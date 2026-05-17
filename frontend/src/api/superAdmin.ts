@@ -81,8 +81,14 @@ export const usersApi = {
 // ── Super Admins ──────────────────────────────
 
 export const adminsApi = {
+  list: () =>
+    api.get<User[]>("/super-admin/admins").then(r => r.data),
   create: (data: { email: string; full_name: string; password: string }) =>
     api.post<User>("/super-admin/admins", data).then(r => r.data),
+  update: (id: string, data: { full_name?: string; is_active?: boolean }) =>
+    api.patch<User>(`/super-admin/admins/${id}`, data).then(r => r.data),
+  remove: (id: string) =>
+    api.delete<void>(`/super-admin/admins/${id}`).then(r => r.data),
 }
 
 // ── Platform Stats ────────────────────────────
