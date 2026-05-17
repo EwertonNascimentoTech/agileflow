@@ -10,6 +10,12 @@ engine = create_async_engine(
     pool_size=10,
     max_overflow=20,
     pool_pre_ping=True,   # revalida conexões da pool antes de usar — evita "aborted transaction" acumulado
+    # Multi-tenant via search_path muda o schema entre requests. asyncpg cacheia
+    # prepared statements pelo plano gerado no schema ativo — se a conexão volta
+    # pra pool com search_path de tenant antigo, os statements cacheados apontam
+    # pra tabelas em schema errado e quebram com "relation does not exist".
+    # Desabilita o cache pra evitar essa contaminação.
+    connect_args={"prepared_statement_cache_size": 0, "statement_cache_size": 0},
 )
 
 AsyncSessionLocal = async_sessionmaker(

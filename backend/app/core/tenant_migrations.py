@@ -92,9 +92,18 @@ async def _step_001_funnels(conn: AsyncConnection, schema: str) -> None:
     ))
     default_id = has_default.scalar()
     if default_id is None:
+        # Valores explícitos porque tabela pode ter sido criada via
+        # TenantBase.metadata.create_all() (sem DB-level defaults).
         result = await conn.execute(text(f"""
-            INSERT INTO {schema}.funnels (name, description, is_default, "order")
-            VALUES ('Padrão', 'Funil padrão criado automaticamente.', TRUE, 0)
+            INSERT INTO {schema}.funnels (
+                id, name, description, color, "order",
+                is_default, is_active, created_at, updated_at
+            )
+            VALUES (
+                gen_random_uuid(), 'Padrão',
+                'Funil padrão criado automaticamente.',
+                '#3B82F6', 0, TRUE, TRUE, now(), now()
+            )
             RETURNING id
         """))
         default_id = result.scalar()
@@ -581,16 +590,16 @@ async def _step_014_tag_slug_classification(conn: AsyncConnection, schema: str) 
         f"ON {schema}.tags (entity_type, slug) WHERE slug IS NOT NULL"
     ))
     await conn.execute(text(f"""
-        INSERT INTO {schema}.tags (id, name, color, entity_type, slug)
-        SELECT gen_random_uuid(), 'PF', '#1D4ED8', 'attendance', 'classificacao_pf'
+        INSERT INTO {schema}.tags (id, name, color, entity_type, slug, created_at)
+        SELECT gen_random_uuid(), 'PF', '#1D4ED8', 'attendance', 'classificacao_pf', now()
         WHERE NOT EXISTS (
             SELECT 1 FROM {schema}.tags t
             WHERE t.entity_type = 'attendance' AND t.slug = 'classificacao_pf'
         )
     """))
     await conn.execute(text(f"""
-        INSERT INTO {schema}.tags (id, name, color, entity_type, slug)
-        SELECT gen_random_uuid(), 'PJ', '#7C3AED', 'attendance', 'classificacao_pj'
+        INSERT INTO {schema}.tags (id, name, color, entity_type, slug, created_at)
+        SELECT gen_random_uuid(), 'PJ', '#7C3AED', 'attendance', 'classificacao_pj', now()
         WHERE NOT EXISTS (
             SELECT 1 FROM {schema}.tags t
             WHERE t.entity_type = 'attendance' AND t.slug = 'classificacao_pj'
