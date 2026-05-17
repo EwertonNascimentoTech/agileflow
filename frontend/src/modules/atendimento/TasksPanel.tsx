@@ -98,9 +98,16 @@ export default function TasksPanel({ attendanceId }: { attendanceId: string }) {
                   {isDone ? <CheckSquare size={14} className="text-primary" /> : <Square size={14} />}
                 </button>
                 <div className="flex-1 min-w-0">
-                  <p className={cn("leading-snug", isDone && "line-through text-muted-foreground")}>
-                    {t.title}
-                  </p>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {t.source === "playbook" && (
+                      <span className="inline-flex items-center rounded px-1 py-0 text-[9px] font-medium bg-violet-100 text-violet-700 border border-violet-200">
+                        Playbook
+                      </span>
+                    )}
+                    <p className={cn("leading-snug", isDone && "line-through text-muted-foreground")}>
+                      {t.title}
+                    </p>
+                  </div>
                   <div className="flex items-center gap-2 mt-0.5 text-[10px] text-muted-foreground">
                     <span className={PRIORITY_COLORS[t.priority]}>● {PRIORITY_LABELS[t.priority]}</span>
                     {t.due_date && (

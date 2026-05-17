@@ -1,14 +1,17 @@
 import { NavLink, Outlet } from "react-router-dom"
-import { KanbanSquare, Users, Building2, Settings2, BarChart3 } from "lucide-react"
+import { KanbanSquare, Users, Building2, Settings2, BarChart3, TrendingUp, GitBranch, ClipboardList } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { NewAttendanceModalProvider } from "./newAttendanceModal"
 
 const tabs = [
-  { to: "/app/modules/atendimento/dashboard", icon: BarChart3,    label: "Dashboard" },
-  { to: "/app/modules/atendimento/kanban",     icon: KanbanSquare, label: "Kanban" },
-  { to: "/app/modules/atendimento/clients",    icon: Users,        label: "Contatos" },
-  { to: "/app/modules/atendimento/companies",  icon: Building2,    label: "Empresas" },
-  { to: "/app/modules/atendimento/config",     icon: Settings2,    label: "Config" },
+  { to: "/app/modules/atendimento/dashboard",    icon: BarChart3,    label: "Dashboard" },
+  { to: "/app/modules/atendimento/kanban",       icon: KanbanSquare, label: "Kanban" },
+  { to: "/app/modules/atendimento/clients",      icon: Users,        label: "Contatos" },
+  { to: "/app/modules/atendimento/companies",    icon: Building2,    label: "Empresas" },
+  { to: "/app/modules/atendimento/forecast",     icon: TrendingUp,   label: "Forecast" },
+  { to: "/app/modules/atendimento/conversion",   icon: GitBranch,    label: "Conversão" },
+  { to: "/app/modules/atendimento/productivity", icon: ClipboardList, label: "Produtividade" },
+  { to: "/app/modules/atendimento/config",       icon: Settings2,    label: "Config" },
 ]
 
 export default function AtendimentoLayout() {

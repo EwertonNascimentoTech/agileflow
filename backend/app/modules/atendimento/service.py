@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional, List
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, func, text
+from sqlalchemy import select, delete, func, text, Numeric
 from sqlalchemy.orm import selectinload
 from fastapi import HTTPException, status
 
@@ -18,6 +18,7 @@ from app.modules.atendimento.models import (
     LeadEventType, AutomationTrigger, AutomationAction,
     StageOutcome, AttendancePriority, ChannelType, ClientEntityType,
     Tag, ClientTag, AttendanceTag,
+    SalesTarget, StageRequiredField, PlaybookStep,
 )
 from app.modules.atendimento.schemas import (
     FunnelCreate, FunnelUpdate,
@@ -29,6 +30,7 @@ from app.modules.atendimento.schemas import (
     ClientCreate, ClientUpdate,
     AttendanceCreate, AttendanceUpdate,
     AttendanceStatusChange, AttendanceAssign,
+    AttendanceCloseRequest,
     MessageCreate,
     CompanyCreate, CompanyUpdate,
     TaskCreate, TaskUpdate,
@@ -36,6 +38,9 @@ from app.modules.atendimento.schemas import (
     AutomationRuleCreate, AutomationRuleUpdate,
     FollowUpTemplateCreate, FollowUpTemplateUpdate,
     TagCreate, TagUpdate,
+    SalesTargetCreate,
+    StageRequiredFieldCreate,
+    PlaybookStepCreate, PlaybookStepUpdate,
 )
 from app.modules.super_admin.models import User
 
@@ -795,6 +800,20 @@ class AttendanceService:
                     detail=f"Transição do status atual para '{new_status.name}' não é permitida.",
                 )
 
+        # Valida campos obrigatórios para o status destino (K-003)
+        required_fields_result = await db.execute(
+            select(StageRequiredField).where(StageRequiredField.status_id == data.to_status_id)
+        )
+        required_fields = list(required_fields_result.scalars().all())
+        missing = []
+        for rf in required_fields:
+            if rf.field_type == "native":
+                val = getattr(attendance, rf.field_name, None)
+                if val is None or val == "":
+                    missing.append(rf.field_label)
+        if missing:
+            raise HTTPException(422, f"Campos obrigatórios para avançar: {', '.join(missing)}")
+
         old_status_id = attendance.status_id
         attendance.status_id = data.to_status_id
         attendance.updated_at = datetime.utcnow()
@@ -828,6 +847,27 @@ class AttendanceService:
 
         # Dispara follow-ups configurados para essa etapa
         await FollowUpService.trigger_for_stage_enter(db, attendance, new_status, current_user)
+
+        # Cria tasks do playbook para o novo status (K-013)
+        from datetime import timedelta as _td
+        pb_result = await db.execute(
+            select(PlaybookStep)
+            .where(PlaybookStep.status_id == data.to_status_id)
+            .order_by(PlaybookStep.order)
+        )
+        for step in pb_result.scalars().all():
+            due = datetime.utcnow() + _td(days=step.due_days)
+            db.add(Task(
+                attendance_id=attendance.id,
+                title=f"[Playbook] {step.title}",
+                description=step.description,
+                due_date=due,
+                assigned_to=attendance.assigned_to,
+                source="playbook",
+                status=TaskStatus.PENDING,
+                priority="medium",
+                created_by=current_user.id,
+            ))
 
         await db.commit()
         await db.refresh(attendance)
@@ -1892,3 +1932,486 @@ class TagService:
         if obj:
             await db.delete(obj)
             await db.commit()
+
+
+# ══════════════════════════════════════════════
+# K-004 — CLOSE WITH REASON SERVICE
+# ══════════════════════════════════════════════
+
+class CloseAttendanceService:
+
+    @staticmethod
+    async def close_attendance(
+        db: AsyncSession,
+        attendance_id: uuid.UUID,
+        data: AttendanceCloseRequest,
+        current_user: User,
+    ) -> Attendance:
+        attendance = await AttendanceService.get_attendance(db, attendance_id)
+        attendance.outcome = data.outcome
+        attendance.close_reason = data.close_reason
+        attendance.closed_by = current_user.id
+        attendance.closed_at = datetime.utcnow()
+        attendance.updated_at = datetime.utcnow()
+
+        label = "ganho 🏆" if data.outcome == "won" else "perdido ✗"
+        await TimelineService.add_event(
+            db, attendance.id,
+            content=f"Negócio marcado como {label}. Motivo: {data.close_reason or '—'}",
+            event_type=LeadEventType.SYSTEM,
+            author_id=current_user.id,
+            author_name=current_user.full_name,
+            commit=False,
+        )
+
+        await db.commit()
+        return await AttendanceService.get_attendance(db, attendance_id)
+
+
+# ══════════════════════════════════════════════
+# K-006 — FORECAST SERVICE
+# ══════════════════════════════════════════════
+
+class ForecastService:
+
+    @staticmethod
+    async def get_forecast(
+        db: AsyncSession,
+        funnel_id: Optional[uuid.UUID],
+        period: str,
+    ) -> dict:
+        """Calcula forecast ponderado por probabilidade de cada etapa."""
+        q = (
+            select(AttendanceStatusConfig)
+            .order_by(AttendanceStatusConfig.order)
+        )
+        if funnel_id:
+            q = q.where(AttendanceStatusConfig.funnel_id == funnel_id)
+        stages_result = await db.execute(q)
+        stages = list(stages_result.scalars().all())
+
+        by_stage = []
+        total_forecast = 0.0
+
+        for stage in stages:
+            agg = await db.execute(
+                select(
+                    func.count(Attendance.id).label("count"),
+                    func.coalesce(func.sum(Attendance.value), 0).label("total_value"),
+                )
+                .where(
+                    Attendance.status_id == stage.id,
+                    Attendance.outcome == "open",
+                )
+            )
+            row = agg.first()
+            count = row.count if row else 0
+            total_value = float(row.total_value) if row else 0.0
+            weighted = total_value * (stage.probability / 100)
+            total_forecast += weighted
+            by_stage.append({
+                "stage_id": str(stage.id),
+                "stage_name": stage.name,
+                "color": stage.color,
+                "probability": stage.probability,
+                "count": count,
+                "total_value": total_value,
+                "weighted_value": weighted,
+            })
+
+        # Metas por usuário
+        targets_result = await db.execute(
+            select(SalesTarget).where(SalesTarget.period == period)
+        )
+        targets = {str(t.user_id): float(t.target_value) for t in targets_result.scalars().all()}
+
+        # Forecast por usuário — join com stages para obter probability
+        user_agg_result = await db.execute(
+            select(
+                Attendance.assigned_to,
+                func.coalesce(
+                    func.sum(
+                        func.coalesce(Attendance.value, 0)
+                        * AttendanceStatusConfig.probability
+                        / 100
+                    ), 0
+                ).label("forecast"),
+            )
+            .join(AttendanceStatusConfig, AttendanceStatusConfig.id == Attendance.status_id)
+            .where(Attendance.outcome == "open")
+            .group_by(Attendance.assigned_to)
+        )
+
+        total_target = sum(targets.values())
+        by_user = []
+        for row in user_agg_result:
+            uid = str(row.assigned_to) if row.assigned_to else None
+            forecast = float(row.forecast) if row.forecast else 0.0
+            target = targets.get(uid, 0.0) if uid else 0.0
+            delta = ((forecast - target) / target * 100) if target else None
+            by_user.append({
+                "user_id": uid,
+                "forecast": forecast,
+                "target": target,
+                "delta_pct": delta,
+            })
+
+        total_delta = ((total_forecast - total_target) / total_target * 100) if total_target else None
+
+        return {
+            "period": period,
+            "funnel_id": str(funnel_id) if funnel_id else None,
+            "total_forecast": total_forecast,
+            "total_target": total_target,
+            "delta_pct": total_delta,
+            "by_stage": by_stage,
+            "by_user": by_user,
+        }
+
+    @staticmethod
+    async def upsert_target(db: AsyncSession, data: SalesTargetCreate) -> SalesTarget:
+        existing = await db.execute(
+            select(SalesTarget).where(
+                SalesTarget.user_id == data.user_id,
+                SalesTarget.funnel_id == data.funnel_id,
+                SalesTarget.period == data.period,
+            )
+        )
+        obj = existing.scalar_one_or_none()
+        if obj:
+            obj.target_value = data.target_value
+        else:
+            obj = SalesTarget(**data.model_dump())
+            db.add(obj)
+        await db.commit()
+        await db.refresh(obj)
+        return obj
+
+
+# ══════════════════════════════════════════════
+# K-003 — STAGE REQUIRED FIELDS SERVICE
+# ══════════════════════════════════════════════
+
+class StageRequiredFieldService:
+
+    @staticmethod
+    async def list_fields(db: AsyncSession, status_id: uuid.UUID) -> List[StageRequiredField]:
+        result = await db.execute(
+            select(StageRequiredField)
+            .where(StageRequiredField.status_id == status_id)
+            .order_by(StageRequiredField.created_at)
+        )
+        return list(result.scalars().all())
+
+    @staticmethod
+    async def create_field(
+        db: AsyncSession, status_id: uuid.UUID, data: StageRequiredFieldCreate
+    ) -> StageRequiredField:
+        await ConfigService.get_status(db, status_id)
+        existing = await db.execute(
+            select(StageRequiredField).where(
+                StageRequiredField.status_id == status_id,
+                StageRequiredField.field_name == data.field_name,
+            )
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(400, "Campo já cadastrado para esta etapa.")
+        obj = StageRequiredField(status_id=status_id, **data.model_dump())
+        db.add(obj)
+        await db.commit()
+        await db.refresh(obj)
+        return obj
+
+    @staticmethod
+    async def delete_field(db: AsyncSession, field_id: uuid.UUID) -> None:
+        result = await db.execute(
+            select(StageRequiredField).where(StageRequiredField.id == field_id)
+        )
+        obj = result.scalar_one_or_none()
+        if not obj:
+            raise HTTPException(404, "Campo obrigatório não encontrado.")
+        await db.delete(obj)
+        await db.commit()
+
+
+# ══════════════════════════════════════════════
+# K-013 — PLAYBOOK SERVICE
+# ══════════════════════════════════════════════
+
+class PlaybookService:
+
+    @staticmethod
+    async def list_steps(db: AsyncSession, status_id: uuid.UUID) -> List[PlaybookStep]:
+        result = await db.execute(
+            select(PlaybookStep)
+            .where(PlaybookStep.status_id == status_id)
+            .order_by(PlaybookStep.order, PlaybookStep.created_at)
+        )
+        return list(result.scalars().all())
+
+    @staticmethod
+    async def create_step(
+        db: AsyncSession, status_id: uuid.UUID, data: PlaybookStepCreate
+    ) -> PlaybookStep:
+        await ConfigService.get_status(db, status_id)
+        obj = PlaybookStep(status_id=status_id, **data.model_dump())
+        db.add(obj)
+        await db.commit()
+        await db.refresh(obj)
+        return obj
+
+    @staticmethod
+    async def update_step(
+        db: AsyncSession, step_id: uuid.UUID, data: PlaybookStepUpdate
+    ) -> PlaybookStep:
+        result = await db.execute(select(PlaybookStep).where(PlaybookStep.id == step_id))
+        obj = result.scalar_one_or_none()
+        if not obj:
+            raise HTTPException(404, "Step não encontrado.")
+        for field, value in data.model_dump(exclude_unset=True).items():
+            setattr(obj, field, value)
+        await db.commit()
+        await db.refresh(obj)
+        return obj
+
+    @staticmethod
+    async def delete_step(db: AsyncSession, step_id: uuid.UUID) -> None:
+        result = await db.execute(select(PlaybookStep).where(PlaybookStep.id == step_id))
+        obj = result.scalar_one_or_none()
+        if not obj:
+            raise HTTPException(404, "Step não encontrado.")
+        await db.delete(obj)
+        await db.commit()
+
+
+# ══════════════════════════════════════════════
+# K-019 — CONVERSION FUNNEL SERVICE
+# ══════════════════════════════════════════════
+
+class ConversionFunnelService:
+
+    @staticmethod
+    async def get_funnel_conversion(
+        db: AsyncSession,
+        funnel_id: Optional[uuid.UUID],
+        period_start: str,
+        period_end: str,
+    ) -> dict:
+        from datetime import date as _date
+        start = _date.fromisoformat(period_start)
+        end = _date.fromisoformat(period_end)
+
+        # Etapas do funil
+        q = select(AttendanceStatusConfig).order_by(AttendanceStatusConfig.order)
+        if funnel_id:
+            q = q.where(AttendanceStatusConfig.funnel_id == funnel_id)
+        stages_result = await db.execute(q)
+        stages = list(stages_result.scalars().all())
+        stage_ids = [s.id for s in stages]
+
+        if not stage_ids:
+            return {
+                "funnel_id": str(funnel_id) if funnel_id else None,
+                "period_start": period_start,
+                "period_end": period_end,
+                "stages": [],
+                "loss_reasons": [],
+            }
+
+        # Entradas por etapa (logs de transição no período)
+        entries_result = await db.execute(
+            select(
+                AttendanceStatusLog.to_status_id,
+                func.count(AttendanceStatusLog.id).label("count"),
+            )
+            .where(
+                AttendanceStatusLog.to_status_id.in_(stage_ids),
+                AttendanceStatusLog.changed_at >= start,
+                AttendanceStatusLog.changed_at <= end,
+            )
+            .group_by(AttendanceStatusLog.to_status_id)
+        )
+        entries_by_stage = {row.to_status_id: row.count for row in entries_result}
+
+        # Perdas por etapa (atendimentos com outcome=lost cujo último log é desta etapa)
+        losses_result = await db.execute(
+            select(
+                Attendance.status_id,
+                func.count(Attendance.id).label("count"),
+            )
+            .where(
+                Attendance.status_id.in_(stage_ids),
+                Attendance.outcome == "lost",
+                Attendance.closed_at >= start,
+                Attendance.closed_at <= end,
+            )
+            .group_by(Attendance.status_id)
+        )
+        losses_by_stage = {row.status_id: row.count for row in losses_result}
+
+        # Tempo médio na etapa (dias entre mudança de entrada e saída)
+        avg_days_result = await db.execute(
+            select(
+                AttendanceStatusLog.to_status_id,
+                func.avg(
+                    func.extract("epoch", func.now() - AttendanceStatusLog.changed_at) / 86400
+                ).label("avg_days"),
+            )
+            .where(AttendanceStatusLog.to_status_id.in_(stage_ids))
+            .group_by(AttendanceStatusLog.to_status_id)
+        )
+        avg_days_by_stage = {row.to_status_id: float(row.avg_days or 0) for row in avg_days_result}
+
+        stage_data = []
+        for i, stage in enumerate(stages):
+            entries = entries_by_stage.get(stage.id, 0)
+            losses = losses_by_stage.get(stage.id, 0)
+            next_entries = entries_by_stage.get(stages[i + 1].id, 0) if i + 1 < len(stages) else 0
+            exits_forward = next_entries
+            conversion = (exits_forward / entries * 100) if entries > 0 else 0.0
+            stage_data.append({
+                "stage_id": str(stage.id),
+                "stage_name": stage.name,
+                "color": stage.color,
+                "order": stage.order,
+                "entries": entries,
+                "exits_forward": exits_forward,
+                "losses": losses,
+                "conversion_rate": round(conversion, 2),
+                "avg_days": round(avg_days_by_stage.get(stage.id, 0), 1),
+            })
+
+        # Top motivos de perda
+        loss_reasons_result = await db.execute(
+            select(
+                Attendance.close_reason,
+                func.count(Attendance.id).label("count"),
+            )
+            .where(
+                Attendance.outcome == "lost",
+                Attendance.closed_at >= start,
+                Attendance.closed_at <= end,
+                Attendance.close_reason.isnot(None),
+            )
+            .group_by(Attendance.close_reason)
+            .order_by(func.count(Attendance.id).desc())
+            .limit(10)
+        )
+        loss_reasons = [
+            {"reason": row.close_reason, "count": row.count}
+            for row in loss_reasons_result
+        ]
+
+        return {
+            "funnel_id": str(funnel_id) if funnel_id else None,
+            "period_start": period_start,
+            "period_end": period_end,
+            "stages": stage_data,
+            "loss_reasons": loss_reasons,
+        }
+
+
+# ══════════════════════════════════════════════
+# K-018 — PRODUCTIVITY SERVICE
+# ══════════════════════════════════════════════
+
+class ProductivityService:
+
+    @staticmethod
+    async def get_productivity(
+        db: AsyncSession,
+        period_start: str,
+        period_end: str,
+    ) -> dict:
+        from datetime import date as _date, timedelta as _td
+        start = _date.fromisoformat(period_start)
+        end = _date.fromisoformat(period_end)
+
+        # Período anterior para delta
+        delta = end - start
+        prev_start = start - _td(days=delta.days + 1)
+        prev_end = start - _td(days=1)
+
+        async def _count(col_filter) -> dict:
+            result = await db.execute(
+                select(
+                    Attendance.assigned_to,
+                    func.count(Attendance.id).label("count"),
+                )
+                .where(*col_filter)
+                .group_by(Attendance.assigned_to)
+            )
+            return {row.assigned_to: row.count for row in result}
+
+        opened = await _count([Attendance.opened_at >= start, Attendance.opened_at <= end])
+        won = await _count([Attendance.outcome == "won", Attendance.closed_at >= start, Attendance.closed_at <= end])
+        lost = await _count([Attendance.outcome == "lost", Attendance.closed_at >= start, Attendance.closed_at <= end])
+
+        prev_opened = await _count([Attendance.opened_at >= prev_start, Attendance.opened_at <= prev_end])
+        prev_won = await _count([Attendance.outcome == "won", Attendance.closed_at >= prev_start, Attendance.closed_at <= prev_end])
+
+        # Tasks concluídas
+        tasks_result = await db.execute(
+            select(Task.assigned_to, func.count(Task.id).label("count"))
+            .where(Task.status == TaskStatus.DONE, Task.completed_at >= start, Task.completed_at <= end)
+            .group_by(Task.assigned_to)
+        )
+        tasks_done = {row.assigned_to: row.count for row in tasks_result}
+
+        prev_tasks_result = await db.execute(
+            select(Task.assigned_to, func.count(Task.id).label("count"))
+            .where(Task.status == TaskStatus.DONE, Task.completed_at >= prev_start, Task.completed_at <= prev_end)
+            .group_by(Task.assigned_to)
+        )
+        prev_tasks_done = {row.assigned_to: row.count for row in prev_tasks_result}
+
+        # Mensagens enviadas por agentes
+        msgs_result = await db.execute(
+            select(AttendanceMessage.sender_id, func.count(AttendanceMessage.id).label("count"))
+            .where(
+                AttendanceMessage.sender_type == SenderType.AGENT,
+                AttendanceMessage.sent_at >= start,
+                AttendanceMessage.sent_at <= end,
+            )
+            .group_by(AttendanceMessage.sender_id)
+        )
+        messages_sent = {row.sender_id: row.count for row in msgs_result}
+
+        # Consolida por usuário
+        all_users = set(opened) | set(won) | set(lost) | set(tasks_done) | set(messages_sent)
+        users_data = []
+        for uid in all_users:
+            o = opened.get(uid, 0)
+            w = won.get(uid, 0)
+            l = lost.get(uid, 0)
+            total_closed = w + l
+            conversion = (w / total_closed * 100) if total_closed > 0 else 0.0
+
+            prev_o = prev_opened.get(uid, 0)
+            prev_w = prev_won.get(uid, 0)
+            prev_td = prev_tasks_done.get(uid, 0)
+            td = tasks_done.get(uid, 0)
+
+            def _delta(curr, prev):
+                if prev == 0:
+                    return None
+                return round((curr - prev) / prev * 100, 1)
+
+            users_data.append({
+                "user_id": str(uid) if uid else None,
+                "attendances_opened": o,
+                "attendances_won": w,
+                "attendances_lost": l,
+                "tasks_done": td,
+                "messages_sent": messages_sent.get(uid, 0),
+                "conversion_rate": round(conversion, 2),
+                "attendances_opened_delta": _delta(o, prev_o),
+                "attendances_won_delta": _delta(w, prev_w),
+                "tasks_done_delta": _delta(td, prev_td),
+            })
+
+        return {
+            "period_start": period_start,
+            "period_end": period_end,
+            "users": users_data,
+        }

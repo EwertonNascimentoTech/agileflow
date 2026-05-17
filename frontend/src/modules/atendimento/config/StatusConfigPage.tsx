@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom"
 import { useForm, type Resolver } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { ArrowLeft, Plus, Pencil, Trash2, Loader2, GripVertical, Trophy, X as XIcon, Circle } from "lucide-react"
+import { ArrowLeft, Plus, Pencil, Trash2, Loader2, GripVertical, Trophy, X as XIcon, Circle, ChevronDown, ChevronUp } from "lucide-react"
 import { statusConfigApi, funnelsApi } from "@/api/atendimento"
 import type { StatusConfig, Funnel, StageOutcome } from "@/api/atendimento"
 import { Button } from "@/components/ui/button"
@@ -15,6 +15,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import StageRequiredFieldsConfig from "./StageRequiredFieldsConfig"
+import PlaybookConfig from "./PlaybookConfig"
 
 const schema = z.object({
   funnel_id: z.string().uuid(),
@@ -68,6 +70,7 @@ export default function StatusConfigPage() {
   const [editing, setEditing] = useState<StatusConfig | null>(null)
   const [serverError, setServerError] = useState("")
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [expandedStageId, setExpandedStageId] = useState<string | null>(null)
 
   const { register, handleSubmit, watch, setValue, reset, formState: { errors, isSubmitting } } =
     useForm<FormData>({
@@ -214,36 +217,57 @@ export default function StatusConfigPage() {
         <div className="space-y-2">
           {statuses.map(s => {
             const OutcomeIcon = OUTCOME_ICONS[s.outcome]
+            const isExpanded = expandedStageId === s.id
             return (
-              <div key={s.id} className="flex items-center gap-3 p-3 rounded-lg border bg-background">
-                <GripVertical size={14} className="text-muted-foreground shrink-0 cursor-grab" />
-                <div className="h-4 w-4 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
-                <div className="flex-1 min-w-0">
-                  <span className="text-sm font-medium">{s.name}</span>
-                  <div className="flex items-center gap-1 mt-0.5 flex-wrap">
-                    <span className={`flex items-center gap-1 text-[10px] ${OUTCOME_COLORS[s.outcome]}`}>
-                      <OutcomeIcon size={10} />
-                      {OUTCOME_LABELS[s.outcome]}
-                    </span>
-                    {s.is_initial && <Badge variant="outline" className="text-[10px] py-0 h-4">Inicial</Badge>}
-                    {s.is_final && <Badge variant="outline" className="text-[10px] py-0 h-4">Final</Badge>}
+              <div key={s.id} className="rounded-lg border bg-background overflow-hidden">
+                <div className="flex items-center gap-3 p-3">
+                  <GripVertical size={14} className="text-muted-foreground shrink-0 cursor-grab" />
+                  <div className="h-4 w-4 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium">{s.name}</span>
+                    <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                      <span className={`flex items-center gap-1 text-[10px] ${OUTCOME_COLORS[s.outcome]}`}>
+                        <OutcomeIcon size={10} />
+                        {OUTCOME_LABELS[s.outcome]}
+                      </span>
+                      {s.is_initial && <Badge variant="outline" className="text-[10px] py-0 h-4">Inicial</Badge>}
+                      {s.is_final && <Badge variant="outline" className="text-[10px] py-0 h-4">Final</Badge>}
+                      {typeof s.probability !== "undefined" && (
+                        <Badge variant="outline" className="text-[10px] py-0 h-4">{s.probability}%</Badge>
+                      )}
+                    </div>
                   </div>
+                  <span className="text-xs text-muted-foreground">#{s.order}</span>
+                  <Button
+                    variant="ghost" size="icon" className="h-7 w-7"
+                    title="Campos obrigatórios e playbook"
+                    onClick={() => setExpandedStageId(isExpanded ? null : s.id)}
+                  >
+                    {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(s)}>
+                    <Pencil size={12} />
+                  </Button>
+                  <Button
+                    variant="ghost" size="icon"
+                    className="h-7 w-7 text-destructive hover:text-destructive"
+                    onClick={() => handleDelete(s.id)}
+                    disabled={deletingId === s.id}
+                  >
+                    {deletingId === s.id
+                      ? <Loader2 size={12} className="animate-spin" />
+                      : <Trash2 size={12} />
+                    }
+                  </Button>
                 </div>
-                <span className="text-xs text-muted-foreground">#{s.order}</span>
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(s)}>
-                  <Pencil size={12} />
-                </Button>
-                <Button
-                  variant="ghost" size="icon"
-                  className="h-7 w-7 text-destructive hover:text-destructive"
-                  onClick={() => handleDelete(s.id)}
-                  disabled={deletingId === s.id}
-                >
-                  {deletingId === s.id
-                    ? <Loader2 size={12} className="animate-spin" />
-                    : <Trash2 size={12} />
-                  }
-                </Button>
+                {isExpanded && (
+                  <div className="border-t bg-muted/20 p-4 space-y-6">
+                    <StageRequiredFieldsConfig statusId={s.id} />
+                    <div className="border-t pt-4">
+                      <PlaybookConfig statusId={s.id} />
+                    </div>
+                  </div>
+                )}
               </div>
             )
           })}

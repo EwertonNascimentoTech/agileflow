@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom"
 import {
   ArrowLeft, Send, Loader2, MessageSquare,
   Phone, Globe, AtSign, Clock, User2, DollarSign, CalendarClock, Pencil,
+  Trophy, X as XIcon,
 } from "lucide-react"
 import { attendancesApi, statusConfigApi, clientsApi } from "@/api/atendimento"
 import type { Attendance, Message, StatusConfig, Client, ChannelType, Priority } from "@/api/atendimento"
@@ -10,6 +11,7 @@ import { companyApi } from "@/api/company"
 import type { User } from "@/types"
 import TasksPanel from "./TasksPanel"
 import TimelinePanel from "./TimelinePanel"
+import CloseAttendanceModal from "./CloseAttendanceModal"
 import ProposalsListPanel from "@/modules/propostas_contratos/ProposalsListPanel"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -61,6 +63,7 @@ export default function AttendanceDetailPage() {
     value: "", expected_close_date: "", assigned_to: NO_USER,
   })
   const [savingEdit, setSavingEdit] = useState(false)
+  const [showCloseModal, setShowCloseModal] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -171,7 +174,39 @@ export default function AttendanceDetailPage() {
           </div>
           <p className="font-semibold text-sm truncate mt-0.5">{attendance.subject}</p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          {/* Outcome badge when closed */}
+          {attendance.outcome === "won" && (
+            <Badge className="gap-1 bg-emerald-100 text-emerald-700 border-emerald-200">
+              <Trophy size={11} /> Ganho
+            </Badge>
+          )}
+          {attendance.outcome === "lost" && (
+            <Badge className="gap-1 bg-red-100 text-red-700 border-red-200">
+              <XIcon size={11} /> Perdido
+            </Badge>
+          )}
+          {/* Close buttons — only visible when outcome is open */}
+          {(!attendance.outcome || attendance.outcome === "open") && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs gap-1 text-emerald-600 hover:text-emerald-700 hover:border-emerald-300"
+              onClick={() => setShowCloseModal(true)}
+            >
+              <Trophy size={12} /> Ganho
+            </Button>
+          )}
+          {(!attendance.outcome || attendance.outcome === "open") && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs gap-1 text-red-600 hover:text-red-700 hover:border-red-300"
+              onClick={() => setShowCloseModal(true)}
+            >
+              <XIcon size={12} /> Perdido
+            </Button>
+          )}
           {changingStatus && <Loader2 size={13} className="animate-spin text-muted-foreground" />}
           <Select value={attendance.status_id} onValueChange={handleStatusChange} disabled={!!attendance.closed_at}>
             <SelectTrigger className="h-8 text-xs w-36">
@@ -415,6 +450,15 @@ export default function AttendanceDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {id && (
+        <CloseAttendanceModal
+          attendanceId={id}
+          open={showCloseModal}
+          onOpenChange={setShowCloseModal}
+          onClosed={(updated) => setAttendance(updated)}
+        />
+      )}
     </div>
   )
 }

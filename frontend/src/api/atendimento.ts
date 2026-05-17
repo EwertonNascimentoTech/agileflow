@@ -55,6 +55,7 @@ export interface StatusConfig {
   is_final: boolean
   outcome: StageOutcome
   lead_page_policy: Record<string, string> | null
+  probability: number
   created_at: string
 }
 
@@ -272,6 +273,7 @@ export interface Task {
   created_by: string | null
   completed_at: string | null
   completed_by: string | null
+  source: string  // "manual" | "playbook" | "automation"
   created_at: string
   updated_at: string
 }
@@ -313,6 +315,9 @@ export interface Attendance {
   sale_id: string | null
   opened_at: string
   closed_at: string | null
+  close_reason: string | null
+  closed_by: string | null
+  outcome: "open" | "won" | "lost"
   created_at: string
   tags?: Tag[]
 }
@@ -332,6 +337,7 @@ export interface AttendanceSummary {
   last_interaction: string | null
   opened_at: string
   closed_at: string | null
+  outcome?: "open" | "won" | "lost"
 }
 
 export interface StatusLog {
@@ -433,6 +439,8 @@ export const attendancesApi = {
     api.post<Attendance>(`/atendimento/attendances/${id}/status`, { to_status_id, notes }).then(r => r.data),
   assign: (id: string, assigned_to: string | null) =>
     api.post<Attendance>(`/atendimento/attendances/${id}/assign`, { assigned_to }).then(r => r.data),
+  close: (id: string, data: { outcome: "won" | "lost"; close_reason?: string }) =>
+    api.post<Attendance>(`/atendimento/attendances/${id}/close`, data).then(r => r.data),
   getHistory: (id: string) => api.get<StatusLog[]>(`/atendimento/attendances/${id}/history`).then(r => r.data),
   getMessages: (id: string) => api.get<Message[]>(`/atendimento/attendances/${id}/messages`).then(r => r.data),
   sendMessage: (id: string, content: string, message_type = "text") =>
@@ -592,4 +600,145 @@ export const tagsApi = {
     api.post<void>(`/atendimento/attendances/${attendanceId}/tags/${tagId}`).then(r => r.data),
   removeFromAttendance: (attendanceId: string, tagId: string) =>
     api.delete<void>(`/atendimento/attendances/${attendanceId}/tags/${tagId}`).then(r => r.data),
+}
+
+// ── K-006 Forecast ────────────────────────────
+
+export interface ForecastStageItem {
+  stage_id: string
+  stage_name: string
+  color: string
+  probability: number
+  count: number
+  total_value: number
+  weighted_value: number
+}
+
+export interface ForecastUserItem {
+  user_id: string | null
+  forecast: number
+  target: number
+  delta_pct: number | null
+}
+
+export interface ForecastData {
+  period: string
+  funnel_id: string | null
+  total_forecast: number
+  total_target: number
+  delta_pct: number | null
+  by_stage: ForecastStageItem[]
+  by_user: ForecastUserItem[]
+}
+
+export const forecastApi = {
+  get: (params: { period: string; funnel_id?: string }) =>
+    api.get<ForecastData>("/atendimento/reports/forecast", { params }).then(r => r.data),
+  upsertTarget: (data: { user_id?: string; funnel_id?: string; period: string; target_value: number }) =>
+    api.post("/atendimento/reports/targets", data).then(r => r.data),
+}
+
+// ── K-003 Stage Required Fields ───────────────
+
+export interface StageRequiredField {
+  id: string
+  status_id: string
+  field_name: string
+  field_label: string
+  field_type: string
+  created_at: string
+}
+
+export const stageRequiredFieldsApi = {
+  list: (statusId: string) =>
+    api.get<StageRequiredField[]>(`/atendimento/config/statuses/${statusId}/required-fields`).then(r => r.data),
+  create: (statusId: string, data: { field_name: string; field_label: string; field_type?: string }) =>
+    api.post<StageRequiredField>(`/atendimento/config/statuses/${statusId}/required-fields`, data).then(r => r.data),
+  delete: (statusId: string, fieldId: string) =>
+    api.delete<void>(`/atendimento/config/statuses/${statusId}/required-fields/${fieldId}`).then(r => r.data),
+}
+
+// ── K-013 Playbook ────────────────────────────
+
+export interface PlaybookStep {
+  id: string
+  status_id: string
+  title: string
+  description: string | null
+  due_days: number
+  order: number
+  created_at: string
+}
+
+export const playbookApi = {
+  list: (statusId: string) =>
+    api.get<PlaybookStep[]>(`/atendimento/config/statuses/${statusId}/playbook`).then(r => r.data),
+  create: (statusId: string, data: { title: string; description?: string; due_days?: number; order?: number }) =>
+    api.post<PlaybookStep>(`/atendimento/config/statuses/${statusId}/playbook`, data).then(r => r.data),
+  update: (statusId: string, stepId: string, data: Partial<{ title: string; description: string; due_days: number; order: number }>) =>
+    api.patch<PlaybookStep>(`/atendimento/config/statuses/${statusId}/playbook/${stepId}`, data).then(r => r.data),
+  delete: (statusId: string, stepId: string) =>
+    api.delete<void>(`/atendimento/config/statuses/${statusId}/playbook/${stepId}`).then(r => r.data),
+}
+
+// ── K-019 Conversion Funnel ───────────────────
+
+export interface ConversionStageItem {
+  stage_id: string
+  stage_name: string
+  color: string
+  order: number
+  entries: number
+  exits_forward: number
+  losses: number
+  conversion_rate: number
+  avg_days: number
+}
+
+export interface LossReasonItem {
+  reason: string
+  count: number
+}
+
+export interface ConversionFunnelData {
+  funnel_id: string | null
+  period_start: string
+  period_end: string
+  stages: ConversionStageItem[]
+  loss_reasons: LossReasonItem[]
+}
+
+export const conversionApi = {
+  getFunnelConversion: (params: { period_start: string; period_end: string; funnel_id?: string }) =>
+    api.get<ConversionFunnelData>("/atendimento/reports/funnel-conversion", { params }).then(r => r.data),
+}
+
+// ── K-018 Productivity ────────────────────────
+
+export interface ProductivityUserItem {
+  user_id: string | null
+  attendances_opened: number
+  attendances_won: number
+  attendances_lost: number
+  tasks_done: number
+  messages_sent: number
+  conversion_rate: number
+  attendances_opened_delta: number | null
+  attendances_won_delta: number | null
+  tasks_done_delta: number | null
+}
+
+export interface ProductivityData {
+  period_start: string
+  period_end: string
+  users: ProductivityUserItem[]
+}
+
+export const productivityApi = {
+  get: (params: { period_start: string; period_end: string }) =>
+    api.get<ProductivityData>("/atendimento/reports/productivity", { params }).then(r => r.data),
+  exportCsvUrl: (params: { period_start: string; period_end: string }) => {
+    const q = new URLSearchParams(params).toString()
+    return `/api/v1/atendimento/reports/productivity/export?${q}`
+  },
 }

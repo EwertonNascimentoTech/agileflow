@@ -598,6 +598,77 @@ async def _step_014_tag_slug_classification(conn: AsyncConnection, schema: str) 
     """))
 
 
+async def _step_015_close_reason(conn: AsyncConnection, schema: str) -> None:
+    """Adiciona campos de fechamento com motivo em attendances (K-004)."""
+    if not await _table_exists(conn, schema, "attendances"):
+        return
+    if not await _column_exists(conn, schema, "attendances", "close_reason"):
+        await conn.execute(text(f"ALTER TABLE {schema}.attendances ADD COLUMN close_reason VARCHAR(500)"))
+    if not await _column_exists(conn, schema, "attendances", "closed_by"):
+        await conn.execute(text(f"ALTER TABLE {schema}.attendances ADD COLUMN closed_by UUID"))
+    if not await _column_exists(conn, schema, "attendances", "outcome"):
+        await conn.execute(text(f"ALTER TABLE {schema}.attendances ADD COLUMN outcome VARCHAR(20) NOT NULL DEFAULT 'open'"))
+
+
+async def _step_016_forecast(conn: AsyncConnection, schema: str) -> None:
+    """Adiciona probability em stages e cria tabela sales_targets (K-006)."""
+    if not await _table_exists(conn, schema, "attendance_status_configs"):
+        return
+    if not await _column_exists(conn, schema, "attendance_status_configs", "probability"):
+        await conn.execute(text(f"ALTER TABLE {schema}.attendance_status_configs ADD COLUMN probability SMALLINT NOT NULL DEFAULT 50"))
+    if not await _table_exists(conn, schema, "sales_targets"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.sales_targets (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                user_id UUID,
+                funnel_id UUID,
+                period VARCHAR(7) NOT NULL,
+                target_value NUMERIC(14,2) NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT now(),
+                UNIQUE(user_id, funnel_id, period)
+            )
+        """))
+
+
+async def _step_017_stage_required_fields(conn: AsyncConnection, schema: str) -> None:
+    """Cria tabela stage_required_fields (K-003)."""
+    if not await _table_exists(conn, schema, "attendance_status_configs"):
+        return
+    if not await _table_exists(conn, schema, "stage_required_fields"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.stage_required_fields (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                status_id UUID NOT NULL REFERENCES {schema}.attendance_status_configs(id) ON DELETE CASCADE,
+                field_name VARCHAR(100) NOT NULL,
+                field_label VARCHAR(100) NOT NULL,
+                field_type VARCHAR(20) NOT NULL DEFAULT 'native',
+                created_at TIMESTAMP DEFAULT now(),
+                UNIQUE(status_id, field_name)
+            )
+        """))
+
+
+async def _step_018_playbook(conn: AsyncConnection, schema: str) -> None:
+    """Adiciona coluna source em tasks e cria tabela playbook_steps (K-013)."""
+    if await _table_exists(conn, schema, "tasks"):
+        if not await _column_exists(conn, schema, "tasks", "source"):
+            await conn.execute(text(f"ALTER TABLE {schema}.tasks ADD COLUMN source VARCHAR(50) NOT NULL DEFAULT 'manual'"))
+    if not await _table_exists(conn, schema, "attendance_status_configs"):
+        return
+    if not await _table_exists(conn, schema, "playbook_steps"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.playbook_steps (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                status_id UUID NOT NULL REFERENCES {schema}.attendance_status_configs(id) ON DELETE CASCADE,
+                title VARCHAR(200) NOT NULL,
+                description TEXT,
+                due_days SMALLINT NOT NULL DEFAULT 1,
+                "order" SMALLINT NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT now()
+            )
+        """))
+
+
 # Lista ordenada de steps. Adicionar novos no final.
 STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("001_funnels", _step_001_funnels),
@@ -614,6 +685,10 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("012_notifications", _step_012_notifications),
     ("013_tags", _step_013_tags),
     ("014_tag_slug_classification", _step_014_tag_slug_classification),
+    ("015_close_reason", _step_015_close_reason),
+    ("016_forecast", _step_016_forecast),
+    ("017_stage_required_fields", _step_017_stage_required_fields),
+    ("018_playbook", _step_018_playbook),
 ]
 
 

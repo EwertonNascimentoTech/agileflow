@@ -42,6 +42,9 @@ import StatusConfigPage from "@/modules/atendimento/config/StatusConfigPage"
 import ChannelsConfigPage from "@/modules/atendimento/config/ChannelsConfigPage"
 import AutomationsConfigPage from "@/modules/atendimento/config/AutomationsConfigPage"
 import FollowUpConfigPage from "@/modules/atendimento/config/FollowUpConfigPage"
+import ForecastPage from "@/modules/atendimento/ForecastPage"
+import ConversionFunnelPage from "@/modules/atendimento/ConversionFunnelPage"
+import ProductivityReportPage from "@/modules/atendimento/ProductivityReportPage"
 
 // ── Propostas e Contratos ─────────────────────────────────────────────
 import ProposalsListPage from "@/modules/propostas_contratos/ProposalsListPage"
@@ -110,6 +113,9 @@ export default function App() {
                     <Route path="config/channels" element={<ChannelsConfigPage />} />
                     <Route path="config/automations" element={<AutomationsConfigPage />} />
                     <Route path="config/follow-ups" element={<FollowUpConfigPage />} />
+                    <Route path="forecast" element={<ForecastPage />} />
+                    <Route path="conversion" element={<ConversionFunnelPage />} />
+                    <Route path="productivity" element={<ProductivityReportPage />} />
                   </Route>
 
                   {/* Propostas e Contratos */}

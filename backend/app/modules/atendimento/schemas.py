@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 import re
@@ -90,6 +90,7 @@ class StatusConfigCreate(BaseModel):
     is_final: bool = False
     outcome: StageOutcome = StageOutcome.NEUTRAL
     lead_page_policy: Optional[dict] = None
+    probability: int = Field(50, ge=0, le=100)
 
 
 class StatusConfigUpdate(BaseModel):
@@ -101,6 +102,7 @@ class StatusConfigUpdate(BaseModel):
     is_final: Optional[bool] = None
     outcome: Optional[StageOutcome] = None
     lead_page_policy: Optional[dict] = None
+    probability: Optional[int] = Field(None, ge=0, le=100)
 
 
 class StatusConfigReorder(BaseModel):
@@ -119,6 +121,7 @@ class StatusConfigResponse(BaseModel):
     is_final: bool
     outcome: StageOutcome
     lead_page_policy: Optional[dict]
+    probability: int = 50
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -423,6 +426,7 @@ class TaskResponse(BaseModel):
     created_by: Optional[uuid.UUID]
     completed_at: Optional[datetime]
     completed_by: Optional[uuid.UUID]
+    source: str = "manual"
     created_at: datetime
     updated_at: datetime
 
@@ -502,6 +506,9 @@ class AttendanceResponse(BaseModel):
     sale_id: Optional[uuid.UUID]
     opened_at: datetime
     closed_at: Optional[datetime]
+    close_reason: Optional[str] = None
+    closed_by: Optional[uuid.UUID] = None
+    outcome: str = "open"
     created_at: datetime
     tags: List["TagResponse"] = []
 
@@ -677,3 +684,170 @@ class FollowUpTemplateResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ══════════════════════════════════════════════
+# K-004 — FECHAR COM MOTIVO
+# ══════════════════════════════════════════════
+
+class AttendanceCloseRequest(BaseModel):
+    outcome: Literal["won", "lost"]
+    close_reason: Optional[str] = Field(None, max_length=500)
+
+    @model_validator(mode="after")
+    def reason_required_for_lost(self) -> "AttendanceCloseRequest":
+        if self.outcome == "lost" and not self.close_reason:
+            raise ValueError("Motivo obrigatório ao marcar como perdido.")
+        return self
+
+
+# ══════════════════════════════════════════════
+# K-006 — FORECAST
+# ══════════════════════════════════════════════
+
+class SalesTargetCreate(BaseModel):
+    user_id: Optional[uuid.UUID] = None
+    funnel_id: Optional[uuid.UUID] = None
+    period: str = Field(..., pattern=r"^\d{4}-\d{2}$")  # "2026-05"
+    target_value: float = Field(0, ge=0)
+
+
+class SalesTargetResponse(BaseModel):
+    id: uuid.UUID
+    user_id: Optional[uuid.UUID]
+    funnel_id: Optional[uuid.UUID]
+    period: str
+    target_value: float
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ForecastStageItem(BaseModel):
+    stage_id: str
+    stage_name: str
+    color: str
+    probability: int
+    count: int
+    total_value: float
+    weighted_value: float  # total_value * probability / 100
+
+
+class ForecastUserItem(BaseModel):
+    user_id: Optional[str]
+    forecast: float
+    target: float
+    delta_pct: Optional[float]
+
+
+class ForecastResponse(BaseModel):
+    period: str
+    funnel_id: Optional[str]
+    total_forecast: float
+    total_target: float
+    delta_pct: Optional[float]
+    by_stage: List[ForecastStageItem]
+    by_user: List[ForecastUserItem]
+
+
+# ══════════════════════════════════════════════
+# K-003 — CAMPOS OBRIGATÓRIOS POR ETAPA
+# ══════════════════════════════════════════════
+
+class StageRequiredFieldCreate(BaseModel):
+    field_name: str = Field(..., min_length=1, max_length=100)
+    field_label: str = Field(..., min_length=1, max_length=100)
+    field_type: str = Field("native", pattern=r"^(native|custom)$")
+
+
+class StageRequiredFieldResponse(BaseModel):
+    id: uuid.UUID
+    status_id: uuid.UUID
+    field_name: str
+    field_label: str
+    field_type: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ══════════════════════════════════════════════
+# K-013 — PLAYBOOK
+# ══════════════════════════════════════════════
+
+class PlaybookStepCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    description: Optional[str] = None
+    due_days: int = Field(1, ge=1)
+    order: int = Field(0, ge=0)
+
+
+class PlaybookStepUpdate(BaseModel):
+    title: Optional[str] = Field(None, min_length=1, max_length=200)
+    description: Optional[str] = None
+    due_days: Optional[int] = Field(None, ge=1)
+    order: Optional[int] = Field(None, ge=0)
+
+
+class PlaybookStepResponse(BaseModel):
+    id: uuid.UUID
+    status_id: uuid.UUID
+    title: str
+    description: Optional[str]
+    due_days: int
+    order: int
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ══════════════════════════════════════════════
+# K-019 — FUNIL DE CONVERSÃO
+# ══════════════════════════════════════════════
+
+class ConversionStageItem(BaseModel):
+    stage_id: str
+    stage_name: str
+    color: str
+    order: int
+    entries: int
+    exits_forward: int
+    losses: int
+    conversion_rate: float
+    avg_days: float
+
+
+class LossReasonItem(BaseModel):
+    reason: str
+    count: int
+
+
+class ConversionFunnelResponse(BaseModel):
+    funnel_id: Optional[str]
+    period_start: str
+    period_end: str
+    stages: List[ConversionStageItem]
+    loss_reasons: List[LossReasonItem]
+
+
+# ══════════════════════════════════════════════
+# K-018 — PRODUTIVIDADE
+# ══════════════════════════════════════════════
+
+class ProductivityUserItem(BaseModel):
+    user_id: Optional[str]
+    attendances_opened: int
+    attendances_won: int
+    attendances_lost: int
+    tasks_done: int
+    messages_sent: int
+    conversion_rate: float
+    attendances_opened_delta: Optional[float] = None
+    attendances_won_delta: Optional[float] = None
+    tasks_done_delta: Optional[float] = None
+
+
+class ProductivityResponse(BaseModel):
+    period_start: str
+    period_end: str
+    users: List[ProductivityUserItem]

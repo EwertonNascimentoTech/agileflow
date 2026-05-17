@@ -17,6 +17,7 @@ _can_attendance_assign = require_permission("atendimento.attendance.assign")
 _can_timeline_manage   = require_permission("atendimento.timeline.manage")
 _can_automation_manage = require_permission("atendimento.automation.manage")
 _can_followup_manage   = require_permission("atendimento.followup.manage")
+_can_reports_view      = require_permission("atendimento.reports.view")
 from app.modules.atendimento.schemas import (
     FunnelCreate, FunnelUpdate, FunnelResponse,
     StatusConfigCreate, StatusConfigUpdate, StatusConfigReorder, StatusConfigResponse,
@@ -27,6 +28,7 @@ from app.modules.atendimento.schemas import (
     ClientCreate, ClientUpdate, ClientResponse, ClientSummary,
     AttendanceCreate, AttendanceUpdate, AttendanceStatusChange,
     AttendanceAssign, AttendanceResponse, AttendanceSummary,
+    AttendanceCloseRequest,
     StatusLogResponse, MessageCreate, MessageResponse, AttachmentResponse,
     CompanyCreate, CompanyUpdate, CompanyResponse, CompanySummary,
     TaskCreate, TaskUpdate, TaskResponse,
@@ -34,6 +36,10 @@ from app.modules.atendimento.schemas import (
     AutomationRuleCreate, AutomationRuleUpdate, AutomationRuleResponse,
     FollowUpTemplateCreate, FollowUpTemplateUpdate, FollowUpTemplateResponse,
     TagCreate, TagUpdate, TagResponse,
+    SalesTargetCreate, SalesTargetResponse, ForecastResponse,
+    StageRequiredFieldCreate, StageRequiredFieldResponse,
+    PlaybookStepCreate, PlaybookStepUpdate, PlaybookStepResponse,
+    ConversionFunnelResponse, ProductivityResponse,
 )
 from app.modules.atendimento.models import TaskStatus, AutomationTrigger
 from app.modules.atendimento.service import (
@@ -41,6 +47,9 @@ from app.modules.atendimento.service import (
     CompanyService, TaskService,
     TimelineService, AutomationService, FollowUpService,
     TagService,
+    CloseAttendanceService, ForecastService,
+    StageRequiredFieldService, PlaybookService,
+    ConversionFunnelService, ProductivityService,
 )
 
 router = APIRouter(prefix="/atendimento", tags=["Atendimento"])
@@ -417,6 +426,17 @@ async def assign_attendance(
     return await AttendanceService.assign(ctx.db, attendance_id, data)
 
 
+@router.post("/attendances/{attendance_id}/close", response_model=AttendanceResponse)
+async def close_attendance(
+    attendance_id: uuid.UUID,
+    data: AttendanceCloseRequest,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_attendance_update),
+):
+    """Marca um atendimento como ganho ou perdido com motivo (K-004)."""
+    return await CloseAttendanceService.close_attendance(ctx.db, attendance_id, data, ctx.user)
+
+
 @router.get("/attendances/{attendance_id}/history", response_model=List[StatusLogResponse])
 async def get_attendance_history(attendance_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
     return await AttendanceService.get_history(ctx.db, attendance_id)
@@ -736,6 +756,154 @@ async def attendance_overview(ctx: ModuleContext = Depends(_ctx)):
 # ══════════════════════════════════════════════
 # RELATÓRIOS / EXPORTAÇÃO CSV
 # ══════════════════════════════════════════════
+
+@router.get("/config/statuses/{status_id}/required-fields", response_model=List[StageRequiredFieldResponse])
+async def list_required_fields(status_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+    """Lista campos obrigatórios de uma etapa (K-003)."""
+    return await StageRequiredFieldService.list_fields(ctx.db, status_id)
+
+
+@router.post("/config/statuses/{status_id}/required-fields", response_model=StageRequiredFieldResponse, status_code=201)
+async def create_required_field(
+    status_id: uuid.UUID,
+    data: StageRequiredFieldCreate,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_config),
+):
+    return await StageRequiredFieldService.create_field(ctx.db, status_id, data)
+
+
+@router.delete("/config/statuses/{status_id}/required-fields/{field_id}", status_code=204)
+async def delete_required_field(
+    status_id: uuid.UUID,
+    field_id: uuid.UUID,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_config),
+):
+    await StageRequiredFieldService.delete_field(ctx.db, field_id)
+
+
+@router.get("/config/statuses/{status_id}/playbook", response_model=List[PlaybookStepResponse])
+async def list_playbook_steps(status_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+    """Lista steps do playbook de uma etapa (K-013)."""
+    return await PlaybookService.list_steps(ctx.db, status_id)
+
+
+@router.post("/config/statuses/{status_id}/playbook", response_model=PlaybookStepResponse, status_code=201)
+async def create_playbook_step(
+    status_id: uuid.UUID,
+    data: PlaybookStepCreate,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_config),
+):
+    return await PlaybookService.create_step(ctx.db, status_id, data)
+
+
+@router.patch("/config/statuses/{status_id}/playbook/{step_id}", response_model=PlaybookStepResponse)
+async def update_playbook_step(
+    status_id: uuid.UUID,
+    step_id: uuid.UUID,
+    data: PlaybookStepUpdate,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_config),
+):
+    return await PlaybookService.update_step(ctx.db, step_id, data)
+
+
+@router.delete("/config/statuses/{status_id}/playbook/{step_id}", status_code=204)
+async def delete_playbook_step(
+    status_id: uuid.UUID,
+    step_id: uuid.UUID,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_config),
+):
+    await PlaybookService.delete_step(ctx.db, step_id)
+
+
+@router.get("/reports/forecast")
+async def get_forecast(
+    period: str = Query(..., description="Período no formato YYYY-MM"),
+    funnel_id: Optional[uuid.UUID] = Query(None),
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Retorna forecast de vendas ponderado por probabilidade de etapa (K-006)."""
+    return await ForecastService.get_forecast(ctx.db, funnel_id, period)
+
+
+@router.post("/reports/targets", response_model=SalesTargetResponse, status_code=201)
+async def upsert_sales_target(
+    data: SalesTargetCreate,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_config),
+):
+    """Cria ou atualiza meta de vendas por período (K-006)."""
+    return await ForecastService.upsert_target(ctx.db, data)
+
+
+@router.get("/reports/funnel-conversion")
+async def funnel_conversion(
+    period_start: str = Query(..., description="YYYY-MM-DD"),
+    period_end: str = Query(..., description="YYYY-MM-DD"),
+    funnel_id: Optional[uuid.UUID] = Query(None),
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Funil de conversão visual por etapa (K-019)."""
+    return await ConversionFunnelService.get_funnel_conversion(ctx.db, funnel_id, period_start, period_end)
+
+
+@router.get("/reports/loss-reasons")
+async def loss_reasons(
+    period_start: str = Query(..., description="YYYY-MM-DD"),
+    period_end: str = Query(..., description="YYYY-MM-DD"),
+    funnel_id: Optional[uuid.UUID] = Query(None),
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Top motivos de perda no período (K-019)."""
+    result = await ConversionFunnelService.get_funnel_conversion(ctx.db, funnel_id, period_start, period_end)
+    return result["loss_reasons"]
+
+
+@router.get("/reports/productivity")
+async def productivity_report(
+    period_start: str = Query(..., description="YYYY-MM-DD"),
+    period_end: str = Query(..., description="YYYY-MM-DD"),
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Relatório de produtividade por vendedor (K-018)."""
+    return await ProductivityService.get_productivity(ctx.db, period_start, period_end)
+
+
+@router.get("/reports/productivity/export")
+async def productivity_export(
+    period_start: str = Query(..., description="YYYY-MM-DD"),
+    period_end: str = Query(..., description="YYYY-MM-DD"),
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Exporta produtividade como CSV (K-018)."""
+    import csv, io
+    from fastapi.responses import StreamingResponse
+
+    data = await ProductivityService.get_productivity(ctx.db, period_start, period_end)
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["user_id", "Abertos", "Ganhos", "Perdidos", "Tarefas Concluídas", "Mensagens", "Tx. Conversão %"])
+    for u in data["users"]:
+        writer.writerow([
+            u["user_id"] or "",
+            u["attendances_opened"],
+            u["attendances_won"],
+            u["attendances_lost"],
+            u["tasks_done"],
+            u["messages_sent"],
+            u["conversion_rate"],
+        ])
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=produtividade.csv"},
+    )
+
 
 @router.get("/reports/attendances")
 async def report_attendances(
