@@ -54,6 +54,21 @@ import ContractsListPage from "@/modules/propostas_contratos/ContractsListPage"
 import ContractDetailPage from "@/modules/propostas_contratos/ContractDetailPage"
 import ProposalsDashboardPage from "@/modules/propostas_contratos/DashboardPage"
 
+// ── Estoque ───────────────────────────────────────────────────────────
+import EstoqueLayout from "@/modules/estoque/EstoqueLayout"
+import EstoqueDashboardPage from "@/modules/estoque/DashboardPage"
+import EstoqueProductsPage from "@/modules/estoque/ProductsPage"
+import EstoqueProductDetailPage from "@/modules/estoque/ProductDetailPage"
+import EstoqueProductTypesPage from "@/modules/estoque/ProductTypesPage"
+import EstoqueCategoriesPage from "@/modules/estoque/CategoriesPage"
+import EstoqueWarehousesPage from "@/modules/estoque/WarehousesPage"
+import EstoqueSuppliersPage from "@/modules/estoque/SuppliersPage"
+import EstoqueStockPage from "@/modules/estoque/StockPage"
+import EstoqueMovementsPage from "@/modules/estoque/MovementsPage"
+import EstoqueBatchesPage from "@/modules/estoque/BatchesPage"
+import EstoqueSerialsPage from "@/modules/estoque/SerialsPage"
+import EstoqueConfigPage from "@/modules/estoque/ConfigPage"
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -110,6 +125,23 @@ export default function App() {
                     <Route path="config/channels" element={<ChannelsConfigPage />} />
                     <Route path="config/automations" element={<AutomationsConfigPage />} />
                     <Route path="config/follow-ups" element={<FollowUpConfigPage />} />
+                  </Route>
+
+                  {/* Estoque */}
+                  <Route path="modules/estoque" element={<EstoqueLayout />}>
+                    <Route index element={<Navigate to="dashboard" replace />} />
+                    <Route path="dashboard"      element={<EstoqueDashboardPage />} />
+                    <Route path="products"       element={<EstoqueProductsPage />} />
+                    <Route path="products/:id"   element={<EstoqueProductDetailPage />} />
+                    <Route path="stock"          element={<EstoqueStockPage />} />
+                    <Route path="movements"      element={<EstoqueMovementsPage />} />
+                    <Route path="batches"        element={<EstoqueBatchesPage />} />
+                    <Route path="serials"        element={<EstoqueSerialsPage />} />
+                    <Route path="config"         element={<EstoqueConfigPage />} />
+                    <Route path="product-types"  element={<EstoqueProductTypesPage />} />
+                    <Route path="categories"     element={<EstoqueCategoriesPage />} />
+                    <Route path="warehouses"     element={<EstoqueWarehousesPage />} />
+                    <Route path="suppliers"      element={<EstoqueSuppliersPage />} />
                   </Route>
 
                   {/* Propostas e Contratos */}

@@ -17,6 +17,7 @@ from app.modules.propostas_contratos.api.routes import router as propostas_route
 from app.modules.propostas_contratos.api.public_routes import router as propostas_public_router
 from app.modules.company.api.routes import router as company_router
 from app.modules.integrations.api.webhook_routes import router as webhooks_router
+from app.modules.estoque.api.routes import router as estoque_router
 
 
 @asynccontextmanager
@@ -59,6 +60,15 @@ async def _seed_known_modules() -> None:
             "backend_path": "backend/app/modules/propostas_contratos",
             "frontend_path": "frontend/src/modules/propostas_contratos",
         },
+        {
+            "slug": "estoque",
+            "name": "Estoque",
+            "description": "Catálogo de produtos, depósitos, fornecedores, lotes, números de série e movimentações.",
+            "icon": "Package",
+            "color": "#F59E0B",
+            "backend_path": "backend/app/modules/estoque",
+            "frontend_path": "frontend/src/modules/estoque",
+        },
     ]
 
     async with AsyncSessionLocal() as db:
@@ -96,6 +106,7 @@ app.include_router(propostas_router, prefix="/api/v1")
 app.include_router(propostas_public_router, prefix="/api/v1")
 app.include_router(company_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")
+app.include_router(estoque_router, prefix="/api/v1")
 
 
 @app.get("/health")

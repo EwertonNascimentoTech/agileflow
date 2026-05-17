@@ -65,6 +65,7 @@ async def create_tenant_tables(schema_name: str) -> None:
     # Importa todos os módulos pra registrar modelos no TenantBase.metadata
     import app.modules.atendimento.models  # noqa
     import app.modules.propostas_contratos.models  # noqa
+    import app.modules.estoque.models  # noqa
 
     async with engine.begin() as conn:
         await conn.execute(text(f"SET search_path TO {schema_name}"))

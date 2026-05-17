@@ -579,6 +579,212 @@ async def _step_013_tags(conn: AsyncConnection, schema: str) -> None:
         ))
 
 
+async def _step_015_estoque(conn: AsyncConnection, schema: str) -> None:
+    """Cria tabelas do módulo Estoque (9 tabelas)."""
+    if not await _table_exists(conn, schema, "estoque_product_types"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.estoque_product_types (
+                id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                slug           VARCHAR(50) NOT NULL UNIQUE,
+                name           VARCHAR(120) NOT NULL,
+                description    TEXT,
+                icon           VARCHAR(50),
+                field_schema   JSONB,
+                tracks_stock   BOOLEAN NOT NULL DEFAULT TRUE,
+                tracks_batch   BOOLEAN NOT NULL DEFAULT FALSE,
+                tracks_expiry  BOOLEAN NOT NULL DEFAULT FALSE,
+                tracks_serial  BOOLEAN NOT NULL DEFAULT FALSE,
+                is_active      BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at     TIMESTAMP DEFAULT now(),
+                updated_at     TIMESTAMP DEFAULT now()
+            )
+        """))
+
+    if not await _table_exists(conn, schema, "estoque_product_categories"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.estoque_product_categories (
+                id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name            VARCHAR(120) NOT NULL,
+                description     TEXT,
+                parent_id       UUID REFERENCES {schema}.estoque_product_categories(id) ON DELETE SET NULL,
+                product_type_id UUID REFERENCES {schema}.estoque_product_types(id) ON DELETE SET NULL,
+                is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at      TIMESTAMP DEFAULT now(),
+                updated_at      TIMESTAMP DEFAULT now()
+            )
+        """))
+
+    if not await _table_exists(conn, schema, "estoque_products"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.estoque_products (
+                id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                type_id       UUID NOT NULL REFERENCES {schema}.estoque_product_types(id) ON DELETE RESTRICT,
+                category_id   UUID REFERENCES {schema}.estoque_product_categories(id) ON DELETE SET NULL,
+                sku           VARCHAR(80) NOT NULL,
+                name          VARCHAR(200) NOT NULL,
+                description   TEXT,
+                barcode       VARCHAR(80),
+                unit          VARCHAR(20) NOT NULL DEFAULT 'un',
+                cost_price    NUMERIC(12,4) NOT NULL DEFAULT 0,
+                sale_price    NUMERIC(12,4) NOT NULL DEFAULT 0,
+                min_stock     NUMERIC(14,4) NOT NULL DEFAULT 0,
+                max_stock     NUMERIC(14,4),
+                custom_fields JSONB,
+                is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at    TIMESTAMP DEFAULT now(),
+                updated_at    TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_estoque_products_sku UNIQUE (sku)
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_estoque_products_type ON {schema}.estoque_products(type_id)"
+        ))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_estoque_products_category ON {schema}.estoque_products(category_id)"
+        ))
+
+    if not await _table_exists(conn, schema, "estoque_warehouses"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.estoque_warehouses (
+                id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                code        VARCHAR(30) NOT NULL,
+                name        VARCHAR(120) NOT NULL,
+                description TEXT,
+                address     JSONB,
+                is_default  BOOLEAN NOT NULL DEFAULT FALSE,
+                is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at  TIMESTAMP DEFAULT now(),
+                updated_at  TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_estoque_warehouses_code UNIQUE (code)
+            )
+        """))
+
+    if not await _table_exists(conn, schema, "estoque_suppliers"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.estoque_suppliers (
+                id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name       VARCHAR(200) NOT NULL,
+                trade_name VARCHAR(200),
+                document   VARCHAR(30),
+                email      VARCHAR(255),
+                phone      VARCHAR(30),
+                address    JSONB,
+                notes      TEXT,
+                is_active  BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT now(),
+                updated_at TIMESTAMP DEFAULT now()
+            )
+        """))
+
+    if not await _table_exists(conn, schema, "estoque_product_suppliers"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.estoque_product_suppliers (
+                id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                product_id     UUID NOT NULL REFERENCES {schema}.estoque_products(id) ON DELETE CASCADE,
+                supplier_id    UUID NOT NULL REFERENCES {schema}.estoque_suppliers(id) ON DELETE CASCADE,
+                supplier_sku   VARCHAR(80),
+                cost_unit      NUMERIC(12,4) NOT NULL DEFAULT 0,
+                lead_time_days INTEGER,
+                is_preferred   BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at     TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_estoque_product_supplier UNIQUE (product_id, supplier_id)
+            )
+        """))
+
+    if not await _table_exists(conn, schema, "estoque_stock_levels"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.estoque_stock_levels (
+                id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                product_id   UUID NOT NULL REFERENCES {schema}.estoque_products(id) ON DELETE CASCADE,
+                warehouse_id UUID NOT NULL REFERENCES {schema}.estoque_warehouses(id) ON DELETE CASCADE,
+                quantity     NUMERIC(14,4) NOT NULL DEFAULT 0,
+                reserved     NUMERIC(14,4) NOT NULL DEFAULT 0,
+                updated_at   TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_estoque_stock_level UNIQUE (product_id, warehouse_id)
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_estoque_stock_levels_product "
+            f"ON {schema}.estoque_stock_levels(product_id)"
+        ))
+
+    if not await _table_exists(conn, schema, "estoque_stock_batches"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.estoque_stock_batches (
+                id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                product_id       UUID NOT NULL REFERENCES {schema}.estoque_products(id) ON DELETE CASCADE,
+                warehouse_id     UUID NOT NULL REFERENCES {schema}.estoque_warehouses(id) ON DELETE CASCADE,
+                batch_code       VARCHAR(80) NOT NULL,
+                quantity         NUMERIC(14,4) NOT NULL DEFAULT 0,
+                cost_unit        NUMERIC(12,4) NOT NULL DEFAULT 0,
+                manufacture_date DATE,
+                expiry_date      DATE,
+                created_at       TIMESTAMP DEFAULT now(),
+                updated_at       TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_estoque_batch UNIQUE (product_id, warehouse_id, batch_code)
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_estoque_batches_expiry "
+            f"ON {schema}.estoque_stock_batches(expiry_date)"
+        ))
+
+    if not await _table_exists(conn, schema, "estoque_stock_serials"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.estoque_stock_serials (
+                id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                product_id   UUID NOT NULL REFERENCES {schema}.estoque_products(id) ON DELETE CASCADE,
+                warehouse_id UUID REFERENCES {schema}.estoque_warehouses(id) ON DELETE SET NULL,
+                serial       VARCHAR(120) NOT NULL,
+                status       VARCHAR(20) NOT NULL DEFAULT 'in_stock',
+                batch_id     UUID REFERENCES {schema}.estoque_stock_batches(id) ON DELETE SET NULL,
+                metadata     JSONB,
+                cost_unit    NUMERIC(12,4) NOT NULL DEFAULT 0,
+                created_at   TIMESTAMP DEFAULT now(),
+                updated_at   TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_estoque_serial UNIQUE (product_id, serial)
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_estoque_serials_status "
+            f"ON {schema}.estoque_stock_serials(status)"
+        ))
+
+    if not await _table_exists(conn, schema, "estoque_stock_movements"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.estoque_stock_movements (
+                id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                product_id        UUID NOT NULL REFERENCES {schema}.estoque_products(id) ON DELETE RESTRICT,
+                warehouse_id      UUID NOT NULL REFERENCES {schema}.estoque_warehouses(id) ON DELETE RESTRICT,
+                batch_id          UUID REFERENCES {schema}.estoque_stock_batches(id) ON DELETE SET NULL,
+                serial_id         UUID REFERENCES {schema}.estoque_stock_serials(id) ON DELETE SET NULL,
+                type              VARCHAR(20) NOT NULL,
+                quantity          NUMERIC(14,4) NOT NULL,
+                cost_unit         NUMERIC(12,4) NOT NULL DEFAULT 0,
+                reason            VARCHAR(200),
+                reference_type    VARCHAR(50),
+                reference_id      UUID,
+                transfer_group_id UUID,
+                supplier_id       UUID REFERENCES {schema}.estoque_suppliers(id) ON DELETE SET NULL,
+                user_id           UUID,
+                notes             TEXT,
+                created_at        TIMESTAMP DEFAULT now()
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_estoque_movements_created "
+            f"ON {schema}.estoque_stock_movements(created_at DESC)"
+        ))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_estoque_movements_product "
+            f"ON {schema}.estoque_stock_movements(product_id, created_at DESC)"
+        ))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_estoque_movements_warehouse "
+            f"ON {schema}.estoque_stock_movements(warehouse_id, created_at DESC)"
+        ))
+
+
 async def _step_014_tag_slug_classification(conn: AsyncConnection, schema: str) -> None:
     """Coluna slug em tags + tags de classificação PF/PJ em atendimentos (idempotente)."""
     if not await _table_exists(conn, schema, "tags"):
@@ -623,6 +829,7 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("012_notifications", _step_012_notifications),
     ("013_tags", _step_013_tags),
     ("014_tag_slug_classification", _step_014_tag_slug_classification),
+    ("015_estoque", _step_015_estoque),
 ]
 
 
