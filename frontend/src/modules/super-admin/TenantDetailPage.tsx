@@ -20,11 +20,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { passwordSchema } from "@/lib/passwordSchema"
+import { PasswordChecklist } from "@/components/PasswordChecklist"
 
 const adminSchema = z.object({
   full_name: z.string().min(2, "Mínimo 2 caracteres"),
   email: z.string().email("E-mail inválido"),
-  password: z.string().min(8, "Mínimo 8 caracteres"),
+  password: passwordSchema,
 })
 type AdminForm = z.infer<typeof adminSchema>
 
@@ -50,7 +52,7 @@ export default function TenantDetailPage() {
   const [adminSuccess, setAdminSuccess] = useState(false)
   const [savingPlan, setSavingPlan] = useState(false)
 
-  const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<AdminForm>({
+  const { register, handleSubmit, reset, watch, formState: { errors, isSubmitting } } = useForm<AdminForm>({
     resolver: zodResolver(adminSchema),
   })
 
@@ -489,7 +491,8 @@ export default function TenantDetailPage() {
               </div>
               <div className="space-y-1.5">
                 <Label>Senha provisória</Label>
-                <Input type="password" placeholder="mínimo 8 caracteres" {...register("password")} />
+                <Input type="password" placeholder="Senha forte" {...register("password")} />
+                <PasswordChecklist password={watch("password") ?? ""} />
                 {errors.password && <p className="text-xs text-destructive">{errors.password.message}</p>}
               </div>
               <DialogFooter>

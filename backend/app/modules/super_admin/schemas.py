@@ -5,6 +5,7 @@ from typing import Optional, List
 from pydantic import BaseModel, EmailStr, Field, field_validator
 import re
 
+from app.core.security import validate_password_strength
 from app.modules.super_admin.models import UserRole
 
 
@@ -185,10 +186,15 @@ class ModuleToggle(BaseModel):
 class UserCreate(BaseModel):
     email: EmailStr
     full_name: str = Field(..., min_length=2, max_length=200)
-    password: str = Field(..., min_length=8)
+    password: str
     role: UserRole = UserRole.COMPANY_USER
     role_id: Optional[uuid.UUID] = None
     tenant_id: Optional[uuid.UUID] = None
+
+    @field_validator("password")
+    @classmethod
+    def _password_strong(cls, v: str) -> str:
+        return validate_password_strength(v)
 
 
 class UserUpdate(BaseModel):

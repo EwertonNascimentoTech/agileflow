@@ -17,13 +17,15 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { EmptyState } from "@/components/EmptyState"
+import { passwordSchema } from "@/lib/passwordSchema"
+import { PasswordChecklist } from "@/components/PasswordChecklist"
 
 const NO_ROLE = "__none__"
 
 const createSchema = z.object({
   full_name: z.string().min(2, "Mínimo 2 caracteres"),
   email: z.string().email("E-mail inválido"),
-  password: z.string().min(8, "Mínimo 8 caracteres"),
+  password: passwordSchema,
   role: z.enum(["company_admin", "company_user"]),
   role_id: z.string().nullable().optional(),
 })
@@ -228,7 +230,12 @@ export default function UsersPage() {
             </div>
             <div className="space-y-1.5">
               <Label>Senha provisória</Label>
-              <Input type="password" placeholder="mínimo 8 caracteres" {...createForm.register("password")} />
+              <Input
+                type="password"
+                placeholder="Senha forte"
+                {...createForm.register("password")}
+              />
+              <PasswordChecklist password={createForm.watch("password") ?? ""} />
               {createForm.formState.errors.password && (
                 <p className="text-xs text-destructive">{createForm.formState.errors.password.message}</p>
               )}

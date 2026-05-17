@@ -20,8 +20,9 @@ from app.modules.super_admin.service import (
 from app.core.security import (
     create_tokens, create_refresh_token,
     decode_refresh_token, create_password_reset_token, decode_password_reset_token,
+    validate_password_strength,
 )
-from pydantic import BaseModel as _BaseModel
+from pydantic import BaseModel as _BaseModel, field_validator
 from fastapi import Request
 from app.core.limiter import limiter
 
@@ -61,6 +62,11 @@ class _ForgotPasswordRequest(_BaseModel):
 class _ResetPasswordRequest(_BaseModel):
     token: str
     new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def _password_strong(cls, v: str) -> str:
+        return validate_password_strength(v)
 
 
 @auth_router.post("/refresh", response_model=TokenResponse)
