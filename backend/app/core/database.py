@@ -66,6 +66,7 @@ async def create_tenant_tables(schema_name: str) -> None:
     import app.modules.atendimento.models  # noqa
     import app.modules.propostas_contratos.models  # noqa
     import app.modules.estoque.models  # noqa
+    import app.modules.pdv.models  # noqa
 
     async with engine.begin() as conn:
         await conn.execute(text(f"SET search_path TO {schema_name}"))

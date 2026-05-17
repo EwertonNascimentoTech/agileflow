@@ -813,6 +813,161 @@ async def _step_014_tag_slug_classification(conn: AsyncConnection, schema: str) 
     """))
 
 
+async def _step_016_pdv(conn: AsyncConnection, schema: str) -> None:
+    """Cria tabelas do módulo PDV (6 tabelas) + seed de formas de pagamento."""
+    if not await _table_exists(conn, schema, "pdv_payment_methods"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.pdv_payment_methods (
+                id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name                VARCHAR(80) NOT NULL,
+                kind                VARCHAR(20) NOT NULL,
+                affects_cash_drawer BOOLEAN NOT NULL DEFAULT FALSE,
+                change_enabled      BOOLEAN NOT NULL DEFAULT FALSE,
+                "order"             INTEGER NOT NULL DEFAULT 0,
+                is_active           BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at          TIMESTAMP DEFAULT now(),
+                updated_at          TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_pdv_payment_methods_name UNIQUE (name)
+            )
+        """))
+
+    if not await _table_exists(conn, schema, "pdv_cash_sessions"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.pdv_cash_sessions (
+                id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                status          VARCHAR(20) NOT NULL DEFAULT 'open',
+                warehouse_id    UUID NOT NULL,
+                opening_amount  NUMERIC(12,2) NOT NULL DEFAULT 0,
+                opened_by       UUID NOT NULL,
+                opened_at       TIMESTAMP NOT NULL DEFAULT now(),
+                closed_by       UUID,
+                closed_at       TIMESTAMP,
+                counted_amount  NUMERIC(12,2),
+                expected_amount NUMERIC(12,2),
+                difference      NUMERIC(12,2),
+                notes           TEXT,
+                created_at      TIMESTAMP DEFAULT now(),
+                updated_at      TIMESTAMP DEFAULT now()
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_pdv_cash_sessions_status "
+            f"ON {schema}.pdv_cash_sessions(status)"
+        ))
+        # No máximo um caixa aberto por depósito.
+        await conn.execute(text(
+            f"CREATE UNIQUE INDEX uq_{schema}_pdv_cash_session_open "
+            f"ON {schema}.pdv_cash_sessions(warehouse_id) WHERE status = 'open'"
+        ))
+
+    if not await _table_exists(conn, schema, "pdv_cash_movements"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.pdv_cash_movements (
+                id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                session_id UUID NOT NULL REFERENCES {schema}.pdv_cash_sessions(id) ON DELETE CASCADE,
+                type       VARCHAR(20) NOT NULL,
+                amount     NUMERIC(12,2) NOT NULL,
+                reason     VARCHAR(200) NOT NULL,
+                notes      TEXT,
+                user_id    UUID NOT NULL,
+                created_at TIMESTAMP DEFAULT now()
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_pdv_cash_movements_created "
+            f"ON {schema}.pdv_cash_movements(created_at)"
+        ))
+
+    if not await _table_exists(conn, schema, "pdv_sales"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.pdv_sales (
+                id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                number          VARCHAR(30) NOT NULL,
+                status          VARCHAR(20) NOT NULL DEFAULT 'completed',
+                session_id      UUID NOT NULL REFERENCES {schema}.pdv_cash_sessions(id) ON DELETE RESTRICT,
+                warehouse_id    UUID NOT NULL,
+                subtotal        NUMERIC(12,2) NOT NULL DEFAULT 0,
+                discount_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+                total           NUMERIC(12,2) NOT NULL DEFAULT 0,
+                paid_amount     NUMERIC(12,2) NOT NULL DEFAULT 0,
+                change_amount   NUMERIC(12,2) NOT NULL DEFAULT 0,
+                operator_id     UUID NOT NULL,
+                notes           TEXT,
+                cancelled_at    TIMESTAMP,
+                cancelled_by    UUID,
+                cancel_reason   VARCHAR(200),
+                created_at      TIMESTAMP DEFAULT now(),
+                updated_at      TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_pdv_sales_number UNIQUE (number)
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_pdv_sales_created ON {schema}.pdv_sales(created_at)"
+        ))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_pdv_sales_session ON {schema}.pdv_sales(session_id)"
+        ))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_pdv_sales_operator "
+            f"ON {schema}.pdv_sales(operator_id, created_at)"
+        ))
+
+    if not await _table_exists(conn, schema, "pdv_sale_items"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.pdv_sale_items (
+                id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                sale_id         UUID NOT NULL REFERENCES {schema}.pdv_sales(id) ON DELETE CASCADE,
+                product_id      UUID NOT NULL,
+                product_sku     VARCHAR(80) NOT NULL,
+                product_name    VARCHAR(200) NOT NULL,
+                unit            VARCHAR(20) NOT NULL DEFAULT 'un',
+                quantity        NUMERIC(14,4) NOT NULL,
+                unit_price      NUMERIC(12,2) NOT NULL,
+                discount_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+                line_total      NUMERIC(12,2) NOT NULL,
+                created_at      TIMESTAMP DEFAULT now()
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_pdv_sale_items_sale ON {schema}.pdv_sale_items(sale_id)"
+        ))
+
+    if not await _table_exists(conn, schema, "pdv_sale_payments"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.pdv_sale_payments (
+                id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                sale_id           UUID NOT NULL REFERENCES {schema}.pdv_sales(id) ON DELETE CASCADE,
+                payment_method_id UUID NOT NULL REFERENCES {schema}.pdv_payment_methods(id) ON DELETE RESTRICT,
+                method_name       VARCHAR(80) NOT NULL,
+                method_kind       VARCHAR(20) NOT NULL,
+                amount            NUMERIC(12,2) NOT NULL,
+                created_at        TIMESTAMP DEFAULT now()
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_pdv_sale_payments_sale "
+            f"ON {schema}.pdv_sale_payments(sale_id)"
+        ))
+
+    # Seed de formas de pagamento iniciais (idempotente).
+    await conn.execute(text(f"""
+        INSERT INTO {schema}.pdv_payment_methods
+            (id, name, kind, affects_cash_drawer, change_enabled, "order", is_active, created_at, updated_at)
+        SELECT gen_random_uuid(), 'Dinheiro', 'cash', TRUE, TRUE, 0, TRUE, now(), now()
+        WHERE NOT EXISTS (
+            SELECT 1 FROM {schema}.pdv_payment_methods WHERE name = 'Dinheiro'
+        )
+    """))
+    await conn.execute(text(f"""
+        INSERT INTO {schema}.pdv_payment_methods
+            (id, name, kind, affects_cash_drawer, change_enabled, "order", is_active, created_at, updated_at)
+        SELECT gen_random_uuid(), 'Cartão', 'card', FALSE, FALSE, 1, TRUE, now(), now()
+        WHERE NOT EXISTS (
+            SELECT 1 FROM {schema}.pdv_payment_methods WHERE name = 'Cartão'
+        )
+    """))
+
+
 # Lista ordenada de steps. Adicionar novos no final.
 STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("001_funnels", _step_001_funnels),
@@ -830,6 +985,7 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("013_tags", _step_013_tags),
     ("014_tag_slug_classification", _step_014_tag_slug_classification),
     ("015_estoque", _step_015_estoque),
+    ("016_pdv", _step_016_pdv),
 ]
 
 

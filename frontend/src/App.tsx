@@ -69,6 +69,16 @@ import EstoqueBatchesPage from "@/modules/estoque/BatchesPage"
 import EstoqueSerialsPage from "@/modules/estoque/SerialsPage"
 import EstoqueConfigPage from "@/modules/estoque/ConfigPage"
 
+// ── PDV ───────────────────────────────────────────────────────────────
+import PdvLayout from "@/modules/pdv/PdvLayout"
+import PdvPosPage from "@/modules/pdv/PosPage"
+import PdvCashSessionPage from "@/modules/pdv/CashSessionPage"
+import PdvSalesHistoryPage from "@/modules/pdv/SalesHistoryPage"
+import PdvSaleDetailPage from "@/modules/pdv/SaleDetailPage"
+import PdvReceiptPrintView from "@/modules/pdv/ReceiptPrintView"
+import PdvDashboardPage from "@/modules/pdv/DashboardPage"
+import PdvPaymentMethodsConfigPage from "@/modules/pdv/PaymentMethodsConfigPage"
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -142,6 +152,18 @@ export default function App() {
                     <Route path="categories"     element={<EstoqueCategoriesPage />} />
                     <Route path="warehouses"     element={<EstoqueWarehousesPage />} />
                     <Route path="suppliers"      element={<EstoqueSuppliersPage />} />
+                  </Route>
+
+                  {/* PDV */}
+                  <Route path="modules/pdv/sales/:id/receipt" element={<PdvReceiptPrintView />} />
+                  <Route path="modules/pdv" element={<PdvLayout />}>
+                    <Route index element={<Navigate to="pos" replace />} />
+                    <Route path="pos"        element={<PdvPosPage />} />
+                    <Route path="cash"       element={<PdvCashSessionPage />} />
+                    <Route path="sales"      element={<PdvSalesHistoryPage />} />
+                    <Route path="sales/:id"  element={<PdvSaleDetailPage />} />
+                    <Route path="dashboard"  element={<PdvDashboardPage />} />
+                    <Route path="config"     element={<PdvPaymentMethodsConfigPage />} />
                   </Route>
 
                   {/* Propostas e Contratos */}
