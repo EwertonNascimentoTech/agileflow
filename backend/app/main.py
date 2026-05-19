@@ -120,6 +120,17 @@ async def _auto_migrate_to_crm() -> None:
                 ))
         await db.commit()
 
+        # 3. Desativar módulos antigos no registry e nos tenants
+        from app.modules.super_admin.models import Module
+        deprecated_slugs = ["atendimento", "propostas_contratos"]
+        await db.execute(_text(
+            "UPDATE modules SET is_active = FALSE WHERE slug = ANY(:slugs)"
+        ), {"slugs": deprecated_slugs})
+        await db.execute(_text(
+            "UPDATE tenant_modules SET is_active = FALSE WHERE module_slug = ANY(:slugs)"
+        ), {"slugs": deprecated_slugs})
+        await db.commit()
+
 
 async def _seed_known_modules() -> None:
     """Cadastra os módulos do core no registry se ainda não estiverem cadastrados."""
@@ -128,15 +139,6 @@ async def _seed_known_modules() -> None:
     from app.modules.super_admin.models import Module
 
     KNOWN_MODULES = [
-        {
-            "slug": "propostas_contratos",
-            "name": "Propostas e Contratos",
-            "description": "Propostas comerciais versionadas, com itens, status e geração de PDF.",
-            "icon": "FileText",
-            "color": "#8B5CF6",
-            "backend_path": "backend/app/modules/propostas_contratos",
-            "frontend_path": "frontend/src/modules/propostas_contratos",
-        },
         {
             "slug": "crm",
             "name": "CRM",
