@@ -59,6 +59,36 @@ import ContractsListPage from "@/modules/propostas_contratos/ContractsListPage"
 import ContractDetailPage from "@/modules/propostas_contratos/ContractDetailPage"
 import ProposalsDashboardPage from "@/modules/propostas_contratos/DashboardPage"
 
+// ── CRM (módulo unificado) ────────────────────────────────────────────
+import CrmLayout from "@/modules/crm/CrmLayout"
+import CrmKanbanPage from "@/modules/crm/KanbanPage"
+import CrmDashboardPage from "@/modules/crm/DashboardPage"
+import CrmClientsPage from "@/modules/crm/ClientsPage"
+import CrmClientDetailPage from "@/modules/crm/ClientDetailPage"
+import CrmAttendanceDetailPage from "@/modules/crm/AttendanceDetailPage"
+import CrmCompaniesPage from "@/modules/crm/CompaniesPage"
+import CrmCompanyDetailPage from "@/modules/crm/CompanyDetailPage"
+import CrmNewAttendanceOpenRedirect from "@/modules/crm/NewAttendanceOpenRedirect"
+import CrmConfigPage from "@/modules/crm/config/ConfigPage"
+import CrmFunnelsConfigPage from "@/modules/crm/config/FunnelsConfigPage"
+import CrmStatusConfigPage from "@/modules/crm/config/StatusConfigPage"
+import CrmChannelsConfigPage from "@/modules/crm/config/ChannelsConfigPage"
+import CrmAutomationsConfigPage from "@/modules/crm/config/AutomationsConfigPage"
+import CrmFollowUpConfigPage from "@/modules/crm/config/FollowUpConfigPage"
+import CrmForecastPage from "@/modules/crm/ForecastPage"
+import CrmConversionFunnelPage from "@/modules/crm/ConversionFunnelPage"
+import CrmProductivityReportPage from "@/modules/crm/ProductivityReportPage"
+import CrmRevenueReportPage from "@/modules/crm/RevenueReportPage"
+import CrmReactivationConfigPage from "@/modules/crm/config/ReactivationConfigPage"
+import CrmProposalsListPage from "@/modules/crm/proposals/ProposalsListPage"
+import CrmNewProposalPage from "@/modules/crm/proposals/NewProposalPage"
+import CrmProposalDetailPage from "@/modules/crm/proposals/ProposalDetailPage"
+import CrmProposalPrintView from "@/modules/crm/proposals/ProposalPrintView"
+import CrmProposalsDashboardPage from "@/modules/crm/proposals/DashboardPage"
+import CrmProposalTemplatesPage from "@/modules/crm/proposals/ProposalTemplatesPage"
+import CrmContractsListPage from "@/modules/crm/proposals/ContractsListPage"
+import CrmContractDetailPage from "@/modules/crm/proposals/ContractDetailPage"
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -120,6 +150,39 @@ export default function App() {
                     <Route path="productivity" element={<ProductivityReportPage />} />
                     <Route path="revenue" element={<RevenueReportPage />} />
                     <Route path="config/reactivation" element={<ReactivationConfigPage />} />
+                  </Route>
+
+                  {/* CRM (módulo unificado) */}
+                  <Route path="modules/crm" element={<CrmLayout />}>
+                    <Route index element={<Navigate to="dashboard" replace />} />
+                    <Route path="dashboard" element={<CrmDashboardPage />} />
+                    <Route path="kanban" element={<CrmKanbanPage />} />
+                    <Route path="attendances" element={<Navigate to="kanban" replace />} />
+                    <Route path="attendances/new" element={<CrmNewAttendanceOpenRedirect />} />
+                    <Route path="attendances/:id" element={<CrmAttendanceDetailPage />} />
+                    <Route path="clients" element={<CrmClientsPage />} />
+                    <Route path="clients/:id" element={<CrmClientDetailPage />} />
+                    <Route path="companies" element={<CrmCompaniesPage />} />
+                    <Route path="companies/:id" element={<CrmCompanyDetailPage />} />
+                    <Route path="forecast" element={<CrmForecastPage />} />
+                    <Route path="conversion" element={<CrmConversionFunnelPage />} />
+                    <Route path="productivity" element={<CrmProductivityReportPage />} />
+                    <Route path="revenue" element={<CrmRevenueReportPage />} />
+                    <Route path="config" element={<CrmConfigPage />} />
+                    <Route path="config/funnels" element={<CrmFunnelsConfigPage />} />
+                    <Route path="config/statuses" element={<CrmStatusConfigPage />} />
+                    <Route path="config/channels" element={<CrmChannelsConfigPage />} />
+                    <Route path="config/automations" element={<CrmAutomationsConfigPage />} />
+                    <Route path="config/follow-ups" element={<CrmFollowUpConfigPage />} />
+                    <Route path="config/reactivation" element={<CrmReactivationConfigPage />} />
+                    <Route path="proposals" element={<CrmProposalsListPage />} />
+                    <Route path="proposals/new" element={<CrmNewProposalPage />} />
+                    <Route path="proposals/dashboard" element={<CrmProposalsDashboardPage />} />
+                    <Route path="proposals/templates" element={<CrmProposalTemplatesPage />} />
+                    <Route path="proposals/:id" element={<CrmProposalDetailPage />} />
+                    <Route path="proposals/:id/print" element={<CrmProposalPrintView />} />
+                    <Route path="contracts" element={<CrmContractsListPage />} />
+                    <Route path="contracts/:id" element={<CrmContractDetailPage />} />
                   </Route>
 
                   {/* Propostas e Contratos */}

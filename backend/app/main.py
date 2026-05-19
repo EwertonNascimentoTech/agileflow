@@ -17,6 +17,10 @@ from app.modules.propostas_contratos.api.routes import router as propostas_route
 from app.modules.propostas_contratos.api.public_routes import router as propostas_public_router
 from app.modules.company.api.routes import router as company_router
 from app.modules.integrations.api.webhook_routes import router as webhooks_router
+from app.modules.crm.api.routes import router as crm_router
+from app.modules.crm.api.proposals_routes import router as crm_proposals_router
+from app.modules.crm.api.proposals_public_routes import router as crm_proposals_public_router
+from app.modules.crm.api.admin_routes import router as crm_admin_router
 
 
 @asynccontextmanager
@@ -40,7 +44,81 @@ async def lifespan(app: FastAPI):
     except Exception as e:  # noqa: BLE001
         print(f"[modules_seed] skipped: {e}")
 
+    # Migra tenants/roles antigos (atendimento + propostas_contratos) para o módulo unificado crm.
+    try:
+        await _auto_migrate_to_crm()
+    except Exception as e:  # noqa: BLE001
+        print(f"[auto_migrate_to_crm] skipped: {e}")
+
     yield
+
+
+async def _auto_migrate_to_crm() -> None:
+    """
+    Para cada tenant que tem 'atendimento' ou 'propostas_contratos' ativo,
+    ativa 'crm' automaticamente. Adiciona todas as permissions crm.* para
+    roles que tinham atendimento.* ou propostas_contratos.*.
+    """
+    from sqlalchemy import select, text as _text, or_
+    from app.core.database import AsyncSessionLocal
+    from app.modules.super_admin.models import TenantModule, Role, RolePermission
+    from datetime import datetime
+
+    async with AsyncSessionLocal() as db:
+        await db.execute(_text("SET search_path TO public"))
+
+        # 1. Ativar crm para tenants que tinham atendimento OU propostas_contratos
+        tenants_to_migrate = await db.execute(
+            select(TenantModule.tenant_id).where(
+                TenantModule.module_slug.in_(["atendimento", "propostas_contratos"]),
+                TenantModule.is_active == True,  # noqa: E712
+            ).distinct()
+        )
+        tenant_ids = [row[0] for row in tenants_to_migrate.all()]
+
+        for tid in tenant_ids:
+            existing = await db.execute(
+                select(TenantModule).where(
+                    TenantModule.tenant_id == tid,
+                    TenantModule.module_slug == "crm",
+                )
+            )
+            if not existing.scalar_one_or_none():
+                db.add(TenantModule(
+                    tenant_id=tid,
+                    module_slug="crm",
+                    is_active=True,
+                    activated_at=datetime.utcnow(),
+                ))
+        await db.commit()
+
+        # 2. Migrar permissions de roles
+        roles_result = await db.execute(
+            select(RolePermission).where(
+                or_(
+                    RolePermission.permission_code.like("atendimento.%"),
+                    RolePermission.permission_code.like("propostas_contratos.%"),
+                )
+            )
+        )
+        existing_role_perms = roles_result.scalars().all()
+
+        for rp in existing_role_perms:
+            old_code = rp.permission_code
+            new_code = old_code.replace("atendimento.", "crm.").replace("propostas_contratos.", "crm.")
+
+            check = await db.execute(
+                select(RolePermission).where(
+                    RolePermission.role_id == rp.role_id,
+                    RolePermission.permission_code == new_code,
+                )
+            )
+            if not check.scalar_one_or_none():
+                db.add(RolePermission(
+                    role_id=rp.role_id,
+                    permission_code=new_code,
+                ))
+        await db.commit()
 
 
 async def _seed_known_modules() -> None:
@@ -58,6 +136,15 @@ async def _seed_known_modules() -> None:
             "color": "#8B5CF6",
             "backend_path": "backend/app/modules/propostas_contratos",
             "frontend_path": "frontend/src/modules/propostas_contratos",
+        },
+        {
+            "slug": "crm",
+            "name": "CRM",
+            "description": "CRM completo: atendimentos, kanban, propostas, contratos, automações e relatórios.",
+            "icon": "Briefcase",
+            "color": "#2563EB",
+            "backend_path": "backend/app/modules/crm",
+            "frontend_path": "frontend/src/modules/crm",
         },
     ]
 
@@ -96,6 +183,10 @@ app.include_router(propostas_router, prefix="/api/v1")
 app.include_router(propostas_public_router, prefix="/api/v1")
 app.include_router(company_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")
+app.include_router(crm_router, prefix="/api/v1")
+app.include_router(crm_proposals_router, prefix="/api/v1")
+app.include_router(crm_proposals_public_router, prefix="/api/v1")
+app.include_router(crm_admin_router, prefix="/api/v1")
 
 
 @app.get("/health")
