@@ -440,6 +440,7 @@ class Attendance(TenantBase):
     close_reason: Mapped[Optional[str]]     = mapped_column(String(500), nullable=True)
     closed_by: Mapped[Optional[uuid.UUID]]  = mapped_column(UUID(as_uuid=True), nullable=True)
     outcome: Mapped[str]                    = mapped_column(String(20), nullable=False, default="open")  # open|won|lost
+    parent_attendance_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)  # reactivation
     created_at: Mapped[datetime]            = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime]            = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -713,3 +714,16 @@ class PlaybookStep(TenantBase):
     due_days: Mapped[int]              = mapped_column(Integer, nullable=False, default=1)
     order: Mapped[int]                 = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime]       = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ReactivationConfig(TenantBase):
+    """Configuração de reativação automática de negócios perdidos por funil/motivo (K-016)."""
+    __tablename__ = "reactivation_configs"
+
+    id: Mapped[uuid.UUID]              = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    funnel_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)   # NULL = todos os funis
+    loss_reason: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)              # NULL = qualquer motivo
+    delay_days: Mapped[int]            = mapped_column(Integer, nullable=False, default=30)
+    is_active: Mapped[bool]            = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime]       = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime]       = mapped_column(DateTime, default=datetime.utcnow)

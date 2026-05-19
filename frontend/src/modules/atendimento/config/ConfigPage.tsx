@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom"
-import { KanbanSquare, Plug, SlidersHorizontal, Users2, ArrowRight, GitBranch, Zap, Send } from "lucide-react"
+import { KanbanSquare, Plug, SlidersHorizontal, Users2, ArrowRight, GitBranch, Zap, Send, RefreshCw } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 
 const sections = [
@@ -44,6 +44,12 @@ const sections = [
     icon: Send,
     title: "Follow-ups Automáticos",
     description: "Templates de mensagem enviados quando o atendimento entra em uma etapa.",
+  },
+  {
+    to: "/app/modules/atendimento/config/reactivation",
+    icon: RefreshCw,
+    title: "Reativação Automática",
+    description: "Regras para reativar negócios perdidos após X dias automaticamente.",
   },
 ]
 

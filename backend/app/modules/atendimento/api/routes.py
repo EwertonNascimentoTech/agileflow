@@ -40,6 +40,8 @@ from app.modules.atendimento.schemas import (
     StageRequiredFieldCreate, StageRequiredFieldResponse,
     PlaybookStepCreate, PlaybookStepUpdate, PlaybookStepResponse,
     ConversionFunnelResponse, ProductivityResponse,
+    ReactivationConfigCreate, ReactivationConfigUpdate, ReactivationConfigResponse,
+    RevenueResponse,
 )
 from app.modules.atendimento.models import TaskStatus, AutomationTrigger
 from app.modules.atendimento.service import (
@@ -50,6 +52,7 @@ from app.modules.atendimento.service import (
     CloseAttendanceService, ForecastService,
     StageRequiredFieldService, PlaybookService,
     ConversionFunnelService, ProductivityService,
+    ReactivationService, RevenueService,
 )
 
 router = APIRouter(prefix="/atendimento", tags=["Atendimento"])
@@ -1005,3 +1008,83 @@ async def remove_tag_from_attendance(
     _=Depends(_can_attendance_update),
 ):
     await TagService.remove_from_attendance(ctx.db, attendance_id, tag_id)
+
+
+# ─────────────────────────────────────────────
+# K-016 — REATIVAÇÃO DE NEGÓCIOS PERDIDOS
+# ─────────────────────────────────────────────
+
+@router.get("/config/reactivation", response_model=List[ReactivationConfigResponse])
+async def list_reactivation_configs(
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_config),
+):
+    return await ReactivationService.list_configs(ctx.db)
+
+
+@router.post("/config/reactivation", response_model=ReactivationConfigResponse, status_code=201)
+async def create_reactivation_config(
+    data: ReactivationConfigCreate,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_config),
+):
+    return await ReactivationService.create_config(ctx.db, data)
+
+
+@router.patch("/config/reactivation/{config_id}", response_model=ReactivationConfigResponse)
+async def update_reactivation_config(
+    config_id: uuid.UUID,
+    data: ReactivationConfigUpdate,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_config),
+):
+    return await ReactivationService.update_config(ctx.db, config_id, data)
+
+
+@router.delete("/config/reactivation/{config_id}", status_code=204)
+async def delete_reactivation_config(
+    config_id: uuid.UUID,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_config),
+):
+    await ReactivationService.delete_config(ctx.db, config_id)
+
+
+# ─────────────────────────────────────────────
+# K-020 — TICKET MÉDIO E RECEITA
+# ─────────────────────────────────────────────
+
+@router.get("/reports/revenue")
+async def get_revenue_report(
+    period_start: str = Query(..., description="Data início (YYYY-MM-DD)"),
+    period_end: str = Query(..., description="Data fim (YYYY-MM-DD)"),
+    funnel_id: Optional[str] = Query(None),
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_reports_view),
+):
+    return await RevenueService.get_revenue(ctx.db, period_start, period_end, funnel_id)
+
+
+@router.get("/reports/revenue/export")
+async def export_revenue_csv(
+    period_start: str = Query(...),
+    period_end: str = Query(...),
+    funnel_id: Optional[str] = Query(None),
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_reports_view),
+):
+    from fastapi.responses import StreamingResponse
+    import io, csv
+    data = await RevenueService.get_revenue(ctx.db, period_start, period_end, funnel_id)
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Responsável", "Negócios Ganhos", "Receita Total (R$)", "Ticket Médio (R$)"])
+    for u in data["by_user"]:
+        writer.writerow([u["user_id"], u["attendances_won"],
+                         f"{u['total_revenue']:.2f}", f"{u['avg_ticket']:.2f}"])
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=receita_{period_start}_{period_end}.csv"},
+    )

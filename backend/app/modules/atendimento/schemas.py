@@ -851,3 +851,60 @@ class ProductivityResponse(BaseModel):
     period_start: str
     period_end: str
     users: List[ProductivityUserItem]
+
+
+# ══════════════════════════════════════════════
+# K-016 — REATIVAÇÃO
+# ══════════════════════════════════════════════
+
+class ReactivationConfigCreate(BaseModel):
+    funnel_id: Optional[uuid.UUID] = None
+    loss_reason: Optional[str] = None
+    delay_days: int = 30
+    is_active: bool = True
+
+
+class ReactivationConfigUpdate(BaseModel):
+    loss_reason: Optional[str] = None
+    delay_days: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class ReactivationConfigResponse(BaseModel):
+    id: uuid.UUID
+    funnel_id: Optional[uuid.UUID]
+    loss_reason: Optional[str]
+    delay_days: int
+    is_active: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ══════════════════════════════════════════════
+# K-020 — TICKET MÉDIO E RECEITA
+# ══════════════════════════════════════════════
+
+class RevenueUserItem(BaseModel):
+    user_id: Optional[str]
+    attendances_won: int
+    total_revenue: float
+    avg_ticket: float
+
+
+class RevenueMonthItem(BaseModel):
+    month: str   # "2026-05"
+    revenue: float
+    won_count: int
+
+
+class RevenueResponse(BaseModel):
+    period_start: str
+    period_end: str
+    total_revenue: float
+    avg_ticket: float
+    total_won: int
+    target_value: float
+    delta_vs_target: Optional[float]
+    by_user: List[RevenueUserItem]
+    monthly_evolution: List[RevenueMonthItem]

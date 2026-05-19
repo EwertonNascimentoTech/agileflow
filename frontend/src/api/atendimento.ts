@@ -742,3 +742,61 @@ export const productivityApi = {
     return `/api/v1/atendimento/reports/productivity/export?${q}`
   },
 }
+
+// ── K-016 Reactivation ────────────────────────
+
+export interface ReactivationConfig {
+  id: string
+  funnel_id: string | null
+  loss_reason: string | null
+  delay_days: number
+  is_active: boolean
+  created_at: string
+}
+
+export const reactivationApi = {
+  list: () =>
+    api.get<ReactivationConfig[]>("/atendimento/config/reactivation").then(r => r.data),
+  create: (data: { funnel_id?: string; loss_reason?: string; delay_days: number; is_active: boolean }) =>
+    api.post<ReactivationConfig>("/atendimento/config/reactivation", data).then(r => r.data),
+  update: (id: string, data: { is_active?: boolean; delay_days?: number; loss_reason?: string }) =>
+    api.patch<ReactivationConfig>(`/atendimento/config/reactivation/${id}`, data).then(r => r.data),
+  remove: (id: string) =>
+    api.delete<void>(`/atendimento/config/reactivation/${id}`),
+}
+
+// ── K-020 Revenue ─────────────────────────────
+
+export interface RevenueUserItem {
+  user_id: string | null
+  attendances_won: number
+  total_revenue: number
+  avg_ticket: number
+}
+
+export interface RevenueMonthItem {
+  month: string
+  revenue: number
+  won_count: number
+}
+
+export interface RevenueReport {
+  period_start: string
+  period_end: string
+  total_revenue: number
+  avg_ticket: number
+  total_won: number
+  target_value: number
+  delta_vs_target: number | null
+  by_user: RevenueUserItem[]
+  monthly_evolution: RevenueMonthItem[]
+}
+
+export const revenueApi = {
+  get: (params: { period_start: string; period_end: string; funnel_id?: string }) =>
+    api.get<RevenueReport>("/atendimento/reports/revenue", { params }).then(r => r.data),
+  exportCsvUrl: (params: { period_start: string; period_end: string }) => {
+    const q = new URLSearchParams(params).toString()
+    return `/api/v1/atendimento/reports/revenue/export?${q}`
+  },
+}

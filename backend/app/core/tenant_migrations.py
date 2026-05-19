@@ -669,6 +669,28 @@ async def _step_018_playbook(conn: AsyncConnection, schema: str) -> None:
         """))
 
 
+async def _step_019_reactivation(conn: AsyncConnection, schema: str) -> None:
+    """Cria tabela reactivation_configs e adiciona parent_attendance_id em attendances (K-016)."""
+    if not await _table_exists(conn, schema, "attendances"):
+        return
+    if not await _column_exists(conn, schema, "attendances", "parent_attendance_id"):
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.attendances ADD COLUMN parent_attendance_id UUID"
+        ))
+    if not await _table_exists(conn, schema, "reactivation_configs"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.reactivation_configs (
+                id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                funnel_id   UUID,
+                loss_reason VARCHAR(500),
+                delay_days  SMALLINT NOT NULL DEFAULT 30,
+                is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at  TIMESTAMP DEFAULT now(),
+                updated_at  TIMESTAMP DEFAULT now()
+            )
+        """))
+
+
 # Lista ordenada de steps. Adicionar novos no final.
 STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("001_funnels", _step_001_funnels),
@@ -689,6 +711,7 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("016_forecast", _step_016_forecast),
     ("017_stage_required_fields", _step_017_stage_required_fields),
     ("018_playbook", _step_018_playbook),
+    ("019_reactivation", _step_019_reactivation),
 ]
 
 

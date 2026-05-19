@@ -18,7 +18,7 @@ from app.modules.atendimento.models import (
     LeadEventType, AutomationTrigger, AutomationAction,
     StageOutcome, AttendancePriority, ChannelType, ClientEntityType,
     Tag, ClientTag, AttendanceTag,
-    SalesTarget, StageRequiredField, PlaybookStep,
+    SalesTarget, StageRequiredField, PlaybookStep, ReactivationConfig,
 )
 from app.modules.atendimento.schemas import (
     FunnelCreate, FunnelUpdate,
@@ -2414,4 +2414,205 @@ class ProductivityService:
             "period_start": period_start,
             "period_end": period_end,
             "users": users_data,
+        }
+
+
+# ─────────────────────────────────────────────
+# K-016 — REATIVAÇÃO DE NEGÓCIOS PERDIDOS
+# ─────────────────────────────────────────────
+
+class ReactivationService:
+
+    @staticmethod
+    async def list_configs(db: AsyncSession) -> list:
+        from app.modules.atendimento.models import ReactivationConfig
+        result = await db.execute(select(ReactivationConfig).order_by(ReactivationConfig.created_at))
+        return list(result.scalars().all())
+
+    @staticmethod
+    async def create_config(db: AsyncSession, data) -> object:
+        from app.modules.atendimento.models import ReactivationConfig
+        obj = ReactivationConfig(**data.model_dump())
+        db.add(obj)
+        await db.commit()
+        await db.refresh(obj)
+        return obj
+
+    @staticmethod
+    async def update_config(db: AsyncSession, config_id: uuid.UUID, data) -> object:
+        from app.modules.atendimento.models import ReactivationConfig
+        result = await db.execute(select(ReactivationConfig).where(ReactivationConfig.id == config_id))
+        obj = result.scalar_one_or_none()
+        if not obj:
+            raise HTTPException(404, "Configuração de reativação não encontrada.")
+        for field, value in data.model_dump(exclude_unset=True).items():
+            setattr(obj, field, value)
+        obj.updated_at = datetime.utcnow()
+        await db.commit()
+        await db.refresh(obj)
+        return obj
+
+    @staticmethod
+    async def delete_config(db: AsyncSession, config_id: uuid.UUID) -> None:
+        from app.modules.atendimento.models import ReactivationConfig
+        result = await db.execute(select(ReactivationConfig).where(ReactivationConfig.id == config_id))
+        obj = result.scalar_one_or_none()
+        if not obj:
+            raise HTTPException(404, "Configuração de reativação não encontrada.")
+        await db.delete(obj)
+        await db.commit()
+
+    @staticmethod
+    async def run_reactivations(db: AsyncSession) -> int:
+        """
+        Verifica atendimentos perdidos há X dias e cria reativações.
+        Chamado pelo Celery beat diariamente.
+        Retorna o número de reativações criadas.
+        """
+        from app.modules.atendimento.models import ReactivationConfig
+        configs_result = await db.execute(
+            select(ReactivationConfig).where(ReactivationConfig.is_active == True)
+        )
+        configs = configs_result.scalars().all()
+        if not configs:
+            return 0
+
+        # Busca atendimentos perdidos sem reativação ainda
+        lost_result = await db.execute(
+            select(Attendance).where(
+                Attendance.outcome == "lost",
+                Attendance.parent_attendance_id == None,
+            ).options(selectinload(Attendance.status))
+        )
+        lost_attendances = lost_result.scalars().all()
+
+        created = 0
+        for attendance in lost_attendances:
+            if not attendance.closed_at:
+                continue
+            # Encontra config aplicável
+            matching_config = None
+            for cfg in configs:
+                reason_match = (cfg.loss_reason is None or cfg.loss_reason == attendance.close_reason)
+                funnel_match = (cfg.funnel_id is None or (
+                    attendance.status and attendance.status.funnel_id == cfg.funnel_id
+                ))
+                if reason_match and funnel_match:
+                    matching_config = cfg
+                    break
+            if not matching_config:
+                continue
+
+            days_since = (datetime.utcnow() - attendance.closed_at).days
+            if days_since < matching_config.delay_days:
+                continue
+
+            # Verifica se já existe reativação para este atendimento
+            existing = await db.execute(
+                select(Attendance).where(
+                    Attendance.parent_attendance_id == attendance.id
+                )
+            )
+            if existing.scalar_one_or_none():
+                continue
+
+            # Cria novo atendimento de reativação
+            reactivation = Attendance(
+                client_id=attendance.client_id,
+                company_id=attendance.company_id,
+                channel=attendance.channel,
+                status_id=attendance.status_id,
+                assigned_to=attendance.assigned_to,
+                subject=f"[Reativação] {attendance.subject}",
+                priority=attendance.priority,
+                value=attendance.value,
+                parent_attendance_id=attendance.id,
+                outcome="open",
+            )
+            db.add(reactivation)
+            created += 1
+
+        if created:
+            await db.commit()
+        return created
+
+
+# ─────────────────────────────────────────────
+# K-020 — TICKET MÉDIO E RECEITA
+# ─────────────────────────────────────────────
+
+class RevenueService:
+
+    @staticmethod
+    async def get_revenue(db: AsyncSession, period_start: str, period_end: str, funnel_id: Optional[str] = None) -> dict:
+        from sqlalchemy import cast, Date as SADate
+        start_dt = datetime.fromisoformat(period_start)
+        end_dt = datetime.fromisoformat(period_end)
+
+        # Base query: atendimentos ganhos no período
+        base_query = select(Attendance).where(
+            Attendance.outcome == "won",
+            Attendance.closed_at >= start_dt,
+            Attendance.closed_at <= end_dt,
+            Attendance.value != None,
+        )
+        if funnel_id:
+            base_query = base_query.join(
+                AttendanceStatusConfig, Attendance.status_id == AttendanceStatusConfig.id
+            ).where(AttendanceStatusConfig.funnel_id == uuid.UUID(funnel_id))
+
+        result = await db.execute(base_query)
+        won_attendances = result.scalars().all()
+
+        total_revenue = sum(float(a.value or 0) for a in won_attendances)
+        total_won = len(won_attendances)
+        avg_ticket = total_revenue / total_won if total_won > 0 else 0
+
+        # Por usuário
+        user_map: dict = {}
+        for a in won_attendances:
+            uid = str(a.assigned_to) if a.assigned_to else "sem_responsavel"
+            if uid not in user_map:
+                user_map[uid] = {"user_id": uid, "attendances_won": 0, "total_revenue": 0.0}
+            user_map[uid]["attendances_won"] += 1
+            user_map[uid]["total_revenue"] += float(a.value or 0)
+        by_user = []
+        for u in user_map.values():
+            u["avg_ticket"] = u["total_revenue"] / u["attendances_won"] if u["attendances_won"] > 0 else 0
+            by_user.append(u)
+        by_user.sort(key=lambda x: x["total_revenue"], reverse=True)
+
+        # Evolução mensal
+        month_map: dict = {}
+        for a in won_attendances:
+            if a.closed_at:
+                month_key = a.closed_at.strftime("%Y-%m")
+                if month_key not in month_map:
+                    month_map[month_key] = {"month": month_key, "revenue": 0.0, "won_count": 0}
+                month_map[month_key]["revenue"] += float(a.value or 0)
+                month_map[month_key]["won_count"] += 1
+        monthly_evolution = sorted(month_map.values(), key=lambda x: x["month"])
+
+        # Meta do período (soma de sales_targets no período)
+        target_result = await db.execute(
+            select(func.sum(SalesTarget.target_value)).where(
+                SalesTarget.period >= period_start[:7],
+                SalesTarget.period <= period_end[:7],
+            )
+        )
+        target_value = float(target_result.scalar() or 0)
+        delta_vs_target = None
+        if target_value > 0:
+            delta_vs_target = round((total_revenue - target_value) / target_value * 100, 1)
+
+        return {
+            "period_start": period_start,
+            "period_end": period_end,
+            "total_revenue": round(total_revenue, 2),
+            "avg_ticket": round(avg_ticket, 2),
+            "total_won": total_won,
+            "target_value": round(target_value, 2),
+            "delta_vs_target": delta_vs_target,
+            "by_user": by_user,
+            "monthly_evolution": monthly_evolution,
         }

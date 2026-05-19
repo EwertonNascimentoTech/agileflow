@@ -45,6 +45,8 @@ import FollowUpConfigPage from "@/modules/atendimento/config/FollowUpConfigPage"
 import ForecastPage from "@/modules/atendimento/ForecastPage"
 import ConversionFunnelPage from "@/modules/atendimento/ConversionFunnelPage"
 import ProductivityReportPage from "@/modules/atendimento/ProductivityReportPage"
+import RevenueReportPage from "@/modules/atendimento/RevenueReportPage"
+import ReactivationConfigPage from "@/modules/atendimento/config/ReactivationConfigPage"
 
 // ── Propostas e Contratos ─────────────────────────────────────────────
 import ProposalsListPage from "@/modules/propostas_contratos/ProposalsListPage"
@@ -116,6 +118,8 @@ export default function App() {
                     <Route path="forecast" element={<ForecastPage />} />
                     <Route path="conversion" element={<ConversionFunnelPage />} />
                     <Route path="productivity" element={<ProductivityReportPage />} />
+                    <Route path="revenue" element={<RevenueReportPage />} />
+                    <Route path="config/reactivation" element={<ReactivationConfigPage />} />
                   </Route>
 
                   {/* Propostas e Contratos */}
