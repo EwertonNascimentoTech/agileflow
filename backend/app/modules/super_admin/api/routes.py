@@ -20,8 +20,9 @@ from app.modules.super_admin.service import (
 from app.core.security import (
     create_tokens, create_refresh_token,
     decode_refresh_token, create_password_reset_token, decode_password_reset_token,
+    validate_password_strength,
 )
-from pydantic import BaseModel as _BaseModel
+from pydantic import BaseModel as _BaseModel, field_validator
 from fastapi import Request
 from app.core.limiter import limiter
 
@@ -61,6 +62,11 @@ class _ForgotPasswordRequest(_BaseModel):
 class _ResetPasswordRequest(_BaseModel):
     token: str
     new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def _password_strong(cls, v: str) -> str:
+        return validate_password_strength(v)
 
 
 @auth_router.post("/refresh", response_model=TokenResponse)
@@ -369,6 +375,21 @@ async def create_company_admin(
 # SUPER ADMINS
 # ─────────────────────────────────────────────
 
+@router.get("/admins", response_model=List[UserResponse])
+async def list_super_admins(
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_super_admin),
+):
+    from sqlalchemy import select as _select
+    from app.modules.super_admin.models import User as _User, UserRole as _UserRole
+    result = await db.execute(
+        _select(_User)
+        .where(_User.role == _UserRole.SUPER_ADMIN)
+        .order_by(_User.created_at.desc())
+    )
+    return list(result.scalars().all())
+
+
 @router.post("/admins", response_model=UserResponse, status_code=201)
 async def create_super_admin(
     data: UserCreate,
@@ -376,6 +397,28 @@ async def create_super_admin(
     _=Depends(require_super_admin),
 ):
     return await UserService.create_super_admin(db, data)
+
+
+@router.patch("/admins/{user_id}", response_model=UserResponse)
+async def update_super_admin(
+    user_id: uuid.UUID,
+    data: UserUpdate,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_super_admin),
+):
+    return await UserService.update_user(db, user_id, data)
+
+
+@router.delete("/admins/{user_id}", status_code=204)
+async def delete_super_admin(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current=Depends(require_super_admin),
+):
+    if current.id == user_id:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Não é possível excluir o próprio usuário.")
+    await UserService.delete_user(db, user_id)
 
 
 # ─────────────────────────────────────────────

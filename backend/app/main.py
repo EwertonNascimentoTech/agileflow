@@ -17,6 +17,8 @@ from app.modules.crm.api.routes import router as crm_router
 from app.modules.crm.api.proposals_routes import router as crm_proposals_router
 from app.modules.crm.api.proposals_public_routes import router as crm_proposals_public_router
 from app.modules.crm.api.admin_routes import router as crm_admin_router
+from app.modules.estoque.api.routes import router as estoque_router
+from app.modules.pdv.api.routes import router as pdv_router
 
 
 @asynccontextmanager
@@ -144,6 +146,24 @@ async def _seed_known_modules() -> None:
             "backend_path": "backend/app/modules/crm",
             "frontend_path": "frontend/src/modules/crm",
         },
+        {
+            "slug": "estoque",
+            "name": "Estoque",
+            "description": "Catálogo de produtos, depósitos, fornecedores, lotes, números de série e movimentações.",
+            "icon": "Package",
+            "color": "#F59E0B",
+            "backend_path": "backend/app/modules/estoque",
+            "frontend_path": "frontend/src/modules/estoque",
+        },
+        {
+            "slug": "pdv",
+            "name": "PDV",
+            "description": "Ponto de venda: sessão de caixa, vendas com carrinho, recibos e relatórios.",
+            "icon": "ShoppingCart",
+            "color": "#10B981",
+            "backend_path": "backend/app/modules/pdv",
+            "frontend_path": "frontend/src/modules/pdv",
+        },
     ]
 
     async with AsyncSessionLocal() as db:
@@ -181,6 +201,8 @@ app.include_router(crm_router, prefix="/api/v1")
 app.include_router(crm_proposals_router, prefix="/api/v1")
 app.include_router(crm_proposals_public_router, prefix="/api/v1")
 app.include_router(crm_admin_router, prefix="/api/v1")
+app.include_router(estoque_router, prefix="/api/v1")
+app.include_router(pdv_router, prefix="/api/v1")
 
 
 @app.get("/health")

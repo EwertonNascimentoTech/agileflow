@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { toast } from "@/lib/toast"
+import { checkPassword } from "@/lib/passwordSchema"
+import { PasswordChecklist } from "@/components/PasswordChecklist"
 
 export default function ForgotPasswordPage() {
   const navigate = useNavigate()
@@ -40,7 +42,10 @@ export default function ForgotPasswordPage() {
   async function doReset(e: React.FormEvent) {
     e.preventDefault()
     if (newPassword !== confirm) { setError("As senhas não conferem."); return }
-    if (newPassword.length < 6) { setError("Senha deve ter no mínimo 6 caracteres."); return }
+    if (!checkPassword(newPassword).ok) {
+      setError("Senha não atende à política de segurança.")
+      return
+    }
     setLoading(true)
     setError("")
     try {
@@ -107,11 +112,12 @@ export default function ForgotPasswordPage() {
                     type="password"
                     value={newPassword}
                     onChange={e => setNewPassword(e.target.value)}
-                    placeholder="Mínimo 6 caracteres"
+                    placeholder="Senha forte"
                     required
                     className="pl-9"
                   />
                 </div>
+                <PasswordChecklist password={newPassword} />
               </div>
               <div className="space-y-1.5">
                 <Label>Confirmar senha</Label>

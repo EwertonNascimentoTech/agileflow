@@ -59,6 +59,31 @@ import CrmProposalTemplatesPage from "@/modules/crm/proposals/ProposalTemplatesP
 import CrmContractsListPage from "@/modules/crm/proposals/ContractsListPage"
 import CrmContractDetailPage from "@/modules/crm/proposals/ContractDetailPage"
 
+// ── Estoque ───────────────────────────────────────────────────────────
+import EstoqueLayout from "@/modules/estoque/EstoqueLayout"
+import EstoqueDashboardPage from "@/modules/estoque/DashboardPage"
+import EstoqueProductsPage from "@/modules/estoque/ProductsPage"
+import EstoqueProductDetailPage from "@/modules/estoque/ProductDetailPage"
+import EstoqueProductTypesPage from "@/modules/estoque/ProductTypesPage"
+import EstoqueCategoriesPage from "@/modules/estoque/CategoriesPage"
+import EstoqueWarehousesPage from "@/modules/estoque/WarehousesPage"
+import EstoqueSuppliersPage from "@/modules/estoque/SuppliersPage"
+import EstoqueStockPage from "@/modules/estoque/StockPage"
+import EstoqueMovementsPage from "@/modules/estoque/MovementsPage"
+import EstoqueBatchesPage from "@/modules/estoque/BatchesPage"
+import EstoqueSerialsPage from "@/modules/estoque/SerialsPage"
+import EstoqueConfigPage from "@/modules/estoque/ConfigPage"
+
+// ── PDV ───────────────────────────────────────────────────────────────
+import PdvLayout from "@/modules/pdv/PdvLayout"
+import PdvPosPage from "@/modules/pdv/PosPage"
+import PdvCashSessionPage from "@/modules/pdv/CashSessionPage"
+import PdvSalesHistoryPage from "@/modules/pdv/SalesHistoryPage"
+import PdvSaleDetailPage from "@/modules/pdv/SaleDetailPage"
+import PdvReceiptPrintView from "@/modules/pdv/ReceiptPrintView"
+import PdvDashboardPage from "@/modules/pdv/DashboardPage"
+import PdvPaymentMethodsConfigPage from "@/modules/pdv/PaymentMethodsConfigPage"
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -135,6 +160,35 @@ export default function App() {
 
                   {/* Propostas/Contratos (deprecated) → redireciona para CRM */}
                   <Route path="modules/propostas_contratos/*" element={<Navigate to="/app/modules/crm/proposals" replace />} />
+
+                  {/* Estoque */}
+                  <Route path="modules/estoque" element={<EstoqueLayout />}>
+                    <Route index element={<Navigate to="dashboard" replace />} />
+                    <Route path="dashboard"      element={<EstoqueDashboardPage />} />
+                    <Route path="products"       element={<EstoqueProductsPage />} />
+                    <Route path="products/:id"   element={<EstoqueProductDetailPage />} />
+                    <Route path="stock"          element={<EstoqueStockPage />} />
+                    <Route path="movements"      element={<EstoqueMovementsPage />} />
+                    <Route path="batches"        element={<EstoqueBatchesPage />} />
+                    <Route path="serials"        element={<EstoqueSerialsPage />} />
+                    <Route path="config"         element={<EstoqueConfigPage />} />
+                    <Route path="product-types"  element={<EstoqueProductTypesPage />} />
+                    <Route path="categories"     element={<EstoqueCategoriesPage />} />
+                    <Route path="warehouses"     element={<EstoqueWarehousesPage />} />
+                    <Route path="suppliers"      element={<EstoqueSuppliersPage />} />
+                  </Route>
+
+                  {/* PDV */}
+                  <Route path="modules/pdv/sales/:id/receipt" element={<PdvReceiptPrintView />} />
+                  <Route path="modules/pdv" element={<PdvLayout />}>
+                    <Route index element={<Navigate to="pos" replace />} />
+                    <Route path="pos"        element={<PdvPosPage />} />
+                    <Route path="cash"       element={<PdvCashSessionPage />} />
+                    <Route path="sales"      element={<PdvSalesHistoryPage />} />
+                    <Route path="sales/:id"  element={<PdvSaleDetailPage />} />
+                    <Route path="dashboard"  element={<PdvDashboardPage />} />
+                    <Route path="config"     element={<PdvPaymentMethodsConfigPage />} />
+                  </Route>
                 </Route>
               </Route>
 

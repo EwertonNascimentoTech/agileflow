@@ -1,3 +1,4 @@
+import re
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
@@ -25,6 +26,45 @@ def get_password_hash(password: str) -> str:
 
 def verify_password(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain.encode(), hashed.encode())
+
+
+# ─────────────────────────────────────────────
+# POLÍTICA DE SENHA FORTE
+# ─────────────────────────────────────────────
+
+PASSWORD_MIN_LENGTH = 8
+PASSWORD_POLICY_DESCRIPTION = (
+    "Mínimo 8 caracteres, com pelo menos 1 letra maiúscula, 1 letra minúscula, "
+    "1 número e 1 caractere especial."
+)
+
+_RE_UPPER = re.compile(r"[A-Z]")
+_RE_LOWER = re.compile(r"[a-z]")
+_RE_DIGIT = re.compile(r"\d")
+_RE_SPECIAL = re.compile(r"[^A-Za-z0-9]")
+
+
+def validate_password_strength(password: str) -> str:
+    """
+    Valida força da senha. Levanta ValueError com mensagem em PT-BR
+    se não atende aos requisitos. Retorna a senha intacta se ok.
+    """
+    if not isinstance(password, str):
+        raise ValueError("Senha inválida.")
+    erros: list[str] = []
+    if len(password) < PASSWORD_MIN_LENGTH:
+        erros.append(f"mínimo {PASSWORD_MIN_LENGTH} caracteres")
+    if not _RE_UPPER.search(password):
+        erros.append("ao menos 1 letra maiúscula")
+    if not _RE_LOWER.search(password):
+        erros.append("ao menos 1 letra minúscula")
+    if not _RE_DIGIT.search(password):
+        erros.append("ao menos 1 número")
+    if not _RE_SPECIAL.search(password):
+        erros.append("ao menos 1 caractere especial")
+    if erros:
+        raise ValueError("Senha fraca: " + ", ".join(erros) + ".")
+    return password
 
 
 # ─────────────────────────────────────────────

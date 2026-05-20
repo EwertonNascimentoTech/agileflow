@@ -134,7 +134,21 @@ def require_module(module_slug: str):
                 )
 
             # Aponta sessão para o schema do tenant
-            await db.execute(text(f"SET search_path TO {tenant.schema_name}, public"))
+            schema_path = f"{tenant.schema_name}, public"
+            await db.execute(text(f"SET search_path TO {schema_path}"))
+
+            # Hook: re-aplica search_path no começo de toda nova transação dentro
+            # dessa sessão. Necessário porque asyncpg + statement_cache_size=0
+            # perde o SET entre COMMIT e o próximo BEGIN implícito (ex: db.refresh
+            # após db.commit), resultando em "relation does not exist".
+            from sqlalchemy import event as _sa_event
+
+            sync_session = db.sync_session
+
+            def _reapply_search_path(session, transaction, connection):
+                connection.exec_driver_sql(f"SET search_path TO {schema_path}")
+
+            _sa_event.listen(sync_session, "after_begin", _reapply_search_path)
             try:
                 yield ModuleContext(db=db, user=current_user, schema=tenant.schema_name)
             except Exception:
@@ -142,6 +156,10 @@ def require_module(module_slug: str):
                 await db.rollback()
                 raise
             finally:
+                try:
+                    _sa_event.remove(sync_session, "after_begin", _reapply_search_path)
+                except Exception:  # noqa: BLE001
+                    pass
                 try:
                     await db.execute(text("SET search_path TO public"))
                 except Exception:  # noqa: BLE001

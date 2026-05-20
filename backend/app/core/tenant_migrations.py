@@ -92,9 +92,18 @@ async def _step_001_funnels(conn: AsyncConnection, schema: str) -> None:
     ))
     default_id = has_default.scalar()
     if default_id is None:
+        # Valores explícitos porque tabela pode ter sido criada via
+        # TenantBase.metadata.create_all() (sem DB-level defaults).
         result = await conn.execute(text(f"""
-            INSERT INTO {schema}.funnels (name, description, is_default, "order")
-            VALUES ('Padrão', 'Funil padrão criado automaticamente.', TRUE, 0)
+            INSERT INTO {schema}.funnels (
+                id, name, description, color, "order",
+                is_default, is_active, created_at, updated_at
+            )
+            VALUES (
+                gen_random_uuid(), 'Padrão',
+                'Funil padrão criado automaticamente.',
+                '#3B82F6', 0, TRUE, TRUE, now(), now()
+            )
             RETURNING id
         """))
         default_id = result.scalar()
@@ -570,6 +579,212 @@ async def _step_013_tags(conn: AsyncConnection, schema: str) -> None:
         ))
 
 
+async def _step_020_estoque(conn: AsyncConnection, schema: str) -> None:
+    """Cria tabelas do módulo Estoque (9 tabelas)."""
+    if not await _table_exists(conn, schema, "estoque_product_types"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.estoque_product_types (
+                id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                slug           VARCHAR(50) NOT NULL UNIQUE,
+                name           VARCHAR(120) NOT NULL,
+                description    TEXT,
+                icon           VARCHAR(50),
+                field_schema   JSONB,
+                tracks_stock   BOOLEAN NOT NULL DEFAULT TRUE,
+                tracks_batch   BOOLEAN NOT NULL DEFAULT FALSE,
+                tracks_expiry  BOOLEAN NOT NULL DEFAULT FALSE,
+                tracks_serial  BOOLEAN NOT NULL DEFAULT FALSE,
+                is_active      BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at     TIMESTAMP DEFAULT now(),
+                updated_at     TIMESTAMP DEFAULT now()
+            )
+        """))
+
+    if not await _table_exists(conn, schema, "estoque_product_categories"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.estoque_product_categories (
+                id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name            VARCHAR(120) NOT NULL,
+                description     TEXT,
+                parent_id       UUID REFERENCES {schema}.estoque_product_categories(id) ON DELETE SET NULL,
+                product_type_id UUID REFERENCES {schema}.estoque_product_types(id) ON DELETE SET NULL,
+                is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at      TIMESTAMP DEFAULT now(),
+                updated_at      TIMESTAMP DEFAULT now()
+            )
+        """))
+
+    if not await _table_exists(conn, schema, "estoque_products"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.estoque_products (
+                id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                type_id       UUID NOT NULL REFERENCES {schema}.estoque_product_types(id) ON DELETE RESTRICT,
+                category_id   UUID REFERENCES {schema}.estoque_product_categories(id) ON DELETE SET NULL,
+                sku           VARCHAR(80) NOT NULL,
+                name          VARCHAR(200) NOT NULL,
+                description   TEXT,
+                barcode       VARCHAR(80),
+                unit          VARCHAR(20) NOT NULL DEFAULT 'un',
+                cost_price    NUMERIC(12,4) NOT NULL DEFAULT 0,
+                sale_price    NUMERIC(12,4) NOT NULL DEFAULT 0,
+                min_stock     NUMERIC(14,4) NOT NULL DEFAULT 0,
+                max_stock     NUMERIC(14,4),
+                custom_fields JSONB,
+                is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at    TIMESTAMP DEFAULT now(),
+                updated_at    TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_estoque_products_sku UNIQUE (sku)
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_estoque_products_type ON {schema}.estoque_products(type_id)"
+        ))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_estoque_products_category ON {schema}.estoque_products(category_id)"
+        ))
+
+    if not await _table_exists(conn, schema, "estoque_warehouses"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.estoque_warehouses (
+                id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                code        VARCHAR(30) NOT NULL,
+                name        VARCHAR(120) NOT NULL,
+                description TEXT,
+                address     JSONB,
+                is_default  BOOLEAN NOT NULL DEFAULT FALSE,
+                is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at  TIMESTAMP DEFAULT now(),
+                updated_at  TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_estoque_warehouses_code UNIQUE (code)
+            )
+        """))
+
+    if not await _table_exists(conn, schema, "estoque_suppliers"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.estoque_suppliers (
+                id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name       VARCHAR(200) NOT NULL,
+                trade_name VARCHAR(200),
+                document   VARCHAR(30),
+                email      VARCHAR(255),
+                phone      VARCHAR(30),
+                address    JSONB,
+                notes      TEXT,
+                is_active  BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT now(),
+                updated_at TIMESTAMP DEFAULT now()
+            )
+        """))
+
+    if not await _table_exists(conn, schema, "estoque_product_suppliers"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.estoque_product_suppliers (
+                id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                product_id     UUID NOT NULL REFERENCES {schema}.estoque_products(id) ON DELETE CASCADE,
+                supplier_id    UUID NOT NULL REFERENCES {schema}.estoque_suppliers(id) ON DELETE CASCADE,
+                supplier_sku   VARCHAR(80),
+                cost_unit      NUMERIC(12,4) NOT NULL DEFAULT 0,
+                lead_time_days INTEGER,
+                is_preferred   BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at     TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_estoque_product_supplier UNIQUE (product_id, supplier_id)
+            )
+        """))
+
+    if not await _table_exists(conn, schema, "estoque_stock_levels"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.estoque_stock_levels (
+                id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                product_id   UUID NOT NULL REFERENCES {schema}.estoque_products(id) ON DELETE CASCADE,
+                warehouse_id UUID NOT NULL REFERENCES {schema}.estoque_warehouses(id) ON DELETE CASCADE,
+                quantity     NUMERIC(14,4) NOT NULL DEFAULT 0,
+                reserved     NUMERIC(14,4) NOT NULL DEFAULT 0,
+                updated_at   TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_estoque_stock_level UNIQUE (product_id, warehouse_id)
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_estoque_stock_levels_product "
+            f"ON {schema}.estoque_stock_levels(product_id)"
+        ))
+
+    if not await _table_exists(conn, schema, "estoque_stock_batches"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.estoque_stock_batches (
+                id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                product_id       UUID NOT NULL REFERENCES {schema}.estoque_products(id) ON DELETE CASCADE,
+                warehouse_id     UUID NOT NULL REFERENCES {schema}.estoque_warehouses(id) ON DELETE CASCADE,
+                batch_code       VARCHAR(80) NOT NULL,
+                quantity         NUMERIC(14,4) NOT NULL DEFAULT 0,
+                cost_unit        NUMERIC(12,4) NOT NULL DEFAULT 0,
+                manufacture_date DATE,
+                expiry_date      DATE,
+                created_at       TIMESTAMP DEFAULT now(),
+                updated_at       TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_estoque_batch UNIQUE (product_id, warehouse_id, batch_code)
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_estoque_batches_expiry "
+            f"ON {schema}.estoque_stock_batches(expiry_date)"
+        ))
+
+    if not await _table_exists(conn, schema, "estoque_stock_serials"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.estoque_stock_serials (
+                id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                product_id   UUID NOT NULL REFERENCES {schema}.estoque_products(id) ON DELETE CASCADE,
+                warehouse_id UUID REFERENCES {schema}.estoque_warehouses(id) ON DELETE SET NULL,
+                serial       VARCHAR(120) NOT NULL,
+                status       VARCHAR(20) NOT NULL DEFAULT 'in_stock',
+                batch_id     UUID REFERENCES {schema}.estoque_stock_batches(id) ON DELETE SET NULL,
+                metadata     JSONB,
+                cost_unit    NUMERIC(12,4) NOT NULL DEFAULT 0,
+                created_at   TIMESTAMP DEFAULT now(),
+                updated_at   TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_estoque_serial UNIQUE (product_id, serial)
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_estoque_serials_status "
+            f"ON {schema}.estoque_stock_serials(status)"
+        ))
+
+    if not await _table_exists(conn, schema, "estoque_stock_movements"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.estoque_stock_movements (
+                id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                product_id        UUID NOT NULL REFERENCES {schema}.estoque_products(id) ON DELETE RESTRICT,
+                warehouse_id      UUID NOT NULL REFERENCES {schema}.estoque_warehouses(id) ON DELETE RESTRICT,
+                batch_id          UUID REFERENCES {schema}.estoque_stock_batches(id) ON DELETE SET NULL,
+                serial_id         UUID REFERENCES {schema}.estoque_stock_serials(id) ON DELETE SET NULL,
+                type              VARCHAR(20) NOT NULL,
+                quantity          NUMERIC(14,4) NOT NULL,
+                cost_unit         NUMERIC(12,4) NOT NULL DEFAULT 0,
+                reason            VARCHAR(200),
+                reference_type    VARCHAR(50),
+                reference_id      UUID,
+                transfer_group_id UUID,
+                supplier_id       UUID REFERENCES {schema}.estoque_suppliers(id) ON DELETE SET NULL,
+                user_id           UUID,
+                notes             TEXT,
+                created_at        TIMESTAMP DEFAULT now()
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_estoque_movements_created "
+            f"ON {schema}.estoque_stock_movements(created_at DESC)"
+        ))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_estoque_movements_product "
+            f"ON {schema}.estoque_stock_movements(product_id, created_at DESC)"
+        ))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_estoque_movements_warehouse "
+            f"ON {schema}.estoque_stock_movements(warehouse_id, created_at DESC)"
+        ))
+
+
 async def _step_014_tag_slug_classification(conn: AsyncConnection, schema: str) -> None:
     """Coluna slug em tags + tags de classificação PF/PJ em atendimentos (idempotente)."""
     if not await _table_exists(conn, schema, "tags"):
@@ -581,16 +796,16 @@ async def _step_014_tag_slug_classification(conn: AsyncConnection, schema: str) 
         f"ON {schema}.tags (entity_type, slug) WHERE slug IS NOT NULL"
     ))
     await conn.execute(text(f"""
-        INSERT INTO {schema}.tags (id, name, color, entity_type, slug)
-        SELECT gen_random_uuid(), 'PF', '#1D4ED8', 'attendance', 'classificacao_pf'
+        INSERT INTO {schema}.tags (id, name, color, entity_type, slug, created_at)
+        SELECT gen_random_uuid(), 'PF', '#1D4ED8', 'attendance', 'classificacao_pf', now()
         WHERE NOT EXISTS (
             SELECT 1 FROM {schema}.tags t
             WHERE t.entity_type = 'attendance' AND t.slug = 'classificacao_pf'
         )
     """))
     await conn.execute(text(f"""
-        INSERT INTO {schema}.tags (id, name, color, entity_type, slug)
-        SELECT gen_random_uuid(), 'PJ', '#7C3AED', 'attendance', 'classificacao_pj'
+        INSERT INTO {schema}.tags (id, name, color, entity_type, slug, created_at)
+        SELECT gen_random_uuid(), 'PJ', '#7C3AED', 'attendance', 'classificacao_pj', now()
         WHERE NOT EXISTS (
             SELECT 1 FROM {schema}.tags t
             WHERE t.entity_type = 'attendance' AND t.slug = 'classificacao_pj'
@@ -691,6 +906,161 @@ async def _step_019_reactivation(conn: AsyncConnection, schema: str) -> None:
         """))
 
 
+async def _step_021_pdv(conn: AsyncConnection, schema: str) -> None:
+    """Cria tabelas do módulo PDV (6 tabelas) + seed de formas de pagamento."""
+    if not await _table_exists(conn, schema, "pdv_payment_methods"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.pdv_payment_methods (
+                id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name                VARCHAR(80) NOT NULL,
+                kind                VARCHAR(20) NOT NULL,
+                affects_cash_drawer BOOLEAN NOT NULL DEFAULT FALSE,
+                change_enabled      BOOLEAN NOT NULL DEFAULT FALSE,
+                "order"             INTEGER NOT NULL DEFAULT 0,
+                is_active           BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at          TIMESTAMP DEFAULT now(),
+                updated_at          TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_pdv_payment_methods_name UNIQUE (name)
+            )
+        """))
+
+    if not await _table_exists(conn, schema, "pdv_cash_sessions"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.pdv_cash_sessions (
+                id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                status          VARCHAR(20) NOT NULL DEFAULT 'open',
+                warehouse_id    UUID NOT NULL,
+                opening_amount  NUMERIC(12,2) NOT NULL DEFAULT 0,
+                opened_by       UUID NOT NULL,
+                opened_at       TIMESTAMP NOT NULL DEFAULT now(),
+                closed_by       UUID,
+                closed_at       TIMESTAMP,
+                counted_amount  NUMERIC(12,2),
+                expected_amount NUMERIC(12,2),
+                difference      NUMERIC(12,2),
+                notes           TEXT,
+                created_at      TIMESTAMP DEFAULT now(),
+                updated_at      TIMESTAMP DEFAULT now()
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_pdv_cash_sessions_status "
+            f"ON {schema}.pdv_cash_sessions(status)"
+        ))
+        # No máximo um caixa aberto por depósito.
+        await conn.execute(text(
+            f"CREATE UNIQUE INDEX uq_{schema}_pdv_cash_session_open "
+            f"ON {schema}.pdv_cash_sessions(warehouse_id) WHERE status = 'open'"
+        ))
+
+    if not await _table_exists(conn, schema, "pdv_cash_movements"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.pdv_cash_movements (
+                id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                session_id UUID NOT NULL REFERENCES {schema}.pdv_cash_sessions(id) ON DELETE CASCADE,
+                type       VARCHAR(20) NOT NULL,
+                amount     NUMERIC(12,2) NOT NULL,
+                reason     VARCHAR(200) NOT NULL,
+                notes      TEXT,
+                user_id    UUID NOT NULL,
+                created_at TIMESTAMP DEFAULT now()
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_pdv_cash_movements_created "
+            f"ON {schema}.pdv_cash_movements(created_at)"
+        ))
+
+    if not await _table_exists(conn, schema, "pdv_sales"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.pdv_sales (
+                id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                number          VARCHAR(30) NOT NULL,
+                status          VARCHAR(20) NOT NULL DEFAULT 'completed',
+                session_id      UUID NOT NULL REFERENCES {schema}.pdv_cash_sessions(id) ON DELETE RESTRICT,
+                warehouse_id    UUID NOT NULL,
+                subtotal        NUMERIC(12,2) NOT NULL DEFAULT 0,
+                discount_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+                total           NUMERIC(12,2) NOT NULL DEFAULT 0,
+                paid_amount     NUMERIC(12,2) NOT NULL DEFAULT 0,
+                change_amount   NUMERIC(12,2) NOT NULL DEFAULT 0,
+                operator_id     UUID NOT NULL,
+                notes           TEXT,
+                cancelled_at    TIMESTAMP,
+                cancelled_by    UUID,
+                cancel_reason   VARCHAR(200),
+                created_at      TIMESTAMP DEFAULT now(),
+                updated_at      TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_pdv_sales_number UNIQUE (number)
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_pdv_sales_created ON {schema}.pdv_sales(created_at)"
+        ))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_pdv_sales_session ON {schema}.pdv_sales(session_id)"
+        ))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_pdv_sales_operator "
+            f"ON {schema}.pdv_sales(operator_id, created_at)"
+        ))
+
+    if not await _table_exists(conn, schema, "pdv_sale_items"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.pdv_sale_items (
+                id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                sale_id         UUID NOT NULL REFERENCES {schema}.pdv_sales(id) ON DELETE CASCADE,
+                product_id      UUID NOT NULL,
+                product_sku     VARCHAR(80) NOT NULL,
+                product_name    VARCHAR(200) NOT NULL,
+                unit            VARCHAR(20) NOT NULL DEFAULT 'un',
+                quantity        NUMERIC(14,4) NOT NULL,
+                unit_price      NUMERIC(12,2) NOT NULL,
+                discount_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+                line_total      NUMERIC(12,2) NOT NULL,
+                created_at      TIMESTAMP DEFAULT now()
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_pdv_sale_items_sale ON {schema}.pdv_sale_items(sale_id)"
+        ))
+
+    if not await _table_exists(conn, schema, "pdv_sale_payments"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.pdv_sale_payments (
+                id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                sale_id           UUID NOT NULL REFERENCES {schema}.pdv_sales(id) ON DELETE CASCADE,
+                payment_method_id UUID NOT NULL REFERENCES {schema}.pdv_payment_methods(id) ON DELETE RESTRICT,
+                method_name       VARCHAR(80) NOT NULL,
+                method_kind       VARCHAR(20) NOT NULL,
+                amount            NUMERIC(12,2) NOT NULL,
+                created_at        TIMESTAMP DEFAULT now()
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_pdv_sale_payments_sale "
+            f"ON {schema}.pdv_sale_payments(sale_id)"
+        ))
+
+    # Seed de formas de pagamento iniciais (idempotente).
+    await conn.execute(text(f"""
+        INSERT INTO {schema}.pdv_payment_methods
+            (id, name, kind, affects_cash_drawer, change_enabled, "order", is_active, created_at, updated_at)
+        SELECT gen_random_uuid(), 'Dinheiro', 'cash', TRUE, TRUE, 0, TRUE, now(), now()
+        WHERE NOT EXISTS (
+            SELECT 1 FROM {schema}.pdv_payment_methods WHERE name = 'Dinheiro'
+        )
+    """))
+    await conn.execute(text(f"""
+        INSERT INTO {schema}.pdv_payment_methods
+            (id, name, kind, affects_cash_drawer, change_enabled, "order", is_active, created_at, updated_at)
+        SELECT gen_random_uuid(), 'Cartão', 'card', FALSE, FALSE, 1, TRUE, now(), now()
+        WHERE NOT EXISTS (
+            SELECT 1 FROM {schema}.pdv_payment_methods WHERE name = 'Cartão'
+        )
+    """))
+
+
 # Lista ordenada de steps. Adicionar novos no final.
 STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("001_funnels", _step_001_funnels),
@@ -712,6 +1082,8 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("017_stage_required_fields", _step_017_stage_required_fields),
     ("018_playbook", _step_018_playbook),
     ("019_reactivation", _step_019_reactivation),
+    ("020_estoque", _step_020_estoque),
+    ("021_pdv", _step_021_pdv),
 ]
 
 

@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 from fastapi import HTTPException, status
 
 from app.core.database import create_tenant_schema, create_tenant_tables
+from app.core.tenant_migrations import upgrade_tenant_schema
 from app.core.security import get_password_hash, verify_password
 from app.modules.super_admin.models import (
     Plan, PlanModule, Tenant, TenantModule, User, Module,
@@ -159,8 +160,12 @@ class PlanService:
             db.add(PlanModule(plan_id=plan.id, module_slug=slug))
 
         await db.commit()
-        await db.refresh(plan)
-        return plan
+        result = await db.execute(
+            select(Plan)
+            .options(selectinload(Plan.allowed_modules))
+            .where(Plan.id == plan.id)
+        )
+        return result.scalar_one()
 
     @staticmethod
     async def update_plan(db: AsyncSession, plan_id: uuid.UUID, data: PlanUpdate) -> Plan:
@@ -177,8 +182,12 @@ class PlanService:
 
         plan.updated_at = datetime.utcnow()
         await db.commit()
-        await db.refresh(plan)
-        return plan
+        result = await db.execute(
+            select(Plan)
+            .options(selectinload(Plan.allowed_modules))
+            .where(Plan.id == plan.id)
+        )
+        return result.scalar_one()
 
 
 # ══════════════════════════════════════════════
@@ -262,12 +271,19 @@ class TenantService:
 
         await create_tenant_schema(schema_name)
         await create_tenant_tables(schema_name)
+        # Aplica steps idempotentes (notifications, lead_events, automation_rules,
+        # tags, etc — tabelas que só existem em DDL raw, não em TenantBase.metadata).
+        await upgrade_tenant_schema(schema_name)
 
         if data.plan_id:
             await TenantService._activate_plan_modules(db, tenant)
 
-        await db.refresh(tenant)
-        return tenant
+        result = await db.execute(
+            select(Tenant)
+            .options(selectinload(Tenant.active_modules))
+            .where(Tenant.id == tenant.id)
+        )
+        return result.scalar_one()
 
     @staticmethod
     async def _activate_plan_modules(db: AsyncSession, tenant: Tenant) -> None:
@@ -304,8 +320,12 @@ class TenantService:
         if data.plan_id and data.plan_id != old_plan_id:
             await TenantService._activate_plan_modules(db, tenant)
 
-        await db.refresh(tenant)
-        return tenant
+        result = await db.execute(
+            select(Tenant)
+            .options(selectinload(Tenant.active_modules))
+            .where(Tenant.id == tenant.id)
+        )
+        return result.scalar_one()
 
     @staticmethod
     async def activate_module(
@@ -424,6 +444,12 @@ class UserService:
         await db.commit()
         await db.refresh(user)
         return user
+
+    @staticmethod
+    async def delete_user(db: AsyncSession, user_id: uuid.UUID) -> None:
+        user = await UserService.get_user(db, user_id)
+        await db.delete(user)
+        await db.commit()
 
     @staticmethod
     async def create_company_user(
