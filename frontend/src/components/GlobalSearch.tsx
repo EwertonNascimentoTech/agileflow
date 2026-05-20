@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Search, FileText, Users, Building2, KanbanSquare, X } from "lucide-react"
-import { clientsApi, companiesApi, attendancesApi } from "@/api/atendimento"
-import { proposalsApi } from "@/api/propostasContratos"
+import { clientsApi, companiesApi, attendancesApi } from "@/api/crm"
+import { proposalsApi } from "@/api/crm"
 import { cn } from "@/lib/utils"
 
 interface SearchResult {

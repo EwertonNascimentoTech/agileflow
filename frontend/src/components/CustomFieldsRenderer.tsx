@@ -5,7 +5,7 @@
  */
 import { useState } from "react"
 import { Check, X, Pencil } from "lucide-react"
-import type { CustomField } from "@/api/atendimento"
+import type { CustomField } from "@/api/crm"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"

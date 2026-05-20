@@ -123,12 +123,12 @@ async def whatsapp_webhook(
 
 async def _process_whatsapp_messages(schema: str, cfg: dict, messages: list[dict]) -> None:
     """Processa mensagens WhatsApp em background: cria/atualiza atendimento e registra mensagem."""
-    from app.modules.atendimento.models import (
+    from app.modules.crm.models import (
         Attendance, AttendanceMessage, Client,
         ChannelConfig, SenderType, MessageType, ChannelType,
     )
-    from app.modules.atendimento.service import AttendanceService, TimelineService
-    from app.modules.atendimento.models import LeadEventType
+    from app.modules.crm.service import AttendanceService, TimelineService
+    from app.modules.crm.models import LeadEventType
 
     channel_config_id = cfg["id"]
 
@@ -205,7 +205,7 @@ async def _process_whatsapp_messages(schema: str, cfg: dict, messages: list[dict
 
 
 def _map_wa_type(wa_type: str) -> "MessageType":
-    from app.modules.atendimento.models import MessageType
+    from app.modules.crm.models import MessageType
     mapping = {
         "text": MessageType.TEXT,
         "image": MessageType.IMAGE,
@@ -279,12 +279,12 @@ async def instagram_webhook(
 
 async def _process_instagram_messages(schema: str, cfg: dict, messages: list[dict]) -> None:
     """Processa DMs Instagram em background."""
-    from app.modules.atendimento.models import (
+    from app.modules.crm.models import (
         Attendance, AttendanceMessage, Client,
         SenderType, MessageType, ChannelType,
     )
-    from app.modules.atendimento.service import TimelineService
-    from app.modules.atendimento.models import LeadEventType
+    from app.modules.crm.service import TimelineService
+    from app.modules.crm.models import LeadEventType
 
     async with AsyncSessionLocal() as db:
         await db.execute(text(f"SET search_path TO {schema}, public"))

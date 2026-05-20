@@ -83,7 +83,7 @@ def send_instagram_message_task(
 async def _update_external_id(schema: str, message_id: str, external_id: str) -> None:
     from sqlalchemy import text, update
     from app.core.database import AsyncSessionLocal
-    from app.modules.atendimento.models import AttendanceMessage
+    from app.modules.crm.models import AttendanceMessage
 
     async with AsyncSessionLocal() as db:
         await db.execute(text(f"SET search_path TO {schema}, public"))
@@ -115,12 +115,12 @@ def send_followup_delayed_task(
 async def _send_followup(schema: str, attendance_id: str, template_id: str) -> None:
     from sqlalchemy import text, select
     from app.core.database import AsyncSessionLocal
-    from app.modules.atendimento.models import (
+    from app.modules.crm.models import (
         Attendance, FollowUpTemplate, AttendanceMessage,
         SenderType, MessageType, FollowUpChannel,
     )
-    from app.modules.atendimento.service import FollowUpService, TimelineService
-    from app.modules.atendimento.models import LeadEventType
+    from app.modules.crm.service import FollowUpService, TimelineService
+    from app.modules.crm.models import LeadEventType
     from datetime import datetime
 
     async with AsyncSessionLocal() as db:
@@ -181,7 +181,7 @@ async def _send_followup(schema: str, attendance_id: str, template_id: str) -> N
 async def _dispatch_outbound(db, schema, attendance, msg, channel) -> None:
     """Despacha mensagem para a fila de envio WhatsApp/Instagram se configurado."""
     from sqlalchemy import select
-    from app.modules.atendimento.models import ChannelConfig, Client, ChannelType
+    from app.modules.crm.models import ChannelConfig, Client, ChannelType
 
     if channel.value not in ("whatsapp", "instagram"):
         return

@@ -31,6 +31,13 @@ def _discover_module_permissions() -> dict[str, list[tuple[str, str, str | None]
                 mod = importlib.import_module(f"app.modules.{info.name}.permissions")
             except ModuleNotFoundError:
                 continue
+            # Suporte a múltiplos slugs por arquivo (módulos consolidados).
+            perms_by_slug = getattr(mod, "PERMISSIONS_BY_SLUG", None)
+            if isinstance(perms_by_slug, dict) and perms_by_slug:
+                for slug, perms in perms_by_slug.items():
+                    if perms:
+                        found[slug] = list(perms)
+                continue
             slug = getattr(mod, "MODULE_SLUG", None) or info.name
             perms = getattr(mod, "PERMISSIONS", [])
             if perms:

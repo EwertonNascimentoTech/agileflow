@@ -7,7 +7,7 @@ import {
 } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import { useTheme } from "@/contexts/ThemeContext"
-import { companyApi, type ActiveModule } from "@/api/company"
+import { companyApi, type ActiveModule } from "@/api/crm"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
@@ -33,7 +33,7 @@ function resolveIcon(name: string | null | undefined): React.ElementType {
   return Comp ?? Package
 }
 
-export default function CompanyLayout() {
+export default function AppLayout() {
   const { user, logout } = useAuth()
   const { theme, toggle: toggleTheme } = useTheme()
   const navigate = useNavigate()

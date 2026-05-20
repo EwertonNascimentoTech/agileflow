@@ -18,13 +18,13 @@ import PlansPage from "@/modules/super-admin/PlansPage"
 import AdminModulesPage from "@/modules/super-admin/ModulesPage"
 import AdminsPage from "@/modules/super-admin/AdminsPage"
 
-// ── Company ───────────────────────────────────────────────────────────
-import CompanyLayout from "@/modules/company/CompanyLayout"
-import CompanyDashboardPage from "@/modules/company/DashboardPage"
-import UsersPage from "@/modules/company/UsersPage"
-import RolesPage from "@/modules/company/RolesPage"
-import ModulesPage from "@/modules/company/ModulesPage"
-import SettingsPage from "@/modules/company/SettingsPage"
+// ── Company (admin do tenant, dentro de crm) ──────────────────────────
+import CompanyLayout from "@/modules/crm/AppLayout"
+import CompanyDashboardPage from "@/modules/crm/admin/DashboardPage"
+import UsersPage from "@/modules/crm/admin/UsersPage"
+import RolesPage from "@/modules/crm/admin/RolesPage"
+import ModulesPage from "@/modules/crm/admin/ModulesPage"
+import SettingsPage from "@/modules/crm/admin/SettingsPage"
 
 // ── Pública (proposta com token sem auth) ─────────────────────────────
 import PublicProposalPage from "@/modules/crm/proposals/PublicProposalPage"

@@ -12,10 +12,6 @@ from app.core.permissions import sync_permissions
 from app.core.tenant_migrations import upgrade_all_tenants
 from app.modules.super_admin.api.routes import router as super_admin_router
 from app.modules.super_admin.api.routes import auth_router
-from app.modules.atendimento.api.routes import router as atendimento_router
-from app.modules.propostas_contratos.api.routes import router as propostas_router
-from app.modules.propostas_contratos.api.public_routes import router as propostas_public_router
-from app.modules.company.api.routes import router as company_router
 from app.modules.integrations.api.webhook_routes import router as webhooks_router
 from app.modules.crm.api.routes import router as crm_router
 from app.modules.crm.api.proposals_routes import router as crm_proposals_router
@@ -180,10 +176,6 @@ app.add_middleware(
 
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(super_admin_router, prefix="/api/v1")
-app.include_router(atendimento_router, prefix="/api/v1")
-app.include_router(propostas_router, prefix="/api/v1")
-app.include_router(propostas_public_router, prefix="/api/v1")
-app.include_router(company_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")
 app.include_router(crm_router, prefix="/api/v1")
 app.include_router(crm_proposals_router, prefix="/api/v1")

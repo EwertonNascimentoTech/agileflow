@@ -1,6 +1,6 @@
 """Smoke tests do módulo propostas — validação de status transitions."""
 import pytest
-from app.modules.propostas_contratos.models import ProposalStatus
+from app.modules.crm.models import ProposalStatus
 
 VALID_TRANSITIONS = {
     ProposalStatus.DRAFT:     {ProposalStatus.SENT, ProposalStatus.CANCELLED},

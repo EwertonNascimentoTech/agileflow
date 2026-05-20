@@ -1,5 +1,5 @@
 """Tests do FollowUpService.interpolate (sem DB)."""
-from app.modules.atendimento.service import FollowUpService
+from app.modules.crm.service import FollowUpService
 
 
 def test_interpolate_basic():

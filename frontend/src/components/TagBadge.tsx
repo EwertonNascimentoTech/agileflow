@@ -1,5 +1,5 @@
 import { X } from "lucide-react"
-import type { Tag } from "@/api/atendimento"
+import type { Tag } from "@/api/crm"
 import { cn } from "@/lib/utils"
 
 interface Props {

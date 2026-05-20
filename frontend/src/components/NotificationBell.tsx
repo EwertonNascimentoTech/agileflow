@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Bell, CheckCheck, X } from "lucide-react"
-import { notificationsApi, type Notification } from "@/api/company"
+import { notificationsApi, type Notification } from "@/api/crm"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 

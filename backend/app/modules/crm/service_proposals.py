@@ -309,11 +309,11 @@ class ProposalService:
         Também registra evento na timeline e dispara automações.
         """
         # Imports locais pra não criar dependência forte de módulo
-        from app.modules.atendimento.models import (
+        from app.modules.crm.models import (
             Attendance, AttendanceStatusConfig, StageOutcome,
             LeadEvent, LeadEventType, AutomationTrigger,
         )
-        from app.modules.atendimento.service import (
+        from app.modules.crm.service import (
             TimelineService, AutomationRunner,
         )
 

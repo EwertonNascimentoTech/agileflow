@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { FileText, Plus, Loader2, ArrowRight } from "lucide-react"
-import { proposalsApi } from "@/api/propostasContratos"
-import type { ProposalSummary, ProposalStatus } from "@/api/propostasContratos"
+import { proposalsApi } from "@/api/crm"
+import type { ProposalSummary, ProposalStatus } from "@/api/crm"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 

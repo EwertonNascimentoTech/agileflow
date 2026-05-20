@@ -7,7 +7,7 @@ import {
 } from "lucide-react"
 import { attendancesApi, statusConfigApi, clientsApi } from "@/api/crm"
 import type { Attendance, Message, StatusConfig, Client, ChannelType, Priority } from "@/api/crm"
-import { companyApi } from "@/api/company"
+import { companyApi } from "@/api/crm"
 import type { User } from "@/types"
 import TasksPanel from "./TasksPanel"
 import TimelinePanel from "./TimelinePanel"
