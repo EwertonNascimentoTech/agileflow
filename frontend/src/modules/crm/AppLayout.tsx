@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react"
-import { NavLink, Outlet, useNavigate } from "react-router-dom"
+import { NavLink, Outlet, useNavigate, useLocation } from "react-router-dom"
 import * as Icons from "lucide-react"
 import {
-  LayoutDashboard, Package,
-  LogOut, Menu, X, Settings, Search, Moon, Sun,
+  LayoutDashboard, Package, Grid3X3,
+  LogOut, Menu, X, Settings, Search, Moon, Sun, ChevronLeft,
 } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import { useTheme } from "@/contexts/ThemeContext"
@@ -13,10 +13,11 @@ import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
 import { NotificationBell } from "@/components/NotificationBell"
 import { GlobalSearch } from "@/components/GlobalSearch"
+import { moduleNavConfig, getActiveModuleSlug, type ModuleNavItem } from "@/modules/crm/moduleNavConfig"
 
 type NavItem = { to: string; icon: React.ElementType; label: string; adminOnly?: boolean }
 
-const baseNavItems: NavItem[] = [
+const homeNavItems: NavItem[] = [
   { to: "/app/dashboard", icon: LayoutDashboard, label: "Dashboard" },
 ]
 
@@ -34,9 +35,15 @@ export default function AppLayout() {
   const { user, logout } = useAuth()
   const { theme, toggle: toggleTheme } = useTheme()
   const navigate = useNavigate()
+  const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [modules, setModules] = useState<ActiveModule[]>([])
   const [searchOpen, setSearchOpen] = useState(false)
+
+  const activeModuleSlug = getActiveModuleSlug(location.pathname)
+  const activeModule = activeModuleSlug ? modules.find(m => m.slug === activeModuleSlug) : null
+  const moduleItems: ModuleNavItem[] = activeModuleSlug ? (moduleNavConfig[activeModuleSlug] ?? []) : []
+  const inModule = !!activeModuleSlug
 
   // Cmd+K global search shortcut
   useEffect(() => {
@@ -83,16 +90,37 @@ export default function AppLayout() {
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
+        {/* Topo da sidebar — exibe nome do módulo ativo OU Kore */}
         <div className="flex h-14 items-center gap-2.5 px-4 border-b">
-          <div className="h-8 w-8 rounded-lg bg-primary text-primary-foreground flex items-center justify-center font-bold text-sm">
-            K
-          </div>
-          <div className="leading-tight flex-1 min-w-0">
-            <p className="text-sm font-semibold truncate">Kore</p>
-            <p className="text-[10px] text-muted-foreground truncate">
-              {user?.role === "company_admin" ? "Admin" : "Usuário"}
-            </p>
-          </div>
+          {inModule && activeModule ? (
+            <>
+              <div
+                className="h-8 w-8 rounded-lg flex items-center justify-center text-white shrink-0"
+                style={{ backgroundColor: activeModule.color }}
+              >
+                {(() => {
+                  const Icon = resolveIcon(activeModule.icon)
+                  return <Icon size={16} />
+                })()}
+              </div>
+              <div className="leading-tight flex-1 min-w-0">
+                <p className="text-sm font-semibold truncate">{activeModule.name}</p>
+                <p className="text-[10px] text-muted-foreground truncate">Módulo</p>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="h-8 w-8 rounded-lg bg-primary text-primary-foreground flex items-center justify-center font-bold text-sm">
+                K
+              </div>
+              <div className="leading-tight flex-1 min-w-0">
+                <p className="text-sm font-semibold truncate">Kore</p>
+                <p className="text-[10px] text-muted-foreground truncate">
+                  {user?.role === "company_admin" ? "Admin" : "Usuário"}
+                </p>
+              </div>
+            </>
+          )}
           <Button
             variant="ghost"
             size="icon"
@@ -104,84 +132,111 @@ export default function AppLayout() {
         </div>
 
         <nav className="flex-1 overflow-y-auto p-2 space-y-0.5">
-          {baseNavItems
-            .filter(item => !item.adminOnly || user?.role === "company_admin" || user?.role === "super_admin")
-            .map(({ to, icon: Icon, label }) => (
-            <NavLink
-              key={to}
-              to={to}
-              onClick={() => setSidebarOpen(false)}
-              className={({ isActive }) =>
-                cn(
-                  "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                  isActive
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                )
-              }
-            >
-              <Icon size={16} />
-              {label}
-            </NavLink>
-          ))}
-
-          {modules.length > 0 && (
+          {inModule ? (
             <>
-              <p className="px-3 pt-3 pb-1 text-[10px] uppercase tracking-wider text-muted-foreground/70 font-semibold">
-                Meus Módulos
-              </p>
-              {modules.map((m) => {
-                const Icon = resolveIcon(m.icon)
-                return (
+              {/* Botão voltar para Home */}
+              <NavLink
+                to="/app/dashboard"
+                onClick={() => setSidebarOpen(false)}
+                className="flex items-center gap-2 rounded-md px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors mb-1"
+              >
+                <ChevronLeft size={14} />
+                Voltar para Módulos
+              </NavLink>
+
+              {/* Itens do módulo ativo */}
+              {moduleItems.map(({ to, icon: Icon, label }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  onClick={() => setSidebarOpen(false)}
+                  className={({ isActive }) =>
+                    cn(
+                      "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                      isActive
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                    )
+                  }
+                >
+                  <Icon size={16} />
+                  {label}
+                </NavLink>
+              ))}
+            </>
+          ) : (
+            <>
+              {/* Modo home: dashboard + módulos disponíveis */}
+              {homeNavItems
+                .filter(item => !item.adminOnly || user?.role === "company_admin" || user?.role === "super_admin")
+                .map(({ to, icon: Icon, label }) => (
                   <NavLink
-                    key={m.slug}
-                    to={`/app/modules/${m.slug}`}
+                    key={to}
+                    to={to}
                     onClick={() => setSidebarOpen(false)}
-                    style={({ isActive }) => isActive ? { backgroundColor: m.color, color: "#fff" } : undefined}
                     className={({ isActive }) =>
                       cn(
                         "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                        !isActive && "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                        isActive
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                       )
                     }
                   >
-                    {({ isActive }) => (
-                      <>
+                    <Icon size={16} />
+                    {label}
+                  </NavLink>
+                ))}
+
+              {modules.length > 0 && (
+                <>
+                  <p className="px-3 pt-3 pb-1 text-[10px] uppercase tracking-wider text-muted-foreground/70 font-semibold">
+                    Meus Módulos
+                  </p>
+                  {modules.map((m) => {
+                    const Icon = resolveIcon(m.icon)
+                    return (
+                      <NavLink
+                        key={m.slug}
+                        to={`/app/modules/${m.slug}`}
+                        onClick={() => setSidebarOpen(false)}
+                        className="flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+                      >
                         <span
                           className="h-5 w-5 rounded-md flex items-center justify-center shrink-0"
-                          style={isActive ? { backgroundColor: "rgba(255,255,255,0.2)" } : { backgroundColor: `${m.color}1a`, color: m.color }}
+                          style={{ backgroundColor: `${m.color}1a`, color: m.color }}
                         >
                           <Icon size={12} />
                         </span>
                         {m.name}
-                      </>
-                    )}
+                      </NavLink>
+                    )
+                  })}
+                </>
+              )}
+
+              <div className="pt-3">
+                {tailNavItems.map(({ to, icon: Icon, label }) => (
+                  <NavLink
+                    key={to}
+                    to={to}
+                    onClick={() => setSidebarOpen(false)}
+                    className={({ isActive }) =>
+                      cn(
+                        "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                        isActive
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                      )
+                    }
+                  >
+                    <Icon size={16} />
+                    {label}
                   </NavLink>
-                )
-              })}
+                ))}
+              </div>
             </>
           )}
-
-          <div className="pt-3">
-            {tailNavItems.map(({ to, icon: Icon, label }) => (
-              <NavLink
-                key={to}
-                to={to}
-                onClick={() => setSidebarOpen(false)}
-                className={({ isActive }) =>
-                  cn(
-                    "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                    isActive
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                  )
-                }
-              >
-                <Icon size={16} />
-                {label}
-              </NavLink>
-            ))}
-          </div>
         </nav>
 
         <div className="p-3 border-t space-y-1">
@@ -211,7 +266,20 @@ export default function AppLayout() {
             <Menu size={18} />
           </Button>
           <span className="font-semibold text-sm lg:hidden">Kore</span>
+
+          {/* Botão Módulos no topo — sempre visível, volta para o dashboard */}
+          <Button
+            variant={inModule ? "outline" : "ghost"}
+            size="sm"
+            onClick={() => navigate("/app/dashboard")}
+            className="h-9 gap-1.5"
+          >
+            <Grid3X3 size={15} />
+            <span className="hidden sm:inline">Módulos</span>
+          </Button>
+
           <div className="flex-1" />
+
           {/* Search trigger */}
           <Button
             variant="ghost"
@@ -223,8 +291,8 @@ export default function AppLayout() {
             <span>Buscar</span>
             <kbd className="hidden md:inline-flex h-4 px-1 rounded border text-[10px] bg-muted">⌘K</kbd>
           </Button>
-          <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setSearchOpen(true)} aria-label="Buscar" title="Buscar (Cmd+K)">
-            <Search size={16} className="sm:hidden" />
+          <Button variant="ghost" size="icon" className="h-9 w-9 sm:hidden" onClick={() => setSearchOpen(true)} aria-label="Buscar" title="Buscar (Cmd+K)">
+            <Search size={16} />
           </Button>
           <Button variant="ghost" size="icon" className="h-9 w-9" onClick={toggleTheme} aria-label="Alternar tema">
             {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
