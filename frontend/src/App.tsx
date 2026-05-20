@@ -48,7 +48,6 @@ import CrmFollowUpConfigPage from "@/modules/crm/config/FollowUpConfigPage"
 import CrmForecastPage from "@/modules/crm/ForecastPage"
 import CrmConversionFunnelPage from "@/modules/crm/ConversionFunnelPage"
 import CrmProductivityReportPage from "@/modules/crm/ProductivityReportPage"
-import CrmRevenueReportPage from "@/modules/crm/RevenueReportPage"
 import CrmReactivationConfigPage from "@/modules/crm/config/ReactivationConfigPage"
 import CrmProposalsListPage from "@/modules/crm/proposals/ProposalsListPage"
 import CrmNewProposalPage from "@/modules/crm/proposals/NewProposalPage"
@@ -147,7 +146,6 @@ export default function App() {
                     <Route path="forecast" element={<CrmForecastPage />} />
                     <Route path="conversion" element={<CrmConversionFunnelPage />} />
                     <Route path="productivity" element={<CrmProductivityReportPage />} />
-                    <Route path="revenue" element={<CrmRevenueReportPage />} />
                     <Route path="config" element={<CrmConfigPage />} />
                     <Route path="config/funnels" element={<CrmFunnelsConfigPage />} />
                     <Route path="config/statuses" element={<CrmStatusConfigPage />} />
