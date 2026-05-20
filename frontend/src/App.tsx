@@ -45,9 +45,6 @@ import CrmStatusConfigPage from "@/modules/crm/config/StatusConfigPage"
 import CrmChannelsConfigPage from "@/modules/crm/config/ChannelsConfigPage"
 import CrmAutomationsConfigPage from "@/modules/crm/config/AutomationsConfigPage"
 import CrmFollowUpConfigPage from "@/modules/crm/config/FollowUpConfigPage"
-import CrmForecastPage from "@/modules/crm/ForecastPage"
-import CrmConversionFunnelPage from "@/modules/crm/ConversionFunnelPage"
-import CrmProductivityReportPage from "@/modules/crm/ProductivityReportPage"
 import CrmReactivationConfigPage from "@/modules/crm/config/ReactivationConfigPage"
 import CrmProposalsListPage from "@/modules/crm/proposals/ProposalsListPage"
 import CrmNewProposalPage from "@/modules/crm/proposals/NewProposalPage"
@@ -143,9 +140,12 @@ export default function App() {
                     <Route path="clients/:id" element={<CrmClientDetailPage />} />
                     <Route path="companies" element={<CrmCompaniesPage />} />
                     <Route path="companies/:id" element={<CrmCompanyDetailPage />} />
-                    <Route path="forecast" element={<CrmForecastPage />} />
-                    <Route path="conversion" element={<CrmConversionFunnelPage />} />
-                    <Route path="productivity" element={<CrmProductivityReportPage />} />
+
+                    {/* Sub-páginas legacy → todas unificadas no Dashboard */}
+                    <Route path="forecast"     element={<Navigate to="/app/modules/crm/dashboard" replace />} />
+                    <Route path="conversion"   element={<Navigate to="/app/modules/crm/dashboard" replace />} />
+                    <Route path="productivity" element={<Navigate to="/app/modules/crm/dashboard" replace />} />
+
                     <Route path="config" element={<CrmConfigPage />} />
                     <Route path="config/funnels" element={<CrmFunnelsConfigPage />} />
                     <Route path="config/statuses" element={<CrmStatusConfigPage />} />

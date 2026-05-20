@@ -4,8 +4,8 @@
  * em vez do menu padrão (Dashboard, Configurações).
  */
 import {
-  KanbanSquare, Users, Building2, Settings2, BarChart3, TrendingUp,
-  GitBranch, ClipboardList, FileText, FileSignature,
+  KanbanSquare, Users, Building2, Settings2, BarChart3,
+  FileText, FileSignature,
   Package, Boxes, ArrowLeftRight, Layers, BadgeCheck,
   ShoppingCart, Wallet, ReceiptText,
 } from "lucide-react"
@@ -23,9 +23,6 @@ export const moduleNavConfig: Record<string, ModuleNavItem[]> = {
     { to: "/app/modules/crm/kanban",       icon: KanbanSquare,   label: "Kanban" },
     { to: "/app/modules/crm/clients",      icon: Users,          label: "Contatos" },
     { to: "/app/modules/crm/companies",    icon: Building2,      label: "Empresas" },
-    { to: "/app/modules/crm/forecast",     icon: TrendingUp,     label: "Forecast" },
-    { to: "/app/modules/crm/conversion",   icon: GitBranch,      label: "Conversão" },
-    { to: "/app/modules/crm/productivity", icon: ClipboardList,  label: "Produtividade" },
     { to: "/app/modules/crm/proposals",    icon: FileText,       label: "Propostas" },
     { to: "/app/modules/crm/contracts",    icon: FileSignature,  label: "Contratos" },
     { to: "/app/modules/crm/config",       icon: Settings2,      label: "Configurações" },
