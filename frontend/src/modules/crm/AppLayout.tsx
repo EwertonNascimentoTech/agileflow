@@ -2,8 +2,8 @@ import { useEffect, useState } from "react"
 import { NavLink, Outlet, useNavigate } from "react-router-dom"
 import * as Icons from "lucide-react"
 import {
-  LayoutDashboard, Users, Package,
-  LogOut, Menu, X, Settings, ShieldCheck, Search, Moon, Sun,
+  LayoutDashboard, Package,
+  LogOut, Menu, X, Settings, Search, Moon, Sun,
 } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import { useTheme } from "@/contexts/ThemeContext"
@@ -18,8 +18,6 @@ type NavItem = { to: string; icon: React.ElementType; label: string; adminOnly?:
 
 const baseNavItems: NavItem[] = [
   { to: "/app/dashboard", icon: LayoutDashboard, label: "Dashboard" },
-  { to: "/app/users",     icon: Users,           label: "Usuários", adminOnly: true },
-  { to: "/app/roles",     icon: ShieldCheck,     label: "Funções",  adminOnly: true },
 ]
 
 const tailNavItems = [

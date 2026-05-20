@@ -21,6 +21,7 @@ import AdminsPage from "@/modules/super-admin/AdminsPage"
 // ── Company (admin do tenant, dentro de crm) ──────────────────────────
 import CompanyLayout from "@/modules/crm/AppLayout"
 import CompanyDashboardPage from "@/modules/crm/admin/DashboardPage"
+import SettingsLayout from "@/modules/crm/admin/SettingsLayout"
 import UsersPage from "@/modules/crm/admin/UsersPage"
 import RolesPage from "@/modules/crm/admin/RolesPage"
 import SettingsPage from "@/modules/crm/admin/SettingsPage"
@@ -114,11 +115,19 @@ export default function App() {
                 <Route path="/app" element={<CompanyLayout />}>
                   <Route index element={<Navigate to="/app/dashboard" replace />} />
                   <Route path="dashboard" element={<CompanyDashboardPage />} />
-                  <Route element={<ProtectedRoute allowedRoles={["super_admin", "company_admin"]} />}>
-                    <Route path="users" element={<UsersPage />} />
-                    <Route path="roles" element={<RolesPage />} />
+
+                  {/* Redirects: rotas antigas /app/users e /app/roles → /app/settings/* */}
+                  <Route path="users" element={<Navigate to="/app/settings/users" replace />} />
+                  <Route path="roles" element={<Navigate to="/app/settings/roles" replace />} />
+
+                  {/* Configurações com sub-menu */}
+                  <Route path="settings" element={<SettingsLayout />}>
+                    <Route index element={<SettingsPage />} />
+                    <Route element={<ProtectedRoute allowedRoles={["super_admin", "company_admin"]} />}>
+                      <Route path="users" element={<UsersPage />} />
+                      <Route path="roles" element={<RolesPage />} />
+                    </Route>
                   </Route>
-                  <Route path="settings" element={<SettingsPage />} />
 
                   {/* Atendimento (deprecated) → redireciona para CRM */}
                   <Route path="modules/atendimento/*" element={<Navigate to="/app/modules/crm" replace />} />

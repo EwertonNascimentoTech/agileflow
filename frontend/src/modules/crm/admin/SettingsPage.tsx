@@ -1,18 +1,13 @@
 import { useAuth } from "@/contexts/AuthContext"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { User, Building2 } from "lucide-react"
+import { User } from "lucide-react"
 
 export default function SettingsPage() {
   const { user } = useAuth()
 
   return (
-    <div className="space-y-6 max-w-xl">
-      <div>
-        <h1 className="text-2xl font-bold">Configurações</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Informações da sua conta.</p>
-      </div>
-
+    <div className="space-y-4 max-w-xl">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
@@ -41,18 +36,6 @@ export default function SettingsPage() {
               <Badge variant="success" className="text-xs">Ativo</Badge>
             </div>
           </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Building2 size={16} /> Empresa
-          </CardTitle>
-          <CardDescription>Informações do seu tenant.</CardDescription>
-        </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">
-          <p>ID do tenant: <span className="font-mono text-xs">{user?.tenant_id ?? "—"}</span></p>
         </CardContent>
       </Card>
     </div>
