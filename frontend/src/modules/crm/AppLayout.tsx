@@ -20,7 +20,6 @@ const baseNavItems: NavItem[] = [
   { to: "/app/dashboard", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/app/users",     icon: Users,           label: "Usuários", adminOnly: true },
   { to: "/app/roles",     icon: ShieldCheck,     label: "Funções",  adminOnly: true },
-  { to: "/app/modules",   icon: Package,         label: "Módulos" },
 ]
 
 const tailNavItems = [

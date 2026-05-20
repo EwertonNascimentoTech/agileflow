@@ -23,7 +23,6 @@ import CompanyLayout from "@/modules/crm/AppLayout"
 import CompanyDashboardPage from "@/modules/crm/admin/DashboardPage"
 import UsersPage from "@/modules/crm/admin/UsersPage"
 import RolesPage from "@/modules/crm/admin/RolesPage"
-import ModulesPage from "@/modules/crm/admin/ModulesPage"
 import SettingsPage from "@/modules/crm/admin/SettingsPage"
 
 // ── Pública (proposta com token sem auth) ─────────────────────────────
@@ -119,7 +118,6 @@ export default function App() {
                     <Route path="users" element={<UsersPage />} />
                     <Route path="roles" element={<RolesPage />} />
                   </Route>
-                  <Route path="modules" element={<ModulesPage />} />
                   <Route path="settings" element={<SettingsPage />} />
 
                   {/* Atendimento (deprecated) → redireciona para CRM */}
