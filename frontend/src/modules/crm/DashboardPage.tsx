@@ -8,6 +8,7 @@ import {
 } from "@/api/crm"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { KpiCard } from "@/components/KpiCard"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
@@ -220,36 +221,30 @@ export default function CrmDashboardPage() {
             </div>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <Card>
-                <CardContent className="p-4">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Total atendimentos</p>
-                  <p className="text-2xl font-bold">{overview?.total ?? 0}</p>
-                  <p className="text-xs text-muted-foreground mt-1">Últimos 30d: {overview?.last_30_days ?? 0}</p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-4">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">No funil</p>
-                  <p className="text-2xl font-bold">{totalAttendances}</p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-4">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Valor pipeline</p>
-                  <p className="text-xl font-bold text-emerald-600">{fmtCurrency(totalValue)}</p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-4">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Ganhos / Perdidos</p>
-                  <p className="text-lg font-bold">
+              <KpiCard
+                icon={BarChart3}
+                label="Total atendimentos"
+                value={overview?.total ?? 0}
+                sub={`Últimos 30d: ${overview?.last_30_days ?? 0}`}
+              />
+              <KpiCard icon={GitBranch} label="No funil" value={totalAttendances} />
+              <KpiCard
+                icon={TrendingUp}
+                label="Valor pipeline"
+                value={<span className="text-emerald-600">{fmtCurrency(totalValue)}</span>}
+              />
+              <KpiCard
+                icon={TrendingDown}
+                label="Ganhos / Perdidos"
+                value={
+                  <span>
                     <span className="text-emerald-600">{wonStage?.count ?? 0}</span>
                     <span className="text-muted-foreground mx-1">/</span>
                     <span className="text-red-500">{lostStage?.count ?? 0}</span>
-                  </p>
-                  {wonStage && <p className="text-xs text-muted-foreground">{fmtCurrency(wonStage.total_value)}</p>}
-                </CardContent>
-              </Card>
+                  </span>
+                }
+                sub={wonStage ? fmtCurrency(wonStage.total_value) : undefined}
+              />
             </div>
           )}
 

@@ -4,6 +4,8 @@ import { statsApi, type PlatformStats } from "@/api/superAdmin"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
+import { PageHeader } from "@/components/PageHeader"
+import { KpiCard } from "@/components/KpiCard"
 
 function fmt(n: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n)
@@ -54,36 +56,14 @@ export default function AdminDashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Dashboard</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Visão geral da plataforma.</p>
-      </div>
+      <PageHeader title="Dashboard" subtitle="Visão geral da plataforma." />
 
       {/* KPI Cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {loading
-          ? Array.from({ length: 4 }).map((_, i) => (
-              <Card key={i}>
-                <CardHeader className="pb-2">
-                  <Skeleton className="h-4 w-32" />
-                </CardHeader>
-                <CardContent>
-                  <Skeleton className="h-8 w-20 mb-1" />
-                  <Skeleton className="h-3 w-40" />
-                </CardContent>
-              </Card>
-            ))
-          : kpis.map(({ title, value, sub, icon: Icon, color }) => (
-              <Card key={title}>
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">{title}</CardTitle>
-                  <Icon size={16} className={color} />
-                </CardHeader>
-                <CardContent>
-                  <p className="text-2xl font-bold">{value}</p>
-                  <p className="text-xs text-muted-foreground mt-1">{sub}</p>
-                </CardContent>
-              </Card>
+          ? Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)
+          : kpis.map(({ title, value, sub, icon: Icon }) => (
+              <KpiCard key={title} icon={Icon} label={title} value={value} sub={sub} />
             ))}
       </div>
 

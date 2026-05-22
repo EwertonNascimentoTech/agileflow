@@ -11,6 +11,7 @@ export function KpiCard({
   icon: Icon,
   delta,
   deltaTone = "neutral",
+  sub,
   className,
 }: {
   label: string
@@ -18,6 +19,7 @@ export function KpiCard({
   icon?: ElementType
   delta?: ReactNode
   deltaTone?: "up" | "down" | "neutral"
+  sub?: ReactNode
   className?: string
 }) {
   const deltaClasses =
@@ -43,6 +45,7 @@ export function KpiCard({
       </div>
       <p className="mt-3 text-2xl font-bold tracking-tight">{value}</p>
       <p className="text-xs text-muted-foreground">{label}</p>
+      {sub && <p className="mt-1 text-xs text-muted-foreground/80">{sub}</p>}
     </Card>
   )
 }

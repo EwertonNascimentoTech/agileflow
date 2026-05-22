@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { Plus, Search, Package, Loader2, Pencil, Trash2 } from "lucide-react"
+import { Plus, Search, Package, Loader2, Pencil, Trash2, AlertTriangle } from "lucide-react"
 import {
-  productsApi, productTypesApi, categoriesApi,
+  productsApi, productTypesApi, categoriesApi, stockApi,
   type Product, type ProductCreate, type ProductType, type ProductCategory,
 } from "@/api/estoque"
 import { Button } from "@/components/ui/button"
@@ -41,6 +41,10 @@ export default function ProductsPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
   const [filterType, setFilterType] = useState<string>(NONE)
+  const [filterCat, setFilterCat] = useState<string>(NONE)
+  const [filterStatus, setFilterStatus] = useState<"all" | "active" | "inactive">("all")
+  // Saldo total por produto (somado entre depósitos), agregado no front.
+  const [stockByProduct, setStockByProduct] = useState<Record<string, number>>({})
 
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<Product | null>(null)
@@ -59,8 +63,14 @@ export default function ProductsPage() {
       productsApi.list({ limit: 200 }),
       productTypesApi.list(true),
       categoriesApi.list(),
-    ]).then(([p, t, c]) => {
+      stockApi.levels().catch(() => []),
+    ]).then(([p, t, c, levels]) => {
       setItems(p); setTypes(t); setCats(c)
+      const agg: Record<string, number> = {}
+      for (const lvl of levels) {
+        agg[lvl.product_id] = (agg[lvl.product_id] ?? 0) + Number(lvl.quantity)
+      }
+      setStockByProduct(agg)
     }).finally(() => setLoading(false))
   }, [])
 
@@ -71,6 +81,9 @@ export default function ProductsPage() {
 
   const filtered = items.filter(p => {
     if (filterType !== NONE && p.type_id !== filterType) return false
+    if (filterCat !== NONE && p.category_id !== filterCat) return false
+    if (filterStatus === "active" && !p.is_active) return false
+    if (filterStatus === "inactive" && p.is_active) return false
     if (search) {
       const q = search.toLowerCase()
       if (
@@ -163,6 +176,11 @@ export default function ProductsPage() {
     return types.find(t => t.id === id)?.name ?? "—"
   }
 
+  function catName(id: string | null) {
+    if (!id) return "—"
+    return cats.find(c => c.id === id)?.name ?? "—"
+  }
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -195,16 +213,31 @@ export default function ProductsPage() {
             value={search} onChange={e => setSearch(e.target.value)} className="pl-9 h-9" />
         </div>
         <Select value={filterType} onValueChange={setFilterType}>
-          <SelectTrigger className="w-48 h-9"><SelectValue placeholder="Filtrar por tipo" /></SelectTrigger>
+          <SelectTrigger className="w-44 h-9"><SelectValue placeholder="Tipo" /></SelectTrigger>
           <SelectContent>
             <SelectItem value={NONE}>Todos os tipos</SelectItem>
             {types.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
           </SelectContent>
         </Select>
+        <Select value={filterCat} onValueChange={setFilterCat}>
+          <SelectTrigger className="w-44 h-9"><SelectValue placeholder="Categoria" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NONE}>Todas categorias</SelectItem>
+            {cats.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={filterStatus} onValueChange={(v) => setFilterStatus(v as "all" | "active" | "inactive")}>
+          <SelectTrigger className="w-36 h-9"><SelectValue placeholder="Status" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos</SelectItem>
+            <SelectItem value="active">Ativos</SelectItem>
+            <SelectItem value="inactive">Inativos</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {loading ? (
-        <div className="space-y-2">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-14 rounded-lg" />)}</div>
+        <div className="space-y-2">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-12 rounded-lg" />)}</div>
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={Package}
@@ -213,46 +246,74 @@ export default function ProductsPage() {
           action={!search && filterType === NONE && types.length > 0 ? { label: "Novo produto", onClick: openCreate } : undefined}
         />
       ) : (
-        <div className="space-y-1.5">
-          {filtered.map(p => (
-            <Card
-              key={p.id}
-              className={`cursor-pointer transition hover:border-primary/40 hover:shadow-md ${!p.is_active ? "opacity-60" : ""}`}
-              onClick={() => navigate(`/app/modules/estoque/products/${p.id}`)}
-            >
-              <CardContent className="p-3 flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="font-medium text-sm truncate">{p.name}</p>
-                    <Badge variant="outline" className="text-[10px] h-4 px-1.5">{typeName(p.type_id)}</Badge>
-                    {!p.is_active && <Badge variant="outline" className="text-[10px] h-4 px-1.5">inativo</Badge>}
-                  </div>
-                  <p className="text-[11px] text-muted-foreground font-mono">
-                    SKU: {p.sku}{p.barcode ? ` · ${p.barcode}` : ""}
-                  </p>
-                </div>
-                <div className="flex items-center gap-3 shrink-0">
-                  <div className="text-right">
-                    <p className="text-sm font-bold tracking-tight">{fmtBRL(p.sale_price)}</p>
-                    <p className="text-[11px] text-muted-foreground">custo {fmtBRL(p.cost_price)}</p>
-                  </div>
-                  <Button size="icon" variant="ghost" className="h-7 w-7"
-                    onClick={(e) => { e.stopPropagation(); openEdit(p) }}>
-                    <Pencil size={13} />
-                  </Button>
-                  <Button
-                    size="icon" variant="ghost"
-                    className="h-7 w-7 text-destructive hover:text-destructive"
-                    onClick={(e) => { e.stopPropagation(); handleDelete(p) }}
-                    disabled={deletingId === p.id}
-                  >
-                    {deletingId === p.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        <Card>
+          <CardContent className="p-0">
+            <div className="scrollbar-thin overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-2.5 font-medium">SKU</th>
+                    <th className="px-3 py-2.5 font-medium">Produto</th>
+                    <th className="px-3 py-2.5 font-medium">Tipo</th>
+                    <th className="px-3 py-2.5 font-medium">Categoria</th>
+                    <th className="px-3 py-2.5 font-medium text-right">Custo</th>
+                    <th className="px-3 py-2.5 font-medium text-right">Venda</th>
+                    <th className="px-3 py-2.5 font-medium text-right">Estoque</th>
+                    <th className="px-3 py-2.5 font-medium">Status</th>
+                    <th className="w-10 px-3 py-2.5"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(p => {
+                    const stock = stockByProduct[p.id] ?? 0
+                    const low = p.min_stock > 0 && stock < p.min_stock
+                    return (
+                      <tr
+                        key={p.id}
+                        className={`group cursor-pointer border-b border-border/60 hover:bg-muted/50 ${!p.is_active ? "opacity-60" : ""}`}
+                        onClick={() => navigate(`/app/modules/estoque/products/${p.id}`)}
+                      >
+                        <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground">{p.sku}</td>
+                        <td className="px-3 py-2.5 font-medium">{p.name}</td>
+                        <td className="px-3 py-2.5"><Badge variant="outline" className="text-[10px]">{typeName(p.type_id)}</Badge></td>
+                        <td className="px-3 py-2.5 text-muted-foreground">{catName(p.category_id)}</td>
+                        <td className="px-3 py-2.5 text-right text-muted-foreground">{fmtBRL(p.cost_price)}</td>
+                        <td className="px-3 py-2.5 text-right font-medium">{fmtBRL(p.sale_price)}</td>
+                        <td className="px-3 py-2.5 text-right">
+                          <span className={`inline-flex items-center justify-end gap-1 ${low ? "font-medium text-rose-500" : ""}`}>
+                            {low && <AlertTriangle size={13} />}
+                            {stock.toLocaleString("pt-BR", { maximumFractionDigits: 4 })}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <Badge variant={p.is_active ? "success" : "secondary"} className="text-[10px]">
+                            {p.is_active ? "Ativo" : "Inativo"}
+                          </Badge>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <div className="flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
+                            <Button size="icon" variant="ghost" className="h-7 w-7"
+                              onClick={(e) => { e.stopPropagation(); openEdit(p) }}>
+                              <Pencil size={13} />
+                            </Button>
+                            <Button
+                              size="icon" variant="ghost"
+                              className="h-7 w-7 text-destructive hover:text-destructive"
+                              onClick={(e) => { e.stopPropagation(); handleDelete(p) }}
+                              disabled={deletingId === p.id}
+                            >
+                              {deletingId === p.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       <Dialog open={open} onOpenChange={setOpen}>

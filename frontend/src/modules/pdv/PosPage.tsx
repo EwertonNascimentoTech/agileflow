@@ -370,44 +370,34 @@ export default function PosPage() {
               </div>
             </div>
 
-            <Card>
-              <CardContent className="p-0">
-                {searching ? (
-                  <div className="p-4 space-y-2">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-10" />)}</div>
-                ) : results.length === 0 ? (
-                  <p className="p-4 text-sm text-muted-foreground">Nenhum produto encontrado.</p>
-                ) : (
-                  <table className="w-full text-sm">
-                    <tbody>
-                      {results.map(p => (
-                        <tr key={p.id} className="border-b last:border-0">
-                          <td className="px-3 py-2">
-                            <p className="font-medium">{p.name}</p>
-                            <p className="text-xs text-muted-foreground font-mono">{p.sku}</p>
-                          </td>
-                          <td className="px-3 py-2 text-right whitespace-nowrap">
-                            {p.tracks_stock
-                              ? (p.stock_qty <= 0
-                                  ? <span className="text-xs font-medium text-rose-500">Sem estoque</span>
-                                  : <span className="text-xs text-muted-foreground">{fmtQty(p.stock_qty)} {p.unit}</span>)
-                              : <span className="text-xs text-muted-foreground">serviço</span>}
-                          </td>
-                          <td className="px-3 py-2 text-right whitespace-nowrap font-medium">
-                            {fmtMoney(p.sale_price)}
-                          </td>
-                          <td className="px-3 py-2 text-right">
-                            <Button size="sm" variant="outline" className="h-7 gap-1"
-                              onClick={() => addToCart(p)}>
-                              <Plus size={13} /> Add
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </CardContent>
-            </Card>
+            {searching ? (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)}
+              </div>
+            ) : results.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">Nenhum produto encontrado.</p>
+            ) : (
+              <div className="scrollbar-thin grid max-h-[calc(100vh-16rem)] grid-cols-2 gap-3 overflow-y-auto sm:grid-cols-3">
+                {results.map(p => {
+                  const out = p.tracks_stock && p.stock_qty <= 0
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() => addToCart(p)}
+                      className="flex flex-col rounded-xl border border-border bg-card p-3 text-left transition hover:border-primary/50 hover:shadow-md"
+                    >
+                      <div className="mb-2 h-16 rounded-lg bg-muted" />
+                      <span className="line-clamp-2 text-sm font-medium leading-tight">{p.name}</span>
+                      <span className="mt-0.5 font-mono text-[11px] text-muted-foreground">{p.sku}</span>
+                      <span className="mt-1 text-base font-bold text-primary">{fmtMoney(p.sale_price)}</span>
+                      <span className={`mt-0.5 text-xs ${out ? "text-rose-500" : "text-muted-foreground"}`}>
+                        {!p.tracks_stock ? "serviço" : out ? "Sem estoque" : `${fmtQty(p.stock_qty)} ${p.unit}`}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
           </div>
 
           {/* Carrinho + pagamento */}

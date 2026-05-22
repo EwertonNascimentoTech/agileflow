@@ -3,6 +3,8 @@ import { Package, Warehouse as WarehouseIcon, DollarSign, AlertTriangle } from "
 import { stockApi, type EstoqueOverview } from "@/api/estoque"
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { PageHeader } from "@/components/PageHeader"
+import { KpiCard } from "@/components/KpiCard"
 
 function fmtMoney(v: number) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
@@ -41,24 +43,14 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Estoque</h1>
-        <p className="text-sm text-muted-foreground">Visão geral do catálogo, depósitos e níveis de estoque.</p>
-      </div>
+      <PageHeader
+        title="Estoque"
+        subtitle="Visão geral do catálogo, depósitos e níveis de estoque."
+      />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {cards.map(({ icon: Icon, label, value }) => (
-          <Card key={label}>
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className="h-10 w-10 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
-                <Icon size={18} />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs text-muted-foreground">{label}</p>
-                <p className="text-lg font-semibold truncate">{value}</p>
-              </div>
-            </CardContent>
-          </Card>
+          <KpiCard key={label} icon={Icon} label={label} value={value} />
         ))}
       </div>
 
