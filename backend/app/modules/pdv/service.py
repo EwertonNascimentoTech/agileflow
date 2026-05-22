@@ -27,7 +27,7 @@ from app.modules.pdv.schemas import (
     CashSessionOpen, CashSessionClose, CashMovementCreate,
     SaleCreate, SaleCancelRequest,
 )
-from app.modules.estoque.models import MovementType
+from app.modules.estoque.models import MovementType, SerialStatus
 from app.modules.estoque.service import (
     StockService, ProductService, ProductTypeService, WarehouseService,
 )
@@ -410,8 +410,8 @@ class SaleService:
         # 2. Estoque ativo (baixa é obrigatória).
         await _require_estoque_active(db, user.tenant_id)
 
-        # 3. Resolve itens — snapshot de preço, validação de tipo.
-        resolved = []  # (product, ptype, qty, unit_price, line_discount, line_total)
+        # 3. Resolve itens — snapshot de preço, validação de tipo/lote/série.
+        resolved = []  # (product, ptype, qty, unit_price, line_discount, line_total, batch_id, serial_id)
         for item in data.items:
             product = await ProductService.get_product(db, item.product_id)
             if not product.is_active:
@@ -419,12 +419,30 @@ class SaleService:
                     status_code=400, detail=f"Produto '{product.name}' está inativo.",
                 )
             ptype = await ProductTypeService.get_type(db, product.type_id)
-            if ptype.tracks_batch or ptype.tracks_serial:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Produto '{product.name}' usa lote/número de série — não suportado no PDV.",
-                )
             qty = _to_decimal(item.quantity)
+
+            # Lote/série: exige seleção e valida pertencimento + disponibilidade.
+            batch_id = item.batch_id if ptype.tracks_batch else None
+            serial_id = item.serial_id if ptype.tracks_serial else None
+            if ptype.tracks_batch:
+                if not batch_id:
+                    raise HTTPException(status_code=422, detail=f"Produto '{product.name}' exige seleção de lote.")
+                batch = await StockService.get_batch(db, batch_id)
+                if batch.product_id != product.id or batch.warehouse_id != data.warehouse_id:
+                    raise HTTPException(status_code=400, detail=f"Lote informado não pertence a '{product.name}' neste depósito.")
+                if _to_decimal(batch.quantity) < qty:
+                    raise HTTPException(status_code=400, detail=f"Saldo do lote insuficiente para '{product.name}'.")
+            if ptype.tracks_serial:
+                if not serial_id:
+                    raise HTTPException(status_code=422, detail=f"Produto '{product.name}' exige número de série.")
+                if qty != Decimal("1"):
+                    raise HTTPException(status_code=422, detail=f"Produto serializado '{product.name}': use 1 por linha.")
+                serial = await StockService.get_serial(db, serial_id)
+                if serial.product_id != product.id:
+                    raise HTTPException(status_code=400, detail=f"Série informada não pertence a '{product.name}'.")
+                if serial.status != SerialStatus.IN_STOCK:
+                    raise HTTPException(status_code=400, detail=f"Série de '{product.name}' não está disponível.")
+
             unit_price = _money(product.sale_price)
             line_discount = _money(item.discount_amount)
             gross = _money(qty * unit_price)
@@ -434,7 +452,7 @@ class SaleService:
                     detail=f"Desconto do item '{product.name}' maior que o valor da linha.",
                 )
             line_total = _money(gross - line_discount)
-            resolved.append((product, ptype, qty, unit_price, line_discount, line_total))
+            resolved.append((product, ptype, qty, unit_price, line_discount, line_total, batch_id, serial_id))
 
         # 4. Totais.
         subtotal = _money(sum((r[5] for r in resolved), Decimal("0")))
@@ -506,7 +524,7 @@ class SaleService:
         await db.flush()  # gera sale.id
 
         # 9. Itens e pagamentos.
-        for product, ptype, qty, unit_price, line_discount, line_total in resolved:
+        for product, ptype, qty, unit_price, line_discount, line_total, batch_id, serial_id in resolved:
             sale.items.append(SaleItem(
                 product_id=product.id,
                 product_sku=product.sku,
@@ -516,6 +534,8 @@ class SaleService:
                 unit_price=unit_price,
                 discount_amount=line_discount,
                 line_total=line_total,
+                batch_id=batch_id,
+                serial_id=serial_id,
             ))
         for method, amount in resolved_payments:
             sale.payments.append(SalePayment(
@@ -527,7 +547,7 @@ class SaleService:
         await db.flush()
 
         # 10. Baixa de estoque (não commita — só flush).
-        for product, ptype, qty, *_ in resolved:
+        for product, ptype, qty, _up, _ld, _lt, batch_id, serial_id in resolved:
             if not ptype.tracks_stock:
                 continue
             await StockService._apply_movement(
@@ -537,8 +557,8 @@ class SaleService:
                 mov_type=MovementType.OUT,
                 quantity=qty,
                 cost_unit=_to_decimal(product.cost_price),
-                batch_id=None,
-                serial_id=None,
+                batch_id=batch_id,
+                serial_id=serial_id,
                 reason=f"Venda {sale.number}",
                 reference_type="pdv_sale",
                 reference_id=sale.id,
@@ -575,8 +595,8 @@ class SaleService:
                 mov_type=MovementType.IN,
                 quantity=_to_decimal(item.quantity),
                 cost_unit=_to_decimal(product.cost_price),
-                batch_id=None,
-                serial_id=None,
+                batch_id=item.batch_id,
+                serial_id=item.serial_id,
                 reason=f"Estorno venda {sale.number}",
                 reference_type="pdv_sale_cancel",
                 reference_id=sale.id,
@@ -620,6 +640,8 @@ class SaleService:
                 "sale_price": _money(p.sale_price),
                 "stock_qty": stock_qty,
                 "tracks_stock": ptype.tracks_stock,
+                "tracks_batch": ptype.tracks_batch,
+                "tracks_serial": ptype.tracks_serial,
             })
         return results
 

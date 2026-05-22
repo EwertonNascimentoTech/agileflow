@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react"
 import { useParams } from "react-router-dom"
 import { salesApi, type Sale } from "@/api/pdv"
+import { companyApi, type Branding } from "@/api/crm"
 import { fmtMoney, fmtQty, fmtDateTime } from "./pdvUtils"
 
 export default function ReceiptPrintView() {
   const { id } = useParams<{ id: string }>()
   const [sale, setSale] = useState<Sale | null>(null)
+  const [branding, setBranding] = useState<Branding | null>(null)
+  const [brandingLoaded, setBrandingLoaded] = useState(false)
   const [error, setError] = useState("")
 
   useEffect(() => {
@@ -15,12 +18,21 @@ export default function ReceiptPrintView() {
       .catch(() => setError("Não foi possível carregar a venda."))
   }, [id])
 
+  // Branding do tenant (nome/logo) para o cabeçalho do recibo.
   useEffect(() => {
-    if (sale) {
+    companyApi.getBranding()
+      .then(setBranding)
+      .catch(() => {})
+      .finally(() => setBrandingLoaded(true))
+  }, [])
+
+  // Imprime só depois da venda E do branding resolverem (para o logo entrar).
+  useEffect(() => {
+    if (sale && brandingLoaded) {
       const t = setTimeout(() => window.print(), 300)
       return () => clearTimeout(t)
     }
-  }, [sale])
+  }, [sale, brandingLoaded])
 
   if (error) return <p style={{ padding: 24, fontFamily: "monospace" }}>{error}</p>
   if (!sale) return <p style={{ padding: 24, fontFamily: "monospace" }}>Carregando…</p>
@@ -38,7 +50,15 @@ export default function ReceiptPrintView() {
       }}
     >
       <div style={{ textAlign: "center", marginBottom: 8 }}>
-        <strong style={{ fontSize: 14 }}>COMPROVANTE DE VENDA</strong>
+        {branding?.logo_url && (
+          <img
+            src={branding.logo_url}
+            alt=""
+            style={{ maxHeight: 48, maxWidth: "100%", margin: "0 auto 4px", display: "block" }}
+          />
+        )}
+        {branding?.name && <div style={{ fontSize: 15, fontWeight: "bold" }}>{branding.name}</div>}
+        <div style={{ fontSize: 11, letterSpacing: 1 }}>COMPROVANTE DE VENDA</div>
         <div>{sale.number}</div>
         <div>{fmtDateTime(sale.created_at)}</div>
         {sale.status === "cancelled" && (

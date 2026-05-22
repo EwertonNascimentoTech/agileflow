@@ -99,6 +99,8 @@ export interface SaleItem {
   unit_price: number
   discount_amount: number
   line_total: number
+  batch_id: string | null
+  serial_id: string | null
 }
 export interface SalePayment {
   id: string
@@ -139,6 +141,8 @@ export interface SaleItemInput {
   product_id: string
   quantity: number
   discount_amount?: number
+  batch_id?: string | null
+  serial_id?: string | null
 }
 export interface SalePaymentInput {
   payment_method_id: string
@@ -161,6 +165,8 @@ export interface ProductSearchResult {
   sale_price: number
   stock_qty: number
   tracks_stock: boolean
+  tracks_batch: boolean
+  tracks_serial: boolean
 }
 
 export interface OperatorBreakdown {

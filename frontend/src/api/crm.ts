@@ -1185,9 +1185,18 @@ export interface UserUpdatePayload {
   role_id?: string | null
 }
 
+export interface Branding {
+  name: string
+  logo_url: string | null
+  primary_color: string | null
+}
+
 export const companyApi = {
   getMyTenant: () =>
     api.get<MyTenant>("/crm/admin/me/tenant").then(r => r.data),
+
+  getBranding: () =>
+    api.get<Branding>("/crm/admin/branding").then(r => r.data),
 
   listUsers: (params?: { search?: string; active_only?: boolean }) =>
     api.get<User[]>("/crm/admin/users", { params }).then(r => r.data),

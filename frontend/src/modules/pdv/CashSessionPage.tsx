@@ -20,12 +20,18 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { fmtMoney, fmtDateTime, getApiError } from "./pdvUtils"
 
+// Categorias estruturadas de movimento (preparam o lançamento financeiro futuro).
+const SUPRIMENTO_CATS = ["Fundo de troco", "Reforço de caixa", "Outro"]
+const SANGRIA_CATS = ["Depósito bancário", "Pagamento de despesa", "Retirada", "Outro"]
+const HIST_SIZE = 20
+
 export default function CashSessionPage() {
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
   const [warehouseId, setWarehouseId] = useState<string>("")
   const [session, setSession] = useState<CashSession | null>(null)
   const [summary, setSummary] = useState<CashSessionSummary | null>(null)
   const [history, setHistory] = useState<CashSession[]>([])
+  const [histPage, setHistPage] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
 
@@ -37,7 +43,8 @@ export default function CashSessionPage() {
   const [movOpen, setMovOpen] = useState(false)
   const [movType, setMovType] = useState<CashMovementType>("suprimento")
   const [movAmount, setMovAmount] = useState("")
-  const [movReason, setMovReason] = useState("")
+  const [movCategory, setMovCategory] = useState("")
+  const [movDetail, setMovDetail] = useState("")
   const [movError, setMovError] = useState("")
 
   const [closeOpen, setCloseOpen] = useState(false)
@@ -71,12 +78,19 @@ export default function CashSessionPage() {
 
   useEffect(() => {
     if (warehouseId) loadSession(warehouseId)
-    cashApi.listSessions({ limit: 20 }).then(setHistory).catch(() => {})
   }, [warehouseId, loadSession])
 
-  async function refreshHistory() {
-    cashApi.listSessions({ limit: 20 }).then(setHistory).catch(() => {})
+  // Histórico paginado (lista não retorna total → prev/next por página cheia).
+  useEffect(() => {
+    cashApi.listSessions({ skip: histPage * HIST_SIZE, limit: HIST_SIZE }).then(setHistory).catch(() => {})
+  }, [histPage])
+
+  function refreshHistory() {
+    setHistPage(0)
+    cashApi.listSessions({ skip: 0, limit: HIST_SIZE }).then(setHistory).catch(() => {})
   }
+
+  const histHasMore = history.length === HIST_SIZE
 
   async function handleOpen() {
     setError("")
@@ -103,15 +117,29 @@ export default function CashSessionPage() {
     setMovError("")
     setBusy(true)
     try {
-      await cashApi.addMovement(session.id, {
+      const created = await cashApi.addMovement(session.id, {
         type: movType,
         amount: Number(movAmount),
-        reason: movReason,
+        reason: movCategory,
+        notes: movDetail.trim() || undefined,
+      })
+      // Atualização local: anexa o movimento e ajusta o resumo (evita 2 refetches + flash).
+      setSession(prev => prev ? { ...prev, movements: [...prev.movements, created] } : prev)
+      setSummary(prev => {
+        if (!prev) return prev
+        const amt = Number(created.amount) || 0
+        const isIn = created.type === "suprimento"
+        return {
+          ...prev,
+          cash_in: isIn ? prev.cash_in + amt : prev.cash_in,
+          cash_out: isIn ? prev.cash_out : prev.cash_out + amt,
+          expected_amount: prev.expected_amount + (isIn ? amt : -amt),
+        }
       })
       setMovOpen(false)
       setMovAmount("")
-      setMovReason("")
-      loadSession(warehouseId)
+      setMovCategory("")
+      setMovDetail("")
     } catch (err) {
       setMovError(getApiError(err))
     } finally {
@@ -143,6 +171,13 @@ export default function CashSessionPage() {
   const countedNum = Number(countedAmount) || 0
   const expectedNum = summary?.expected_amount ?? 0
   const diffPreview = countedNum - expectedNum
+  // Divergência relevante (acima de meio centavo) exige justificativa.
+  const hasDivergence = countedAmount !== "" && Math.abs(diffPreview) >= 0.005
+  const closeBlocked = busy || countedAmount === "" || (hasDivergence && !closeNotes.trim())
+
+  const movCats = movType === "sangria" ? SANGRIA_CATS : SUPRIMENTO_CATS
+  const movNeedsDetail = movCategory === "Outro"
+  const movBlocked = busy || !movAmount || !movCategory || (movNeedsDetail && !movDetail.trim())
 
   return (
     <div className="space-y-4">
@@ -202,11 +237,11 @@ export default function CashSessionPage() {
                 </div>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" className="gap-1.5"
-                    onClick={() => { setMovType("suprimento"); setMovAmount(""); setMovReason(""); setMovError(""); setMovOpen(true) }}>
+                    onClick={() => { setMovType("suprimento"); setMovAmount(""); setMovCategory(""); setMovDetail(""); setMovError(""); setMovOpen(true) }}>
                     <ArrowUpCircle size={14} /> Suprimento
                   </Button>
                   <Button variant="outline" size="sm" className="gap-1.5"
-                    onClick={() => { setMovType("sangria"); setMovAmount(""); setMovReason(""); setMovError(""); setMovOpen(true) }}>
+                    onClick={() => { setMovType("sangria"); setMovAmount(""); setMovCategory(""); setMovDetail(""); setMovError(""); setMovOpen(true) }}>
                     <ArrowDownCircle size={14} /> Sangria
                   </Button>
                 </div>
@@ -230,6 +265,7 @@ export default function CashSessionPage() {
                     <div key={m.id} className="flex justify-between text-sm border-b last:border-0 py-1">
                       <span>
                         {m.type === "sangria" ? "Sangria" : "Suprimento"} · {m.reason}
+                        {m.notes && <span className="text-muted-foreground"> — {m.notes}</span>}
                       </span>
                       <span className={m.type === "sangria" ? "text-destructive" : ""}>
                         {m.type === "sangria" ? "-" : "+"}{fmtMoney(m.amount)}
@@ -248,36 +284,51 @@ export default function CashSessionPage() {
         </>
       )}
 
-      {history.length > 0 && (
+      {(history.length > 0 || histPage > 0) && (
         <Card>
           <CardContent className="p-4 space-y-2">
             <h2 className="text-sm font-semibold">Sessões recentes</h2>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-xs text-muted-foreground text-left border-b">
-                  <th className="py-1.5 font-medium">Aberto</th>
-                  <th className="py-1.5 font-medium">Fechado</th>
-                  <th className="py-1.5 font-medium">Status</th>
-                  <th className="py-1.5 font-medium text-right">Diferença</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.map(s => (
-                  <tr key={s.id} className="border-b last:border-0">
-                    <td className="py-1.5">{fmtDateTime(s.opened_at)}</td>
-                    <td className="py-1.5">{fmtDateTime(s.closed_at)}</td>
-                    <td className="py-1.5">
-                      {s.status === "open"
-                        ? <Badge variant="secondary" className="text-[10px]">aberto</Badge>
-                        : <Badge variant="outline" className="text-[10px]">fechado</Badge>}
-                    </td>
-                    <td className="py-1.5 text-right">
-                      {s.difference == null ? "—" : fmtMoney(s.difference)}
-                    </td>
+            {history.length === 0 ? (
+              <p className="py-4 text-center text-sm text-muted-foreground">Nenhuma sessão nesta página.</p>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-xs text-muted-foreground text-left border-b">
+                    <th className="py-1.5 font-medium">Aberto</th>
+                    <th className="py-1.5 font-medium">Fechado</th>
+                    <th className="py-1.5 font-medium">Status</th>
+                    <th className="py-1.5 font-medium text-right">Diferença</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {history.map(s => (
+                    <tr key={s.id} className="border-b last:border-0">
+                      <td className="py-1.5">{fmtDateTime(s.opened_at)}</td>
+                      <td className="py-1.5">{fmtDateTime(s.closed_at)}</td>
+                      <td className="py-1.5">
+                        {s.status === "open"
+                          ? <Badge variant="secondary" className="text-[10px]">aberto</Badge>
+                          : <Badge variant="outline" className="text-[10px]">fechado</Badge>}
+                      </td>
+                      <td className="py-1.5 text-right">
+                        {s.difference == null ? "—" : fmtMoney(s.difference)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <div className="flex items-center justify-between pt-1 text-sm">
+              <span className="text-muted-foreground">Página {histPage + 1}</span>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" disabled={histPage === 0} onClick={() => setHistPage(p => p - 1)}>
+                  Anterior
+                </Button>
+                <Button variant="outline" size="sm" disabled={!histHasMore} onClick={() => setHistPage(p => p + 1)}>
+                  Próxima
+                </Button>
+              </div>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -295,14 +346,31 @@ export default function CashSessionPage() {
                 onChange={e => setMovAmount(e.target.value)} />
             </div>
             <div className="space-y-1.5">
-              <Label>Motivo</Label>
-              <Textarea rows={2} value={movReason} onChange={e => setMovReason(e.target.value)} />
+              <Label>Categoria</Label>
+              <Select value={movCategory} onValueChange={setMovCategory}>
+                <SelectTrigger><SelectValue placeholder="Selecione a categoria" /></SelectTrigger>
+                <SelectContent>
+                  {movCats.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>
+                Detalhe{movNeedsDetail ? <span className="text-destructive"> *</span> : <span className="text-muted-foreground"> (opcional)</span>}
+              </Label>
+              <Textarea
+                rows={2}
+                value={movDetail}
+                onChange={e => setMovDetail(e.target.value)}
+                placeholder={movNeedsDetail ? "Descreva o motivo…" : "Observação adicional"}
+                aria-invalid={movNeedsDetail && !movDetail.trim()}
+              />
             </div>
             {movError && <Alert variant="destructive"><AlertDescription className="text-xs">{movError}</AlertDescription></Alert>}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setMovOpen(false)}>Cancelar</Button>
-            <Button onClick={handleMovement} disabled={busy || !movAmount || !movReason.trim()}>
+            <Button onClick={handleMovement} disabled={movBlocked}>
               {busy && <Loader2 size={14} className="mr-1.5 animate-spin" />}
               Registrar
             </Button>
@@ -329,20 +397,35 @@ export default function CashSessionPage() {
             {countedAmount !== "" && (
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Diferença</span>
-                <span className={diffPreview < 0 ? "text-destructive font-medium" : "font-medium"}>
-                  {fmtMoney(diffPreview)}
+                <span className={hasDivergence ? (diffPreview < 0 ? "text-destructive font-medium" : "text-amber-600 font-medium") : "font-medium"}>
+                  {diffPreview > 0 ? "+" : ""}{fmtMoney(diffPreview)}
+                  <span className="ml-1 text-xs font-normal text-muted-foreground">
+                    {hasDivergence ? (diffPreview < 0 ? "(falta)" : "(sobra)") : "(confere)"}
+                  </span>
                 </span>
               </div>
             )}
             <div className="space-y-1.5">
-              <Label>Observações</Label>
-              <Textarea rows={2} value={closeNotes} onChange={e => setCloseNotes(e.target.value)} />
+              <Label>
+                {hasDivergence ? "Justificativa da diferença" : "Observações"}
+                {hasDivergence && <span className="text-destructive"> *</span>}
+              </Label>
+              <Textarea
+                rows={2}
+                value={closeNotes}
+                onChange={e => setCloseNotes(e.target.value)}
+                placeholder={hasDivergence ? "Explique a sobra/falta no caixa…" : undefined}
+                aria-invalid={hasDivergence && !closeNotes.trim()}
+              />
+              {hasDivergence && !closeNotes.trim() && (
+                <p className="text-xs text-destructive">Informe o motivo da diferença para fechar.</p>
+              )}
             </div>
             {closeError && <Alert variant="destructive"><AlertDescription className="text-xs">{closeError}</AlertDescription></Alert>}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCloseOpen(false)}>Cancelar</Button>
-            <Button onClick={handleClose} disabled={busy || countedAmount === ""}>
+            <Button onClick={handleClose} disabled={closeBlocked}>
               {busy && <Loader2 size={14} className="mr-1.5 animate-spin" />}
               Confirmar fechamento
             </Button>

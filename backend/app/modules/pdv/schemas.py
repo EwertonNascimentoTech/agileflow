@@ -140,6 +140,9 @@ class SaleItemInput(BaseModel):
     product_id: uuid.UUID
     quantity: Decimal = Field(..., gt=0)
     discount_amount: Decimal = Field(Decimal("0"), ge=0)
+    # Obrigatórios quando o tipo do produto rastreia lote/série.
+    batch_id: Optional[uuid.UUID] = None
+    serial_id: Optional[uuid.UUID] = None
 
 
 class SalePaymentInput(BaseModel):
@@ -169,6 +172,8 @@ class SaleItemResponse(BaseModel):
     unit_price: Decimal
     discount_amount: Decimal
     line_total: Decimal
+    batch_id: Optional[uuid.UUID] = None
+    serial_id: Optional[uuid.UUID] = None
 
     model_config = {"from_attributes": True}
 
@@ -230,6 +235,8 @@ class ProductSearchResult(BaseModel):
     sale_price: Decimal
     stock_qty: Decimal
     tracks_stock: bool
+    tracks_batch: bool = False
+    tracks_serial: bool = False
 
 
 # ══════════════════════════════════════════════

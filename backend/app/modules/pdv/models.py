@@ -218,6 +218,9 @@ class SaleItem(TenantBase):
     unit_price: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
     discount_amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     line_total: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    # Lote/série baixados (produtos rastreados) — guardados para estorno no cancelamento.
+    batch_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    serial_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     sale: Mapped["Sale"] = relationship(back_populates="items")

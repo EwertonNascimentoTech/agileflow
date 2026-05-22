@@ -5,6 +5,7 @@ import { salesApi, type SaleListItem, type SaleStatus } from "@/api/pdv"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -15,6 +16,7 @@ import { EmptyState } from "@/components/EmptyState"
 import { fmtMoney, fmtDateTime, getApiError } from "./pdvUtils"
 
 const ALL = "__all__"
+const PAGE_SIZE = 20
 
 export default function SalesHistoryPage() {
   const navigate = useNavigate()
@@ -24,6 +26,7 @@ export default function SalesHistoryPage() {
   const [status, setStatus] = useState<SaleStatus | typeof ALL>(ALL)
   const [dateFrom, setDateFrom] = useState("")
   const [dateTo, setDateTo] = useState("")
+  const [page, setPage] = useState(0)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -32,14 +35,23 @@ export default function SalesHistoryPage() {
       status: status === ALL ? undefined : status,
       date_from: dateFrom ? `${dateFrom}T00:00:00` : undefined,
       date_to: dateTo ? `${dateTo}T23:59:59` : undefined,
-      limit: 200,
+      skip: page * PAGE_SIZE,
+      limit: PAGE_SIZE,
     })
       .then(setItems)
       .catch(err => setError(getApiError(err)))
       .finally(() => setLoading(false))
-  }, [status, dateFrom, dateTo])
+  }, [status, dateFrom, dateTo, page])
 
   useEffect(() => { load() }, [load])
+
+  // Troca de filtro volta pra primeira página.
+  function resetTo(setter: () => void) {
+    setter()
+    setPage(0)
+  }
+
+  const hasMore = items.length === PAGE_SIZE
 
   return (
     <div className="space-y-4">
@@ -52,7 +64,7 @@ export default function SalesHistoryPage() {
         <CardContent className="p-4 grid gap-3 sm:grid-cols-3">
           <div className="space-y-1.5">
             <Label className="text-xs">Status</Label>
-            <Select value={status} onValueChange={(v) => setStatus(v as SaleStatus | typeof ALL)}>
+            <Select value={status} onValueChange={(v) => resetTo(() => setStatus(v as SaleStatus | typeof ALL))}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value={ALL}>Todos</SelectItem>
@@ -63,11 +75,11 @@ export default function SalesHistoryPage() {
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs">De</Label>
-            <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+            <Input type="date" value={dateFrom} onChange={e => resetTo(() => setDateFrom(e.target.value))} />
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs">Até</Label>
-            <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+            <Input type="date" value={dateTo} onChange={e => resetTo(() => setDateTo(e.target.value))} />
           </div>
         </CardContent>
       </Card>
@@ -76,45 +88,63 @@ export default function SalesHistoryPage() {
 
       {loading ? (
         <div className="space-y-2">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-12 rounded-lg" />)}</div>
-      ) : items.length === 0 ? (
+      ) : items.length === 0 && page === 0 ? (
         <EmptyState
           icon={ReceiptText}
           title="Nenhuma venda"
           description="Nenhuma venda no período selecionado."
         />
       ) : (
-        <Card>
-          <CardContent className="p-0">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-xs text-muted-foreground text-left border-b">
-                  <th className="px-4 py-2 font-medium">Número</th>
-                  <th className="px-4 py-2 font-medium">Data</th>
-                  <th className="px-4 py-2 font-medium">Status</th>
-                  <th className="px-4 py-2 font-medium text-right">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map(s => (
-                  <tr
-                    key={s.id}
-                    className="border-b last:border-0 cursor-pointer hover:bg-muted/50"
-                    onClick={() => navigate(`/app/modules/pdv/sales/${s.id}`)}
-                  >
-                    <td className="px-4 py-2.5 font-mono">{s.number}</td>
-                    <td className="px-4 py-2.5">{fmtDateTime(s.created_at)}</td>
-                    <td className="px-4 py-2.5">
-                      {s.status === "cancelled"
-                        ? <Badge variant="outline" className="text-[10px]">cancelada</Badge>
-                        : <Badge variant="secondary" className="text-[10px]">concluída</Badge>}
-                    </td>
-                    <td className="px-4 py-2.5 text-right font-medium">{fmtMoney(s.total)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
+        <>
+          {items.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">Nenhuma venda nesta página.</p>
+          ) : (
+            <Card>
+              <CardContent className="p-0">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-xs text-muted-foreground text-left border-b">
+                      <th className="px-4 py-2 font-medium">Número</th>
+                      <th className="px-4 py-2 font-medium">Data</th>
+                      <th className="px-4 py-2 font-medium">Status</th>
+                      <th className="px-4 py-2 font-medium text-right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map(s => (
+                      <tr
+                        key={s.id}
+                        className="border-b last:border-0 cursor-pointer hover:bg-muted/50"
+                        onClick={() => navigate(`/app/modules/pdv/sales/${s.id}`)}
+                      >
+                        <td className="px-4 py-2.5 font-mono">{s.number}</td>
+                        <td className="px-4 py-2.5">{fmtDateTime(s.created_at)}</td>
+                        <td className="px-4 py-2.5">
+                          {s.status === "cancelled"
+                            ? <Badge variant="outline" className="text-[10px]">cancelada</Badge>
+                            : <Badge variant="secondary" className="text-[10px]">concluída</Badge>}
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-medium">{fmtMoney(s.total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
+          )}
+
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Página {page + 1}</span>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" disabled={page === 0 || loading} onClick={() => setPage(p => p - 1)}>
+                Anterior
+              </Button>
+              <Button variant="outline" size="sm" disabled={!hasMore || loading} onClick={() => setPage(p => p + 1)}>
+                Próxima
+              </Button>
+            </div>
+          </div>
+        </>
       )}
     </div>
   )

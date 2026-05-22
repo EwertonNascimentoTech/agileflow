@@ -1061,6 +1061,20 @@ async def _step_021_pdv(conn: AsyncConnection, schema: str) -> None:
     """))
 
 
+async def _step_022_pdv_sale_item_batch_serial(conn: AsyncConnection, schema: str) -> None:
+    """Adiciona batch_id/serial_id em pdv_sale_items (venda de lote/série no PDV)."""
+    if not await _table_exists(conn, schema, "pdv_sale_items"):
+        return
+    if not await _column_exists(conn, schema, "pdv_sale_items", "batch_id"):
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.pdv_sale_items ADD COLUMN batch_id UUID"
+        ))
+    if not await _column_exists(conn, schema, "pdv_sale_items", "serial_id"):
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.pdv_sale_items ADD COLUMN serial_id UUID"
+        ))
+
+
 # Lista ordenada de steps. Adicionar novos no final.
 STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("001_funnels", _step_001_funnels),
@@ -1084,6 +1098,7 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("019_reactivation", _step_019_reactivation),
     ("020_estoque", _step_020_estoque),
     ("021_pdv", _step_021_pdv),
+    ("022_pdv_sale_item_batch_serial", _step_022_pdv_sale_item_batch_serial),
 ]
 
 
