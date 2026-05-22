@@ -1,20 +1,12 @@
 import { NavLink, Outlet } from "react-router-dom"
-import { User as UserIcon, Users, ShieldCheck } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import { cn } from "@/lib/utils"
-
-type Tab = { to: string; icon: React.ElementType; label: string; adminOnly?: boolean }
-
-const tabs: Tab[] = [
-  { to: "/app/settings",       icon: UserIcon,    label: "Perfil" },
-  { to: "/app/settings/users", icon: Users,       label: "Usuários", adminOnly: true },
-  { to: "/app/settings/roles", icon: ShieldCheck, label: "Funções",  adminOnly: true },
-]
+import { settingsNav } from "@/modules/crm/admin/settingsNav"
 
 export default function SettingsLayout() {
   const { user } = useAuth()
   const isAdmin = user?.role === "company_admin" || user?.role === "super_admin"
-  const visible = tabs.filter(t => !t.adminOnly || isAdmin)
+  const visible = settingsNav.filter(t => !t.adminOnly || isAdmin)
 
   return (
     <div className="flex min-h-0 h-full flex-col gap-4">

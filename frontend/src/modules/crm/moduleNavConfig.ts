@@ -53,3 +53,12 @@ export function getActiveModuleSlug(pathname: string): string | null {
   const match = pathname.match(/^\/app\/modules\/([^/]+)/)
   return match ? match[1] : null
 }
+
+/**
+ * Rota padrão ao clicar num módulo no rail: 1º item do menu do módulo,
+ * com fallback para a raiz do módulo se ele não tiver config.
+ */
+export function defaultModuleRoute(slug: string): string {
+  const items = moduleNavConfig[slug]
+  return items?.[0]?.to ?? `/app/modules/${slug}`
+}

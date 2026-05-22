@@ -23,3 +23,5 @@ dist/
 .coverage
 htmlcov/
 .claude/worktrees/
+.claude/.claude/
+.claude/settings.local.json

@@ -17,7 +17,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { EmptyState } from "@/components/EmptyState"
+import { PageHeader } from "@/components/PageHeader"
 import CustomFieldsRenderer from "./CustomFieldsRenderer"
+
+const fmtBRL = (v: number) =>
+  new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v)
 
 function getApiError(err: unknown): string {
   const e = err as { response?: { data?: { detail?: unknown } } }
@@ -161,22 +165,20 @@ export default function ProductsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <h1 className="text-xl font-bold">Produtos</h1>
-          <p className="text-sm text-muted-foreground">
-            {loading ? "…" : `${items.length} produto${items.length !== 1 ? "s" : ""}`}
-          </p>
-        </div>
-        <Button
-          onClick={openCreate}
-          disabled={types.length === 0}
-          className="gap-1.5"
-          title={types.length === 0 ? "Cadastre um tipo primeiro" : undefined}
-        >
-          <Plus size={16} /> Novo produto
-        </Button>
-      </div>
+      <PageHeader
+        title="Produtos"
+        subtitle={loading ? "…" : `${items.length} produto${items.length !== 1 ? "s" : ""}`}
+        actions={
+          <Button
+            onClick={openCreate}
+            disabled={types.length === 0}
+            className="gap-1.5"
+            title={types.length === 0 ? "Cadastre um tipo primeiro" : undefined}
+          >
+            <Plus size={16} /> Novo produto
+          </Button>
+        }
+      />
 
       {types.length === 0 && (
         <Alert>
@@ -215,7 +217,7 @@ export default function ProductsPage() {
           {filtered.map(p => (
             <Card
               key={p.id}
-              className={`cursor-pointer hover:shadow-sm transition-shadow ${!p.is_active ? "opacity-60" : ""}`}
+              className={`cursor-pointer transition hover:border-primary/40 hover:shadow-md ${!p.is_active ? "opacity-60" : ""}`}
               onClick={() => navigate(`/app/modules/estoque/products/${p.id}`)}
             >
               <CardContent className="p-3 flex items-center justify-between gap-3">
@@ -229,7 +231,11 @@ export default function ProductsPage() {
                     SKU: {p.sku}{p.barcode ? ` · ${p.barcode}` : ""}
                   </p>
                 </div>
-                <div className="flex gap-1 shrink-0">
+                <div className="flex items-center gap-3 shrink-0">
+                  <div className="text-right">
+                    <p className="text-sm font-bold tracking-tight">{fmtBRL(p.sale_price)}</p>
+                    <p className="text-[11px] text-muted-foreground">custo {fmtBRL(p.cost_price)}</p>
+                  </div>
                   <Button size="icon" variant="ghost" className="h-7 w-7"
                     onClick={(e) => { e.stopPropagation(); openEdit(p) }}>
                     <Pencil size={13} />

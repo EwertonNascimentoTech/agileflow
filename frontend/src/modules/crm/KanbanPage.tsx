@@ -20,10 +20,10 @@ import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 
 const PRIORITY_COLORS: Record<Priority, string> = {
-  low:    "bg-slate-100 text-slate-600",
-  medium: "bg-blue-100 text-blue-600",
-  high:   "bg-orange-100 text-orange-700",
-  urgent: "bg-red-100 text-red-700",
+  low:    "bg-slate-500/15 text-slate-500",
+  medium: "bg-blue-500/15 text-blue-500",
+  high:   "bg-amber-500/15 text-amber-600",
+  urgent: "bg-rose-500/15 text-rose-500",
 }
 const PRIORITY_LABELS: Record<Priority, string> = {
   low: "Baixa", medium: "Normal", high: "Alta", urgent: "Urgente",
@@ -58,8 +58,8 @@ function AttendanceCard({
       {...attributes}
       onClick={() => navigate(`/app/modules/crm/attendances/${attendance.id}`)}
       className={cn(
-        "bg-background rounded-lg border p-3 space-y-2 cursor-grab active:cursor-grabbing select-none",
-        "hover:shadow-md transition-shadow",
+        "bg-card rounded-xl border border-border p-3 space-y-2 cursor-grab active:cursor-grabbing select-none",
+        "hover:border-primary/40 hover:shadow-md transition",
         isDragging && "opacity-50 rotate-1"
       )}
     >
@@ -73,7 +73,7 @@ function AttendanceCard({
       <p className="text-sm font-medium leading-snug line-clamp-2">{attendance.subject}</p>
 
       {attendance.value !== null && attendance.value !== undefined && (
-        <p className="text-sm font-semibold text-emerald-600">
+        <p className="text-base font-bold tracking-tight text-emerald-600">
           {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(attendance.value))}
         </p>
       )}
@@ -448,7 +448,7 @@ export default function KanbanPage() {
         onDragOver={onDragOver as never}
         onDragEnd={onDragEnd}
       >
-        <div className="flex gap-4 overflow-x-auto pb-4 h-full items-start">
+        <div className="scrollbar-thin flex gap-4 overflow-x-auto pb-4 h-full items-start">
           {statuses.map(status => (
             <KanbanColumn
               key={status.id}

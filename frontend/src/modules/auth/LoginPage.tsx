@@ -8,7 +8,6 @@ import { useAuth } from "@/contexts/AuthContext"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
 const schema = z.object({
@@ -53,96 +52,123 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-muted/40 p-4">
-      <div className="w-full max-w-sm space-y-6">
-        {/* Logo / marca */}
-        <div className="text-center space-y-1">
-          <div className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground text-xl font-bold">
-            K
+    <div className="grid min-h-screen grid-cols-1 lg:grid-cols-2">
+      {/* Formulário */}
+      <div className="flex items-center justify-center p-8">
+        <div className="w-full max-w-sm">
+          <div className="mb-8 flex items-center gap-2">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-lg font-bold text-primary-foreground">
+              K
+            </span>
+            <span className="text-xl font-bold tracking-tight">Kore</span>
           </div>
-          <h1 className="text-2xl font-bold tracking-tight">Kore</h1>
-          <p className="text-sm text-muted-foreground">Plataforma de gestão inteligente</p>
-        </div>
 
-        <Card>
-          <CardHeader className="space-y-1 pb-4">
-            <CardTitle className="text-xl">Entrar</CardTitle>
-            <CardDescription>Acesse sua conta para continuar</CardDescription>
-          </CardHeader>
+          <h1 className="text-2xl font-bold tracking-tight">Bem-vindo de volta</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Acesse a plataforma da sua empresa.
+          </p>
 
-          <CardContent>
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
-              {serverError && (
-                <Alert variant="destructive">
-                  <AlertDescription>{serverError}</AlertDescription>
-                </Alert>
+          <form onSubmit={handleSubmit(onSubmit)} className="mt-8 space-y-4" noValidate>
+            {serverError && (
+              <Alert variant="destructive">
+                <AlertDescription>{serverError}</AlertDescription>
+              </Alert>
+            )}
+
+            <div className="space-y-1.5">
+              <Label htmlFor="email">E-mail</Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="seu@email.com"
+                autoComplete="email"
+                autoFocus
+                {...register("email")}
+                aria-invalid={!!errors.email}
+              />
+              {errors.email && (
+                <p className="text-xs text-destructive">{errors.email.message}</p>
               )}
+            </div>
 
-              <div className="space-y-1.5">
-                <Label htmlFor="email">E-mail</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="seu@email.com"
-                  autoComplete="email"
-                  autoFocus
-                  {...register("email")}
-                  aria-invalid={!!errors.email}
-                />
-                {errors.email && (
-                  <p className="text-xs text-destructive">{errors.email.message}</p>
-                )}
-              </div>
-
-              <div className="space-y-1.5">
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
                 <Label htmlFor="password">Senha</Label>
-                <div className="relative">
-                  <Input
-                    id="password"
-                    type={showPassword ? "text" : "password"}
-                    placeholder="••••••••"
-                    autoComplete="current-password"
-                    className="pr-10"
-                    {...register("password")}
-                    aria-invalid={!!errors.password}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                    tabIndex={-1}
-                    aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
-                  >
-                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
-                </div>
-                {errors.password && (
-                  <p className="text-xs text-destructive">{errors.password.message}</p>
-                )}
-              </div>
-
-              <Button type="submit" className="w-full" disabled={isSubmitting}>
-                {isSubmitting ? (
-                  <>
-                    <Loader2 size={16} className="animate-spin" />
-                    Entrando…
-                  </>
-                ) : (
-                  "Entrar"
-                )}
-              </Button>
-              <div className="text-center">
-                <a href="/forgot-password" className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline">
-                  Esqueceu sua senha?
+                <a
+                  href="/forgot-password"
+                  className="text-xs font-medium text-primary hover:underline"
+                >
+                  Esqueci a senha
                 </a>
               </div>
-            </form>
-          </CardContent>
-        </Card>
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  placeholder="••••••••"
+                  autoComplete="current-password"
+                  className="pr-10"
+                  {...register("password")}
+                  aria-invalid={!!errors.password}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  tabIndex={-1}
+                  aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+              {errors.password && (
+                <p className="text-xs text-destructive">{errors.password.message}</p>
+              )}
+            </div>
 
-        <p className="text-center text-xs text-muted-foreground">
-          © {new Date().getFullYear()} Kore. Todos os direitos reservados.
-        </p>
+            <Button type="submit" size="lg" className="w-full justify-center" disabled={isSubmitting}>
+              {isSubmitting ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  Entrando…
+                </>
+              ) : (
+                "Entrar"
+              )}
+            </Button>
+          </form>
+
+          <p className="mt-6 text-center text-xs text-muted-foreground">
+            Plataforma multi-tenant — sua empresa, seus dados.
+          </p>
+        </div>
+      </div>
+
+      {/* Painel visual */}
+      <div className="relative hidden overflow-hidden lg:block">
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              "radial-gradient(120% 120% at 100% 0%, hsl(256 72% 56%) 0%, hsl(256 72% 40%) 40%, hsl(224 40% 14%) 100%)",
+          }}
+        />
+        <div
+          className="absolute inset-0 opacity-20"
+          style={{
+            backgroundImage:
+              "linear-gradient(hsl(0 0% 100% / .15) 1px, transparent 1px), linear-gradient(90deg, hsl(0 0% 100% / .15) 1px, transparent 1px)",
+            backgroundSize: "32px 32px",
+          }}
+        />
+        <div className="relative flex h-full flex-col justify-end p-12 text-white">
+          <h2 className="max-w-md text-3xl font-bold leading-tight">
+            Toda a operação da sua empresa em um só lugar.
+          </h2>
+          <p className="mt-3 max-w-md text-white/70">
+            CRM, estoque, PDV e propostas — módulos que conversam entre si.
+          </p>
+        </div>
       </div>
     </div>
   )
