@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom"
+import { NavLink, useLocation } from "react-router-dom"
 import type { ElementType } from "react"
 import { LogOut } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -32,6 +32,20 @@ export function ContextualSidebar({
   onLogout: () => void
   onNavigate?: () => void
 }) {
+  const location = useLocation()
+
+  function isPathActive(to: string, end?: boolean): boolean {
+    const path = location.pathname
+    const matches = end ? path === to : path === to || path.startsWith(to + "/")
+    if (!matches) return false
+    // Se houver outra seção com prefixo mais específico que também combine, esta não fica ativa.
+    return !sections.some((other) => {
+      if (other.to === to) return false
+      if (!other.to.startsWith(to + "/")) return false
+      return path === other.to || path.startsWith(other.to + "/")
+    })
+  }
+
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-card">
       {/* Cabeçalho do contexto */}
@@ -47,25 +61,26 @@ export function ContextualSidebar({
 
       {/* Seções */}
       <nav className="scrollbar-thin flex-1 space-y-0.5 overflow-y-auto px-3 py-2">
-        {sections.map(({ to, icon: ItemIcon, label, end }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={end}
-            onClick={onNavigate}
-            className={({ isActive }) =>
-              cn(
+        {sections.map(({ to, icon: ItemIcon, label, end }) => {
+          const active = isPathActive(to, end)
+          return (
+            <NavLink
+              key={to}
+              to={to}
+              end={end}
+              onClick={onNavigate}
+              className={cn(
                 "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition",
-                isActive
+                active
                   ? "bg-primary/15 font-medium text-primary"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              )
-            }
-          >
-            <ItemIcon size={16} />
-            {label}
-          </NavLink>
-        ))}
+              )}
+            >
+              <ItemIcon size={16} />
+              {label}
+            </NavLink>
+          )
+        })}
       </nav>
 
       {/* Card do usuário */}

@@ -5,10 +5,10 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import {
   ArrowLeft, Building2, Loader2,
-  CalendarDays, Package, UserPlus, Pencil, Trash2,
+  CalendarDays, UserPlus, Pencil, Trash2,
 } from "lucide-react"
-import { tenantsApi, plansApi, modulesApi, usersApi } from "@/api/superAdmin"
-import type { Tenant, Plan, ModuleSlug, Module, User } from "@/types"
+import { tenantsApi, modulesApi, usersApi } from "@/api/superAdmin"
+import type { Tenant, ModuleSlug, Module, User } from "@/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -42,7 +42,6 @@ export default function TenantDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [tenant, setTenant] = useState<Tenant | null>(null)
-  const [plans, setPlans] = useState<Plan[]>([])
   const [registry, setRegistry] = useState<Module[]>([])
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
@@ -50,7 +49,6 @@ export default function TenantDetailPage() {
   const [adminOpen, setAdminOpen] = useState(false)
   const [adminError, setAdminError] = useState("")
   const [adminSuccess, setAdminSuccess] = useState(false)
-  const [savingPlan, setSavingPlan] = useState(false)
 
   const { register, handleSubmit, reset, watch, formState: { errors, isSubmitting } } = useForm<AdminForm>({
     resolver: zodResolver(adminSchema),
@@ -60,11 +58,10 @@ export default function TenantDetailPage() {
     if (!id) return
     Promise.all([
       tenantsApi.get(id),
-      plansApi.list(false),
       modulesApi.list(false),
       tenantsApi.listUsers(id).catch(() => [] as User[]),
     ])
-      .then(([t, p, m, u]) => { setTenant(t); setPlans(p); setRegistry(m); setUsers(u) })
+      .then(([t, m, u]) => { setTenant(t); setRegistry(m); setUsers(u) })
       .finally(() => setLoading(false))
   }, [id])
 
@@ -152,18 +149,6 @@ export default function TenantDetailPage() {
     }
   }
 
-  async function handleChangePlan(planId: string) {
-    if (!tenant) return
-    setSavingPlan(true)
-    try {
-      const newPlanId = planId === "__none__" ? null : planId
-      const updated = await tenantsApi.update(tenant.id, { plan_id: newPlanId })
-      setTenant(updated)
-    } finally {
-      setSavingPlan(false)
-    }
-  }
-
   async function handleToggleActive() {
     if (!tenant) return
     const updated = await tenantsApi.update(tenant.id, { is_active: !tenant.is_active })
@@ -197,8 +182,6 @@ export default function TenantDetailPage() {
   if (!tenant) {
     return <div className="text-center py-16 text-muted-foreground">Empresa não encontrada.</div>
   }
-
-  const currentPlan = plans.find((p) => p.id === tenant.plan_id)
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -250,33 +233,6 @@ export default function TenantDetailPage() {
                     {new Date(tenant.created_at).toLocaleDateString("pt-BR")}
                   </p>
                 </div>
-              </div>
-
-              {/* Plano */}
-              <div className="space-y-1.5 pt-2 border-t">
-                <Label className="flex items-center gap-1.5">
-                  <Package size={13} /> Plano
-                  {savingPlan && <Loader2 size={12} className="animate-spin ml-1" />}
-                </Label>
-                <Select
-                  defaultValue={tenant.plan_id ?? "__none__"}
-                  onValueChange={handleChangePlan}
-                >
-                  <SelectTrigger className="max-w-xs">
-                    <SelectValue placeholder="Sem plano" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">Sem plano</SelectItem>
-                    {plans.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {currentPlan && (
-                  <p className="text-xs text-muted-foreground">
-                    {currentPlan.max_users} usuários · R$ {Number(currentPlan.price).toFixed(2)}/mês
-                  </p>
-                )}
               </div>
 
               {/* Status */}

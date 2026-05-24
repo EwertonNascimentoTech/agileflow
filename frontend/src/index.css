@@ -3,55 +3,114 @@
 @tailwind utilities;
 
 @layer base {
+  /*
+   * Design system — paleta institucional
+   *   Brand:  #001834  #014898  #164194  #112A59
+   *   Ações:  #6AB42F  #008BD2  #E84E0F  #66C1BF
+   *   Fundos: #FFFFFF  #F8F8F8  #F2F2F2  #E8E8E8
+   *   Texto:  #333333  #000000  #FFFFFF
+   */
   :root {
-    --background: 240 20% 99%;
-    --foreground: 224 32% 12%;
-    --card: 0 0% 100%;
-    --card-foreground: 224 32% 12%;
+    /* Fundos & texto */
+    --background: 0 0% 100%;          /* #FFFFFF */
+    --foreground: 0 0% 20%;           /* #333333 */
+    --card: 0 0% 100%;                /* #FFFFFF */
+    --card-foreground: 0 0% 20%;
     --popover: 0 0% 100%;
-    --popover-foreground: 224 32% 12%;
-    --primary: 256 72% 56%;
+    --popover-foreground: 0 0% 20%;
+
+    /* Brand — primária e variações */
+    --primary: 213 99% 30%;           /* #014898 */
     --primary-foreground: 0 0% 100%;
-    --secondary: 240 16% 95%;
-    --secondary-foreground: 224 30% 18%;
-    --muted: 240 16% 96%;
-    --muted-foreground: 224 10% 46%;
-    --accent: 256 60% 96%;
-    --accent-foreground: 256 50% 32%;
-    --destructive: 0 72% 56%;
+    --brand-900: 212 100% 10%;        /* #001834 */
+    --brand-800: 220 67% 21%;         /* #112A59 */
+    --brand-700: 220 74% 33%;         /* #164194 */
+    --brand-500: 213 99% 30%;         /* #014898 */
+
+    /* Superfícies neutras */
+    --secondary: 0 0% 95%;            /* #F2F2F2 */
+    --secondary-foreground: 0 0% 20%;
+    --muted: 0 0% 97%;                /* #F8F8F8 */
+    --muted-foreground: 0 0% 42%;
+
+    /* Accent (ação informativa) — azul ciano */
+    --accent: 200 100% 41%;           /* #008BD2 */
+    --accent-foreground: 0 0% 100%;
+
+    /* Estados de ação */
+    --success: 95 59% 45%;            /* #6AB42F */
+    --success-foreground: 0 0% 100%;
+    --warning: 18 88% 49%;            /* #E84E0F */
+    --warning-foreground: 0 0% 100%;
+    --info: 200 100% 41%;             /* #008BD2 */
+    --info-foreground: 0 0% 100%;
+    --highlight: 178 41% 58%;         /* #66C1BF */
+    --highlight-foreground: 0 0% 20%;
+
+    /* Destrutivo */
+    --destructive: 18 88% 49%;        /* #E84E0F */
     --destructive-foreground: 0 0% 100%;
-    --border: 240 16% 90%;
-    --input: 240 16% 90%;
-    --ring: 256 72% 56%;
+
+    /* Bordas / inputs / foco */
+    --border: 0 0% 91%;               /* #E8E8E8 */
+    --input: 0 0% 91%;
+    --ring: 213 99% 30%;              /* #014898 */
     --radius: 0.75rem;
 
-    --rail: 256 30% 14%;
-    --rail-foreground: 256 20% 78%;
+    /* Rail (coluna lateral de módulos) — brand-900 */
+    --rail: 212 100% 10%;             /* #001834 */
+    --rail-foreground: 0 0% 100%;
   }
 
   .dark {
-    --background: 240 16% 8%;
-    --foreground: 240 22% 96%;
-    --card: 240 14% 11%;
-    --card-foreground: 240 22% 96%;
-    --popover: 240 14% 11%;
-    --popover-foreground: 240 22% 96%;
-    --primary: 256 84% 70%;
-    --primary-foreground: 256 40% 12%;
-    --secondary: 240 12% 16%;
-    --secondary-foreground: 240 20% 92%;
-    --muted: 240 12% 15%;
-    --muted-foreground: 240 10% 62%;
-    --accent: 256 30% 22%;
-    --accent-foreground: 256 60% 88%;
-    --destructive: 0 64% 52%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 240 10% 20%;
-    --input: 240 10% 20%;
-    --ring: 256 84% 70%;
+    /* Fundo institucional escuro */
+    --background: 212 100% 10%;       /* #001834 */
+    --foreground: 0 0% 100%;
+    --card: 220 67% 21%;              /* #112A59 */
+    --card-foreground: 0 0% 100%;
+    --popover: 220 67% 21%;
+    --popover-foreground: 0 0% 100%;
 
-    --rail: 240 18% 6%;
-    --rail-foreground: 240 14% 70%;
+    /* Brand — primária mais brilhante para contraste */
+    --primary: 200 100% 41%;          /* #008BD2 */
+    --primary-foreground: 0 0% 100%;
+    --brand-900: 212 100% 10%;
+    --brand-800: 220 67% 21%;
+    --brand-700: 220 74% 33%;
+    --brand-500: 213 99% 30%;
+
+    /* Superfícies */
+    --secondary: 220 67% 18%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 220 50% 16%;
+    --muted-foreground: 0 0% 78%;
+
+    /* Accent */
+    --accent: 200 100% 41%;
+    --accent-foreground: 0 0% 100%;
+
+    /* Estados */
+    --success: 95 59% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 18 88% 55%;
+    --warning-foreground: 0 0% 100%;
+    --info: 200 100% 41%;
+    --info-foreground: 0 0% 100%;
+    --highlight: 178 41% 58%;
+    --highlight-foreground: 212 100% 10%;
+
+    /* Destrutivo */
+    --destructive: 18 88% 49%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Bordas / inputs / foco */
+    --border: 220 50% 25%;
+    --input: 220 50% 25%;
+    --ring: 200 100% 41%;
+
+    /* Rail */
+    --rail: 212 100% 7%;
+    --rail-foreground: 0 0% 100%;
   }
 }
 

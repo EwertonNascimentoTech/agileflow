@@ -1,6 +1,5 @@
 import api from "./client"
 import type {
-  Plan, PlanCreate, PlanUpdate,
   Tenant, TenantSummary, TenantCreate, TenantUpdate,
   TenantModule, ModuleSlug, User,
   Module, ModuleCreate, ModuleUpdate,
@@ -23,22 +22,6 @@ export const modulesApi = {
 
   remove: (id: string) =>
     api.delete<void>(`/super-admin/modules/${id}`).then(r => r.data),
-}
-
-// ── Plans ─────────────────────────────────────
-
-export const plansApi = {
-  list: (activeOnly = false) =>
-    api.get<Plan[]>("/super-admin/plans", { params: { active_only: activeOnly } }).then(r => r.data),
-
-  get: (id: string) =>
-    api.get<Plan>(`/super-admin/plans/${id}`).then(r => r.data),
-
-  create: (data: PlanCreate) =>
-    api.post<Plan>("/super-admin/plans", data).then(r => r.data),
-
-  update: (id: string, data: PlanUpdate) =>
-    api.patch<Plan>(`/super-admin/plans/${id}`, data).then(r => r.data),
 }
 
 // ── Tenants ───────────────────────────────────

@@ -24,9 +24,9 @@ export function KpiCard({
 }) {
   const deltaClasses =
     deltaTone === "up"
-      ? "bg-emerald-500/15 text-emerald-500"
+      ? "bg-success/15 text-success"
       : deltaTone === "down"
-        ? "bg-rose-500/15 text-rose-500"
+        ? "bg-warning/15 text-warning"
         : "bg-muted text-muted-foreground"
 
   return (

@@ -17,8 +17,10 @@ from app.modules.crm.api.routes import router as crm_router
 from app.modules.crm.api.proposals_routes import router as crm_proposals_router
 from app.modules.crm.api.proposals_public_routes import router as crm_proposals_public_router
 from app.modules.crm.api.admin_routes import router as crm_admin_router
+from app.modules.projetos.api.routes import router as projetos_router
 from app.modules.estoque.api.routes import router as estoque_router
 from app.modules.pdv.api.routes import router as pdv_router
+from app.modules.teamops.api.routes import router as teamops_router
 
 
 @asynccontextmanager
@@ -136,13 +138,16 @@ async def _seed_known_modules() -> None:
     from app.core.database import AsyncSessionLocal
     from app.modules.super_admin.models import Module
 
+    # Cores alinhadas ao design system institucional:
+    #   Brand:  #001834 #014898 #164194 #112A59
+    #   Ações:  #6AB42F #008BD2 #E84E0F #66C1BF
     KNOWN_MODULES = [
         {
             "slug": "crm",
             "name": "CRM",
             "description": "CRM completo: atendimentos, kanban, propostas, contratos, automações e relatórios.",
             "icon": "Briefcase",
-            "color": "#2563EB",
+            "color": "#014898",
             "backend_path": "backend/app/modules/crm",
             "frontend_path": "frontend/src/modules/crm",
         },
@@ -151,18 +156,36 @@ async def _seed_known_modules() -> None:
             "name": "Estoque",
             "description": "Catálogo de produtos, depósitos, fornecedores, lotes, números de série e movimentações.",
             "icon": "Package",
-            "color": "#F59E0B",
+            "color": "#E84E0F",
             "backend_path": "backend/app/modules/estoque",
             "frontend_path": "frontend/src/modules/estoque",
+        },
+        {
+            "slug": "projetos",
+            "name": "Projetos",
+            "description": "Gestão de projetos com board kanban, tarefas, responsáveis, prazos e acompanhamento.",
+            "icon": "FolderKanban",
+            "color": "#164194",
+            "backend_path": "backend/app/modules/projetos",
+            "frontend_path": "frontend/src/modules/projetos",
         },
         {
             "slug": "pdv",
             "name": "PDV",
             "description": "Ponto de venda: sessão de caixa, vendas com carrinho, recibos e relatórios.",
             "icon": "ShoppingCart",
-            "color": "#10B981",
+            "color": "#6AB42F",
             "backend_path": "backend/app/modules/pdv",
             "frontend_path": "frontend/src/modules/pdv",
+        },
+        {
+            "slug": "teamops",
+            "name": "Gestão de Times e Capacidade",
+            "description": "Gestão de pessoas, áreas, POs, organograma, stacks, mapa de competências e ausências.",
+            "icon": "Users",
+            "color": "#008BD2",
+            "backend_path": "backend/app/modules/teamops",
+            "frontend_path": "frontend/src/modules/teamops",
         },
     ]
 
@@ -170,8 +193,15 @@ async def _seed_known_modules() -> None:
         await db.execute(_text("SET search_path TO public"))
         for m in KNOWN_MODULES:
             result = await db.execute(select(Module).where(Module.slug == m["slug"]))
-            if result.scalar_one_or_none() is None:
+            existing = result.scalar_one_or_none()
+            if existing is None:
                 db.add(Module(**m, is_active=True))
+            else:
+                # Mantém visual alinhado ao design system institucional (cor + ícone + nome + descrição).
+                existing.color = m["color"]
+                existing.icon = m["icon"]
+                existing.name = m["name"]
+                existing.description = m["description"]
         await db.commit()
 
 
@@ -201,8 +231,10 @@ app.include_router(crm_router, prefix="/api/v1")
 app.include_router(crm_proposals_router, prefix="/api/v1")
 app.include_router(crm_proposals_public_router, prefix="/api/v1")
 app.include_router(crm_admin_router, prefix="/api/v1")
+app.include_router(projetos_router, prefix="/api/v1")
 app.include_router(estoque_router, prefix="/api/v1")
 app.include_router(pdv_router, prefix="/api/v1")
+app.include_router(teamops_router, prefix="/api/v1")
 
 
 @app.get("/health")

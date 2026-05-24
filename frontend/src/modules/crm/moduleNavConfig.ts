@@ -8,6 +8,9 @@ import {
   FileText, FileSignature,
   Package, Boxes, ArrowLeftRight, Layers, BadgeCheck,
   ShoppingCart, Wallet, ReceiptText,
+  FolderKanban,
+  Network, Code2, CalendarOff,
+  CalendarRange,
 } from "lucide-react"
 import type { ElementType } from "react"
 
@@ -42,6 +45,20 @@ export const moduleNavConfig: Record<string, ModuleNavItem[]> = {
     { to: "/app/modules/pdv/sales",     icon: ReceiptText,  label: "Vendas" },
     { to: "/app/modules/pdv/dashboard", icon: BarChart3,    label: "Dashboard" },
     { to: "/app/modules/pdv/config",    icon: Settings2,    label: "Configurações" },
+  ],
+  projetos: [
+    { to: "/app/modules/projetos", icon: FolderKanban, label: "Kanban" },
+    { to: "/app/modules/projetos/cronograma", icon: CalendarRange, label: "Cronograma" },
+    { to: "/app/modules/projetos/relatorios", icon: BarChart3, label: "Relatórios" },
+    { to: "/app/modules/projetos/config", icon: Settings2, label: "Configurações" },
+  ],
+  teamops: [
+    { to: "/app/modules/teamops",          icon: BarChart3,   label: "Dashboard" },
+    { to: "/app/modules/teamops/org",      icon: Network,     label: "Organograma" },
+    { to: "/app/modules/teamops/people",   icon: Users,       label: "Pessoas" },
+    { to: "/app/modules/teamops/stacks",   icon: Code2,       label: "Stacks" },
+    { to: "/app/modules/teamops/absences", icon: CalendarOff, label: "Ausências" },
+    { to: "/app/modules/teamops/config",   icon: Settings2,   label: "Configurações" },
   ],
 }
 

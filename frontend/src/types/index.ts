@@ -95,36 +95,6 @@ export interface LoginRequest {
   password: string
 }
 
-// ── Plans ──────────────────────────────────────
-
-export interface Plan {
-  id: string
-  name: string
-  description: string | null
-  price: number
-  max_users: number
-  is_active: boolean
-  modules: ModuleSlug[]
-  created_at: string
-}
-
-export interface PlanCreate {
-  name: string
-  description?: string
-  price: number
-  max_users: number
-  modules: ModuleSlug[]
-}
-
-export interface PlanUpdate {
-  name?: string
-  description?: string
-  price?: number
-  max_users?: number
-  is_active?: boolean
-  modules?: ModuleSlug[]
-}
-
 // ── Tenants ────────────────────────────────────
 
 export interface TenantModule {
@@ -138,7 +108,6 @@ export interface TenantSummary {
   name: string
   slug: string
   is_active: boolean
-  plan_id: string | null
   created_at: string
 }
 
@@ -147,9 +116,7 @@ export interface Tenant {
   name: string
   slug: string
   schema_name: string
-  plan_id: string | null
   is_active: boolean
-  plan_expires_at: string | null
   active_modules: TenantModule[]
   created_at: string
 }
@@ -157,14 +124,10 @@ export interface Tenant {
 export interface TenantCreate {
   name: string
   slug: string
-  plan_id?: string
-  plan_expires_at?: string
 }
 
 export interface TenantUpdate {
   name?: string
-  plan_id?: string | null
-  plan_expires_at?: string | null
   is_active?: boolean
 }
 

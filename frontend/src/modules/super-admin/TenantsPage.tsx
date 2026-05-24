@@ -4,8 +4,8 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { Building2, Plus, Search, ChevronRight, Loader2 } from "lucide-react"
-import { tenantsApi, plansApi } from "@/api/superAdmin"
-import type { TenantSummary, Plan } from "@/types"
+import { tenantsApi } from "@/api/superAdmin"
+import type { TenantSummary } from "@/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -16,17 +16,12 @@ import {
   Dialog, DialogContent, DialogHeader,
   DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
-import {
-  Select, SelectContent, SelectItem,
-  SelectTrigger, SelectValue,
-} from "@/components/ui/select"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { EmptyState } from "@/components/EmptyState"
 
 const schema = z.object({
   name: z.string().min(2, "Mínimo 2 caracteres"),
   slug: z.string().min(2).regex(/^[a-z0-9-]+$/, "Apenas letras minúsculas, números e hífens"),
-  plan_id: z.string().optional(),
 })
 type FormData = z.infer<typeof schema>
 
@@ -41,7 +36,6 @@ function getApiError(err: unknown): string {
 export default function TenantsPage() {
   const navigate = useNavigate()
   const [tenants, setTenants] = useState<TenantSummary[]>([])
-  const [plans, setPlans] = useState<Plan[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
   const [open, setOpen] = useState(false)
@@ -52,8 +46,8 @@ export default function TenantsPage() {
   })
 
   useEffect(() => {
-    Promise.all([tenantsApi.list({ limit: 200 }), plansApi.list(false)])
-      .then(([t, p]) => { setTenants(t); setPlans(p) })
+    tenantsApi.list({ limit: 200 })
+      .then((t) => { setTenants(t) })
       .finally(() => setLoading(false))
   }, [])
 
@@ -69,7 +63,6 @@ export default function TenantsPage() {
       const tenant = await tenantsApi.create({
         name: data.name,
         slug: data.slug,
-        plan_id: data.plan_id || undefined,
       })
       setTenants((prev) => [{ ...tenant, active_modules: undefined } as unknown as TenantSummary, ...prev])
       reset()
@@ -122,7 +115,6 @@ export default function TenantsPage() {
       ) : (
         <div className="space-y-2">
           {filtered.map((tenant) => {
-            const plan = plans.find((p) => p.id === tenant.plan_id)
             return (
               <Card
                 key={tenant.id}
@@ -138,9 +130,6 @@ export default function TenantsPage() {
                     <p className="text-xs text-muted-foreground">{tenant.slug}</p>
                   </div>
                   <div className="hidden sm:flex items-center gap-2">
-                    {plan && (
-                      <Badge variant="secondary" className="text-xs">{plan.name}</Badge>
-                    )}
                     <Badge variant={tenant.is_active ? "success" : "destructive"}>
                       {tenant.is_active ? "Ativo" : "Inativo"}
                     </Badge>
@@ -185,20 +174,6 @@ export default function TenantsPage() {
               />
               <p className="text-xs text-muted-foreground">Identificador único — letras minúsculas, números e hífens.</p>
               {errors.slug && <p className="text-xs text-destructive">{errors.slug.message}</p>}
-            </div>
-
-            <div className="space-y-1.5">
-              <Label>Plano <span className="text-muted-foreground">(opcional)</span></Label>
-              <Select onValueChange={(v) => setValue("plan_id", v)}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecionar plano…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {plans.filter(p => p.is_active).map((p) => (
-                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
 
             <DialogFooter>

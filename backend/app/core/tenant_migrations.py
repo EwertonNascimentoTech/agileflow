@@ -1075,6 +1075,884 @@ async def _step_022_pdv_sale_item_batch_serial(conn: AsyncConnection, schema: st
         ))
 
 
+async def _step_023_projetos(conn: AsyncConnection, schema: str) -> None:
+    """Cria tabelas do módulo Projetos (MVP kanban)."""
+    if not await _table_exists(conn, schema, "project_projects"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_projects (
+                id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name        VARCHAR(200) NOT NULL,
+                description TEXT,
+                owner_id    UUID,
+                start_date  TIMESTAMP,
+                due_date    TIMESTAMP,
+                is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at  TIMESTAMP DEFAULT now(),
+                updated_at  TIMESTAMP DEFAULT now()
+            )
+        """))
+
+    if not await _table_exists(conn, schema, "project_status_configs"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_status_configs (
+                id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                project_id UUID NOT NULL REFERENCES {schema}.project_projects(id) ON DELETE CASCADE,
+                name       VARCHAR(100) NOT NULL,
+                color      VARCHAR(7) NOT NULL DEFAULT '#6B7280',
+                "order"    INTEGER NOT NULL DEFAULT 0,
+                is_initial BOOLEAN NOT NULL DEFAULT FALSE,
+                is_final   BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT now(),
+                updated_at TIMESTAMP DEFAULT now(),
+                UNIQUE(project_id, name)
+            )
+        """))
+
+    if not await _table_exists(conn, schema, "project_tasks"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_tasks (
+                id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                project_id  UUID NOT NULL REFERENCES {schema}.project_projects(id) ON DELETE CASCADE,
+                status_id   UUID NOT NULL REFERENCES {schema}.project_status_configs(id) ON DELETE RESTRICT,
+                title       VARCHAR(200) NOT NULL,
+                description TEXT,
+                assigned_to UUID,
+                due_date    TIMESTAMP,
+                priority    VARCHAR(20) NOT NULL DEFAULT 'medium',
+                "order"     INTEGER NOT NULL DEFAULT 0,
+                created_by  UUID,
+                completed_at TIMESTAMP,
+                created_at  TIMESTAMP DEFAULT now(),
+                updated_at  TIMESTAMP DEFAULT now()
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_project_tasks_project ON {schema}.project_tasks(project_id, status_id)"
+        ))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_project_tasks_assigned ON {schema}.project_tasks(assigned_to)"
+        ))
+
+    if not await _table_exists(conn, schema, "project_task_comments"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_task_comments (
+                id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                task_id    UUID NOT NULL REFERENCES {schema}.project_tasks(id) ON DELETE CASCADE,
+                author_id  UUID,
+                content    TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT now()
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_project_task_comments_task ON {schema}.project_task_comments(task_id, created_at)"
+        ))
+
+    if not await _table_exists(conn, schema, "project_members"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_members (
+                id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                project_id UUID NOT NULL REFERENCES {schema}.project_projects(id) ON DELETE CASCADE,
+                user_id    UUID NOT NULL,
+                role       VARCHAR(30) NOT NULL DEFAULT 'member',
+                created_at TIMESTAMP DEFAULT now(),
+                UNIQUE(project_id, user_id)
+            )
+        """))
+
+
+async def _step_024_projetos_funnels(conn: AsyncConnection, schema: str) -> None:
+    """Adiciona suporte a múltiplos funis no módulo de Projetos."""
+    if not await _table_exists(conn, schema, "project_projects"):
+        return
+
+    if not await _table_exists(conn, schema, "project_funnels"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_funnels (
+                id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                project_id  UUID NOT NULL REFERENCES {schema}.project_projects(id) ON DELETE CASCADE,
+                name        VARCHAR(120) NOT NULL,
+                description TEXT,
+                color       VARCHAR(7) NOT NULL DEFAULT '#7C3AED',
+                "order"     INTEGER NOT NULL DEFAULT 0,
+                is_default  BOOLEAN NOT NULL DEFAULT FALSE,
+                is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at  TIMESTAMP DEFAULT now(),
+                updated_at  TIMESTAMP DEFAULT now(),
+                UNIQUE(project_id, name)
+            )
+        """))
+
+    if await _table_exists(conn, schema, "project_status_configs") and not await _column_exists(conn, schema, "project_status_configs", "funnel_id"):
+        await conn.execute(text(f"ALTER TABLE {schema}.project_status_configs ADD COLUMN funnel_id UUID"))
+
+    if await _table_exists(conn, schema, "project_status_configs"):
+        await conn.execute(text(f"""
+            INSERT INTO {schema}.project_funnels (project_id, name, description, color, "order", is_default, is_active)
+            SELECT p.id, 'Padrão', 'Funil padrão do projeto.', '#7C3AED', 0, TRUE, TRUE
+            FROM {schema}.project_projects p
+            WHERE NOT EXISTS (
+                SELECT 1 FROM {schema}.project_funnels f WHERE f.project_id = p.id
+            )
+        """))
+        await conn.execute(text(f"""
+            UPDATE {schema}.project_status_configs s
+               SET funnel_id = f.id
+              FROM {schema}.project_funnels f
+             WHERE s.project_id = f.project_id
+               AND f.is_default = TRUE
+               AND s.funnel_id IS NULL
+        """))
+        await conn.execute(text(f"""
+            ALTER TABLE {schema}.project_status_configs
+            ALTER COLUMN funnel_id SET NOT NULL
+        """))
+        fk_exists = await conn.execute(text("""
+            SELECT 1 FROM information_schema.table_constraints
+            WHERE table_schema = :schema
+              AND table_name = 'project_status_configs'
+              AND constraint_name = 'project_status_configs_funnel_id_fkey'
+        """), {"schema": schema})
+        if fk_exists.scalar() is None:
+            await conn.execute(text(f"""
+                ALTER TABLE {schema}.project_status_configs
+                ADD CONSTRAINT project_status_configs_funnel_id_fkey
+                FOREIGN KEY (funnel_id) REFERENCES {schema}.project_funnels(id) ON DELETE CASCADE
+            """))
+        await conn.execute(text(f"""
+            ALTER TABLE {schema}.project_status_configs
+            DROP CONSTRAINT IF EXISTS project_status_configs_project_id_name_key
+        """))
+        uq_exists = await conn.execute(text("""
+            SELECT 1 FROM information_schema.table_constraints
+            WHERE table_schema = :schema
+              AND table_name = 'project_status_configs'
+              AND constraint_name = 'uq_project_status_funnel_name'
+        """), {"schema": schema})
+        if uq_exists.scalar() is None:
+            await conn.execute(text(f"""
+                ALTER TABLE {schema}.project_status_configs
+                ADD CONSTRAINT uq_project_status_funnel_name UNIQUE (funnel_id, name)
+            """))
+
+
+async def _step_025_projetos_status_active(conn: AsyncConnection, schema: str) -> None:
+    """Adiciona is_active nas colunas de status do módulo Projetos."""
+    if not await _table_exists(conn, schema, "project_status_configs"):
+        return
+    if not await _column_exists(conn, schema, "project_status_configs", "is_active"):
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.project_status_configs "
+            f"ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE"
+        ))
+
+
+async def _step_026_projetos_demand_types(conn: AsyncConnection, schema: str) -> None:
+    """Cria estruturas de tipos de demanda e formulários por sessão no Projetos."""
+    if not await _table_exists(conn, schema, "project_tasks"):
+        return
+
+    if not await _table_exists(conn, schema, "project_demand_types"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_demand_types (
+                id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                slug        VARCHAR(80) NOT NULL UNIQUE,
+                name        VARCHAR(140) NOT NULL UNIQUE,
+                description TEXT,
+                "order"     INTEGER NOT NULL DEFAULT 0,
+                is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at  TIMESTAMP DEFAULT now(),
+                updated_at  TIMESTAMP DEFAULT now()
+            )
+        """))
+        await conn.execute(text(f"""
+            INSERT INTO {schema}.project_demand_types (slug, name, description, "order", is_active)
+            SELECT 'demanda_geral', 'Demanda geral', 'Tipo padrão para demandas do kanban.', 0, TRUE
+            WHERE NOT EXISTS (SELECT 1 FROM {schema}.project_demand_types)
+        """))
+
+    if not await _column_exists(conn, schema, "project_tasks", "demand_type_id"):
+        await conn.execute(text(f"ALTER TABLE {schema}.project_tasks ADD COLUMN demand_type_id UUID"))
+        await conn.execute(text(f"""
+            UPDATE {schema}.project_tasks t
+               SET demand_type_id = dt.id
+              FROM {schema}.project_demand_types dt
+             WHERE dt.slug = 'demanda_geral'
+               AND t.demand_type_id IS NULL
+        """))
+        await conn.execute(text(f"""
+            ALTER TABLE {schema}.project_tasks
+            ADD CONSTRAINT fk_project_tasks_demand_type
+            FOREIGN KEY (demand_type_id) REFERENCES {schema}.project_demand_types(id) ON DELETE SET NULL
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX IF NOT EXISTS ix_{schema}_project_tasks_demand_type ON {schema}.project_tasks(demand_type_id)"
+        ))
+
+    if not await _table_exists(conn, schema, "project_demand_form_sections"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_demand_form_sections (
+                id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                demand_type_id UUID NOT NULL REFERENCES {schema}.project_demand_types(id) ON DELETE CASCADE,
+                key            VARCHAR(80) NOT NULL,
+                title          VARCHAR(140) NOT NULL,
+                description    TEXT,
+                "order"        INTEGER NOT NULL DEFAULT 0,
+                is_active      BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at     TIMESTAMP DEFAULT now(),
+                updated_at     TIMESTAMP DEFAULT now(),
+                UNIQUE(demand_type_id, key)
+            )
+        """))
+
+    if not await _table_exists(conn, schema, "project_demand_form_fields"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_demand_form_fields (
+                id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                section_id  UUID NOT NULL REFERENCES {schema}.project_demand_form_sections(id) ON DELETE CASCADE,
+                field_key   VARCHAR(80) NOT NULL,
+                label       VARCHAR(140) NOT NULL,
+                field_type  VARCHAR(30) NOT NULL DEFAULT 'text',
+                placeholder VARCHAR(200),
+                options     JSONB,
+                validation  JSONB,
+                is_required BOOLEAN NOT NULL DEFAULT FALSE,
+                is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+                "order"     INTEGER NOT NULL DEFAULT 0,
+                created_at  TIMESTAMP DEFAULT now(),
+                updated_at  TIMESTAMP DEFAULT now(),
+                UNIQUE(section_id, field_key)
+            )
+        """))
+
+    if not await _table_exists(conn, schema, "project_status_section_links"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_status_section_links (
+                id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                status_id  UUID NOT NULL REFERENCES {schema}.project_status_configs(id) ON DELETE CASCADE,
+                section_id UUID NOT NULL REFERENCES {schema}.project_demand_form_sections(id) ON DELETE CASCADE,
+                mode       VARCHAR(20) NOT NULL DEFAULT 'visible',
+                created_at TIMESTAMP DEFAULT now(),
+                UNIQUE(status_id, section_id)
+            )
+        """))
+
+    if not await _table_exists(conn, schema, "project_demand_form_submissions"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_demand_form_submissions (
+                id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                task_id    UUID NOT NULL REFERENCES {schema}.project_tasks(id) ON DELETE CASCADE UNIQUE,
+                values     JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                updated_by UUID,
+                created_at TIMESTAMP DEFAULT now(),
+                updated_at TIMESTAMP DEFAULT now()
+            )
+        """))
+
+
+async def _step_029_default_project(conn: AsyncConnection, schema: str) -> None:
+    """Garante que cada tenant tenha pelo menos um projeto + funil + status iniciais."""
+    if not await _table_exists(conn, schema, "project_projects"):
+        return
+
+    result = await conn.execute(text(f"SELECT id FROM {schema}.project_projects LIMIT 1"))
+    if result.scalar() is not None:
+        return
+
+    project = await conn.execute(text(f"""
+        INSERT INTO {schema}.project_projects (id, name, description, is_active, created_at, updated_at)
+        VALUES (gen_random_uuid(), 'Padrão', 'Projeto padrão criado automaticamente.', TRUE, now(), now())
+        RETURNING id
+    """))
+    project_id = project.scalar()
+
+    funnel = await conn.execute(text(f"""
+        INSERT INTO {schema}.project_funnels
+            (id, project_id, name, description, color, "order", is_default, is_active, created_at, updated_at)
+        VALUES
+            (gen_random_uuid(), :pid, 'Padrão', 'Funil padrão.', '#7C3AED', 0, TRUE, TRUE, now(), now())
+        RETURNING id
+    """), {"pid": project_id})
+    funnel_id = funnel.scalar()
+
+    await conn.execute(text(f"""
+        INSERT INTO {schema}.project_status_configs
+            (id, project_id, funnel_id, name, color, "order", is_initial, is_final, is_active, created_at, updated_at)
+        VALUES
+            (gen_random_uuid(), :pid, :fid, 'Backlog',     '#64748B', 0, TRUE,  FALSE, TRUE, now(), now()),
+            (gen_random_uuid(), :pid, :fid, 'Em andamento','#3B82F6', 1, FALSE, FALSE, TRUE, now(), now()),
+            (gen_random_uuid(), :pid, :fid, 'Concluído',   '#22C55E', 2, FALSE, TRUE,  TRUE, now(), now())
+    """), {"pid": project_id, "fid": funnel_id})
+
+
+async def _step_028_drop_project_task_priority(conn: AsyncConnection, schema: str) -> None:
+    """Remove a coluna priority de project_tasks (descomissionada)."""
+    if not await _table_exists(conn, schema, "project_tasks"):
+        return
+    if await _column_exists(conn, schema, "project_tasks", "priority"):
+        await conn.execute(text(f"ALTER TABLE {schema}.project_tasks DROP COLUMN priority"))
+
+
+async def _step_027_demand_type_funnel(conn: AsyncConnection, schema: str) -> None:
+    """Adiciona funnel_id em project_demand_types (vincula tipo de demanda a um kanban)."""
+    if not await _table_exists(conn, schema, "project_demand_types"):
+        return
+    if not await _column_exists(conn, schema, "project_demand_types", "funnel_id"):
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.project_demand_types ADD COLUMN funnel_id UUID"
+        ))
+    fk_exists = await conn.execute(text("""
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE table_schema = :schema
+          AND table_name = 'project_demand_types'
+          AND constraint_name = 'fk_project_demand_types_funnel'
+    """), {"schema": schema})
+    if fk_exists.scalar() is None:
+        await conn.execute(text(f"""
+            ALTER TABLE {schema}.project_demand_types
+            ADD CONSTRAINT fk_project_demand_types_funnel
+            FOREIGN KEY (funnel_id) REFERENCES {schema}.project_funnels(id) ON DELETE SET NULL
+        """))
+    await conn.execute(text(
+        f"CREATE INDEX IF NOT EXISTS ix_{schema}_project_demand_types_funnel "
+        f"ON {schema}.project_demand_types(funnel_id)"
+    ))
+
+
+async def _step_030_teamops(conn: AsyncConnection, schema: str) -> None:
+    """Cria tabelas do módulo TeamOps (Gestão de Times e Capacidade)."""
+    if not await _table_exists(conn, schema, "team_stack_categories"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.team_stack_categories (
+                id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name       VARCHAR(120) NOT NULL,
+                "order"    INTEGER NOT NULL DEFAULT 0,
+                is_active  BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT now(),
+                updated_at TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_team_stack_categories_name UNIQUE (name)
+            )
+        """))
+
+    if not await _table_exists(conn, schema, "team_stacks"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.team_stacks (
+                id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                category_id UUID NOT NULL REFERENCES {schema}.team_stack_categories(id) ON DELETE CASCADE,
+                name        VARCHAR(140) NOT NULL,
+                slug        VARCHAR(140) NOT NULL,
+                is_critical BOOLEAN NOT NULL DEFAULT FALSE,
+                is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at  TIMESTAMP DEFAULT now(),
+                updated_at  TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_team_stacks_slug UNIQUE (slug)
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_team_stacks_category ON {schema}.team_stacks(category_id)"
+        ))
+
+    if not await _table_exists(conn, schema, "team_absence_types"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.team_absence_types (
+                id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name              VARCHAR(120) NOT NULL,
+                slug              VARCHAR(80) NOT NULL,
+                requires_approval BOOLEAN NOT NULL DEFAULT TRUE,
+                affects_capacity  BOOLEAN NOT NULL DEFAULT TRUE,
+                color             VARCHAR(7) NOT NULL DEFAULT '#8B5CF6',
+                is_active         BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at        TIMESTAMP DEFAULT now(),
+                updated_at        TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_team_absence_types_slug UNIQUE (slug)
+            )
+        """))
+
+    if not await _table_exists(conn, schema, "team_areas"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.team_areas (
+                id                        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name                      VARCHAR(140) NOT NULL UNIQUE,
+                description               TEXT,
+                parent_area_id            UUID,
+                area_type                 VARCHAR(20) NOT NULL DEFAULT 'negocio',
+                po_person_id              UUID,
+                tech_reference_person_id  UUID,
+                coordinator_person_id     UUID,
+                manager_person_id         UUID,
+                status                    VARCHAR(20) NOT NULL DEFAULT 'ativa',
+                is_active                 BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at                TIMESTAMP DEFAULT now(),
+                updated_at                TIMESTAMP DEFAULT now()
+            )
+        """))
+        await conn.execute(text(f"""
+            ALTER TABLE {schema}.team_areas
+            ADD CONSTRAINT fk_team_areas_parent
+            FOREIGN KEY (parent_area_id) REFERENCES {schema}.team_areas(id) ON DELETE SET NULL
+        """))
+
+    if not await _table_exists(conn, schema, "team_persons"):
+        # Nota: position_id é adicionado/populado depois pelo step 033 (team_positions).
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.team_persons (
+                id                        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                user_id                   UUID,
+                full_name                 VARCHAR(200) NOT NULL,
+                email                     VARCHAR(255) NOT NULL,
+                phone                     VARCHAR(30),
+                team_role                 VARCHAR(30) DEFAULT 'dev_fullstack',
+                area_id                   UUID REFERENCES {schema}.team_areas(id) ON DELETE SET NULL,
+                po_person_id              UUID,
+                tech_reference_person_id  UUID,
+                manager_person_id         UUID,
+                employment_type           VARCHAR(20) NOT NULL DEFAULT 'clt',
+                daily_hours               NUMERIC(4,2) NOT NULL DEFAULT 8.0,
+                weekly_hours              NUMERIC(5,2) NOT NULL DEFAULT 40.0,
+                start_date                DATE,
+                status                    VARCHAR(20) NOT NULL DEFAULT 'ativo',
+                notes                     TEXT,
+                created_at                TIMESTAMP DEFAULT now(),
+                updated_at                TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_team_persons_email UNIQUE (email)
+            )
+        """))
+        # FKs auto-referenciais (após criar a tabela)
+        await conn.execute(text(f"""
+            ALTER TABLE {schema}.team_persons
+            ADD CONSTRAINT fk_team_persons_po
+            FOREIGN KEY (po_person_id) REFERENCES {schema}.team_persons(id) ON DELETE SET NULL
+        """))
+        await conn.execute(text(f"""
+            ALTER TABLE {schema}.team_persons
+            ADD CONSTRAINT fk_team_persons_tech_ref
+            FOREIGN KEY (tech_reference_person_id) REFERENCES {schema}.team_persons(id) ON DELETE SET NULL
+        """))
+        await conn.execute(text(f"""
+            ALTER TABLE {schema}.team_persons
+            ADD CONSTRAINT fk_team_persons_manager
+            FOREIGN KEY (manager_person_id) REFERENCES {schema}.team_persons(id) ON DELETE SET NULL
+        """))
+        # FKs em team_areas pra team_persons (agora que ambas existem)
+        await conn.execute(text(f"""
+            ALTER TABLE {schema}.team_areas
+            ADD CONSTRAINT fk_team_areas_po
+            FOREIGN KEY (po_person_id) REFERENCES {schema}.team_persons(id) ON DELETE SET NULL
+        """))
+        await conn.execute(text(f"""
+            ALTER TABLE {schema}.team_areas
+            ADD CONSTRAINT fk_team_areas_tech_ref
+            FOREIGN KEY (tech_reference_person_id) REFERENCES {schema}.team_persons(id) ON DELETE SET NULL
+        """))
+        await conn.execute(text(f"""
+            ALTER TABLE {schema}.team_areas
+            ADD CONSTRAINT fk_team_areas_coordinator
+            FOREIGN KEY (coordinator_person_id) REFERENCES {schema}.team_persons(id) ON DELETE SET NULL
+        """))
+        await conn.execute(text(f"""
+            ALTER TABLE {schema}.team_areas
+            ADD CONSTRAINT fk_team_areas_manager
+            FOREIGN KEY (manager_person_id) REFERENCES {schema}.team_persons(id) ON DELETE SET NULL
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_team_persons_area ON {schema}.team_persons(area_id)"
+        ))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_team_persons_role ON {schema}.team_persons(team_role)"
+        ))
+
+    if not await _table_exists(conn, schema, "team_person_stacks"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.team_person_stacks (
+                id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                person_id       UUID NOT NULL REFERENCES {schema}.team_persons(id) ON DELETE CASCADE,
+                stack_id        UUID NOT NULL REFERENCES {schema}.team_stacks(id) ON DELETE CASCADE,
+                level           VARCHAR(20) NOT NULL DEFAULT 'pleno',
+                years_experience INTEGER NOT NULL DEFAULT 0,
+                is_reference    BOOLEAN NOT NULL DEFAULT FALSE,
+                notes           TEXT,
+                created_at      TIMESTAMP DEFAULT now(),
+                updated_at      TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_team_person_stack UNIQUE (person_id, stack_id)
+            )
+        """))
+
+    if not await _table_exists(conn, schema, "team_absences"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.team_absences (
+                id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                person_id           UUID NOT NULL REFERENCES {schema}.team_persons(id) ON DELETE CASCADE,
+                absence_type_id     UUID NOT NULL REFERENCES {schema}.team_absence_types(id) ON DELETE RESTRICT,
+                start_date          DATE NOT NULL,
+                end_date            DATE NOT NULL,
+                partial_hours       NUMERIC(5,2),
+                status              VARCHAR(20) NOT NULL DEFAULT 'pendente',
+                requested_by        UUID,
+                approver_person_id  UUID REFERENCES {schema}.team_persons(id) ON DELETE SET NULL,
+                approved_at         TIMESTAMP,
+                decision_notes      TEXT,
+                notes               TEXT,
+                created_at          TIMESTAMP DEFAULT now(),
+                updated_at          TIMESTAMP DEFAULT now()
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_team_absences_person ON {schema}.team_absences(person_id, start_date)"
+        ))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_team_absences_status ON {schema}.team_absences(status)"
+        ))
+
+    # Seed básico: categorias de stack + tipos de ausência (idempotente via ON CONFLICT)
+    for order, cat_name in enumerate(("Desenvolvimento", "Dados", "Infra/DevOps", "Produto e Gestão")):
+        await conn.execute(text(f"""
+            INSERT INTO {schema}.team_stack_categories (id, name, "order", is_active, created_at, updated_at)
+            VALUES (gen_random_uuid(), :n, :o, TRUE, now(), now())
+            ON CONFLICT (name) DO NOTHING
+        """), {"n": cat_name, "o": order})
+
+    for slug, name in (
+        ("ferias", "Férias"),
+        ("afastamento_medico", "Afastamento médico"),
+        ("folga", "Folga"),
+        ("banco_horas", "Banco de horas"),
+        ("treinamento", "Treinamento"),
+    ):
+        await conn.execute(text(f"""
+            INSERT INTO {schema}.team_absence_types (id, name, slug, requires_approval, affects_capacity, color, is_active, created_at, updated_at)
+            VALUES (gen_random_uuid(), :n, :s, TRUE, TRUE, '#8B5CF6', TRUE, now(), now())
+            ON CONFLICT (slug) DO NOTHING
+        """), {"n": name, "s": slug})
+
+
+async def _step_031_teamops_drop_positions(conn: AsyncConnection, schema: str) -> None:
+    """
+    OBSOLETO / NO-OP.
+
+    Originalmente este step removia a tabela team_positions e a coluna position_id
+    (quando 'cargo' e 'papel no time' foram unificados num enum). Essa decisão foi
+    revertida no step 033, que recria team_positions como catálogo editável e migra
+    os cargos. Como os dois steps rodam no MESMO boot, mantê-lo ativo zerava o
+    position_id de todas as pessoas a cada rebuild (caíam no fallback 'dev_fullstack').
+
+    Mantido como no-op apenas para preservar a ordem histórica dos steps.
+    """
+    return
+
+
+SYSTEM_POSITIONS: list[tuple[str, str, int]] = [
+    ("gerente", "Gerente", 0),
+    ("coordenador", "Coordenador", 10),
+    ("po", "Product Owner", 20),
+    ("scrum_master", "Scrum Master", 30),
+    ("tech_reference", "Referência Técnica", 40),
+    ("architect", "Arquiteto", 50),
+    ("dev_backend", "Dev Backend", 60),
+    ("dev_frontend", "Dev Frontend", 70),
+    ("dev_fullstack", "Dev Fullstack", 80),
+    ("qa", "QA", 90),
+    ("ux_ui", "UX/UI Designer", 100),
+    ("data_analyst", "Analista de Dados", 110),
+    ("data_scientist", "Cientista de Dados", 120),
+    ("devops", "DevOps", 130),
+    ("support", "Suporte", 140),
+    ("requirements", "Analista de Requisitos", 150),
+    ("intern", "Estagiário", 160),
+]
+
+
+async def _step_033_teamops_positions(conn: AsyncConnection, schema: str) -> None:
+    """Substitui o enum team_role por uma tabela editável team_positions."""
+    if not await _table_exists(conn, schema, "team_persons"):
+        return
+
+    # 1) Cria a tabela team_positions (catálogo editável)
+    if not await _table_exists(conn, schema, "team_positions"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.team_positions (
+                id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                slug        VARCHAR(80) NOT NULL,
+                name        VARCHAR(140) NOT NULL,
+                description TEXT,
+                is_system   BOOLEAN NOT NULL DEFAULT FALSE,
+                sort_order  INTEGER NOT NULL DEFAULT 0,
+                is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at  TIMESTAMP DEFAULT now(),
+                updated_at  TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_team_positions_slug UNIQUE (slug)
+            )
+        """))
+
+    # 2) Popula cargos do sistema (idempotente via ON CONFLICT)
+    for slug, name, order in SYSTEM_POSITIONS:
+        await conn.execute(text(f"""
+            INSERT INTO {schema}.team_positions (id, slug, name, description, is_system, sort_order, is_active, created_at, updated_at)
+            VALUES (gen_random_uuid(), :s, :n, NULL, TRUE, :o, TRUE, now(), now())
+            ON CONFLICT (slug) DO NOTHING
+        """), {"s": slug, "n": name, "o": order})
+
+    # 3) Adiciona coluna position_id (nullable inicialmente)
+    if not await _column_exists(conn, schema, "team_persons", "position_id"):
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.team_persons ADD COLUMN position_id UUID"
+        ))
+
+    # 4) Migra: para cada pessoa com team_role definido, vincula ao cargo correspondente
+    if await _column_exists(conn, schema, "team_persons", "team_role"):
+        await conn.execute(text(f"""
+            UPDATE {schema}.team_persons p
+               SET position_id = pos.id
+              FROM {schema}.team_positions pos
+             WHERE pos.slug = p.team_role
+               AND p.position_id IS NULL
+        """))
+
+    # 5) Garante que toda pessoa tenha algum cargo — fallback para 'dev_fullstack' se faltar
+    await conn.execute(text(f"""
+        UPDATE {schema}.team_persons p
+           SET position_id = (SELECT id FROM {schema}.team_positions WHERE slug = 'dev_fullstack' LIMIT 1)
+         WHERE p.position_id IS NULL
+    """))
+
+    # 6) Adiciona FK + NOT NULL
+    fk_exists = await conn.execute(text("""
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE table_schema = :schema
+          AND table_name = 'team_persons'
+          AND constraint_name = 'fk_team_persons_position'
+    """), {"schema": schema})
+    if fk_exists.scalar() is None:
+        await conn.execute(text(f"""
+            ALTER TABLE {schema}.team_persons
+            ADD CONSTRAINT fk_team_persons_position
+            FOREIGN KEY (position_id) REFERENCES {schema}.team_positions(id) ON DELETE RESTRICT
+        """))
+    await conn.execute(text(
+        f"ALTER TABLE {schema}.team_persons ALTER COLUMN position_id SET NOT NULL"
+    ))
+
+    # 7) Drop coluna team_role (substituída por position_id)
+    if await _column_exists(conn, schema, "team_persons", "team_role"):
+        await conn.execute(text(
+            f"DROP INDEX IF EXISTS {schema}.ix_{schema}_team_persons_role"
+        ))
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.team_persons DROP COLUMN team_role"
+        ))
+
+    # 8) Índice para o novo cargo
+    await conn.execute(text(
+        f"CREATE INDEX IF NOT EXISTS ix_{schema}_team_persons_position "
+        f"ON {schema}.team_persons(position_id)"
+    ))
+
+
+async def _step_032_teamops_area_parent(conn: AsyncConnection, schema: str) -> None:
+    """Adiciona parent_area_id em team_areas para suportar sub-áreas."""
+    if not await _table_exists(conn, schema, "team_areas"):
+        return
+    if not await _column_exists(conn, schema, "team_areas", "parent_area_id"):
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.team_areas ADD COLUMN parent_area_id UUID"
+        ))
+    fk_exists = await conn.execute(text("""
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE table_schema = :schema
+          AND table_name = 'team_areas'
+          AND constraint_name = 'fk_team_areas_parent'
+    """), {"schema": schema})
+    if fk_exists.scalar() is None:
+        await conn.execute(text(f"""
+            ALTER TABLE {schema}.team_areas
+            ADD CONSTRAINT fk_team_areas_parent
+            FOREIGN KEY (parent_area_id) REFERENCES {schema}.team_areas(id) ON DELETE SET NULL
+        """))
+
+
+async def _step_034_projetos_hierarchy(conn: AsyncConnection, schema: str) -> None:
+    """Hierarquia de cards (parent/origin) + regras de tipos-filho + fase que converte."""
+    if await _table_exists(conn, schema, "project_tasks"):
+        if not await _column_exists(conn, schema, "project_tasks", "parent_task_id"):
+            await conn.execute(text(
+                f"ALTER TABLE {schema}.project_tasks ADD COLUMN parent_task_id UUID"
+            ))
+            await conn.execute(text(f"""
+                ALTER TABLE {schema}.project_tasks
+                ADD CONSTRAINT fk_project_tasks_parent
+                FOREIGN KEY (parent_task_id) REFERENCES {schema}.project_tasks(id) ON DELETE SET NULL
+            """))
+            await conn.execute(text(
+                f"CREATE INDEX IF NOT EXISTS ix_{schema}_project_tasks_parent "
+                f"ON {schema}.project_tasks(parent_task_id)"
+            ))
+        if not await _column_exists(conn, schema, "project_tasks", "origin_task_id"):
+            await conn.execute(text(
+                f"ALTER TABLE {schema}.project_tasks ADD COLUMN origin_task_id UUID"
+            ))
+            await conn.execute(text(f"""
+                ALTER TABLE {schema}.project_tasks
+                ADD CONSTRAINT fk_project_tasks_origin
+                FOREIGN KEY (origin_task_id) REFERENCES {schema}.project_tasks(id) ON DELETE SET NULL
+            """))
+            await conn.execute(text(
+                f"CREATE INDEX IF NOT EXISTS ix_{schema}_project_tasks_origin "
+                f"ON {schema}.project_tasks(origin_task_id)"
+            ))
+
+    if await _table_exists(conn, schema, "project_demand_types"):
+        if not await _column_exists(conn, schema, "project_demand_types", "allowed_child_type_ids"):
+            await conn.execute(text(
+                f"ALTER TABLE {schema}.project_demand_types ADD COLUMN allowed_child_type_ids JSONB"
+            ))
+
+    if await _table_exists(conn, schema, "project_status_configs"):
+        if not await _column_exists(conn, schema, "project_status_configs", "creates_demand_type_id"):
+            await conn.execute(text(
+                f"ALTER TABLE {schema}.project_status_configs ADD COLUMN creates_demand_type_id UUID"
+            ))
+            await conn.execute(text(f"""
+                ALTER TABLE {schema}.project_status_configs
+                ADD CONSTRAINT fk_project_status_creates_type
+                FOREIGN KEY (creates_demand_type_id) REFERENCES {schema}.project_demand_types(id) ON DELETE SET NULL
+            """))
+
+
+async def _step_035_projetos_kanbans(conn: AsyncConnection, schema: str) -> None:
+    """Kanbans-base reutilizáveis: tipos permitidos por funil, transição entre funis
+    (moves_to_funnel_id) e seed dos 4 kanbans padrão (Triagem PMO, Planejamento PO,
+    Desenvolvimento, DevOps) no projeto Padrão."""
+    if not await _table_exists(conn, schema, "project_funnels"):
+        return
+
+    # 1) Colunas novas
+    if not await _column_exists(conn, schema, "project_funnels", "allowed_demand_type_ids"):
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.project_funnels ADD COLUMN allowed_demand_type_ids JSONB"
+        ))
+    if not await _column_exists(conn, schema, "project_status_configs", "moves_to_funnel_id"):
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.project_status_configs ADD COLUMN moves_to_funnel_id UUID"
+        ))
+        await conn.execute(text(f"""
+            ALTER TABLE {schema}.project_status_configs
+            ADD CONSTRAINT fk_project_status_moves_to_funnel
+            FOREIGN KEY (moves_to_funnel_id) REFERENCES {schema}.project_funnels(id) ON DELETE SET NULL
+        """))
+
+    # 2) Seed dos kanbans-base no projeto "Padrão" (idempotente por nome)
+    proj = await conn.execute(text(
+        f"SELECT id FROM {schema}.project_projects ORDER BY created_at ASC LIMIT 1"
+    ))
+    project_id = proj.scalar()
+    if project_id is None:
+        return
+
+    KANBANS = [
+        ("Triagem PMO",     "#014898", [("Recebida", True, False), ("Em triagem", False, False), ("Aprovada", False, True)]),
+        ("Planejamento PO", "#164194", [("Backlog", True, False), ("Requisitos", False, False), ("Cronograma", False, False), ("Validado", False, True)]),
+        ("Desenvolvimento", "#008BD2", [("A fazer", True, False), ("Em desenvolvimento", False, False), ("Testes internos", False, False), ("Homologação", False, True)]),
+        ("DevOps",          "#6AB42F", [("Fila", True, False), ("Segurança/Ambiente", False, False), ("Deploy", False, False), ("Concluído", False, True)]),
+    ]
+    for order, (fname, color, cols) in enumerate(KANBANS, start=1):
+        existing = await conn.execute(text(
+            f"SELECT id FROM {schema}.project_funnels WHERE project_id = :pid AND name = :n"
+        ), {"pid": project_id, "n": fname})
+        fid = existing.scalar()
+        if fid is None:
+            created = await conn.execute(text(f"""
+                INSERT INTO {schema}.project_funnels
+                    (id, project_id, name, description, color, "order", is_default, is_active, created_at, updated_at)
+                VALUES (gen_random_uuid(), :pid, :n, :d, :c, :o, FALSE, TRUE, now(), now())
+                RETURNING id
+            """), {"pid": project_id, "n": fname, "d": f"Kanban padrão: {fname}.", "c": color, "o": 10 + order})
+            fid = created.scalar()
+            for col_order, (cname, is_init, is_final) in enumerate(cols):
+                await conn.execute(text(f"""
+                    INSERT INTO {schema}.project_status_configs
+                        (id, project_id, funnel_id, name, color, "order", is_initial, is_final, is_active, created_at, updated_at)
+                    VALUES (gen_random_uuid(), :pid, :fid, :n, :c, :o, :ini, :fin, TRUE, now(), now())
+                """), {"pid": project_id, "fid": fid, "n": cname, "c": color, "o": col_order, "ini": is_init, "fin": is_final})
+
+
+async def _step_036_projetos_automations(conn: AsyncConnection, schema: str) -> None:
+    """Cria tabela de automações por etapa do kanban (projetos)."""
+    if not await _table_exists(conn, schema, "project_status_configs"):
+        return
+    if not await _table_exists(conn, schema, "project_automation_rules"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_automation_rules (
+                id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                project_id    UUID NOT NULL REFERENCES {schema}.project_projects(id) ON DELETE CASCADE,
+                status_id     UUID NOT NULL REFERENCES {schema}.project_status_configs(id) ON DELETE CASCADE,
+                name          VARCHAR(140) NOT NULL,
+                trigger       VARCHAR(30) NOT NULL DEFAULT 'enter_status',
+                action        VARCHAR(30) NOT NULL,
+                action_config JSONB,
+                "order"       INTEGER NOT NULL DEFAULT 0,
+                is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at    TIMESTAMP DEFAULT now(),
+                updated_at    TIMESTAMP DEFAULT now()
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_project_automation_status "
+            f"ON {schema}.project_automation_rules(status_id, is_active)"
+        ))
+
+
+async def _step_037_projetos_move_permissions(conn: AsyncConnection, schema: str) -> None:
+    """Permissão de movimentação por função: move_in_role_ids em project_status_configs."""
+    if not await _table_exists(conn, schema, "project_status_configs"):
+        return
+    if not await _column_exists(conn, schema, "project_status_configs", "move_in_role_ids"):
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.project_status_configs ADD COLUMN move_in_role_ids JSONB"
+        ))
+
+
+async def _step_038_projetos_sla(conn: AsyncConnection, schema: str) -> None:
+    """SLA por etapa: sla_hours/sla_warning_pct em status; status_entered_at/sla_state em task."""
+    if await _table_exists(conn, schema, "project_status_configs"):
+        if not await _column_exists(conn, schema, "project_status_configs", "sla_hours"):
+            await conn.execute(text(f"ALTER TABLE {schema}.project_status_configs ADD COLUMN sla_hours INTEGER"))
+        if not await _column_exists(conn, schema, "project_status_configs", "sla_warning_pct"):
+            await conn.execute(text(
+                f"ALTER TABLE {schema}.project_status_configs ADD COLUMN sla_warning_pct INTEGER NOT NULL DEFAULT 80"
+            ))
+    if await _table_exists(conn, schema, "project_tasks"):
+        if not await _column_exists(conn, schema, "project_tasks", "status_entered_at"):
+            await conn.execute(text(
+                f"ALTER TABLE {schema}.project_tasks ADD COLUMN status_entered_at TIMESTAMP"
+            ))
+            # inicializa com created_at para cards já existentes
+            await conn.execute(text(
+                f"UPDATE {schema}.project_tasks SET status_entered_at = created_at WHERE status_entered_at IS NULL"
+            ))
+        if not await _column_exists(conn, schema, "project_tasks", "sla_state"):
+            await conn.execute(text(
+                f"ALTER TABLE {schema}.project_tasks ADD COLUMN sla_state VARCHAR(12) NOT NULL DEFAULT 'none'"
+            ))
+
+
+async def _step_039_projetos_task_start_date(conn: AsyncConnection, schema: str) -> None:
+    """Adiciona start_date em project_tasks (para o cronograma/Gantt)."""
+    if not await _table_exists(conn, schema, "project_tasks"):
+        return
+    if not await _column_exists(conn, schema, "project_tasks", "start_date"):
+        await conn.execute(text(f"ALTER TABLE {schema}.project_tasks ADD COLUMN start_date TIMESTAMP"))
+
+
+async def _step_040_projetos_demand_type_basic(conn: AsyncConnection, schema: str) -> None:
+    """Adiciona available_for_basic em project_demand_types: se False, usuários basic
+    não podem solicitar nem visualizar demandas deste tipo."""
+    if not await _table_exists(conn, schema, "project_demand_types"):
+        return
+    if not await _column_exists(conn, schema, "project_demand_types", "available_for_basic"):
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.project_demand_types "
+            "ADD COLUMN available_for_basic BOOLEAN NOT NULL DEFAULT TRUE"
+        ))
+
+
 # Lista ordenada de steps. Adicionar novos no final.
 STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("001_funnels", _step_001_funnels),
@@ -1099,6 +1977,24 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("020_estoque", _step_020_estoque),
     ("021_pdv", _step_021_pdv),
     ("022_pdv_sale_item_batch_serial", _step_022_pdv_sale_item_batch_serial),
+    ("023_projetos", _step_023_projetos),
+    ("024_projetos_funnels", _step_024_projetos_funnels),
+    ("025_projetos_status_active", _step_025_projetos_status_active),
+    ("026_projetos_demand_types", _step_026_projetos_demand_types),
+    ("027_demand_type_funnel", _step_027_demand_type_funnel),
+    ("028_drop_project_task_priority", _step_028_drop_project_task_priority),
+    ("029_default_project", _step_029_default_project),
+    ("030_teamops", _step_030_teamops),
+    ("031_teamops_drop_positions", _step_031_teamops_drop_positions),
+    ("032_teamops_area_parent", _step_032_teamops_area_parent),
+    ("033_teamops_positions", _step_033_teamops_positions),
+    ("034_projetos_hierarchy", _step_034_projetos_hierarchy),
+    ("035_projetos_kanbans", _step_035_projetos_kanbans),
+    ("036_projetos_automations", _step_036_projetos_automations),
+    ("037_projetos_move_permissions", _step_037_projetos_move_permissions),
+    ("038_projetos_sla", _step_038_projetos_sla),
+    ("039_projetos_task_start_date", _step_039_projetos_task_start_date),
+    ("040_projetos_demand_type_basic", _step_040_projetos_demand_type_basic),
 ]
 
 

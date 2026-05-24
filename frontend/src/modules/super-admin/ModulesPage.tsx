@@ -122,7 +122,7 @@ export default function ModulesPage() {
   }
 
   async function handleDelete(m: Module) {
-    if (!confirm(`Excluir o módulo "${m.name}"?\nEsta ação só funciona se ele não estiver vinculado a nenhum plano ou tenant.`)) return
+    if (!confirm(`Excluir o módulo "${m.name}"?\nEsta ação só funciona se ele não estiver vinculado a nenhum tenant.`)) return
     setDeletingId(m.id)
     try {
       await modulesApi.remove(m.id)
@@ -151,7 +151,7 @@ export default function ModulesPage() {
 
       <Alert>
         <AlertDescription className="text-xs">
-          Apenas módulos cadastrados aqui ficam disponíveis para inclusão em planos e ativação em tenants.
+          Apenas módulos cadastrados aqui ficam disponíveis para ativação em tenants.
           Cadastre um módulo somente após ele ser desenvolvido (backend + frontend).
         </AlertDescription>
       </Alert>
@@ -359,7 +359,7 @@ export default function ModulesPage() {
             <div className="flex items-center justify-between rounded-md border p-3">
               <div>
                 <p className="text-sm font-medium">Módulo ativo</p>
-                <p className="text-xs text-muted-foreground">Inativos não aparecem em planos nem podem ser ativados em tenants.</p>
+                <p className="text-xs text-muted-foreground">Inativos não podem ser ativados em tenants.</p>
               </div>
               <Switch
                 checked={isActive ?? true}

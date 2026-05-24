@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react"
 import { Outlet, useNavigate, useLocation } from "react-router-dom"
 import * as Icons from "lucide-react"
 import {
-  LayoutDashboard, Package, Menu, Settings, Search, Moon, Sun, ChevronRight,
+  LayoutDashboard, Package, Menu, Settings, Search, Moon, Sun, ChevronRight, ClipboardList, CirclePlus,
 } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import { useTheme } from "@/contexts/ThemeContext"
@@ -17,6 +17,7 @@ import {
 import { settingsNav } from "@/modules/crm/admin/settingsNav"
 import { ModuleRail, type RailItem } from "@/modules/crm/shell/ModuleRail"
 import { ContextualSidebar, type SidebarSection } from "@/modules/crm/shell/ContextualSidebar"
+import type { Role } from "@/types"
 
 const homeSections: SidebarSection[] = [
   { to: "/app/dashboard", icon: LayoutDashboard, label: "Dashboard", end: true },
@@ -36,14 +37,33 @@ export default function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [modules, setModules] = useState<ActiveModule[]>([])
   const [searchOpen, setSearchOpen] = useState(false)
+  const [roles, setRoles] = useState<Role[]>([])
 
   const isAdmin = user?.role === "company_admin" || user?.role === "super_admin"
+  const userRoleName = useMemo(() => {
+    const resolvedByRoleId = roles.find((r) => r.id === user?.role_id)?.name
+    const fromUserPayload =
+      (user as unknown as { role_name?: string; function_name?: string; role_display_name?: string })
+        .role_name
+      ?? (user as unknown as { role_name?: string; function_name?: string; role_display_name?: string })
+        .function_name
+      ?? (user as unknown as { role_name?: string; function_name?: string; role_display_name?: string })
+        .role_display_name
+
+    return (resolvedByRoleId ?? fromUserPayload ?? "").trim().toLowerCase()
+  }, [roles, user])
+  const isBasicUser =
+    user?.role === "company_user" &&
+    (userRoleName === "basic" || userRoleName === "")
   const activeModuleSlug = getActiveModuleSlug(location.pathname)
   const inSettings = location.pathname.startsWith("/app/settings")
   const activeModule = activeModuleSlug ? modules.find(m => m.slug === activeModuleSlug) : null
+  const hasProjetosModule = modules.some((m) => m.slug === "projetos")
+  const basicNewRequestRoute = hasProjetosModule ? "/app/modules/projetos/solicitacoes" : "/app/modules/crm/attendances/new"
+  const basicMyRequestsRoute = hasProjetosModule ? "/app/modules/projetos/minhas" : "/app/modules/crm/kanban"
 
   // Chave ativa do rail
-  const activeKey = activeModuleSlug ?? (inSettings ? "settings" : "home")
+  const activeKey = isBasicUser ? "home" : (activeModuleSlug ?? (inSettings ? "settings" : "home"))
 
   // Cmd+K global search shortcut
   useEffect(() => {
@@ -63,6 +83,13 @@ export default function AppLayout() {
       .catch(() => setModules([]))
   }, [])
 
+  useEffect(() => {
+    if (user?.role !== "company_user" || !user.role_id) return
+    companyApi.listRoles()
+      .then(setRoles)
+      .catch(() => setRoles([]))
+  }, [user?.role, user?.role_id])
+
   function handleLogout() {
     logout()
     navigate("/login", { replace: true })
@@ -72,6 +99,12 @@ export default function AppLayout() {
 
   // Itens do rail: Visão geral + módulos da API + Configurações (rodapé)
   const railItems: RailItem[] = useMemo(() => {
+    if (isBasicUser) {
+      return [
+        { key: "home", label: "Solicitações", icon: ClipboardList, to: basicMyRequestsRoute },
+      ]
+    }
+
     const items: RailItem[] = [
       { key: "home", label: "Visão geral", icon: LayoutDashboard, to: "/app/dashboard" },
       ...modules.map(m => ({
@@ -84,10 +117,22 @@ export default function AppLayout() {
       { key: "settings", label: "Configurações", icon: Settings, to: "/app/settings", pinBottom: true },
     ]
     return items
-  }, [modules])
+  }, [isBasicUser, modules, basicMyRequestsRoute])
 
   // Cabeçalho + seções da sidebar conforme o contexto ativo
   const { sidebarTitle, sidebarIcon, sidebarColor, sections } = useMemo(() => {
+    if (isBasicUser) {
+      return {
+        sidebarTitle: "Solicitações",
+        sidebarIcon: ClipboardList as React.ElementType,
+        sidebarColor: undefined,
+        sections: [
+          { to: basicNewRequestRoute, icon: CirclePlus, label: "Nova Solicitação" },
+          { to: basicMyRequestsRoute, icon: ClipboardList, label: "Minhas Solicitações" },
+        ],
+      }
+    }
+
     if (activeModuleSlug) {
       return {
         sidebarTitle: activeModule?.name ?? activeModuleSlug,
@@ -112,7 +157,7 @@ export default function AppLayout() {
       sidebarColor: undefined,
       sections: homeSections,
     }
-  }, [activeModuleSlug, activeModule, inSettings, isAdmin])
+  }, [activeModuleSlug, activeModule, inSettings, isAdmin, isBasicUser, basicNewRequestRoute, basicMyRequestsRoute])
 
   // Seção atual (para o breadcrumb) — match mais específico vence
   const currentSectionLabel = useMemo(() => {
@@ -154,7 +199,7 @@ export default function AppLayout() {
         />
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-background px-4">
           <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(true)} className="lg:hidden">
             <Menu size={18} />
@@ -194,7 +239,7 @@ export default function AppLayout() {
         </header>
         {searchOpen && <GlobalSearch onClose={() => setSearchOpen(false)} />}
 
-        <main className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
+        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6">
           <Outlet />
         </main>
       </div>

@@ -14,7 +14,6 @@ import AdminLayout from "@/modules/super-admin/AdminLayout"
 import AdminDashboardPage from "@/modules/super-admin/DashboardPage"
 import TenantsPage from "@/modules/super-admin/TenantsPage"
 import TenantDetailPage from "@/modules/super-admin/TenantDetailPage"
-import PlansPage from "@/modules/super-admin/PlansPage"
 import AdminModulesPage from "@/modules/super-admin/ModulesPage"
 import AdminsPage from "@/modules/super-admin/AdminsPage"
 
@@ -79,6 +78,27 @@ import PdvSaleDetailPage from "@/modules/pdv/SaleDetailPage"
 import PdvReceiptPrintView from "@/modules/pdv/ReceiptPrintView"
 import PdvDashboardPage from "@/modules/pdv/DashboardPage"
 import PdvPaymentMethodsConfigPage from "@/modules/pdv/PaymentMethodsConfigPage"
+import ProjetosLayout from "@/modules/projetos/ProjetosLayout"
+import ProjectBoardPage from "@/modules/projetos/ProjectBoardPage"
+import ProjectConfigHomePage from "@/modules/projetos/config/ProjectConfigHomePage"
+import ProjectDemandTypesConfigPage from "@/modules/projetos/config/ProjectDemandTypesConfigPage"
+import ProjectDemandTypeFormEditorPage from "@/modules/projetos/config/ProjectDemandTypeFormEditorPage"
+import ProjectFunnelsConfigPage from "@/modules/projetos/config/ProjectFunnelsConfigPage"
+import ProjectStatusesConfigPage from "@/modules/projetos/config/ProjectStatusesConfigPage"
+import BasicNewRequestPage from "@/modules/projetos/basic/BasicNewRequestPage"
+import BasicMyRequestsPage from "@/modules/projetos/basic/BasicMyRequestsPage"
+import GanttPage from "@/modules/projetos/GanttPage"
+import ProjetosReportsPage from "@/modules/projetos/ReportsPage"
+
+// ── TeamOps ───────────────────────────────────────────────────────────
+import TeamopsLayout from "@/modules/teamops/TeamopsLayout"
+import TeamopsDashboardPage from "@/modules/teamops/DashboardPage"
+import TeamopsOrgPage from "@/modules/teamops/OrgPage"
+import TeamopsPeoplePage from "@/modules/teamops/PeoplePage"
+import TeamopsPersonDetailPage from "@/modules/teamops/PersonDetailPage"
+import TeamopsStacksPage from "@/modules/teamops/StacksPage"
+import TeamopsAbsencesPage from "@/modules/teamops/AbsencesPage"
+import TeamopsConfigPage from "@/modules/teamops/ConfigPage"
 
 export default function App() {
   return (
@@ -100,7 +120,6 @@ export default function App() {
                   <Route path="dashboard" element={<AdminDashboardPage />} />
                   <Route path="tenants" element={<TenantsPage />} />
                   <Route path="tenants/:id" element={<TenantDetailPage />} />
-                  <Route path="plans" element={<PlansPage />} />
                   <Route path="modules" element={<AdminModulesPage />} />
                   <Route path="admins" element={<AdminsPage />} />
                 </Route>
@@ -166,6 +185,21 @@ export default function App() {
                   {/* Propostas/Contratos (deprecated) → redireciona para CRM */}
                   <Route path="modules/propostas_contratos/*" element={<Navigate to="/app/modules/crm/proposals" replace />} />
 
+                  {/* Projetos */}
+                  <Route path="modules/projetos" element={<ProjetosLayout />}>
+                    <Route index element={<ProjectBoardPage />} />
+                    <Route path="cronograma" element={<GanttPage />} />
+                    <Route path="relatorios" element={<ProjetosReportsPage />} />
+                    <Route path="solicitacoes" element={<BasicNewRequestPage />} />
+                    <Route path="minhas" element={<BasicMyRequestsPage />} />
+                    <Route path=":projectId/board" element={<ProjectBoardPage />} />
+                    <Route path="config" element={<ProjectConfigHomePage />} />
+                    <Route path="config/demand-types" element={<ProjectDemandTypesConfigPage />} />
+                    <Route path="config/demand-types/:demandTypeId" element={<ProjectDemandTypeFormEditorPage />} />
+                    <Route path="config/funnels" element={<ProjectFunnelsConfigPage />} />
+                    <Route path="config/statuses" element={<ProjectStatusesConfigPage />} />
+                  </Route>
+
                   {/* Estoque */}
                   <Route path="modules/estoque" element={<EstoqueLayout />}>
                     <Route index element={<Navigate to="dashboard" replace />} />
@@ -181,6 +215,17 @@ export default function App() {
                     <Route path="categories"     element={<EstoqueCategoriesPage />} />
                     <Route path="warehouses"     element={<EstoqueWarehousesPage />} />
                     <Route path="suppliers"      element={<EstoqueSuppliersPage />} />
+                  </Route>
+
+                  {/* TeamOps */}
+                  <Route path="modules/teamops" element={<TeamopsLayout />}>
+                    <Route index element={<TeamopsDashboardPage />} />
+                    <Route path="org"           element={<TeamopsOrgPage />} />
+                    <Route path="people"        element={<TeamopsPeoplePage />} />
+                    <Route path="people/:personId" element={<TeamopsPersonDetailPage />} />
+                    <Route path="stacks"        element={<TeamopsStacksPage />} />
+                    <Route path="absences"      element={<TeamopsAbsencesPage />} />
+                    <Route path="config"        element={<TeamopsConfigPage />} />
                   </Route>
 
                   {/* PDV */}
