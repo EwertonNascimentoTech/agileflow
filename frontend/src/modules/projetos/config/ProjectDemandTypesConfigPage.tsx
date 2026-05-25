@@ -35,6 +35,7 @@ export default function ProjectDemandTypesConfigPage() {
   const [funnelId, setFunnelId] = useState<string>(NO_FUNNEL)
   const [active, setActive] = useState(true)
   const [availableForBasic, setAvailableForBasic] = useState(true)
+  const [showInSchedule, setShowInSchedule] = useState(true)
 
   useEffect(() => {
     async function load() {
@@ -77,6 +78,7 @@ export default function ProjectDemandTypesConfigPage() {
     setFunnelId(NO_FUNNEL)
     setActive(true)
     setAvailableForBasic(true)
+    setShowInSchedule(true)
   }
 
   function openCreateDialog() {
@@ -94,6 +96,7 @@ export default function ProjectDemandTypesConfigPage() {
         description: description.trim() || undefined,
         funnel_id: funnelId === NO_FUNNEL ? null : funnelId,
         available_for_basic: availableForBasic,
+        show_in_schedule: showInSchedule,
         order: items.length,
         is_active: active,
       })
@@ -116,6 +119,13 @@ export default function ProjectDemandTypesConfigPage() {
   async function handleToggleBasic(item: ProjectDemandType) {
     const updated = await projetosApi.updateDemandType(item.id, {
       available_for_basic: !item.available_for_basic,
+    })
+    setItems((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
+  }
+
+  async function handleToggleSchedule(item: ProjectDemandType) {
+    const updated = await projetosApi.updateDemandType(item.id, {
+      show_in_schedule: !item.show_in_schedule,
     })
     setItems((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
   }
@@ -190,6 +200,11 @@ export default function ProjectDemandTypesConfigPage() {
                               restrito p/ basic
                             </Badge>
                           )}
+                          {!item.show_in_schedule && (
+                            <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                              fora do cronograma
+                            </Badge>
+                          )}
                           {linkedLabel ? (
                             <Badge variant="outline" className="gap-1 text-[10px]">
                               <GitBranch size={10} />
@@ -243,6 +258,16 @@ export default function ProjectDemandTypesConfigPage() {
                       {item.available_for_basic
                         ? "pode solicitar e ver em Minhas Solicitações"
                         : "oculto para o usuário basic"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 pl-12">
+                    <Label className="text-xs whitespace-nowrap text-muted-foreground">Visível no cronograma</Label>
+                    <Switch
+                      checked={item.show_in_schedule}
+                      onCheckedChange={() => void handleToggleSchedule(item)}
+                    />
+                    <span className="text-[11px] text-muted-foreground">
+                      {item.show_in_schedule ? "aparece no Cronograma" : "não aparece no Cronograma"}
                     </span>
                   </div>
                   <div className="flex items-center gap-2 pl-12">
@@ -369,6 +394,15 @@ export default function ProjectDemandTypesConfigPage() {
               <p className="text-[11px] text-muted-foreground">
                 Se desligado, o usuário basic não pode abrir solicitações deste tipo nem vê-las em
                 "Minhas Solicitações".
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <Switch checked={showInSchedule} onCheckedChange={setShowInSchedule} />
+                <Label className="text-sm">Visível no cronograma</Label>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Se desligado, itens deste tipo não aparecem no Cronograma.
               </p>
             </div>
           </div>

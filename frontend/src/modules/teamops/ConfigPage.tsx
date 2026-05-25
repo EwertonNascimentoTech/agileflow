@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
-import { Plus, Trash2, Pencil } from "lucide-react"
+import { Plus, Trash2, Pencil, KeyRound } from "lucide-react"
+import { PositionAccessDialog } from "@/modules/teamops/PositionAccessDialog"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -322,6 +323,7 @@ function PositionsTab() {
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [editing, setEditing] = useState<Position | null>(null)
+  const [accessPos, setAccessPos] = useState<Position | null>(null)
 
   async function refresh() {
     setLoading(true)
@@ -371,6 +373,9 @@ function PositionsTab() {
                     {p.is_active ? <Badge variant="success">Ativo</Badge> : <Badge variant="secondary">Inativo</Badge>}
                   </td>
                   <td className="px-4 py-2 text-right">
+                    <Button variant="ghost" size="sm" className="gap-1.5" onClick={() => setAccessPos(p)} title="Acesso do cargo">
+                      <KeyRound className="h-4 w-4" /> Acesso
+                    </Button>
                     <Button variant="ghost" size="sm" onClick={() => setEditing(p)}>
                       <Pencil className="h-4 w-4" />
                     </Button>
@@ -387,6 +392,13 @@ function PositionsTab() {
           item={editing}
           onClose={() => { setCreating(false); setEditing(null) }}
           onSaved={() => { setCreating(false); setEditing(null); refresh() }}
+        />
+      )}
+      {accessPos && (
+        <PositionAccessDialog
+          position={accessPos}
+          onClose={() => setAccessPos(null)}
+          onSaved={() => { setAccessPos(null); refresh() }}
         />
       )}
     </div>

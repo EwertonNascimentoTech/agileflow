@@ -2,9 +2,28 @@
 
 import uuid
 from datetime import date, datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, EmailStr, Field
+
+# Nível de acesso de uma Pessoa do time:
+#  none       -> só ficha de capacidade (sem login)
+#  com_acesso -> company_user com a role do CARGO (matriz de permissões por cargo)
+#  executor/gestor -> valores legados, tratados como "com_acesso"
+AccessLevel = Literal["none", "com_acesso", "executor", "gestor"]
+
+
+class PositionPermissionsUpdate(BaseModel):
+    codes: list[str]
+
+
+class CatalogPermission(BaseModel):
+    code: str
+    name: str
+    description: Optional[str] = None
+    module_slug: str
+
+    model_config = {"from_attributes": True}
 
 from app.modules.teamops.models import (
     AbsenceStatus,
@@ -44,6 +63,7 @@ class PositionResponse(BaseModel):
     is_system: bool
     sort_order: int
     is_active: bool
+    role_id: Optional[uuid.UUID] = None
     created_at: datetime
     updated_at: datetime
     person_count: int = 0
@@ -244,7 +264,6 @@ class AreaResponse(BaseModel):
 
 
 class PersonCreate(BaseModel):
-    user_id: Optional[uuid.UUID] = None
     full_name: str = Field(..., min_length=2, max_length=200)
     email: EmailStr
     phone: Optional[str] = Field(None, max_length=30)
@@ -259,10 +278,12 @@ class PersonCreate(BaseModel):
     start_date: Optional[date] = None
     status: PersonStatus = PersonStatus.ATIVO
     notes: Optional[str] = None
+    # Acesso ao sistema (provisiona/vincula o login). Senha exigida ao criar o login.
+    access_level: AccessLevel = "none"
+    password: Optional[str] = None
 
 
 class PersonUpdate(BaseModel):
-    user_id: Optional[uuid.UUID] = None
     full_name: Optional[str] = Field(None, min_length=2, max_length=200)
     email: Optional[EmailStr] = None
     phone: Optional[str] = Field(None, max_length=30)
@@ -277,6 +298,11 @@ class PersonUpdate(BaseModel):
     start_date: Optional[date] = None
     status: Optional[PersonStatus] = None
     notes: Optional[str] = None
+    # Acesso ao sistema. access_level muda o vínculo; password define senha ao provisionar;
+    # reset_password redefine a senha de um login já vinculado.
+    access_level: Optional[AccessLevel] = None
+    password: Optional[str] = None
+    reset_password: Optional[str] = None
 
 
 class AreaMini(BaseModel):
@@ -310,8 +336,23 @@ class PersonResponse(BaseModel):
     po_person: Optional[PersonMini] = None
     tech_reference_person: Optional[PersonMini] = None
     manager_person: Optional[PersonMini] = None
+    # Acesso ao sistema (derivado do usuário vinculado).
+    access_level: AccessLevel = "none"
+    user_active: Optional[bool] = None
+    user_email: Optional[str] = None
 
     model_config = {"from_attributes": True}
+
+
+class TeamMemberResponse(BaseModel):
+    """Membro do time = Pessoa com login vinculado e ativo. `id` é o user_id
+    (compatível com o seletor de responsável do kanban)."""
+    id: uuid.UUID  # user_id
+    person_id: uuid.UUID
+    full_name: str
+    email: str
+    position_name: Optional[str] = None
+    access_level: AccessLevel = "executor"
 
 
 # ─────────────────────────────────────────────

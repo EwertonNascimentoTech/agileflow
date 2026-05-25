@@ -2,9 +2,11 @@ import uuid
 from typing import List
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.modules.super_admin.models import Role, RolePermission, UserRole
 from app.core.security import require_super_admin, get_current_user
 from app.modules.super_admin.schemas import (
     PlanCreate, PlanUpdate, PlanResponse,
@@ -34,10 +36,30 @@ auth_router = APIRouter(prefix="/auth", tags=["Auth"])
 # AUTH
 # ─────────────────────────────────────────────
 
+async def _attach_role_name(db: AsyncSession, user) -> None:
+    """Anexa nome da role + permissões efetivas ao usuário (o frontend usa para decidir
+    a visão/menu, sem depender de endpoints admin). super_admin/company_admin = ['*']
+    (acesso total); company_user = códigos da role do seu cargo."""
+    name = None
+    perms: list[str] = []
+    if user.role in (UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN):
+        perms = ["*"]
+    if user.role_id:
+        name = (await db.execute(select(Role.name).where(Role.id == user.role_id))).scalar_one_or_none()
+        if not perms:
+            rows = await db.execute(
+                select(RolePermission.permission_code).where(RolePermission.role_id == user.role_id)
+            )
+            perms = sorted(r[0] for r in rows.all())
+    user.role_name = name
+    user.permissions = perms
+
+
 @auth_router.post("/login", response_model=TokenResponse)
 @limiter.limit("10/minute")
 async def login(request: Request, data: LoginRequest, db: AsyncSession = Depends(get_db)):
     user = await UserService.authenticate(db, data.email, data.password)
+    await _attach_role_name(db, user)
     access_token, refresh_token = create_tokens(user)
     return TokenResponse(
         access_token=access_token,
@@ -47,7 +69,8 @@ async def login(request: Request, data: LoginRequest, db: AsyncSession = Depends
 
 
 @auth_router.get("/me", response_model=UserResponse)
-async def me(current_user=Depends(get_current_user)):
+async def me(current_user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    await _attach_role_name(db, current_user)
     return current_user
 
 
@@ -81,6 +104,7 @@ async def refresh_token(data: _RefreshRequest, db: AsyncSession = Depends(get_db
     if not user.is_active:
         from fastapi import HTTPException
         raise HTTPException(401, "Usuário inativo.")
+    await _attach_role_name(db, user)
     access_token, new_refresh_token = create_tokens(user)
     return TokenResponse(access_token=access_token, refresh_token=new_refresh_token, user=user)
 

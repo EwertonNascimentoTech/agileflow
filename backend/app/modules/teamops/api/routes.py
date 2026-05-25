@@ -30,6 +30,9 @@ from app.modules.teamops.schemas import (
     PersonStackResponse,
     PersonStackUpdate,
     PersonUpdate,
+    TeamMemberResponse,
+    CatalogPermission,
+    PositionPermissionsUpdate,
     PositionCreate,
     PositionResponse,
     PositionUpdate,
@@ -183,6 +186,31 @@ async def delete_position(
     await PositionService.delete(ctx.db, position_id)
 
 
+@router.get("/permissions-catalog", response_model=list[CatalogPermission])
+async def permissions_catalog(ctx: ModuleContext = Depends(_ctx), _=Depends(_can_config_manage)):
+    """Catálogo de permissões dos módulos ATIVOS do tenant (para a matriz de acesso por cargo)."""
+    return await PositionService.permissions_catalog(ctx.db, ctx.user.tenant_id)
+
+
+@router.get("/positions/{position_id}/permissions", response_model=list[str])
+async def get_position_permissions(
+    position_id: uuid.UUID,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_config_manage),
+):
+    return await PositionService.get_permissions(ctx.db, position_id)
+
+
+@router.put("/positions/{position_id}/permissions", response_model=list[str])
+async def set_position_permissions(
+    position_id: uuid.UUID,
+    data: PositionPermissionsUpdate,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_config_manage),
+):
+    return await PositionService.set_permissions(ctx.db, position_id, data.codes, ctx.user.tenant_id)
+
+
 # ─────────────────────────────────────────────
 # Stack Categories
 # ─────────────────────────────────────────────
@@ -319,13 +347,19 @@ async def list_persons(
     )
 
 
+@router.get("/members", response_model=list[TeamMemberResponse])
+async def list_members(ctx: ModuleContext = Depends(_ctx)):
+    """Membros do time (pessoas com login ativo) — usado no seletor de responsável do kanban."""
+    return await PersonService.list_members(ctx.db)
+
+
 @router.post("/persons", response_model=PersonResponse, status_code=201)
 async def create_person(
     data: PersonCreate,
     ctx: ModuleContext = Depends(_ctx),
     _=Depends(_can_person_manage),
 ):
-    return await PersonService.create(ctx.db, data)
+    return await PersonService.create(ctx.db, data, tenant_id=ctx.user.tenant_id)
 
 
 @router.get("/persons/{person_id}", response_model=PersonResponse)
@@ -340,7 +374,7 @@ async def update_person(
     ctx: ModuleContext = Depends(_ctx),
     _=Depends(_can_person_manage),
 ):
-    return await PersonService.update(ctx.db, person_id, data)
+    return await PersonService.update(ctx.db, person_id, data, tenant_id=ctx.user.tenant_id)
 
 
 @router.delete("/persons/{person_id}", status_code=204)

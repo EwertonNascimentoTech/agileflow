@@ -17,7 +17,6 @@ import {
 import { settingsNav } from "@/modules/crm/admin/settingsNav"
 import { ModuleRail, type RailItem } from "@/modules/crm/shell/ModuleRail"
 import { ContextualSidebar, type SidebarSection } from "@/modules/crm/shell/ContextualSidebar"
-import type { Role } from "@/types"
 
 const homeSections: SidebarSection[] = [
   { to: "/app/dashboard", icon: LayoutDashboard, label: "Dashboard", end: true },
@@ -29,6 +28,20 @@ function resolveIcon(name: string | null | undefined): React.ElementType {
   return Comp ?? Package
 }
 
+// Slug do registry (crm/estoque/…) → prefixos de módulo nos códigos de permissão.
+// crm é servido por dois módulos de permissão (atendimento + propostas_contratos).
+const MODULE_PERM_SLUGS: Record<string, string[]> = {
+  crm: ["atendimento", "propostas_contratos"],
+}
+
+/** Usuário enxerga o módulo se tem ["*"] ou ≥1 permissão em algum prefixo do módulo. */
+function canSeeModule(permissions: string[] | undefined, slug: string): boolean {
+  if (!permissions || permissions.length === 0) return false
+  if (permissions.includes("*")) return true
+  const prefixes = MODULE_PERM_SLUGS[slug] ?? [slug]
+  return permissions.some((code) => prefixes.some((p) => code.startsWith(p + ".")))
+}
+
 export default function AppLayout() {
   const { user, logout } = useAuth()
   const { theme, toggle: toggleTheme } = useTheme()
@@ -37,21 +50,10 @@ export default function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [modules, setModules] = useState<ActiveModule[]>([])
   const [searchOpen, setSearchOpen] = useState(false)
-  const [roles, setRoles] = useState<Role[]>([])
 
   const isAdmin = user?.role === "company_admin" || user?.role === "super_admin"
-  const userRoleName = useMemo(() => {
-    const resolvedByRoleId = roles.find((r) => r.id === user?.role_id)?.name
-    const fromUserPayload =
-      (user as unknown as { role_name?: string; function_name?: string; role_display_name?: string })
-        .role_name
-      ?? (user as unknown as { role_name?: string; function_name?: string; role_display_name?: string })
-        .function_name
-      ?? (user as unknown as { role_name?: string; function_name?: string; role_display_name?: string })
-        .role_display_name
-
-    return (resolvedByRoleId ?? fromUserPayload ?? "").trim().toLowerCase()
-  }, [roles, user])
+  // Nome da role vem no payload do usuário autenticado (/auth/me) — não depende de endpoint admin.
+  const userRoleName = useMemo(() => (user?.role_name ?? "").trim().toLowerCase(), [user])
   const isBasicUser =
     user?.role === "company_user" &&
     (userRoleName === "basic" || userRoleName === "")
@@ -83,12 +85,6 @@ export default function AppLayout() {
       .catch(() => setModules([]))
   }, [])
 
-  useEffect(() => {
-    if (user?.role !== "company_user" || !user.role_id) return
-    companyApi.listRoles()
-      .then(setRoles)
-      .catch(() => setRoles([]))
-  }, [user?.role, user?.role_id])
 
   function handleLogout() {
     logout()
@@ -105,9 +101,14 @@ export default function AppLayout() {
       ]
     }
 
+    // Admin vê tudo (["*"]); demais só os módulos onde o cargo tem ≥1 permissão.
+    const visibleModules = isAdmin
+      ? modules
+      : modules.filter((m) => canSeeModule(user?.permissions, m.slug))
+
     const items: RailItem[] = [
       { key: "home", label: "Visão geral", icon: LayoutDashboard, to: "/app/dashboard" },
-      ...modules.map(m => ({
+      ...visibleModules.map(m => ({
         key: m.slug,
         label: m.name,
         icon: resolveIcon(m.icon),
@@ -117,7 +118,7 @@ export default function AppLayout() {
       { key: "settings", label: "Configurações", icon: Settings, to: "/app/settings", pinBottom: true },
     ]
     return items
-  }, [isBasicUser, modules, basicMyRequestsRoute])
+  }, [isBasicUser, isAdmin, modules, user?.permissions, basicMyRequestsRoute])
 
   // Cabeçalho + seções da sidebar conforme o contexto ativo
   const { sidebarTitle, sidebarIcon, sidebarColor, sections } = useMemo(() => {

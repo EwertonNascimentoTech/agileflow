@@ -4,7 +4,7 @@ import { Check, ChevronDown, FileText, Link as LinkIcon, Loader2, Pencil, Plus, 
 import { projetosApi, type ProjectDemandFormField, type ProjectDemandFormSection, type ProjectDemandType, type ProjectStatus, type ProjectStatusSectionLink, type ProjectTask, type ProjectTaskComment } from "@/api/projetos"
 import { Badge } from "@/components/ui/badge"
 import { GitBranch } from "lucide-react"
-import { companyApi } from "@/api/crm"
+import { teamopsApi } from "@/api/teamops"
 import type { User } from "@/types"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -102,7 +102,9 @@ export function ProjectTaskDrawer({
       setStatusId(task.status_id)
     }, 0)
 
-    companyApi.listUsers({ active_only: true }).then(setUsers).catch(() => setUsers([]))
+    teamopsApi.listMembers()
+      .then((ms) => setUsers(ms.map((m) => ({ id: m.id, full_name: m.full_name, email: m.email })) as unknown as User[]))
+      .catch(() => setUsers([]))
     projetosApi.listTaskComments(projectId, task.id).then(setComments).catch(() => setComments([]))
     projetosApi.getTaskFormSubmission(projectId, task.id).then((submission) => {
       setFormValues(submission?.values ?? {})

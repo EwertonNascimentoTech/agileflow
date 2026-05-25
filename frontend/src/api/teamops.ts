@@ -22,9 +22,17 @@ export interface Position {
   is_system: boolean
   sort_order: number
   is_active: boolean
+  role_id: string | null
   created_at: string
   updated_at: string
   person_count: number
+}
+
+export interface CatalogPermission {
+  code: string
+  name: string
+  description: string | null
+  module_slug: string
 }
 
 export interface PersonMini {
@@ -143,6 +151,21 @@ export interface Person {
   po_person: PersonMini | null
   tech_reference_person: PersonMini | null
   manager_person: PersonMini | null
+  // Acesso ao sistema (derivado do usuário vinculado)
+  access_level: AccessLevel
+  user_active: boolean | null
+  user_email: string | null
+}
+
+export type AccessLevel = "none" | "com_acesso" | "executor" | "gestor"
+
+export interface TeamMember {
+  id: string // user_id
+  person_id: string
+  full_name: string
+  email: string
+  position_name: string | null
+  access_level: AccessLevel
 }
 
 export interface PersonStack {
@@ -276,6 +299,14 @@ export const teamopsApi = {
     api.patch<Position>(`/teamops/positions/${id}`, data).then((r) => r.data),
   deletePosition: (id: string) => api.delete<void>(`/teamops/positions/${id}`).then((r) => r.data),
 
+  // Acesso por cargo (matriz de permissões)
+  getPermissionsCatalog: () =>
+    api.get<CatalogPermission[]>("/teamops/permissions-catalog").then((r) => r.data),
+  getPositionPermissions: (positionId: string) =>
+    api.get<string[]>(`/teamops/positions/${positionId}/permissions`).then((r) => r.data),
+  setPositionPermissions: (positionId: string, codes: string[]) =>
+    api.put<string[]>(`/teamops/positions/${positionId}/permissions`, { codes }).then((r) => r.data),
+
   // Stack Categories
   listStackCategories: (activeOnly = false) =>
     api.get<StackCategory[]>("/teamops/stack-categories", { params: { active_only: activeOnly } }).then((r) => r.data),
@@ -324,11 +355,14 @@ export const teamopsApi = {
     search?: string
   }) => api.get<Person[]>("/teamops/persons", { params }).then((r) => r.data),
   getPerson: (id: string) => api.get<Person>(`/teamops/persons/${id}`).then((r) => r.data),
-  createPerson: (data: Partial<Person> & { full_name: string; email: string }) =>
+  createPerson: (data: Partial<Person> & { full_name: string; email: string; access_level?: AccessLevel; password?: string }) =>
     api.post<Person>("/teamops/persons", data).then((r) => r.data),
-  updatePerson: (id: string, data: Partial<Person>) =>
+  updatePerson: (id: string, data: Partial<Person> & { access_level?: AccessLevel; password?: string; reset_password?: string }) =>
     api.patch<Person>(`/teamops/persons/${id}`, data).then((r) => r.data),
   deletePerson: (id: string) => api.delete<void>(`/teamops/persons/${id}`).then((r) => r.data),
+
+  // Membros do time (pessoas com login ativo) — para o seletor de responsável do kanban
+  listMembers: () => api.get<TeamMember[]>("/teamops/members").then((r) => r.data),
 
   // Person Stacks
   listPersonStacks: (personId: string) =>

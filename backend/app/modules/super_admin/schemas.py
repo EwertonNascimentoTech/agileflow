@@ -210,6 +210,8 @@ class UserResponse(BaseModel):
     full_name: str
     role: UserRole
     role_id: Optional[uuid.UUID]
+    role_name: Optional[str] = None  # nome da role custom (para o frontend decidir a visão)
+    permissions: List[str] = Field(default_factory=list)  # permissões efetivas; ["*"] = acesso total
     tenant_id: Optional[uuid.UUID]
     is_active: bool
     last_login: Optional[datetime]

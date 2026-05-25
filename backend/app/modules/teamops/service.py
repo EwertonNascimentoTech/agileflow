@@ -7,11 +7,27 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import HTTPException
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, delete as sa_delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.security import get_password_hash, validate_password_strength
+from app.modules.super_admin.models import (
+    ModulePermission,
+    Plan,
+    Role,
+    RolePermission,
+    Tenant,
+    TenantModule,
+    User,
+    UserRole,
+)
+
+# Registry slug -> slugs usados nos códigos de permissão (CRM agrupa 2 módulos de permissão).
+MODULE_PERM_SLUGS: dict[str, set[str]] = {
+    "crm": {"atendimento", "propostas_contratos"},
+}
 from app.modules.teamops.models import (
     Absence,
     AbsenceStatus,
@@ -26,6 +42,20 @@ from app.modules.teamops.models import (
     StackCategory,
     StackLevel,
 )
+
+# Permissões da role de sistema "Executor" (acesso operacional para quem executa tarefas).
+EXECUTOR_PERMISSIONS = [
+    "projetos.project.view",
+    "projetos.task.view",
+    "projetos.task.manage",
+    "projetos.comment.manage",
+    "teamops.view",
+    "teamops.org.view",
+    "teamops.person.view",
+    "teamops.stack.view",
+    "teamops.absence.view_own",
+    "teamops.absence.request",
+]
 from app.modules.teamops.schemas import (
     AbsenceCalendarDay,
     AbsenceCalendarResponse,
@@ -48,6 +78,7 @@ from app.modules.teamops.schemas import (
     PersonStackCreate,
     PersonStackUpdate,
     PersonUpdate,
+    TeamMemberResponse,
     PositionCreate,
     PositionUpdate,
     StackCategoryCreate,
@@ -137,6 +168,75 @@ class PositionService:
             )
         await db.delete(item)
         await db.commit()
+
+    # ── Acesso por cargo: matriz de permissões (role do cargo) ──────────────
+    @staticmethod
+    async def _get_or_create_role(db: AsyncSession, position: Position, tenant_id: uuid.UUID) -> Role:
+        """Role (public.roles) que guarda as permissões do cargo. Cria com um conjunto
+        padrão sensato (EXECUTOR_PERMISSIONS) na primeira vez."""
+        if position.role_id:
+            role = (await db.execute(select(Role).where(Role.id == position.role_id))).scalar_one_or_none()
+            if role:
+                return role
+        role = Role(
+            tenant_id=tenant_id,
+            name=f"Cargo · {position.name}",
+            description=f"Permissões do cargo {position.name} (gerenciadas no TeamOps).",
+            is_system=True,
+        )
+        db.add(role)
+        await db.flush()
+        for code in EXECUTOR_PERMISSIONS:
+            db.add(RolePermission(role_id=role.id, permission_code=code))
+        position.role_id = role.id
+        await db.flush()
+        return role
+
+    @staticmethod
+    async def get_permissions(db: AsyncSession, position_id: uuid.UUID) -> list[str]:
+        pos = await PositionService.get(db, position_id)
+        if not pos.role_id:
+            return []
+        rows = await db.execute(
+            select(RolePermission.permission_code).where(RolePermission.role_id == pos.role_id)
+        )
+        return sorted(r[0] for r in rows.all())
+
+    @staticmethod
+    async def set_permissions(
+        db: AsyncSession, position_id: uuid.UUID, codes: list[str], tenant_id: uuid.UUID
+    ) -> list[str]:
+        pos = await PositionService.get(db, position_id)
+        role = await PositionService._get_or_create_role(db, pos, tenant_id)
+        valid = {c for (c,) in (await db.execute(select(ModulePermission.code))).all()}
+        clean = [c for c in dict.fromkeys(codes) if c in valid]
+        await db.execute(sa_delete(RolePermission).where(RolePermission.role_id == role.id))
+        for c in clean:
+            db.add(RolePermission(role_id=role.id, permission_code=c))
+        pos.updated_at = datetime.utcnow()
+        await db.commit()
+        return await PositionService.get_permissions(db, position_id)
+
+    @staticmethod
+    async def permissions_catalog(db: AsyncSession, tenant_id: Optional[uuid.UUID]) -> list[ModulePermission]:
+        """Catálogo de permissões filtrado aos módulos ATIVOS do tenant."""
+        allowed: set[str] = set()
+        if tenant_id:
+            active = (await db.execute(
+                select(TenantModule.module_slug).where(
+                    TenantModule.tenant_id == tenant_id,
+                    TenantModule.is_active == True,  # noqa: E712
+                )
+            )).all()
+            for (slug,) in active:
+                allowed |= MODULE_PERM_SLUGS.get(slug, {slug})
+        rows = await db.execute(
+            select(ModulePermission).order_by(ModulePermission.module_slug, ModulePermission.code)
+        )
+        perms = list(rows.scalars().all())
+        if allowed:
+            perms = [p for p in perms if p.module_slug in allowed]
+        return perms
 
 
 # ─────────────────────────────────────────────
@@ -485,7 +585,9 @@ class PersonService:
             q = q.where(and_(*filters))
         q = q.order_by(Person.full_name.asc())
         result = await db.execute(q)
-        return list(result.scalars().all())
+        items = list(result.scalars().all())
+        await PersonService._enrich_access(db, items)
+        return items
 
     @staticmethod
     async def get(db: AsyncSession, person_id: uuid.UUID) -> Person:
@@ -503,6 +605,7 @@ class PersonService:
         person = result.scalar_one_or_none()
         if not person:
             raise HTTPException(status_code=404, detail="Pessoa não encontrada.")
+        await PersonService._enrich_access(db, [person])
         return person
 
     @staticmethod
@@ -518,23 +621,36 @@ class PersonService:
                     raise HTTPException(status_code=400, detail=f"Referência inválida em {fld}.")
 
     @staticmethod
-    async def create(db: AsyncSession, data: PersonCreate) -> Person:
+    async def create(db: AsyncSession, data: PersonCreate, tenant_id: Optional[uuid.UUID] = None) -> Person:
         payload = data.model_dump()
+        access_level = payload.pop("access_level", "none")
+        password = payload.pop("password", None)
+        payload.pop("reset_password", None)
         payload["email"] = payload["email"].lower()
         await PersonService._validate_refs(db, payload)
         item = Person(**payload)
         db.add(item)
         try:
-            await db.commit()
+            await db.flush()  # garante item.id e dispara unique de e-mail da pessoa
         except IntegrityError:
             await db.rollback()
             raise HTTPException(status_code=400, detail="Já existe uma pessoa com este e-mail.")
+        if access_level and access_level != "none":
+            await PersonService._provision_user(db, item, access_level, password, None, tenant_id)
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            raise HTTPException(status_code=400, detail="Não foi possível salvar (e-mail já em uso).")
         return await PersonService.get(db, item.id)
 
     @staticmethod
-    async def update(db: AsyncSession, person_id: uuid.UUID, data: PersonUpdate) -> Person:
+    async def update(db: AsyncSession, person_id: uuid.UUID, data: PersonUpdate, tenant_id: Optional[uuid.UUID] = None) -> Person:
         item = await PersonService.get(db, person_id)
         payload = data.model_dump(exclude_unset=True)
+        access_level = payload.pop("access_level", None)
+        password = payload.pop("password", None)
+        reset_password = payload.pop("reset_password", None)
         if "email" in payload and payload["email"]:
             payload["email"] = payload["email"].lower()
         await PersonService._validate_refs(db, payload)
@@ -545,12 +661,191 @@ class PersonService:
         for key, value in payload.items():
             setattr(item, key, value)
         item.updated_at = datetime.utcnow()
+        if access_level is not None or reset_password:
+            await PersonService._provision_user(db, item, access_level, password, reset_password, tenant_id)
         try:
             await db.commit()
         except IntegrityError:
             await db.rollback()
-            raise HTTPException(status_code=400, detail="Já existe uma pessoa com este e-mail.")
+            raise HTTPException(status_code=400, detail="Não foi possível salvar (e-mail já em uso).")
         return await PersonService.get(db, item.id)
+
+    # ── Acesso ao sistema: provisionamento Pessoa ↔ Usuário ──────────────────
+    @staticmethod
+    def _hash_validated(pw: str) -> str:
+        try:
+            validate_password_strength(pw)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return get_password_hash(pw)
+
+    @staticmethod
+    async def _assert_plan_limit(db: AsyncSession, tenant_id: Optional[uuid.UUID]) -> None:
+        if not tenant_id:
+            return
+        t = (await db.execute(select(Tenant).where(Tenant.id == tenant_id))).scalar_one_or_none()
+        if not t or not t.plan_id:
+            return
+        p = (await db.execute(select(Plan).where(Plan.id == t.plan_id))).scalar_one_or_none()
+        if not p or p.max_users <= 0:
+            return
+        count = (await db.execute(
+            select(func.count(User.id)).where(User.tenant_id == tenant_id, User.is_active == True)  # noqa: E712
+        )).scalar() or 0
+        if count >= p.max_users:
+            raise HTTPException(status_code=403, detail=f"Limite de {p.max_users} usuários do plano atingido.")
+
+    @staticmethod
+    async def _get_executor_role_id(db: AsyncSession, tenant_id: Optional[uuid.UUID]) -> uuid.UUID:
+        if not tenant_id:
+            raise HTTPException(status_code=400, detail="Tenant não identificado para criar o acesso.")
+        res = await db.execute(select(Role).where(Role.tenant_id == tenant_id, Role.name == "Executor"))
+        role = res.scalar_one_or_none()
+        if role:
+            return role.id
+        role = Role(
+            tenant_id=tenant_id,
+            name="Executor",
+            description="Acesso operacional a Projetos (provisionado pelo TeamOps).",
+            is_system=True,
+        )
+        db.add(role)
+        await db.flush()
+        for code in EXECUTOR_PERMISSIONS:
+            db.add(RolePermission(role_id=role.id, permission_code=code))
+        await db.flush()
+        return role.id
+
+    @staticmethod
+    async def _provision_user(
+        db: AsyncSession,
+        person: Person,
+        access_level: Optional[str],
+        password: Optional[str],
+        reset_password: Optional[str],
+        tenant_id: Optional[uuid.UUID],
+    ) -> None:
+        """Cria/vincula/ajusta o login (public.users) conforme o nível de acesso.
+        - none: desativa e desvincula o login (não apaga o User, preserva históricos).
+        - com acesso (com_acesso/executor/gestor): company_user com a role do CARGO
+          (matriz de permissões por cargo). Ninguém vira company_admin por aqui.
+        access_level None = não muda o acesso (usado só para reset de senha)."""
+        user: Optional[User] = None
+        if person.user_id:
+            user = (await db.execute(select(User).where(User.id == person.user_id))).scalar_one_or_none()
+
+        if reset_password and user:
+            PersonService._hash_validated(reset_password)
+            user.hashed_password = get_password_hash(reset_password)
+            user.updated_at = datetime.utcnow()
+
+        if access_level is None:
+            return
+
+        if access_level == "none":
+            if user:
+                user.is_active = False
+                user.updated_at = datetime.utcnow()
+            person.user_id = None
+            return
+
+        # Acesso = company_user com a role do CARGO (matriz de permissões por cargo).
+        target_role = UserRole.COMPANY_USER
+        position = (await db.execute(
+            select(Position).where(Position.id == person.position_id)
+        )).scalar_one_or_none()
+        if position is None:
+            raise HTTPException(status_code=400, detail="Cargo da pessoa não encontrado para definir o acesso.")
+        target_role_id = (await PositionService._get_or_create_role(db, position, tenant_id)).id
+
+        if user is None:
+            existing = (await db.execute(
+                select(User).where(func.lower(User.email) == person.email.lower())
+            )).scalar_one_or_none()
+            if existing is None:
+                if not password:
+                    raise HTTPException(status_code=400, detail="Defina uma senha para criar o acesso.")
+                await PersonService._assert_plan_limit(db, tenant_id)
+                user = User(
+                    email=person.email.lower(),
+                    full_name=person.full_name,
+                    hashed_password=PersonService._hash_validated(password),
+                    role=target_role,
+                    role_id=target_role_id,
+                    tenant_id=tenant_id,
+                    is_active=True,
+                )
+                db.add(user)
+                await db.flush()
+                person.user_id = user.id
+                return
+            if existing.tenant_id != tenant_id:
+                raise HTTPException(status_code=400, detail="E-mail já usado por outro usuário.")
+            user = existing  # revincula um usuário do mesmo tenant
+
+        # usuário já vinculado (ou revinculado): ativa + ajusta nível
+        if not user.is_active:
+            await PersonService._assert_plan_limit(db, tenant_id)
+        user.is_active = True
+        user.role = target_role
+        user.role_id = target_role_id
+        user.full_name = person.full_name
+        if password:
+            user.hashed_password = PersonService._hash_validated(password)
+        user.updated_at = datetime.utcnow()
+        person.user_id = user.id
+
+    @staticmethod
+    async def _enrich_access(db: AsyncSession, persons: list[Person]) -> None:
+        """Deriva access_level/user_active/user_email a partir do usuário vinculado."""
+        user_ids = [p.user_id for p in persons if p.user_id]
+        users_by_id: dict[uuid.UUID, User] = {}
+        if user_ids:
+            rows = await db.execute(select(User).where(User.id.in_(user_ids)))
+            users_by_id = {u.id: u for u in rows.scalars().all()}
+        for p in persons:
+            u = users_by_id.get(p.user_id) if p.user_id else None
+            if u is None:
+                p.access_level = "none"
+                p.user_active = None
+                p.user_email = None
+            else:
+                # Acesso é regido pela role do cargo; "gestor" legado (company_admin) também conta.
+                p.access_level = "gestor" if u.role == UserRole.COMPANY_ADMIN else "com_acesso"
+                p.user_active = u.is_active
+                p.user_email = u.email
+
+    @staticmethod
+    async def list_members(db: AsyncSession) -> list[TeamMemberResponse]:
+        """Membros do time = Pessoas ativas com login ativo vinculado (para atribuição no kanban)."""
+        rows = await db.execute(
+            select(Person)
+            .options(selectinload(Person.position))
+            .where(Person.user_id.isnot(None), Person.status == PersonStatus.ATIVO)
+            .order_by(Person.full_name.asc())
+        )
+        persons = list(rows.scalars().all())
+        user_ids = [p.user_id for p in persons if p.user_id]
+        users_by_id: dict[uuid.UUID, User] = {}
+        if user_ids:
+            urows = await db.execute(
+                select(User).where(User.id.in_(user_ids), User.is_active == True)  # noqa: E712
+            )
+            users_by_id = {u.id: u for u in urows.scalars().all()}
+        members: list[TeamMemberResponse] = []
+        for p in persons:
+            u = users_by_id.get(p.user_id)
+            if u is None:
+                continue
+            members.append(TeamMemberResponse(
+                id=u.id,
+                person_id=p.id,
+                full_name=p.full_name,
+                email=u.email,
+                position_name=p.position.name if p.position else None,
+                access_level="gestor" if u.role == UserRole.COMPANY_ADMIN else "com_acesso",
+            ))
+        return members
 
     @staticmethod
     async def delete(db: AsyncSession, person_id: uuid.UUID) -> None:
@@ -1066,10 +1361,15 @@ class DashboardService:
         )
         by_area_list = [{"area": row[0], "count": row[1]} for row in by_area.all()]
 
+        # "Por cargo" — agrupa pelo Position (team_role foi removido na unificação de usuários)
         by_role = await db.execute(
-            select(Person.team_role, func.count(Person.id)).group_by(Person.team_role)
+            select(Position.name, func.count(Person.id))
+            .select_from(Person)
+            .join(Position, Person.position_id == Position.id, isouter=True)
+            .group_by(Position.name)
+            .order_by(func.count(Person.id).desc())
         )
-        by_role_list = [{"role": row[0].value if hasattr(row[0], "value") else str(row[0]), "count": row[1]} for row in by_role.all()]
+        by_role_list = [{"role": row[0] or "Sem cargo", "count": row[1]} for row in by_role.all()]
 
         return DashboardKpis(
             active_persons=active.scalar() or 0,

@@ -112,6 +112,7 @@ export interface ProjectDemandType {
   funnel: ProjectDemandTypeFunnelRef | null
   allowed_child_type_ids: string[] | null
   available_for_basic: boolean
+  show_in_schedule: boolean
   order: number
   is_active: boolean
   created_at: string
@@ -230,6 +231,7 @@ export const projetosApi = {
     funnel_id?: string | null
     allowed_child_type_ids?: string[] | null
     available_for_basic?: boolean
+    show_in_schedule?: boolean
     order?: number
     is_active?: boolean
   }) => api.post<ProjectDemandType>("/projetos/config/demand-types", data).then((r) => r.data),
@@ -240,6 +242,7 @@ export const projetosApi = {
     funnel_id: string | null
     allowed_child_type_ids: string[] | null
     available_for_basic: boolean
+    show_in_schedule: boolean
     order: number
     is_active: boolean
   }>) => api.patch<ProjectDemandType>(`/projetos/config/demand-types/${demandTypeId}`, data).then((r) => r.data),

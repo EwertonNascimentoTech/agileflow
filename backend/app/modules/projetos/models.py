@@ -264,6 +264,8 @@ class ProjectDemandType(TenantBase):
     allowed_child_type_ids: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     # Se False, usuários "basic" não podem solicitar nem ver demandas deste tipo.
     available_for_basic: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Se False, itens deste tipo não aparecem no Cronograma.
+    show_in_schedule: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

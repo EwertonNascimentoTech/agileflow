@@ -85,6 +85,7 @@ class ProjectDemandTypeCreate(BaseModel):
     funnel_id: Optional[uuid.UUID] = None
     allowed_child_type_ids: Optional[list[uuid.UUID]] = None
     available_for_basic: bool = True
+    show_in_schedule: bool = True
     order: int = Field(0, ge=0)
     is_active: bool = True
 
@@ -96,6 +97,7 @@ class ProjectDemandTypeUpdate(BaseModel):
     funnel_id: Optional[uuid.UUID] = None
     allowed_child_type_ids: Optional[list[uuid.UUID]] = None
     available_for_basic: Optional[bool] = None
+    show_in_schedule: Optional[bool] = None
     order: Optional[int] = Field(None, ge=0)
     is_active: Optional[bool] = None
 
@@ -117,6 +119,7 @@ class ProjectDemandTypeResponse(BaseModel):
     funnel: Optional[ProjectDemandTypeFunnelRef] = None
     allowed_child_type_ids: Optional[list[uuid.UUID]] = None
     available_for_basic: bool = True
+    show_in_schedule: bool = True
     order: int
     is_active: bool
     created_at: datetime

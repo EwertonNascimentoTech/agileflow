@@ -1,9 +1,41 @@
-import { useMemo } from "react"
+import { useMemo, useState, type PointerEvent as ReactPointerEvent } from "react"
+import { Plus } from "lucide-react"
 import type { ProjectTask } from "@/api/projetos"
+import type { User } from "@/types"
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const PX_PER_DAY = 26
-const LABEL_W = 300
+const LABEL_W = 360
+
+function toIsoOrNull(v: string): string | null {
+  return v ? new Date(`${v}T00:00:00`).toISOString() : null
+}
+
+// ISO (meia-noite local) a partir de "YYYY-MM-DD", mesma convenção dos inputs de data.
+function isoFromDateStr(s: string): string {
+  return new Date(`${s}T00:00:00`).toISOString()
+}
+
+// Soma `days` à data (parte YYYY-MM-DD do ISO), sem deriva de fuso/horário de verão.
+function addDaysToIso(iso: string, days: number): string {
+  const [y, m, d] = iso.slice(0, 10).split("-").map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  dt.setUTCDate(dt.getUTCDate() + days)
+  const ny = dt.getUTCFullYear()
+  const nm = String(dt.getUTCMonth() + 1).padStart(2, "0")
+  const nd = String(dt.getUTCDate()).padStart(2, "0")
+  return isoFromDateStr(`${ny}-${nm}-${nd}`)
+}
+
+type DragState = { taskId: string; mode: "move" | "start" | "end"; startX: number; deltaDays: number }
+
+function ganttInitials(name: string | undefined): string {
+  if (!name) return "?"
+  const p = name.trim().split(/\s+/).filter(Boolean)
+  if (p.length === 0) return "?"
+  if (p.length === 1) return p[0].slice(0, 2).toUpperCase()
+  return (p[0][0] + p[p.length - 1][0]).toUpperCase()
+}
 
 interface GanttNode {
   task: ProjectTask
@@ -43,8 +75,62 @@ function barColor(task: ProjectTask): string {
   return "bg-primary"
 }
 
-export function GanttChart({ rootId, tasks }: { rootId: string; tasks: ProjectTask[] }) {
+export function GanttChart({
+  rootId,
+  tasks,
+  users = [],
+  onOpenTask,
+  onAddChild,
+  onUpdateDates,
+}: {
+  rootId: string
+  tasks: ProjectTask[]
+  users?: User[]
+  onOpenTask?: (t: ProjectTask) => void
+  onAddChild?: (t: ProjectTask) => void
+  onUpdateDates?: (t: ProjectTask, patch: { start_date?: string | null; due_date?: string | null }) => void
+}) {
+  const [drag, setDrag] = useState<DragState | null>(null)
   const root = tasks.find((t) => t.id === rootId)
+
+  function startDrag(e: ReactPointerEvent, task: ProjectTask, mode: DragState["mode"]) {
+    if (!onUpdateDates || !task.start_date || !task.due_date) return
+    e.preventDefault()
+    e.stopPropagation()
+    ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
+    setDrag({ taskId: task.id, mode, startX: e.clientX, deltaDays: 0 })
+  }
+
+  function moveDrag(e: ReactPointerEvent, taskId: string) {
+    setDrag((d) => {
+      if (!d || d.taskId !== taskId) return d
+      const dd = Math.round((e.clientX - d.startX) / PX_PER_DAY)
+      return dd === d.deltaDays ? d : { ...d, deltaDays: dd }
+    })
+  }
+
+  function endDrag(e: ReactPointerEvent, task: ProjectTask) {
+    ;(e.currentTarget as Element).releasePointerCapture?.(e.pointerId)
+    if (!drag || drag.taskId !== task.id) { setDrag(null); return }
+    const dd = drag.deltaDays
+    const mode = drag.mode
+    setDrag(null)
+    if (dd === 0 || !onUpdateDates || !task.start_date || !task.due_date) return
+    if (mode === "move") {
+      onUpdateDates(task, {
+        start_date: addDaysToIso(task.start_date, dd),
+        due_date: addDaysToIso(task.due_date, dd),
+      })
+    } else if (mode === "start") {
+      let ns = addDaysToIso(task.start_date, dd)
+      if (ns.slice(0, 10) > task.due_date.slice(0, 10)) ns = isoFromDateStr(task.due_date.slice(0, 10))
+      onUpdateDates(task, { start_date: ns })
+    } else {
+      let nd = addDaysToIso(task.due_date, dd)
+      if (nd.slice(0, 10) < task.start_date.slice(0, 10)) nd = isoFromDateStr(task.start_date.slice(0, 10))
+      onUpdateDates(task, { due_date: nd })
+    }
+  }
   const byParent = useMemo(() => {
     const m = new Map<string, ProjectTask[]>()
     for (const t of tasks) {
@@ -135,23 +221,103 @@ export function GanttChart({ rootId, tasks }: { rootId: string; tasks: ProjectTa
               width = Math.max(PX_PER_DAY, (daysBetween(s, e) + 1) * PX_PER_DAY)
             }
             return (
-              <div key={task.id} className="flex border-b last:border-b-0 hover:bg-muted/20">
+              <div key={task.id} className="group/row flex border-b last:border-b-0 hover:bg-muted/20">
                 <div
-                  className="shrink-0 truncate px-3 py-2 text-sm"
+                  className="flex shrink-0 flex-col gap-1 px-3 py-1.5"
                   style={{ width: LABEL_W, paddingLeft: 12 + depth * 16 }}
-                  title={task.title}
                 >
-                  {depth > 0 && <span className="text-muted-foreground">↳ </span>}
-                  {task.title}
+                  <div className="flex items-center gap-1.5 text-sm">
+                    {depth > 0 && <span className="shrink-0 text-muted-foreground">↳</span>}
+                    {(() => {
+                      const a = users.find((u) => u.id === task.assigned_to) ?? null
+                      return (
+                        <span
+                          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[9px] font-semibold text-white"
+                          style={{ backgroundColor: a ? "#6366f1" : "#94a3b8" }}
+                          title={a?.full_name ?? "Sem responsável"}
+                        >
+                          {ganttInitials(a?.full_name)}
+                        </span>
+                      )
+                    })()}
+                    <button
+                      type="button"
+                      className="flex-1 truncate text-left hover:text-primary hover:underline"
+                      title={task.title}
+                      onClick={() => onOpenTask?.(task)}
+                    >
+                      {task.title}
+                    </button>
+                    {onAddChild && (
+                      <button
+                        type="button"
+                        className="shrink-0 text-muted-foreground opacity-0 transition hover:text-primary group-hover/row:opacity-100"
+                        title="Adicionar item filho"
+                        onClick={() => onAddChild(task)}
+                      >
+                        <Plus size={14} />
+                      </button>
+                    )}
+                  </div>
+                  {onUpdateDates && (
+                    <div className="flex items-center gap-1 pl-6">
+                      <input
+                        type="date"
+                        value={task.start_date ? task.start_date.slice(0, 10) : ""}
+                        onChange={(e) => onUpdateDates(task, { start_date: toIsoOrNull(e.target.value) })}
+                        className="h-6 w-[115px] rounded border border-border bg-background px-1 text-[11px] text-muted-foreground"
+                        title="Início"
+                      />
+                      <span className="text-[10px] text-muted-foreground">→</span>
+                      <input
+                        type="date"
+                        value={task.due_date ? task.due_date.slice(0, 10) : ""}
+                        onChange={(e) => onUpdateDates(task, { due_date: toIsoOrNull(e.target.value) })}
+                        className="h-6 w-[115px] rounded border border-border bg-background px-1 text-[11px] text-muted-foreground"
+                        title="Prazo"
+                      />
+                    </div>
+                  )}
                 </div>
                 <div className="relative" style={{ width: timelineWidth }}>
-                  {hasDates ? (
-                    <div
-                      className={`absolute top-1/2 -translate-y-1/2 h-4 rounded ${barColor(task)} opacity-90`}
-                      style={{ left, width }}
-                      title={`${task.start_date?.slice(0, 10) ?? "?"} → ${task.due_date?.slice(0, 10) ?? "?"}`}
-                    />
-                  ) : (
+                  {hasDates ? (() => {
+                    const draggable = !!onUpdateDates && !!task.start_date && !!task.due_date
+                    let bl = left
+                    let bw = width
+                    if (drag && drag.taskId === task.id) {
+                      const dd = drag.deltaDays * PX_PER_DAY
+                      if (drag.mode === "move") bl = left + dd
+                      else if (drag.mode === "start") { bl = left + dd; bw = Math.max(PX_PER_DAY, width - dd) }
+                      else bw = Math.max(PX_PER_DAY, width + dd)
+                    }
+                    return (
+                      <div
+                        className={`absolute top-1/2 -translate-y-1/2 h-4 select-none rounded ${barColor(task)} opacity-90 ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
+                        style={{ left: bl, width: bw }}
+                        title={`${task.start_date?.slice(0, 10) ?? "?"} → ${task.due_date?.slice(0, 10) ?? "?"}${draggable ? " · arraste para mover, pegue as bordas para redimensionar" : ""}`}
+                        onPointerDown={draggable ? (e) => startDrag(e, task, "move") : undefined}
+                        onPointerMove={draggable ? (e) => moveDrag(e, task.id) : undefined}
+                        onPointerUp={draggable ? (e) => endDrag(e, task) : undefined}
+                      >
+                        {draggable && (
+                          <>
+                            <span
+                              className="absolute left-0 top-0 h-full w-2 cursor-ew-resize rounded-l bg-black/10"
+                              onPointerDown={(e) => startDrag(e, task, "start")}
+                              onPointerMove={(e) => moveDrag(e, task.id)}
+                              onPointerUp={(e) => endDrag(e, task)}
+                            />
+                            <span
+                              className="absolute right-0 top-0 h-full w-2 cursor-ew-resize rounded-r bg-black/10"
+                              onPointerDown={(e) => startDrag(e, task, "end")}
+                              onPointerMove={(e) => moveDrag(e, task.id)}
+                              onPointerUp={(e) => endDrag(e, task)}
+                            />
+                          </>
+                        )}
+                      </div>
+                    )
+                  })() : (
                     <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] italic text-muted-foreground/60">
                       sem datas
                     </span>

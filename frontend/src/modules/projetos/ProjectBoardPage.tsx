@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { GripVertical, Loader2, Plus, Search, GitBranch, ArrowUpRight } from "lucide-react"
+import { GripVertical, Loader2, Plus, Search, GitBranch, ArrowUpRight, Check, ChevronDown, X } from "lucide-react"
 import {
   DndContext,
   PointerSensor,
@@ -13,7 +13,7 @@ import {
 } from "@dnd-kit/core"
 import { CSS } from "@dnd-kit/utilities"
 
-import { companyApi } from "@/api/crm"
+import { teamopsApi } from "@/api/teamops"
 import { projetosApi, type Project, type ProjectDemandFormField, type ProjectDemandFormSection, type ProjectDemandType, type ProjectFunnel, type ProjectStatus, type ProjectStatusSectionLink, type ProjectTask } from "@/api/projetos"
 import { useAuth } from "@/contexts/AuthContext"
 import type { User } from "@/types"
@@ -50,6 +50,74 @@ function colorForUser(id: string | null | undefined): string {
   for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0
   const palette = ["#7c3aed", "#0ea5e9", "#10b981", "#f59e0b", "#ef4444", "#ec4899", "#14b8a6", "#6366f1"]
   return palette[Math.abs(hash) % palette.length]
+}
+
+// Filtros do board persistidos entre navegações (limpos só pelo botão "Limpar").
+const FILTERS_KEY = "projetos.board.filters"
+type BoardFilters = { q?: string; assignees?: string[]; types?: string[]; slas?: string[] }
+function loadFilters(): BoardFilters {
+  try {
+    return JSON.parse(localStorage.getItem(FILTERS_KEY) || "{}") as BoardFilters
+  } catch {
+    return {}
+  }
+}
+
+// Filtro multi-seleção (checkboxes) — permite escolher vários valores por campo.
+function FilterMultiSelect({
+  label,
+  options,
+  selected,
+  onChange,
+}: {
+  label: string
+  options: { value: string; label: string }[]
+  selected: string[]
+  onChange: (next: string[]) => void
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex h-9 items-center gap-1.5 rounded-md border bg-background px-3 text-sm hover:bg-muted"
+      >
+        <span className={selected.length ? "font-medium" : "text-muted-foreground"}>{label}</span>
+        {selected.length > 0 && (
+          <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary/15 px-1 text-[10px] font-semibold text-primary">
+            {selected.length}
+          </span>
+        )}
+        <ChevronDown size={14} className="text-muted-foreground" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 z-20 mt-1 max-h-72 w-56 overflow-y-auto rounded-md border bg-popover p-1 shadow-md">
+            {options.length === 0 ? (
+              <p className="px-2 py-1.5 text-[11px] italic text-muted-foreground/70">Sem opções.</p>
+            ) : options.map((o) => {
+              const checked = selected.includes(o.value)
+              return (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => onChange(checked ? selected.filter((v) => v !== o.value) : [...selected, o.value])}
+                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
+                >
+                  <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${checked ? "border-primary bg-primary text-white" : "border-border"}`}>
+                    {checked && <Check size={11} />}
+                  </span>
+                  <span className="truncate">{o.label}</span>
+                </button>
+              )
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  )
 }
 
 function BoardCard({
@@ -244,17 +312,30 @@ export default function ProjectBoardPage() {
   const [openCreate, setOpenCreate] = useState(false)
   const [savingCreate, setSavingCreate] = useState(false)
   const [selectedTask, setSelectedTask] = useState<ProjectTask | null>(null)
-  const [roles, setRoles] = useState<Array<{ id: string; name: string }>>([])
   const [selectedFunnelId, setSelectedFunnelId] = useState("")
   const [selectedDemandTypeId, setSelectedDemandTypeId] = useState("")
   const [formValues, setFormValues] = useState<Record<string, unknown>>({})
   const [newTaskTitle, setNewTaskTitle] = useState("")
   const [newTaskDescription, setNewTaskDescription] = useState("")
   const [pendingCreateStatusId, setPendingCreateStatusId] = useState<string | null>(null)
-  const [searchQuery, setSearchQuery] = useState("")
-  const [assigneeFilter, setAssigneeFilter] = useState("__all__")
-  const [typeFilter, setTypeFilter] = useState("__all__")
-  const [slaFilter, setSlaFilter] = useState("__all__")
+  const [searchQuery, setSearchQuery] = useState<string>(() => loadFilters().q ?? "")
+  const [assignees, setAssignees] = useState<string[]>(() => loadFilters().assignees ?? [])
+  const [types, setTypes] = useState<string[]>(() => loadFilters().types ?? [])
+  const [slas, setSlas] = useState<string[]>(() => loadFilters().slas ?? [])
+
+  // Persiste os filtros (continuam ao trocar de página; só o botão "Limpar" zera).
+  useEffect(() => {
+    try {
+      localStorage.setItem(FILTERS_KEY, JSON.stringify({ q: searchQuery, assignees, types, slas }))
+    } catch { /* ignore */ }
+  }, [searchQuery, assignees, types, slas])
+
+  function clearFilters() {
+    setSearchQuery("")
+    setAssignees([])
+    setTypes([])
+    setSlas([])
+  }
   const [createSectionLinks, setCreateSectionLinks] = useState<ProjectStatusSectionLink[]>([])
   const [createFieldErrors, setCreateFieldErrors] = useState<Record<string, string>>({})
   const [conversionPrompt, setConversionPrompt] = useState<{ task: ProjectTask; toStatusId: string; typeName: string; name: string } | null>(null)
@@ -284,7 +365,7 @@ export default function ProjectBoardPage() {
     const byId = new Map(tasks.map((t) => [t.id, t.title]))
     return (id: string | null) => (id ? byId.get(id) ?? null : null)
   }, [tasks])
-  const userRoleName = roles.find((r) => r.id === user?.role_id)?.name?.trim().toLowerCase() ?? ""
+  const userRoleName = (user?.role_name ?? "").trim().toLowerCase()
   const isBasicUser =
     user?.role === "company_user" &&
     (userRoleName === "basic" || userRoleName === "")
@@ -292,7 +373,9 @@ export default function ProjectBoardPage() {
   useEffect(() => {
     Promise.all([
       projetosApi.listProjects(true),
-      companyApi.listUsers({ active_only: true }).catch(() => [] as User[]),
+      teamopsApi.listMembers()
+        .then((ms) => ms.map((m) => ({ id: m.id, full_name: m.full_name, email: m.email })) as unknown as User[])
+        .catch(() => [] as User[]),
       projetosApi.listDemandTypes(true).catch(() => [] as ProjectDemandType[]),
     ])
       .then(([ps, us, dts]) => {
@@ -314,11 +397,6 @@ export default function ProjectBoardPage() {
     const stillEligible = availableDemandTypes.some((t) => t.id === selectedDemandTypeId)
     if (!stillEligible) setSelectedDemandTypeId(availableDemandTypes[0].id)
   }, [availableDemandTypes, selectedDemandTypeId])
-
-  useEffect(() => {
-    if (user?.role !== "company_user" || !user.role_id) return
-    companyApi.listRoles().then(setRoles).catch(() => setRoles([]))
-  }, [user?.role, user?.role_id])
 
   useEffect(() => {
     if (!projectId) return
@@ -606,20 +684,20 @@ export default function ProjectBoardPage() {
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col gap-4 overflow-hidden">
-      <div className="flex w-full min-w-0 flex-wrap items-center gap-3 rounded-xl border bg-card px-4 py-3 shadow-sm">
-        <div className="flex items-baseline gap-2 min-w-0">
+      <div className="flex w-full min-w-0 flex-wrap items-center gap-2 rounded-xl border bg-card px-4 py-3 shadow-sm">
+        <div className="flex items-baseline gap-2 min-w-0 shrink-0">
           <h1 className="text-xl font-bold shrink-0">Kanban</h1>
           {selectedFunnel && (
             <>
               <span className="text-muted-foreground shrink-0">/</span>
-              <p className="text-sm font-medium text-muted-foreground truncate min-w-0">{selectedFunnel.name}</p>
+              <p className="text-sm font-medium text-muted-foreground truncate min-w-0 max-w-[140px]">{selectedFunnel.name}</p>
             </>
           )}
           <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-muted px-1.5 text-[11px] font-medium text-muted-foreground shrink-0">
             {totalTasks}
           </span>
         </div>
-        <div className="relative flex-1 min-w-[180px] max-w-xl">
+        <div className="relative min-w-[160px] flex-1">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={searchQuery}
@@ -628,53 +706,47 @@ export default function ProjectBoardPage() {
             className="pl-9 h-9"
           />
         </div>
-        <div className="flex items-center gap-2 flex-wrap ml-auto">
-          <Select value={assigneeFilter} onValueChange={setAssigneeFilter}>
-            <SelectTrigger className="w-[160px] h-9"><SelectValue placeholder="Responsável" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">Todos responsáveis</SelectItem>
-              <SelectItem value="__none__">Sem responsável</SelectItem>
-              {users.map((u) => (
-                <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={typeFilter} onValueChange={setTypeFilter}>
-            <SelectTrigger className="w-[150px] h-9"><SelectValue placeholder="Tipo" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">Todos os tipos</SelectItem>
-              {demandTypes.map((t) => (
-                <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={slaFilter} onValueChange={setSlaFilter}>
-            <SelectTrigger className="w-[140px] h-9"><SelectValue placeholder="SLA" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">Todos (SLA)</SelectItem>
-              <SelectItem value="ok">No prazo</SelectItem>
-              <SelectItem value="warning">Em alerta</SelectItem>
-              <SelectItem value="breached">Atrasado</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select
-            value={selectedFunnelId || undefined}
-            onValueChange={setSelectedFunnelId}
-          >
-            <SelectTrigger className="w-[200px] h-9">
-              <SelectValue placeholder="Selecionar funil" />
-            </SelectTrigger>
-            <SelectContent>
-              {funnels.map((funnel) => (
-                <SelectItem key={funnel.id} value={funnel.id}>{funnel.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button className="gap-1.5 h-9 shrink-0" onClick={() => setOpenCreate(true)}>
-            <Plus size={14} />
-            Nova Demanda
+        <FilterMultiSelect
+          label="Responsável"
+          options={[{ value: "__none__", label: "Sem responsável" }, ...users.map((u) => ({ value: u.id, label: u.full_name }))]}
+          selected={assignees}
+          onChange={setAssignees}
+        />
+        <FilterMultiSelect
+          label="Tipo"
+          options={demandTypes.map((t) => ({ value: t.id, label: t.name }))}
+          selected={types}
+          onChange={setTypes}
+        />
+        <FilterMultiSelect
+          label="SLA"
+          options={[
+            { value: "ok", label: "No prazo" },
+            { value: "warning", label: "Em alerta" },
+            { value: "breached", label: "Atrasado" },
+            { value: "none", label: "Sem SLA" },
+          ]}
+          selected={slas}
+          onChange={setSlas}
+        />
+        <Select value={selectedFunnelId} onValueChange={setSelectedFunnelId}>
+          <SelectTrigger className="w-[180px] h-9 shrink-0">
+            <SelectValue placeholder="Selecionar funil" />
+          </SelectTrigger>
+          <SelectContent>
+            {funnels.map((funnel) => (
+              <SelectItem key={funnel.id} value={funnel.id}>{funnel.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {(searchQuery.trim() || assignees.length || types.length || slas.length) ? (
+          <Button variant="ghost" className="h-9 gap-1.5 shrink-0 text-muted-foreground" onClick={clearFilters}>
+            <X size={14} /> Limpar
           </Button>
-        </div>
+        ) : null}
+        <Button size="icon" className="h-9 w-9 shrink-0" onClick={() => setOpenCreate(true)} title="Nova Demanda">
+          <Plus size={16} />
+        </Button>
       </div>
 
       {statuses.length === 0 ? (
@@ -691,10 +763,9 @@ export default function ProjectBoardPage() {
               const columnTasks = tasks
                 .filter((t) => t.status_id === status.id)
                 .filter((t) => !q || t.title.toLowerCase().includes(q))
-                .filter((t) => assigneeFilter === "__all__"
-                  || (assigneeFilter === "__none__" ? !t.assigned_to : t.assigned_to === assigneeFilter))
-                .filter((t) => typeFilter === "__all__" || t.demand_type_id === typeFilter)
-                .filter((t) => slaFilter === "__all__" || t.sla_state === slaFilter)
+                .filter((t) => assignees.length === 0 || assignees.includes(t.assigned_to ?? "__none__"))
+                .filter((t) => types.length === 0 || (t.demand_type_id ? types.includes(t.demand_type_id) : false))
+                .filter((t) => slas.length === 0 || slas.includes(t.sla_state))
                 .sort((a, b) => a.order - b.order)
               return (
                 <BoardColumn

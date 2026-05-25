@@ -45,6 +45,8 @@ export interface User {
   full_name: string
   role: UserRole
   role_id: string | null
+  role_name: string | null
+  permissions: string[]  // permissões efetivas; ["*"] = acesso total (super/company admin)
   tenant_id: string | null
   is_active: boolean
   last_login: string | null

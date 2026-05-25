@@ -12,6 +12,7 @@ import {
   teamopsApi,
   EMPLOYMENT_TYPE_LABELS,
   PERSON_STATUS_LABELS,
+  type AccessLevel,
   type Area,
   type EmploymentType,
   type Person,
@@ -20,6 +21,11 @@ import {
 } from "@/api/teamops"
 
 const NONE = "__none__"
+
+// Acesso agora é binário: o que a pessoa PODE fazer vem da matriz de permissões do cargo.
+function normalizeAccess(level?: AccessLevel | null): "none" | "com_acesso" {
+  return level && level !== "none" ? "com_acesso" : "none"
+}
 
 interface Props {
   person: Person | null
@@ -49,6 +55,9 @@ export function PersonFormDialog({ person, areas, onClose, onSaved }: Props) {
   const [startDate, setStartDate] = useState<string>(person?.start_date ?? "")
   const [status, setStatus] = useState<PersonStatus>(person?.status ?? "ativo")
   const [notes, setNotes] = useState<string>(person?.notes ?? "")
+  const [accessLevel, setAccessLevel] = useState<"none" | "com_acesso">(normalizeAccess(person?.access_level))
+  const [password, setPassword] = useState("")
+  const [resetPassword, setResetPassword] = useState("")
 
   useEffect(() => {
     teamopsApi.listPersons().then(setAllPersons).catch(() => null)
@@ -73,6 +82,11 @@ export function PersonFormDialog({ person, areas, onClose, onSaved }: Props) {
         setSaving(false)
         return
       }
+      if (needsNewPassword && !password) {
+        setError("Defina uma senha inicial para o acesso.")
+        setSaving(false)
+        return
+      }
       const payload: any = {
         full_name: fullName,
         email,
@@ -88,7 +102,10 @@ export function PersonFormDialog({ person, areas, onClose, onSaved }: Props) {
         start_date: startDate || null,
         status,
         notes: notes || null,
+        access_level: accessLevel,
       }
+      if (needsNewPassword && password) payload.password = password
+      if (canResetPassword && resetPassword) payload.reset_password = resetPassword
       if (isEdit) {
         await teamopsApi.updatePerson(person!.id, payload)
       } else {
@@ -103,6 +120,9 @@ export function PersonFormDialog({ person, areas, onClose, onSaved }: Props) {
   }
 
   const otherPersons = allPersons.filter((p) => p.id !== person?.id)
+  const hasLoginAlready = isEdit && (person?.access_level ?? "none") !== "none"
+  const needsNewPassword = accessLevel !== "none" && !hasLoginAlready
+  const canResetPassword = hasLoginAlready && accessLevel !== "none"
 
   return (
     <Dialog open onOpenChange={onClose}>
@@ -212,6 +232,51 @@ export function PersonFormDialog({ person, areas, onClose, onSaved }: Props) {
           <div className="md:col-span-2">
             <Label>Observações</Label>
             <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
+          </div>
+
+          <div className="md:col-span-2 space-y-3 rounded-md border border-border p-3">
+            <p className="text-sm font-semibold">Acesso ao sistema</p>
+            {hasLoginAlready && (
+              <p className="text-xs text-muted-foreground">
+                Login: {person!.user_email ?? "—"} · {person!.user_active ? "ativo" : "inativo"}
+              </p>
+            )}
+            <div className="grid gap-3 md:grid-cols-2">
+              <div>
+                <Label>Acesso</Label>
+                <Select value={accessLevel} onValueChange={(v) => setAccessLevel(v as "none" | "com_acesso")}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Sem acesso (só ficha)</SelectItem>
+                    <SelectItem value="com_acesso">Com acesso ao sistema</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {needsNewPassword && (
+                <div>
+                  <Label>Senha inicial *</Label>
+                  <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Mín. 8 caracteres, com maiúscula, minúscula, número e especial.
+                  </p>
+                </div>
+              )}
+              {canResetPassword && (
+                <div>
+                  <Label>Redefinir senha</Label>
+                  <Input
+                    type="password"
+                    value={resetPassword}
+                    onChange={(e) => setResetPassword(e.target.value)}
+                    placeholder="(deixe vazio para manter)"
+                    autoComplete="new-password"
+                  />
+                </div>
+              )}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Cria um login usando o e-mail acima. <strong>O que a pessoa pode fazer vem da matriz de permissões do cargo</strong> — configure em Configurações → Cargos → Acesso.
+            </p>
           </div>
 
           {error && (

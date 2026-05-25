@@ -142,6 +142,7 @@ export default function PeoplePage() {
                     <th className="px-4 py-2 text-left">Cargo</th>
                     <th className="px-4 py-2 text-left">Área</th>
                     <th className="px-4 py-2 text-left">PO</th>
+                    <th className="px-4 py-2 text-left">Acesso</th>
                     <th className="px-4 py-2 text-left">Status</th>
                     <th className="px-4 py-2"></th>
                   </tr>
@@ -158,6 +159,15 @@ export default function PeoplePage() {
                       <td className="px-4 py-2">{p.position?.name ?? "—"}</td>
                       <td className="px-4 py-2">{p.area?.name ?? "—"}</td>
                       <td className="px-4 py-2">{p.po_person?.full_name ?? "—"}</td>
+                      <td className="px-4 py-2">
+                        {p.access_level === "none" ? (
+                          <span className="text-xs text-muted-foreground">Sem acesso</span>
+                        ) : (
+                          <Badge variant="secondary">
+                            Com acesso{p.user_active === false ? " (inativo)" : ""}
+                          </Badge>
+                        )}
+                      </td>
                       <td className="px-4 py-2">
                         <Badge variant={p.status === "ativo" ? "success" : p.status === "desligado" ? "destructive" : "warning"}>
                           {PERSON_STATUS_LABELS[p.status]}

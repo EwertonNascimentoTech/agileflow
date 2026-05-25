@@ -1953,6 +1953,29 @@ async def _step_040_projetos_demand_type_basic(conn: AsyncConnection, schema: st
         ))
 
 
+async def _step_041_projetos_demand_type_schedule(conn: AsyncConnection, schema: str) -> None:
+    """Adiciona show_in_schedule em project_demand_types: se False, itens deste tipo
+    não aparecem no Cronograma."""
+    if not await _table_exists(conn, schema, "project_demand_types"):
+        return
+    if not await _column_exists(conn, schema, "project_demand_types", "show_in_schedule"):
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.project_demand_types "
+            "ADD COLUMN show_in_schedule BOOLEAN NOT NULL DEFAULT TRUE"
+        ))
+
+
+async def _step_042_teamops_position_role(conn: AsyncConnection, schema: str) -> None:
+    """Adiciona role_id em team_positions: cada cargo aponta para uma role (public.roles)
+    que guarda sua matriz de permissões."""
+    if not await _table_exists(conn, schema, "team_positions"):
+        return
+    if not await _column_exists(conn, schema, "team_positions", "role_id"):
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.team_positions ADD COLUMN role_id UUID"
+        ))
+
+
 # Lista ordenada de steps. Adicionar novos no final.
 STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("001_funnels", _step_001_funnels),
@@ -1995,6 +2018,8 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("038_projetos_sla", _step_038_projetos_sla),
     ("039_projetos_task_start_date", _step_039_projetos_task_start_date),
     ("040_projetos_demand_type_basic", _step_040_projetos_demand_type_basic),
+    ("041_projetos_demand_type_schedule", _step_041_projetos_demand_type_schedule),
+    ("042_teamops_position_role", _step_042_teamops_position_role),
 ]
 
 
