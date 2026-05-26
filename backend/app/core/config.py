@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     )
 
     # ── APP ──────────────────────────────────────
-    PROJECT_NAME: str = "SaaS Platform"
+    PROJECT_NAME: str = "AgileFlow"
     DEBUG: bool = False
     SECRET_KEY: str
     ALLOWED_ORIGINS: List[str] = ["http://localhost:3000"]

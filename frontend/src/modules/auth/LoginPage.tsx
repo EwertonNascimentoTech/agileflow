@@ -58,9 +58,9 @@ export default function LoginPage() {
         <div className="w-full max-w-sm">
           <div className="mb-8 flex items-center gap-2">
             <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-lg font-bold text-primary-foreground">
-              K
+              A
             </span>
-            <span className="text-xl font-bold tracking-tight">Kore</span>
+            <span className="text-xl font-bold tracking-tight">AgileFlow</span>
           </div>
 
           <h1 className="text-2xl font-bold tracking-tight">Bem-vindo de volta</h1>
@@ -150,7 +150,7 @@ export default function LoginPage() {
           className="absolute inset-0"
           style={{
             background:
-              "radial-gradient(120% 120% at 100% 0%, hsl(256 72% 56%) 0%, hsl(256 72% 40%) 40%, hsl(224 40% 14%) 100%)",
+              "radial-gradient(120% 120% at 100% 0%, hsl(var(--accent)) 0%, hsl(var(--brand-500)) 40%, hsl(var(--brand-900)) 100%)",
           }}
         />
         <div

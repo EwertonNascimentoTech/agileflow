@@ -89,6 +89,7 @@ import BasicNewRequestPage from "@/modules/projetos/basic/BasicNewRequestPage"
 import BasicMyRequestsPage from "@/modules/projetos/basic/BasicMyRequestsPage"
 import GanttPage from "@/modules/projetos/GanttPage"
 import ProjetosReportsPage from "@/modules/projetos/ReportsPage"
+import ProjectScheduleConfigPage from "@/modules/projetos/config/ProjectScheduleConfigPage"
 
 // ── TeamOps ───────────────────────────────────────────────────────────
 import TeamopsLayout from "@/modules/teamops/TeamopsLayout"
@@ -198,6 +199,7 @@ export default function App() {
                     <Route path="config/demand-types/:demandTypeId" element={<ProjectDemandTypeFormEditorPage />} />
                     <Route path="config/funnels" element={<ProjectFunnelsConfigPage />} />
                     <Route path="config/statuses" element={<ProjectStatusesConfigPage />} />
+                    <Route path="config/cronograma" element={<ProjectScheduleConfigPage />} />
                   </Route>
 
                   {/* Estoque */}

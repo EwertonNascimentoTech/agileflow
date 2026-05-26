@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react"
+import { useSearchParams } from "react-router-dom"
 import { CalendarRange, Loader2 } from "lucide-react"
 
 import { companyApi } from "@/api/crm"
-import { projetosApi, type ProjectDemandType, type ProjectTask } from "@/api/projetos"
+import { projetosApi, type ProjectDemandType, type ProjectScheduleBinding, type ProjectTask } from "@/api/projetos"
 import type { User } from "@/types"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -20,6 +21,7 @@ const NO_ASSIGNEE = "__none__"
 export default function GanttPage() {
   const [tasks, setTasks] = useState<ProjectTask[]>([])
   const [demandTypes, setDemandTypes] = useState<ProjectDemandType[]>([])
+  const [bindings, setBindings] = useState<ProjectScheduleBinding[]>([])
   const [users, setUsers] = useState<User[]>([])
   const [projectId, setProjectId] = useState<string>("")
   const [loading, setLoading] = useState(true)
@@ -62,13 +64,15 @@ export default function GanttPage() {
       const pid = projects[0]?.id
       if (!pid) return
       setProjectId(pid)
-      const [ts, dts, us] = await Promise.all([
+      const [ts, dts, bs, us] = await Promise.all([
         projetosApi.listTasks(pid),
         projetosApi.listDemandTypes(true),
+        projetosApi.listScheduleBindings().catch(() => [] as ProjectScheduleBinding[]),
         companyApi.listUsers({ active_only: true }).catch(() => [] as User[]),
       ])
       setTasks(ts)
       setDemandTypes(dts)
+      setBindings(bs)
       setUsers(us)
     }
     load().finally(() => setLoading(false))
@@ -79,11 +83,19 @@ export default function GanttPage() {
     return (id: string | null) => (id ? m.get(id) ?? null : null)
   }, [demandTypes])
 
-  // Só entram no cronograma itens cujo tipo está marcado como "Visível no cronograma".
+  // Um item entra no cronograma quando os DOIS filtros permitem:
+  //  (1) o tipo está marcado como "aparece no Cronograma" (show_in_schedule); e
+  //  (2) o card está numa etapa vinculada ao plugin Cronograma (fluxo+etapa).
+  // Nuance: com o AND sobre o status atual, um filho que não esteja numa etapa
+  // vinculada não aparece na árvore — se for indesejado, expandir para descendentes
+  // de qualquer raiz que qualifique.
   const scheduleTasks = useMemo(() => {
-    const visible = new Set(demandTypes.filter((d) => d.show_in_schedule).map((d) => d.id))
-    return tasks.filter((t) => !!t.demand_type_id && visible.has(t.demand_type_id))
-  }, [tasks, demandTypes])
+    const showTypeIds = new Set(demandTypes.filter((d) => d.show_in_schedule).map((d) => d.id))
+    const boundStatusIds = new Set(bindings.filter((b) => b.is_active).map((b) => b.status_id))
+    return tasks.filter(
+      (t) => !!t.demand_type_id && showTypeIds.has(t.demand_type_id) && boundStatusIds.has(t.status_id),
+    )
+  }, [tasks, demandTypes, bindings])
 
   // Raízes do cronograma: cards que já têm filhos OU itens de topo de um tipo "container"
   // (tipo que aceita filhos) — assim um Projeto recém-criado já aparece para planejar.
@@ -101,9 +113,27 @@ export default function GanttPage() {
       .sort((a, b) => a.title.localeCompare(b.title))
   }, [scheduleTasks, demandTypes])
 
+  // Foco inicial: se veio ?root=<taskId> (botão "Cronograma" do card), seleciona a
+  // raiz ancestral daquele card; senão cai na primeira raiz disponível.
+  const [searchParams] = useSearchParams()
+  const rootParam = searchParams.get("root")
   useEffect(() => {
-    if (!rootId && roots.length > 0) setRootId(roots[0].id)
-  }, [roots, rootId])
+    if (rootId || roots.length === 0) return
+    if (rootParam) {
+      const byId = new Map(tasks.map((t) => [t.id, t]))
+      let cur = byId.get(rootParam)
+      let guard = 0
+      while (cur?.parent_task_id && byId.get(cur.parent_task_id) && guard++ < 50) {
+        cur = byId.get(cur.parent_task_id)
+      }
+      const candidate = cur?.id ?? rootParam
+      if (roots.some((r) => r.id === candidate)) {
+        setRootId(candidate)
+        return
+      }
+    }
+    setRootId(roots[0].id)
+  }, [roots, rootId, rootParam, tasks])
 
   // Tipos oferecidos no diálogo de criação
   const createTypeOptions = useMemo(() => {
@@ -236,7 +266,7 @@ export default function GanttPage() {
         <EmptyState
           icon={CalendarRange}
           title="Nada para exibir no cronograma"
-          description="Crie um Projeto/Programa no kanban (ou abra um card e adicione itens filhos). Itens que possuem filhos aparecem aqui para montar a linha do tempo."
+          description="Em Configurações, escolha em quais fluxos e etapas o cronograma deve ser preenchido. Os cards que estiverem nessas etapas (e cujo tipo apareça no cronograma) entram aqui para montar a linha do tempo."
         />
       ) : (
         <>

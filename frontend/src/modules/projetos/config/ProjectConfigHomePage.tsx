@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom"
-import { ArrowRight, FileText, GitBranch, KanbanSquare } from "lucide-react"
+import { ArrowRight, CalendarRange, FileText, GitBranch, KanbanSquare } from "lucide-react"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 
@@ -21,6 +21,12 @@ const sections = [
     icon: FileText,
     title: "Tipos de Demanda",
     description: "Crie tipos de demanda e seus formulários por sessões.",
+  },
+  {
+    to: "/app/modules/projetos/config/cronograma",
+    icon: CalendarRange,
+    title: "Cronograma",
+    description: "Escolha em quais fluxos e etapas o cronograma deve ser preenchido (e quando exigir início/prazo).",
   },
 ]
 

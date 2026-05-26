@@ -1976,6 +1976,30 @@ async def _step_042_teamops_position_role(conn: AsyncConnection, schema: str) ->
         ))
 
 
+async def _step_043_projetos_schedule_bindings(conn: AsyncConnection, schema: str) -> None:
+    """Cria a tabela de vínculos do Cronograma (fluxo+etapa onde o cronograma é
+    preenchido), parte do módulo Projetos."""
+    if not await _table_exists(conn, schema, "project_status_configs"):
+        return
+    if not await _table_exists(conn, schema, "project_schedule_bindings"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_schedule_bindings (
+                id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                funnel_id    UUID NOT NULL REFERENCES {schema}.project_funnels(id) ON DELETE CASCADE,
+                status_id    UUID NOT NULL REFERENCES {schema}.project_status_configs(id) ON DELETE CASCADE,
+                require_fill BOOLEAN NOT NULL DEFAULT TRUE,
+                is_active    BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at   TIMESTAMP DEFAULT now(),
+                updated_at   TIMESTAMP DEFAULT now(),
+                UNIQUE(status_id)
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_project_schedule_bindings_funnel "
+            f"ON {schema}.project_schedule_bindings(funnel_id)"
+        ))
+
+
 # Lista ordenada de steps. Adicionar novos no final.
 STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("001_funnels", _step_001_funnels),
@@ -2020,6 +2044,7 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("040_projetos_demand_type_basic", _step_040_projetos_demand_type_basic),
     ("041_projetos_demand_type_schedule", _step_041_projetos_demand_type_schedule),
     ("042_teamops_position_role", _step_042_teamops_position_role),
+    ("043_projetos_schedule_bindings", _step_043_projetos_schedule_bindings),
 ]
 
 

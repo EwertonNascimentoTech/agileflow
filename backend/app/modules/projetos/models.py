@@ -403,3 +403,31 @@ class ProjectAutomationRule(TenantBase):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+
+class ProjectScheduleBinding(TenantBase):
+    """Vínculo do Cronograma com uma etapa (status) de um fluxo (funnel).
+
+    Cards numa etapa vinculada aparecem no cronograma; com `require_fill`, só
+    podem SAIR da etapa com início e prazo preenchidos (gate). Configurado no
+    card "Cronograma" das configurações do módulo Projetos.
+    """
+
+    __tablename__ = "project_schedule_bindings"
+    __table_args__ = (UniqueConstraint("status_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    funnel_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("project_funnels.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    status_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("project_status_configs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    require_fill: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+

@@ -54,10 +54,10 @@ export default function AdminLayout() {
         {/* Logo */}
         <div className="flex h-14 items-center gap-2.5 px-4 border-b border-border">
           <div className="h-9 w-9 rounded-xl bg-primary text-primary-foreground flex items-center justify-center font-bold">
-            K
+            A
           </div>
           <div className="leading-tight">
-            <p className="text-sm font-semibold">Kore</p>
+            <p className="text-sm font-semibold">AgileFlow</p>
             <p className="text-[10px] text-muted-foreground">Super Admin</p>
           </div>
           <Button
@@ -131,7 +131,7 @@ export default function AdminLayout() {
           <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(true)}>
             <Menu size={18} />
           </Button>
-          <span className="font-semibold text-sm">Kore Admin</span>
+          <span className="font-semibold text-sm">AgileFlow Admin</span>
         </header>
 
         {/* Conteúdo */}

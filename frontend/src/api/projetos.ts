@@ -180,6 +180,23 @@ export interface ProjectAutomationRule {
   updated_at: string
 }
 
+export interface ProjectScheduleBinding {
+  id: string
+  funnel_id: string
+  status_id: string
+  require_fill: boolean
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface ProjectScheduleBindingInput {
+  funnel_id: string
+  status_id: string
+  require_fill: boolean
+  is_active: boolean
+}
+
 export interface ProjectReports {
   total_active: number
   total_completed: number
@@ -440,5 +457,13 @@ export const projetosApi = {
 
   getReports: () =>
     api.get<ProjectReports>(`/projetos/reports`).then((r) => r.data),
+
+  // Cronograma: vínculos fluxo + etapa
+  listScheduleBindings: () =>
+    api.get<ProjectScheduleBinding[]>(`/projetos/config/schedule-bindings`).then((r) => r.data),
+  saveScheduleBindings: (bindings: ProjectScheduleBindingInput[]) =>
+    api.put<ProjectScheduleBinding[]>(`/projetos/config/schedule-bindings`, { bindings }).then((r) => r.data),
+  deleteScheduleBinding: (statusId: string) =>
+    api.delete<void>(`/projetos/config/schedule-bindings/${statusId}`).then((r) => r.data),
 }
 

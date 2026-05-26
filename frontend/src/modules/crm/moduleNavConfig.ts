@@ -10,7 +10,6 @@ import {
   ShoppingCart, Wallet, ReceiptText,
   FolderKanban,
   Network, Code2, CalendarOff,
-  CalendarRange,
 } from "lucide-react"
 import type { ElementType } from "react"
 
@@ -48,7 +47,6 @@ export const moduleNavConfig: Record<string, ModuleNavItem[]> = {
   ],
   projetos: [
     { to: "/app/modules/projetos", icon: FolderKanban, label: "Kanban" },
-    { to: "/app/modules/projetos/cronograma", icon: CalendarRange, label: "Cronograma" },
     { to: "/app/modules/projetos/relatorios", icon: BarChart3, label: "Relatórios" },
     { to: "/app/modules/projetos/config", icon: Settings2, label: "Configurações" },
   ],

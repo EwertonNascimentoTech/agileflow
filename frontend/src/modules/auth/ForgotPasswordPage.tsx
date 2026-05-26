@@ -64,8 +64,8 @@ export default function ForgotPasswordPage() {
     <div className="min-h-screen bg-muted/40 flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center gap-3 mb-8">
-          <div className="h-12 w-12 rounded-xl bg-primary text-primary-foreground flex items-center justify-center font-bold text-xl">K</div>
-          <h1 className="text-xl font-bold">Kore</h1>
+          <div className="h-12 w-12 rounded-xl bg-primary text-primary-foreground flex items-center justify-center font-bold text-xl">A</div>
+          <h1 className="text-xl font-bold">AgileFlow</h1>
         </div>
 
         <div className="bg-background rounded-xl border p-6 space-y-4">
@@ -144,7 +144,7 @@ export default function ForgotPasswordPage() {
         </div>
 
         <p className="text-center text-xs text-muted-foreground mt-6">
-          © {new Date().getFullYear()} Kore. Todos os direitos reservados.
+          © {new Date().getFullYear()} AgileFlow. Todos os direitos reservados.
         </p>
       </div>
     </div>

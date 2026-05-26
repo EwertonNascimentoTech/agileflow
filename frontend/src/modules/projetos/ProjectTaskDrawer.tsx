@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
-import { Check, ChevronDown, FileText, Link as LinkIcon, Loader2, Pencil, Plus, Trash2, X } from "lucide-react"
+import { useNavigate } from "react-router-dom"
+import { CalendarRange, Check, ChevronDown, FileText, Link as LinkIcon, Loader2, Pencil, Plus, Trash2, X } from "lucide-react"
 
 import { projetosApi, type ProjectDemandFormField, type ProjectDemandFormSection, type ProjectDemandType, type ProjectStatus, type ProjectStatusSectionLink, type ProjectTask, type ProjectTaskComment } from "@/api/projetos"
 import { Badge } from "@/components/ui/badge"
@@ -43,6 +44,7 @@ export function ProjectTaskDrawer({
   onSaved: (task: ProjectTask) => void
   onDeleted: (taskId: string) => void
 }) {
+  const navigate = useNavigate()
   const [users, setUsers] = useState<User[]>([])
   const [comments, setComments] = useState<ProjectTaskComment[]>([])
   const [selectedDemandTypeId, setSelectedDemandTypeId] = useState("")
@@ -821,6 +823,19 @@ export function ProjectTaskDrawer({
           <Button type="button" variant="destructive" className="mr-auto" onClick={handleDelete} disabled={removing || !task}>
             {removing ? <Loader2 size={13} className="animate-spin mr-1.5" /> : <Trash2 size={13} className="mr-1.5" />}
             Excluir
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={!task}
+            onClick={() => {
+              const id = task?.id
+              onOpenChange(false)
+              if (id) navigate(`/app/modules/projetos/cronograma?root=${id}`)
+            }}
+          >
+            <CalendarRange size={13} className="mr-1.5" />
+            Cronograma
           </Button>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
             Fechar

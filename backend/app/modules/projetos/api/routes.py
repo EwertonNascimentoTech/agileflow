@@ -32,6 +32,8 @@ from app.modules.projetos.schemas import (
     ProjectMemberResponse,
     ProjectReportsResponse,
     ProjectResponse,
+    ProjectScheduleBindingResponse,
+    ProjectScheduleBindingsUpsert,
     ProjectStatusCreate,
     ProjectStatusReorder,
     ProjectStatusResponse,
@@ -55,6 +57,7 @@ from app.modules.projetos.service import (
     ProjectFunnelService,
     ProjectMemberService,
     ProjectReportsService,
+    ProjectScheduleBindingService,
     ProjectService,
     ProjectStatusService,
     ProjectTaskCommentService,
@@ -663,4 +666,31 @@ async def create_task_comment(
         data,
         author_id=ctx.user.id,
     )
+
+
+# ─────────────────────────────────────────────
+# Cronograma: vínculos fluxo + etapa
+# ─────────────────────────────────────────────
+
+@router.get("/config/schedule-bindings", response_model=list[ProjectScheduleBindingResponse])
+async def list_schedule_bindings(ctx: ModuleContext = Depends(_ctx)):
+    return await ProjectScheduleBindingService.list(ctx.db)
+
+
+@router.put("/config/schedule-bindings", response_model=list[ProjectScheduleBindingResponse])
+async def save_schedule_bindings(
+    data: ProjectScheduleBindingsUpsert,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_status_manage),
+):
+    return await ProjectScheduleBindingService.save(ctx.db, data.bindings)
+
+
+@router.delete("/config/schedule-bindings/{status_id}", status_code=204)
+async def delete_schedule_binding(
+    status_id: uuid.UUID,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_status_manage),
+):
+    await ProjectScheduleBindingService.delete(ctx.db, status_id)
 

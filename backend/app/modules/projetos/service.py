@@ -20,6 +20,7 @@ from app.modules.projetos.models import (
     ProjectFunnel,
     Project,
     ProjectMember,
+    ProjectScheduleBinding,
     ProjectStatusSectionLink,
     ProjectStatusConfig,
     ProjectTask,
@@ -39,6 +40,7 @@ from app.modules.projetos.schemas import (
     ProjectFunnelCreate,
     ProjectFunnelUpdate,
     ProjectMemberCreate,
+    ProjectScheduleBindingItem,
     ProjectStatusCreate,
     ProjectStatusUpdate,
     ProjectTaskCommentCreate,
@@ -1215,6 +1217,35 @@ class ProjectTaskService:
         return task
 
     @staticmethod
+    async def _enforce_schedule_gate(
+        db: AsyncSession,
+        task: ProjectTask,
+        payload: dict,
+    ) -> None:
+        """Bloqueia a saída de uma etapa vinculada ao Cronograma sem início+prazo.
+
+        Aplica-se quando a etapa de ORIGEM (status atual do card) tem um vínculo de
+        cronograma ativo com `require_fill`.
+        """
+        binding = await db.execute(
+            select(ProjectScheduleBinding).where(
+                ProjectScheduleBinding.status_id == task.status_id,
+                ProjectScheduleBinding.is_active == True,  # noqa: E712
+                ProjectScheduleBinding.require_fill == True,  # noqa: E712
+            )
+        )
+        if not binding.scalar_one_or_none():
+            return
+        # Datas efetivas (cobre preencher datas + mover no mesmo PATCH).
+        start = payload.get("start_date", task.start_date)
+        due = payload.get("due_date", task.due_date)
+        if start is None or due is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Preencha início e prazo no cronograma antes de sair desta etapa.",
+            )
+
+    @staticmethod
     async def update(
         db: AsyncSession,
         project_id: uuid.UUID,
@@ -1276,6 +1307,11 @@ class ProjectTaskService:
 
         # O card mudou de etapa? (calculado antes do setattr)
         status_changed = bool(payload.get("status_id")) and payload["status_id"] != task.status_id
+
+        # Cronograma: se a etapa de ORIGEM exige preenchimento, bloqueia a saída
+        # sem início+prazo.
+        if status_changed:
+            await ProjectTaskService._enforce_schedule_gate(db, task, payload)
 
         for key, value in payload.items():
             setattr(task, key, value)
@@ -1700,4 +1736,72 @@ class ProjectReportsService:
                 "avg_lead_time_days": avg_lead,
             },
         }
+
+
+class ProjectScheduleBindingService:
+    """CRUD dos vínculos do Cronograma (fluxo + etapa). Configurado pelo card
+    "Cronograma" nas configurações do módulo Projetos."""
+
+    @staticmethod
+    async def list(db: AsyncSession) -> list[ProjectScheduleBinding]:
+        result = await db.execute(select(ProjectScheduleBinding))
+        return list(result.scalars().all())
+
+    @staticmethod
+    async def save(
+        db: AsyncSession, items: list[ProjectScheduleBindingItem]
+    ) -> list[ProjectScheduleBinding]:
+        """Upsert em lote por `status_id`: cria/atualiza os informados e remove o resto.
+
+        Valida que cada etapa existe e pertence ao fluxo informado.
+        """
+        for item in items:
+            row = await db.execute(
+                select(ProjectStatusConfig).where(ProjectStatusConfig.id == item.status_id)
+            )
+            status = row.scalar_one_or_none()
+            if not status:
+                raise HTTPException(status_code=400, detail="Etapa inválida no vínculo do cronograma.")
+            if status.funnel_id != item.funnel_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="A etapa informada não pertence ao fluxo selecionado.",
+                )
+
+        keep_status_ids = {item.status_id for item in items}
+        existing_result = await db.execute(select(ProjectScheduleBinding))
+        existing = {b.status_id: b for b in existing_result.scalars().all()}
+
+        to_remove = [sid for sid in existing if sid not in keep_status_ids]
+        if to_remove:
+            await db.execute(
+                sa_delete(ProjectScheduleBinding).where(
+                    ProjectScheduleBinding.status_id.in_(to_remove)
+                )
+            )
+
+        for item in items:
+            current = existing.get(item.status_id)
+            if current is None:
+                db.add(ProjectScheduleBinding(
+                    funnel_id=item.funnel_id,
+                    status_id=item.status_id,
+                    require_fill=item.require_fill,
+                    is_active=item.is_active,
+                ))
+            else:
+                current.funnel_id = item.funnel_id
+                current.require_fill = item.require_fill
+                current.is_active = item.is_active
+                current.updated_at = datetime.utcnow()
+
+        await db.commit()
+        return await ProjectScheduleBindingService.list(db)
+
+    @staticmethod
+    async def delete(db: AsyncSession, status_id: uuid.UUID) -> None:
+        await db.execute(
+            sa_delete(ProjectScheduleBinding).where(ProjectScheduleBinding.status_id == status_id)
+        )
+        await db.commit()
 

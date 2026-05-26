@@ -499,3 +499,31 @@ class ProjectReportsResponse(BaseModel):
     sla: ReportSlaSummary
     throughput: ReportThroughput
 
+
+# ─────────────────────────────────────────────
+# Cronograma: vínculos fluxo + etapa
+# ─────────────────────────────────────────────
+
+
+class ProjectScheduleBindingItem(BaseModel):
+    funnel_id: uuid.UUID
+    status_id: uuid.UUID
+    require_fill: bool = True
+    is_active: bool = True
+
+
+class ProjectScheduleBindingsUpsert(BaseModel):
+    bindings: list[ProjectScheduleBindingItem]
+
+
+class ProjectScheduleBindingResponse(BaseModel):
+    id: uuid.UUID
+    funnel_id: uuid.UUID
+    status_id: uuid.UUID
+    require_fill: bool
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+

@@ -62,7 +62,7 @@ export function ModuleRail({
   return (
     <nav className="rail-surface flex w-16 shrink-0 flex-col items-center gap-1 py-3">
       <span className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-primary font-bold text-primary-foreground">
-        K
+        A
       </span>
       {top.map(renderItem)}
       <div className="flex-1" />
