@@ -1,14 +1,20 @@
 import { useNavigate } from "react-router-dom"
-import { ArrowRight, CalendarRange, FileText, GitBranch, KanbanSquare } from "lucide-react"
+import { ArrowRight, CalendarRange, FileText, GitBranch, KanbanSquare, Settings2 } from "lucide-react"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 
 const sections = [
   {
+    to: "/app/modules/projetos/config/processos",
+    icon: Settings2,
+    title: "Processos",
+    description: "Cadastre, edite e exclua processos (CRUD).",
+  },
+  {
     to: "/app/modules/projetos/config/funnels",
     icon: GitBranch,
     title: "Funis",
-    description: "Crie e gerencie funis do módulo de projetos.",
+    description: "Crie e gerencie funis do módulo de processos.",
   },
   {
     to: "/app/modules/projetos/config/statuses",
@@ -37,7 +43,7 @@ export default function ProjectConfigHomePage() {
     <div className="w-full space-y-4">
       <div>
         <h2 className="text-lg font-bold">Configurações</h2>
-        <p className="text-sm text-muted-foreground">Personalize o módulo de Projetos.</p>
+        <p className="text-sm text-muted-foreground">Personalize o módulo de Processos.</p>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">

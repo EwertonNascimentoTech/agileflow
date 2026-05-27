@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { useNavigate, useParams } from "react-router-dom"
-import { GripVertical, Loader2, Plus, Search, GitBranch, ArrowUpRight, Check, ChevronDown, X } from "lucide-react"
+import { useLocation, useNavigate, useParams } from "react-router-dom"
+import { ArrowUpRight, BarChart3, CalendarRange, Check, ChevronDown, ChevronLeft, ChevronRight, GitBranch, KanbanSquare, List as ListIcon, Loader2, Plus, Search, X } from "lucide-react"
 import {
   DndContext,
   PointerSensor,
@@ -63,63 +63,25 @@ function loadFilters(): BoardFilters {
   }
 }
 
-// Filtro multi-seleção (checkboxes) — permite escolher vários valores por campo.
-function FilterMultiSelect({
-  label,
-  options,
-  selected,
-  onChange,
-}: {
-  label: string
-  options: { value: string; label: string }[]
-  selected: string[]
-  onChange: (next: string[]) => void
-}) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className="relative shrink-0">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex h-9 items-center gap-1.5 rounded-md border bg-background px-3 text-sm hover:bg-muted"
-      >
-        <span className={selected.length ? "font-medium" : "text-muted-foreground"}>{label}</span>
-        {selected.length > 0 && (
-          <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary/15 px-1 text-[10px] font-semibold text-primary">
-            {selected.length}
-          </span>
-        )}
-        <ChevronDown size={14} className="text-muted-foreground" />
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 z-20 mt-1 max-h-72 w-56 overflow-y-auto rounded-md border bg-popover p-1 shadow-md">
-            {options.length === 0 ? (
-              <p className="px-2 py-1.5 text-[11px] italic text-muted-foreground/70">Sem opções.</p>
-            ) : options.map((o) => {
-              const checked = selected.includes(o.value)
-              return (
-                <button
-                  key={o.value}
-                  type="button"
-                  onClick={() => onChange(checked ? selected.filter((v) => v !== o.value) : [...selected, o.value])}
-                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
-                >
-                  <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${checked ? "border-primary bg-primary text-white" : "border-border"}`}>
-                    {checked && <Check size={11} />}
-                  </span>
-                  <span className="truncate">{o.label}</span>
-                </button>
-              )
-            })}
-          </div>
-        </>
-      )}
-    </div>
-  )
+type BoardFilterState = { q: string; assignees: string[]; types: string[]; slas: string[] }
+
+// Filtro compartilhado pelas visões (board, lista, calendário).
+function taskMatches(t: ProjectTask, f: BoardFilterState): boolean {
+  const q = f.q.trim().toLowerCase()
+  if (q && !t.title.toLowerCase().includes(q)) return false
+  if (f.assignees.length && !f.assignees.includes(t.assigned_to ?? "__none__")) return false
+  if (f.types.length && !(t.demand_type_id ? f.types.includes(t.demand_type_id) : false)) return false
+  if (f.slas.length && !f.slas.includes(t.sla_state)) return false
+  return true
 }
 
+function SlaChip({ state }: { state: ProjectTask["sla_state"] }) {
+  if (state === "warning") return <span className="chip warning">SLA: alerta</span>
+  if (state === "breached") return <span className="chip destructive">SLA: atrasado</span>
+  return null
+}
+
+// ─────────── Task card (estilo do protótipo) ───────────
 function BoardCard({
   task,
   users,
@@ -134,99 +96,78 @@ function BoardCard({
   onOpen: (task: ProjectTask) => void
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: `task-${task.id}` })
-  const style = {
-    transform: CSS.Translate.toString(transform),
-    opacity: isDragging ? 0.4 : 1,
-  }
+  const style = { transform: CSS.Translate.toString(transform) }
   const assignee = users.find((u) => u.id === task.assigned_to) ?? null
-  const isOverdue = task.due_date ? new Date(task.due_date) < new Date(new Date().toDateString()) : false
+  const isOverdue = task.due_date && !task.completed_at
+    ? new Date(task.due_date) < new Date(new Date().toDateString())
+    : false
   const typeName = demandTypeName(task.demand_type_id)
+  const parent = task.parent_task_id ? parentName(task.parent_task_id) : null
   return (
-    <div
+    <article
       ref={setNodeRef}
       style={style}
-      className="group relative rounded-xl border border-border bg-card p-3 cursor-pointer transition hover:border-primary/50 hover:shadow-sm"
+      className={`task-card ${isDragging ? "dragging" : ""}`}
       onClick={() => onOpen(task)}
+      {...attributes}
+      {...listeners}
     >
-      <button
-        type="button"
-        className="absolute left-1 top-2 cursor-grab touch-none rounded p-0.5 text-muted-foreground/0 hover:text-foreground active:cursor-grabbing group-hover:text-muted-foreground"
-        aria-label="Arrastar para outra etapa"
-        onClick={(e) => e.stopPropagation()}
-        {...attributes}
-        {...listeners}
-      >
-        <GripVertical size={14} />
-      </button>
+      {(typeName || task.completed_at || task.sla_state === "warning" || task.sla_state === "breached") && (
+        <div className="top-row">
+          {typeName && <span className="chip">{typeName}</span>}
+          <SlaChip state={task.sla_state} />
+          {task.completed_at && (
+            <span className="chip success"><Check size={10} /> Concluída</span>
+          )}
+          <span className="task-id">{task.id.slice(0, 8).toUpperCase()}</span>
+        </div>
+      )}
+      {!typeName && !task.completed_at && task.sla_state !== "warning" && task.sla_state !== "breached" && (
+        <div className="top-row">
+          <span className="task-id">{task.id.slice(0, 8).toUpperCase()}</span>
+        </div>
+      )}
 
-      <div className="flex items-start gap-2 pl-3">
-        <p className="text-sm font-semibold text-foreground line-clamp-2 flex-1">{task.title}</p>
-        <div
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
-          style={{ backgroundColor: colorForUser(assignee?.id ?? null) }}
+      <h4 className="title">{task.title}</h4>
+
+      {(parent || task.origin_task_id) && (
+        <div className="meta-chips">
+          {parent && (
+            <span className="chip muted"><GitBranch size={10} />
+              <span style={{ maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{parent}</span>
+            </span>
+          )}
+          {task.origin_task_id && <span className="chip info"><ArrowUpRight size={10} /> origem</span>}
+        </div>
+      )}
+
+      <div className="meta-row">
+        {task.due_date && (
+          <span className={`due-pill ${isOverdue ? "overdue" : ""}`}>
+            <span className="dot" />
+            {new Date(task.due_date).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}
+          </span>
+        )}
+        <span className="spacer" />
+        <span
+          className="assignee-avatar"
+          style={{ background: colorForUser(assignee?.id ?? null), width: 22, height: 22, fontSize: 9 }}
           title={assignee?.full_name ?? "Sem responsável"}
         >
-          {initialsOf(assignee?.full_name)}
-        </div>
+          {assignee ? initialsOf(assignee.full_name) : "?"}
+        </span>
       </div>
-
-      {(typeName || task.parent_task_id || task.origin_task_id || task.sla_state === "warning" || task.sla_state === "breached") && (
-        <div className="mt-2 flex flex-wrap items-center gap-1.5 pl-3">
-          {typeName && (
-            <span className="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
-              {typeName}
-            </span>
-          )}
-          {task.sla_state === "warning" && (
-            <span className="inline-flex items-center rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-medium text-warning" title="SLA em alerta">
-              SLA: alerta
-            </span>
-          )}
-          {task.sla_state === "breached" && (
-            <span className="inline-flex items-center rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-medium text-destructive" title="SLA estourado">
-              SLA: atrasado
-            </span>
-          )}
-          {task.parent_task_id && (
-            <span
-              className="inline-flex max-w-[170px] items-center gap-0.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
-              title={`Filho de: ${parentName(task.parent_task_id) ?? "card pai"}`}
-            >
-              <GitBranch size={10} className="shrink-0" />
-              <span className="truncate">{parentName(task.parent_task_id) ?? "filho"}</span>
-            </span>
-          )}
-          {task.origin_task_id && (
-            <span className="inline-flex items-center gap-0.5 rounded-full bg-info/10 px-1.5 py-0.5 text-[10px] text-info" title="Criado a partir de uma demanda">
-              <ArrowUpRight size={10} /> origem
-            </span>
-          )}
-        </div>
-      )}
-
-      {task.due_date && (
-        <div
-          className={`mt-2.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
-            isOverdue
-              ? "bg-destructive/10 text-destructive"
-              : "bg-muted text-muted-foreground"
-          }`}
-        >
-          <span className="h-1.5 w-1.5 rounded-full bg-current" />
-          {new Date(task.due_date).toLocaleDateString("pt-BR")}
-        </div>
-      )}
-    </div>
+    </article>
   )
 }
 
+// ─────────── Column (estilo do protótipo) ───────────
 function BoardColumn({
   status,
   tasks,
   users,
   demandTypeName,
   parentName,
-  isDragging,
   onOpen,
   onCreate,
 }: {
@@ -235,38 +176,25 @@ function BoardColumn({
   users: User[]
   demandTypeName: (id: string | null) => string | null
   parentName: (id: string | null) => string | null
-  isDragging: boolean
   onOpen: (task: ProjectTask) => void
   onCreate: (status: ProjectStatus) => void
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `column-${status.id}` })
   return (
-    <div className="w-80 shrink-0 rounded-2xl bg-muted/30 overflow-hidden">
-      <div className="h-1" style={{ backgroundColor: status.color }} />
-      <div className="px-3 pt-3 pb-2 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <p className="text-sm font-bold text-foreground truncate">{status.name}</p>
-          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-border bg-background px-1.5 text-[11px] font-medium text-muted-foreground">
-            {tasks.length}
-          </span>
+    <section className={`column ${isOver ? "drag-over" : ""}`}>
+      <div className="col-bar" style={{ background: status.color }} />
+      <header className="column-head">
+        <div className="left">
+          <h3>{status.name}</h3>
+          <span className="col-count">{tasks.length}</span>
         </div>
-        <button
-          type="button"
-          className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground transition"
-          title="Nova demanda nesta etapa"
-          onClick={() => onCreate(status)}
-        >
-          <Plus size={14} />
+        <button className="col-plus" title="Nova demanda nesta etapa" onClick={() => onCreate(status)}>
+          <Plus size={13} />
         </button>
-      </div>
-      <div
-        ref={setNodeRef}
-        className={`min-h-[160px] space-y-2 px-2 pb-2 transition-colors ${
-          isDragging && isOver ? "bg-primary/10 ring-2 ring-inset ring-primary/40" : ""
-        }`}
-      >
+      </header>
+      <div ref={setNodeRef} className="col-body">
         {tasks.length === 0 ? (
-          <p className="text-xs text-muted-foreground/70 px-2 py-3 text-center italic">Nenhuma demanda</p>
+          <div className="col-empty">Nenhuma demanda</div>
         ) : tasks.map((task) => (
           <BoardCard
             key={task.id}
@@ -278,13 +206,213 @@ function BoardColumn({
           />
         ))}
       </div>
-      <button
-        type="button"
-        className="w-full px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/70 hover:bg-background hover:text-foreground transition"
-        onClick={() => onCreate(status)}
-      >
-        + Nova demanda
+      <div className="col-foot">
+        <button onClick={() => onCreate(status)}>+ Nova demanda</button>
+      </div>
+    </section>
+  )
+}
+
+// ─────────── View tabs (Quadro / Lista / Gantt / Calendário) ───────────
+type BoardView = "board" | "list" | "cal"
+function resolveViewFromPath(pathname: string): BoardView {
+  if (pathname.endsWith("/lista")) return "list"
+  if (pathname.endsWith("/calendario")) return "cal"
+  return "board"
+}
+
+function ViewTabs({
+  active,
+  onChange,
+  onGantt,
+  count,
+}: {
+  active: BoardView
+  onChange: (v: BoardView) => void
+  onGantt: () => void
+  count: number
+}) {
+  return (
+    <div className="view-tabs">
+      <button className={`view-tab ${active === "board" ? "active" : ""}`} onClick={() => onChange("board")}>
+        <KanbanSquare size={14} /> Quadro <span className="pill">{count}</span>
       </button>
+      <button className={`view-tab ${active === "list" ? "active" : ""}`} onClick={() => onChange("list")}>
+        <ListIcon size={14} /> Lista
+      </button>
+      <button className="view-tab" onClick={onGantt}>
+        <BarChart3 size={14} /> Gantt
+      </button>
+      <button className={`view-tab ${active === "cal" ? "active" : ""}`} onClick={() => onChange("cal")}>
+        <CalendarRange size={14} /> Calendário
+      </button>
+    </div>
+  )
+}
+
+// ─────────── List view (agrupada por etapa) ───────────
+function ListView({
+  statuses,
+  tasks,
+  users,
+  demandTypeName,
+  onOpen,
+}: {
+  statuses: ProjectStatus[]
+  tasks: ProjectTask[]
+  users: User[]
+  demandTypeName: (id: string | null) => string | null
+  onOpen: (task: ProjectTask) => void
+}) {
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  const toggle = (k: string) => setCollapsed((c) => ({ ...c, [k]: !c[k] }))
+  const today = new Date(new Date().toDateString())
+  return (
+    <div className="list-card">
+      <div className="list-row header">
+        <span />
+        <span>Demanda</span>
+        <span>Tipo</span>
+        <span>Status</span>
+        <span>Responsável</span>
+        <span>SLA</span>
+        <span>Prazo</span>
+      </div>
+      {statuses.map((s) => {
+        const stTasks = tasks.filter((t) => t.status_id === s.id)
+        if (stTasks.length === 0) return null
+        return (
+          <div key={s.id}>
+            <div className="list-row group" onClick={() => toggle(s.id)}>
+              {collapsed[s.id] ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+              <span className="status-dot" style={{ background: s.color }} />
+              <span>{s.name}</span>
+              <span style={{ color: "var(--af-muted-fg)", fontWeight: 500 }}>{stTasks.length}</span>
+            </div>
+            {!collapsed[s.id] && stTasks.map((t) => {
+              const a = users.find((u) => u.id === t.assigned_to) ?? null
+              const due = t.due_date ? new Date(t.due_date) : null
+              const overdue = due && !t.completed_at ? due < today : false
+              const typeName = demandTypeName(t.demand_type_id)
+              return (
+                <div key={t.id} className="list-row task" onClick={() => onOpen(t)}>
+                  <span />
+                  <div className="col-title">
+                    <span className="text">{t.title}</span>
+                  </div>
+                  <span>{typeName && <span className="chip">{typeName}</span>}</span>
+                  <span>
+                    <span className="chip" style={{ background: s.color + "22", color: s.color }}>
+                      <span style={{ width: 6, height: 6, borderRadius: 3, background: s.color }} />
+                      {s.name}
+                    </span>
+                  </span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span className="assignee-avatar" style={{ background: colorForUser(a?.id ?? null), width: 22, height: 22, fontSize: 9 }}>
+                      {a ? initialsOf(a.full_name) : "?"}
+                    </span>
+                    <span style={{ fontSize: 12 }}>{a?.full_name?.split(" ")[0] ?? "—"}</span>
+                  </span>
+                  <span><SlaChip state={t.sla_state} /></span>
+                  <span>{due && (
+                    <span className={`due-pill ${overdue ? "overdue" : ""}`}>
+                      <span className="dot" />{due.toLocaleDateString("pt-BR")}
+                    </span>
+                  )}</span>
+                </div>
+              )
+            })}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ─────────── Calendar view (mês) ───────────
+const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
+const DOWS = ["SEG", "TER", "QUA", "QUI", "SEX", "SÁB", "DOM"]
+function CalendarView({
+  tasks,
+  demandTypeName,
+  onOpen,
+}: {
+  tasks: ProjectTask[]
+  demandTypeName: (id: string | null) => string | null
+  onOpen: (task: ProjectTask) => void
+}) {
+  const now = new Date()
+  const [cursor, setCursor] = useState({ y: now.getFullYear(), m: now.getMonth() })
+  const today = new Date()
+  const first = new Date(cursor.y, cursor.m, 1)
+  const startDow = (first.getDay() + 6) % 7
+  const daysInMonth = new Date(cursor.y, cursor.m + 1, 0).getDate()
+  const cells: (number | null)[] = []
+  for (let i = 0; i < startDow; i++) cells.push(null)
+  for (let i = 1; i <= daysInMonth; i++) cells.push(i)
+  return (
+    <>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>{MONTHS[cursor.m]} {cursor.y}</h2>
+        <button className="btn ghost icon" onClick={() => setCursor((c) => { const d = new Date(c.y, c.m - 1, 1); return { y: d.getFullYear(), m: d.getMonth() } })}>
+          <ChevronLeft size={14} />
+        </button>
+        <button className="btn ghost icon" onClick={() => setCursor((c) => { const d = new Date(c.y, c.m + 1, 1); return { y: d.getFullYear(), m: d.getMonth() } })}>
+          <ChevronRight size={14} />
+        </button>
+        <span className="spacer" />
+        <button className="btn ghost" onClick={() => setCursor({ y: now.getFullYear(), m: now.getMonth() })}>Hoje</button>
+      </div>
+      <div className="cal-grid" style={{ marginBottom: 6 }}>
+        {DOWS.map((d) => (
+          <div key={d} style={{ padding: "6px 8px", fontSize: 11, fontWeight: 600, color: "var(--af-muted-fg)" }}>{d}</div>
+        ))}
+      </div>
+      <div className="cal-grid">
+        {cells.map((day, i) => {
+          if (!day) return <div key={i} />
+          const dayDate = new Date(cursor.y, cursor.m, day)
+          const isToday = dayDate.toDateString() === today.toDateString()
+          const dayTasks = tasks.filter((t) => t.due_date && new Date(t.due_date).toDateString() === dayDate.toDateString())
+          return (
+            <div key={i} className={`cal-day ${isToday ? "today" : ""}`}>
+              <div className="num">{day}</div>
+              {dayTasks.slice(0, 3).map((t) => (
+                <div key={t.id} className="cal-tag" onClick={() => onOpen(t)} title={t.title}>
+                  {demandTypeName(t.demand_type_id) ? `${demandTypeName(t.demand_type_id)}: ` : ""}{t.title}
+                </div>
+              ))}
+              {dayTasks.length > 3 && <div style={{ fontSize: 10, color: "var(--af-muted-fg)" }}>+{dayTasks.length - 3}</div>}
+            </div>
+          )
+        })}
+      </div>
+    </>
+  )
+}
+
+// Dropdown de filtro multi-seleção no estilo do protótipo (usado na toolbar).
+function FilterDropdown({
+  label,
+  open,
+  onToggle,
+  selectedCount,
+  children,
+}: {
+  label: string
+  open: boolean
+  onToggle: () => void
+  selectedCount: number
+  children: React.ReactNode
+}) {
+  return (
+    <div className="relative">
+      <button className={`filter-btn ${selectedCount ? "active" : ""}`} onClick={onToggle}>
+        <span>{label}</span>
+        {selectedCount > 0 && <span className="filter-count">{selectedCount}</span>}
+        <ChevronDown size={12} />
+      </button>
+      {open && <div className="dd-menu">{children}</div>}
     </div>
   )
 }
@@ -299,6 +427,7 @@ export default function ProjectBoardPage() {
 
   const { user } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const { projectId } = useParams<{ projectId: string }>()
   const [projects, setProjects] = useState<Project[]>([])
   const [funnels, setFunnels] = useState<ProjectFunnel[]>([])
@@ -322,6 +451,12 @@ export default function ProjectBoardPage() {
   const [assignees, setAssignees] = useState<string[]>(() => loadFilters().assignees ?? [])
   const [types, setTypes] = useState<string[]>(() => loadFilters().types ?? [])
   const [slas, setSlas] = useState<string[]>(() => loadFilters().slas ?? [])
+  const [view, setView] = useState<BoardView>(() => resolveViewFromPath(location.pathname))
+  const [openMenu, setOpenMenu] = useState<string | null>(null)
+
+  function toggleMulti(setter: React.Dispatch<React.SetStateAction<string[]>>, current: string[], val: string) {
+    setter(current.includes(val) ? current.filter((x) => x !== val) : [...current, val])
+  }
 
   // Persiste os filtros (continuam ao trocar de página; só o botão "Limpar" zera).
   useEffect(() => {
@@ -345,6 +480,7 @@ export default function ProjectBoardPage() {
     () => projects.find((p) => p.id === projectId) ?? null,
     [projects, projectId]
   )
+  const projectRouteBase = selectedProject ? `/app/modules/projetos/${selectedProject.id}` : "/app/modules/projetos"
   // Tipos que são "filhos" de algum outro tipo: criados pela hierarquia (dentro do card pai),
   // não diretamente pelo "Nova Demanda".
   const childTypeIds = useMemo(
@@ -369,6 +505,10 @@ export default function ProjectBoardPage() {
   const isBasicUser =
     user?.role === "company_user" &&
     (userRoleName === "basic" || userRoleName === "")
+
+  useEffect(() => {
+    setView(resolveViewFromPath(location.pathname))
+  }, [location.pathname])
 
   useEffect(() => {
     Promise.all([
@@ -473,7 +613,7 @@ export default function ProjectBoardPage() {
   const demandFormCache = useRef<Map<string, { sections: ProjectDemandFormSection[]; fieldsBySection: Record<string, ProjectDemandFormField[]> }>>(new Map())
   const sectionLinksCache = useRef<Map<string, ProjectStatusSectionLink[]>>(new Map())
   const formValuesCache = useRef<Map<string, Record<string, unknown>>>(new Map())
-  const [activeDragTaskId, setActiveDragTaskId] = useState<string | null>(null)
+  const [, setActiveDragTaskId] = useState<string | null>(null)
 
   async function loadDemandForm(demandTypeId: string) {
     const cached = demandFormCache.current.get(demandTypeId)
@@ -680,109 +820,149 @@ export default function ProjectBoardPage() {
   }
 
   const selectedFunnel = funnels.find((f) => f.id === selectedFunnelId) ?? null
-  const totalTasks = tasks.length
+  const filterState: BoardFilterState = { q: searchQuery, assignees, types, slas }
+  const funnelTasks = tasks.filter((t) => taskMatches(t, filterState))
+  const hasFilters = !!(searchQuery.trim() || assignees.length || types.length || slas.length)
 
   return (
-    <div className="flex h-full min-h-0 w-full min-w-0 flex-col gap-4 overflow-hidden">
-      <div className="flex w-full min-w-0 flex-wrap items-center gap-2 rounded-xl border bg-card px-4 py-3 shadow-sm">
-        <div className="flex items-baseline gap-2 min-w-0 shrink-0">
-          <h1 className="text-xl font-bold shrink-0">Kanban</h1>
-          {selectedFunnel && (
-            <>
-              <span className="text-muted-foreground shrink-0">/</span>
-              <p className="text-sm font-medium text-muted-foreground truncate min-w-0 max-w-[140px]">{selectedFunnel.name}</p>
-            </>
+    <div className="afx flex h-full min-h-0 w-full min-w-0 flex-col gap-4 overflow-hidden">
+      {openMenu && <div style={{ position: "fixed", inset: 0, zIndex: 20 }} onClick={() => setOpenMenu(null)} />}
+
+      <ViewTabs
+        active={view}
+        onChange={(nextView) => {
+          setView(nextView)
+          const nextPath = nextView === "list"
+            ? `${projectRouteBase}/lista`
+            : nextView === "cal"
+              ? `${projectRouteBase}/calendario`
+              : `${projectRouteBase}/board`
+          navigate(nextPath)
+        }}
+        onGantt={() => navigate(`${projectRouteBase}/gantt`)}
+        count={funnelTasks.length}
+      />
+
+      <div className="board-toolbar" style={{ position: "relative", zIndex: 25 }}>
+        <div className="board-title">
+          <h1>Kanban</h1>
+          {selectedFunnel && (<><span className="slash">/</span><span className="funnel-name">{selectedFunnel.name}</span></>)}
+          <span className="count-pill">{funnelTasks.length}</span>
+        </div>
+
+        <div className="tb-search">
+          <Search size={14} />
+          <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Buscar demandas pelo título..." />
+        </div>
+
+        <FilterDropdown label="Responsável" open={openMenu === "assignee"} onToggle={() => setOpenMenu(openMenu === "assignee" ? null : "assignee")} selectedCount={assignees.length}>
+          <div className="dd-head">Filtrar por responsável</div>
+          {[{ id: "__none__", full_name: "Sem responsável" }, ...users].map((m) => {
+            const checked = assignees.includes(m.id)
+            return (
+              <div key={m.id} className="dd-item" onClick={() => toggleMulti(setAssignees, assignees, m.id)}>
+                <span className={`check ${checked ? "checked" : ""}`}>{checked && <Check size={11} />}</span>
+                <span>{m.full_name}</span>
+              </div>
+            )
+          })}
+        </FilterDropdown>
+
+        <FilterDropdown label="Tipo" open={openMenu === "type"} onToggle={() => setOpenMenu(openMenu === "type" ? null : "type")} selectedCount={types.length}>
+          <div className="dd-head">Tipo de demanda</div>
+          {demandTypes.map((t) => {
+            const checked = types.includes(t.id)
+            return (
+              <div key={t.id} className="dd-item" onClick={() => toggleMulti(setTypes, types, t.id)}>
+                <span className={`check ${checked ? "checked" : ""}`}>{checked && <Check size={11} />}</span>
+                <span>{t.name}</span>
+              </div>
+            )
+          })}
+        </FilterDropdown>
+
+        <FilterDropdown label="SLA" open={openMenu === "sla"} onToggle={() => setOpenMenu(openMenu === "sla" ? null : "sla")} selectedCount={slas.length}>
+          <div className="dd-head">SLA</div>
+          {[{ id: "ok", label: "No prazo" }, { id: "warning", label: "Em alerta" }, { id: "breached", label: "Atrasado" }, { id: "none", label: "Sem SLA" }].map((o) => {
+            const checked = slas.includes(o.id)
+            return (
+              <div key={o.id} className="dd-item" onClick={() => toggleMulti(setSlas, slas, o.id)}>
+                <span className={`check ${checked ? "checked" : ""}`}>{checked && <Check size={11} />}</span>
+                <span>{o.label}</span>
+              </div>
+            )
+          })}
+        </FilterDropdown>
+
+        <div className="relative">
+          <button className="filter-btn" onClick={() => setOpenMenu(openMenu === "funnel" ? null : "funnel")}>
+            <GitBranch size={12} /><span>{selectedFunnel?.name ?? "Selecionar funil"}</span><ChevronDown size={12} />
+          </button>
+          {openMenu === "funnel" && (
+            <div className="dd-menu">
+              <div className="dd-head">Kanbans deste projeto</div>
+              {funnels.map((f) => (
+                <div key={f.id} className="dd-item" onClick={() => { setSelectedFunnelId(f.id); setOpenMenu(null) }}>
+                  {selectedFunnelId === f.id
+                    ? <Check size={13} style={{ color: "var(--af-primary)" }} />
+                    : <GitBranch size={13} style={{ color: "var(--af-muted-fg)" }} />}
+                  <span>{f.name}</span>
+                  {f.is_default && <span className="chip muted" style={{ marginLeft: "auto" }}>Padrão</span>}
+                </div>
+              ))}
+            </div>
           )}
-          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-muted px-1.5 text-[11px] font-medium text-muted-foreground shrink-0">
-            {totalTasks}
-          </span>
         </div>
-        <div className="relative min-w-[160px] flex-1">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Buscar demandas pelo título..."
-            className="pl-9 h-9"
-          />
-        </div>
-        <FilterMultiSelect
-          label="Responsável"
-          options={[{ value: "__none__", label: "Sem responsável" }, ...users.map((u) => ({ value: u.id, label: u.full_name }))]}
-          selected={assignees}
-          onChange={setAssignees}
-        />
-        <FilterMultiSelect
-          label="Tipo"
-          options={demandTypes.map((t) => ({ value: t.id, label: t.name }))}
-          selected={types}
-          onChange={setTypes}
-        />
-        <FilterMultiSelect
-          label="SLA"
-          options={[
-            { value: "ok", label: "No prazo" },
-            { value: "warning", label: "Em alerta" },
-            { value: "breached", label: "Atrasado" },
-            { value: "none", label: "Sem SLA" },
-          ]}
-          selected={slas}
-          onChange={setSlas}
-        />
-        <Select value={selectedFunnelId} onValueChange={setSelectedFunnelId}>
-          <SelectTrigger className="w-[180px] h-9 shrink-0">
-            <SelectValue placeholder="Selecionar funil" />
-          </SelectTrigger>
-          <SelectContent>
-            {funnels.map((funnel) => (
-              <SelectItem key={funnel.id} value={funnel.id}>{funnel.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {(searchQuery.trim() || assignees.length || types.length || slas.length) ? (
-          <Button variant="ghost" className="h-9 gap-1.5 shrink-0 text-muted-foreground" onClick={clearFilters}>
-            <X size={14} /> Limpar
-          </Button>
-        ) : null}
-        <Button size="icon" className="h-9 w-9 shrink-0" onClick={() => setOpenCreate(true)} title="Nova Demanda">
-          <Plus size={16} />
-        </Button>
+
+        {hasFilters && (<button className="btn ghost" onClick={clearFilters}><X size={14} /> Limpar</button>)}
+        <button className="btn primary icon" onClick={() => setOpenCreate(true)} title="Nova demanda"><Plus size={16} /></button>
       </div>
 
-      {statuses.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Este funil ainda não possui colunas de kanban.</p>
-      ) : (
-        <DndContext
-          sensors={boardSensors}
-          onDragStart={onBoardDragStart}
-          onDragEnd={onBoardDragEnd}
-        >
-          <div className="scrollbar-thin flex flex-1 min-h-0 gap-4 overflow-x-auto pb-3 items-start">
-            {statuses.map((status) => {
-              const q = searchQuery.trim().toLowerCase()
-              const columnTasks = tasks
-                .filter((t) => t.status_id === status.id)
-                .filter((t) => !q || t.title.toLowerCase().includes(q))
-                .filter((t) => assignees.length === 0 || assignees.includes(t.assigned_to ?? "__none__"))
-                .filter((t) => types.length === 0 || (t.demand_type_id ? types.includes(t.demand_type_id) : false))
-                .filter((t) => slas.length === 0 || slas.includes(t.sla_state))
-                .sort((a, b) => a.order - b.order)
-              return (
-                <BoardColumn
-                  key={status.id}
-                  status={status}
-                  tasks={columnTasks}
-                  users={users}
-                  demandTypeName={demandTypeName}
-                  parentName={parentName}
-                  isDragging={activeDragTaskId !== null}
-                  onOpen={(t) => setSelectedTask(t)}
-                  onCreate={(s) => { setPendingCreateStatusId(s.id); setOpenCreate(true) }}
-                />
-              )
-            })}
+      {view === "board" && (
+        statuses.length === 0 ? (
+          <div className="empty-state">
+            <div className="icon-wrap"><KanbanSquare size={24} /></div>
+            <h3>Sem colunas</h3>
+            <p>Este funil ainda não possui colunas de kanban.</p>
           </div>
-        </DndContext>
+        ) : (
+          <DndContext sensors={boardSensors} onDragStart={onBoardDragStart} onDragEnd={onBoardDragEnd}>
+            <div className="board scrollbar-thin" style={{ flex: 1, minHeight: 0, overflowX: "auto" }}>
+              {statuses.map((status) => {
+                const columnTasks = funnelTasks
+                  .filter((t) => t.status_id === status.id)
+                  .sort((a, b) => a.order - b.order)
+                return (
+                  <BoardColumn
+                    key={status.id}
+                    status={status}
+                    tasks={columnTasks}
+                    users={users}
+                    demandTypeName={demandTypeName}
+                    parentName={parentName}
+                    onOpen={(t) => setSelectedTask(t)}
+                    onCreate={(s) => { setPendingCreateStatusId(s.id); setOpenCreate(true) }}
+                  />
+                )
+              })}
+              <button className="btn ghost" style={{ flexShrink: 0, alignSelf: "flex-start", marginTop: 8 }}>
+                <Plus size={14} /> Nova coluna
+              </button>
+            </div>
+          </DndContext>
+        )
+      )}
+
+      {view === "list" && (
+        <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+          <ListView statuses={statuses} tasks={funnelTasks} users={users} demandTypeName={demandTypeName} onOpen={(t) => setSelectedTask(t)} />
+        </div>
+      )}
+
+      {view === "cal" && (
+        <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+          <CalendarView tasks={funnelTasks} demandTypeName={demandTypeName} onOpen={(t) => setSelectedTask(t)} />
+        </div>
       )}
 
       <Dialog open={openCreate} onOpenChange={(v) => { setOpenCreate(v); if (!v) { setPendingCreateStatusId(null); setCreateFieldErrors({}) } }}>

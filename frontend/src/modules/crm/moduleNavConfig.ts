@@ -8,7 +8,7 @@ import {
   FileText, FileSignature,
   Package, Boxes, ArrowLeftRight, Layers, BadgeCheck,
   ShoppingCart, Wallet, ReceiptText,
-  FolderKanban,
+  FolderKanban, List, CalendarRange,
   Network, Code2, CalendarOff,
 } from "lucide-react"
 import type { ElementType } from "react"
@@ -46,7 +46,11 @@ export const moduleNavConfig: Record<string, ModuleNavItem[]> = {
     { to: "/app/modules/pdv/config",    icon: Settings2,    label: "Configurações" },
   ],
   projetos: [
-    { to: "/app/modules/projetos", icon: FolderKanban, label: "Kanban" },
+    { to: "/app/modules/projetos", icon: BarChart3, label: "Visão geral" },
+    { to: "/app/modules/projetos/board", icon: FolderKanban, label: "Quadro" },
+    { to: "/app/modules/projetos/lista", icon: List, label: "Lista" },
+    { to: "/app/modules/projetos/gantt", icon: BarChart3, label: "Gantt" },
+    { to: "/app/modules/projetos/calendario", icon: CalendarRange, label: "Calendário" },
     { to: "/app/modules/projetos/relatorios", icon: BarChart3, label: "Relatórios" },
     { to: "/app/modules/projetos/config", icon: Settings2, label: "Configurações" },
   ],

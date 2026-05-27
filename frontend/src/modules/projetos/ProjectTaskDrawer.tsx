@@ -122,6 +122,14 @@ export function ProjectTaskDrawer({
     return () => clearTimeout(timer)
   }, [open, task, projectId])
 
+  // Fecha o slide-over com Esc (a casca agora é custom, não o Dialog do shadcn).
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onOpenChange(false) }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [open, onOpenChange])
+
   useEffect(() => {
     if (!selectedDemandTypeId) {
       setFormSections([])
@@ -492,13 +500,32 @@ export function ProjectTaskDrawer({
 
   return (
     <>
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-6xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{task ? `Tarefa — ${task.title}` : "Tarefa"}</DialogTitle>
-        </DialogHeader>
+    {open && task && (
+      <div className="afx af-drawer-overlay" onClick={() => onOpenChange(false)}>
+        <div className="af-drawer" onClick={(e) => e.stopPropagation()}>
+          <div className="drawer-head">
+            <div className="crumb">
+              <FileText size={13} style={{ color: "var(--af-muted-fg)" }} />
+              <span className="muted">{demandTypeName(task.demand_type_id) ?? "Card"}</span>
+            </div>
+            <span className="spacer" />
+            <button
+              className="icon-btn"
+              title="Abrir no cronograma"
+              onClick={() => { const id = task.id; onOpenChange(false); navigate(`/app/modules/projetos/cronograma?root=${id}`) }}
+            >
+              <CalendarRange size={15} />
+            </button>
+            {!isBasicUser && (
+              <button className="icon-btn" title="Excluir" onClick={handleDelete} disabled={removing}>
+                {removing ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+              </button>
+            )}
+            <div className="divider-v" />
+            <button className="icon-btn" title="Fechar" onClick={() => onOpenChange(false)}><X size={16} /></button>
+          </div>
 
-        {!task ? null : (
+          <div className="drawer-body">
           <div className="space-y-5">
             {/* Cabeçalho: tipo, estado, título e meta (estilo Azure DevOps) */}
             <div className="space-y-2 border-b border-border pb-3">
@@ -817,36 +844,23 @@ export function ProjectTaskDrawer({
               </div>
             </div>
           </div>
-        )}
+          </div>
 
-        <DialogFooter>
-          <Button type="button" variant="destructive" className="mr-auto" onClick={handleDelete} disabled={removing || !task}>
-            {removing ? <Loader2 size={13} className="animate-spin mr-1.5" /> : <Trash2 size={13} className="mr-1.5" />}
-            Excluir
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={!task}
-            onClick={() => {
-              const id = task?.id
-              onOpenChange(false)
-              if (id) navigate(`/app/modules/projetos/cronograma?root=${id}`)
-            }}
-          >
-            <CalendarRange size={13} className="mr-1.5" />
-            Cronograma
-          </Button>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-            Fechar
-          </Button>
-          <Button type="button" onClick={handleSave} disabled={saving || !title.trim()}>
-            {saving && <Loader2 size={13} className="animate-spin mr-1.5" />}
-            Salvar
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <div className="modal-foot">
+            {!isBasicUser && (
+              <button className="btn danger" onClick={handleDelete} disabled={removing}>
+                {removing ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />} Excluir
+              </button>
+            )}
+            <span className="spacer" />
+            <button className="btn" onClick={() => onOpenChange(false)}>Fechar</button>
+            <button className="btn primary" onClick={handleSave} disabled={saving || !title.trim()}>
+              {saving && <Loader2 size={13} className="animate-spin" />} Salvar
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
 
     {/* Diálogo: adicionar vínculo (item existente ou novo item) */}
     <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>

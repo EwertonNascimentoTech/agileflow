@@ -55,6 +55,7 @@ export function ModuleRail({
         >
           <item.icon size={18} />
         </span>
+        <span className="af-rail-tooltip">{item.label}</span>
       </button>
     )
   }

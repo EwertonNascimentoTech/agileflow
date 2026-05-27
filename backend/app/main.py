@@ -162,8 +162,8 @@ async def _seed_known_modules() -> None:
         },
         {
             "slug": "projetos",
-            "name": "Projetos",
-            "description": "Gestão de projetos com board kanban, tarefas, responsáveis, prazos e acompanhamento.",
+            "name": "Processos",
+            "description": "Gestão de processos com board kanban, tarefas, responsáveis, prazos e acompanhamento.",
             "icon": "FolderKanban",
             "color": "#164194",
             "backend_path": "backend/app/modules/projetos",

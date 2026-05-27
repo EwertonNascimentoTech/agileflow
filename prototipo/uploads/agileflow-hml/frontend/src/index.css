@@ -1,0 +1,186 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /*
+   * Design system — paleta institucional
+   *   Brand:  #001834  #014898  #164194  #112A59
+   *   Ações:  #6AB42F  #008BD2  #E84E0F  #66C1BF
+   *   Fundos: #FFFFFF  #F8F8F8  #F2F2F2  #E8E8E8
+   *   Texto:  #333333  #000000  #FFFFFF
+   */
+  :root {
+    /* Fundos & texto */
+    --background: 0 0% 100%;          /* #FFFFFF */
+    --foreground: 0 0% 20%;           /* #333333 */
+    --card: 0 0% 100%;                /* #FFFFFF */
+    --card-foreground: 0 0% 20%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 20%;
+
+    /* Brand — primária e variações */
+    --primary: 213 99% 30%;           /* #014898 */
+    --primary-foreground: 0 0% 100%;
+    --brand-900: 212 100% 10%;        /* #001834 */
+    --brand-800: 220 67% 21%;         /* #112A59 */
+    --brand-700: 220 74% 33%;         /* #164194 */
+    --brand-500: 213 99% 30%;         /* #014898 */
+
+    /* Superfícies neutras */
+    --secondary: 0 0% 95%;            /* #F2F2F2 */
+    --secondary-foreground: 0 0% 20%;
+    --muted: 0 0% 97%;                /* #F8F8F8 */
+    --muted-foreground: 0 0% 42%;
+
+    /* Accent (ação informativa) — azul ciano */
+    --accent: 200 100% 41%;           /* #008BD2 */
+    --accent-foreground: 0 0% 100%;
+
+    /* Estados de ação */
+    --success: 95 59% 45%;            /* #6AB42F */
+    --success-foreground: 0 0% 100%;
+    --warning: 18 88% 49%;            /* #E84E0F */
+    --warning-foreground: 0 0% 100%;
+    --info: 200 100% 41%;             /* #008BD2 */
+    --info-foreground: 0 0% 100%;
+    --highlight: 178 41% 58%;         /* #66C1BF */
+    --highlight-foreground: 0 0% 20%;
+
+    /* Destrutivo */
+    --destructive: 18 88% 49%;        /* #E84E0F */
+    --destructive-foreground: 0 0% 100%;
+
+    /* Bordas / inputs / foco */
+    --border: 0 0% 91%;               /* #E8E8E8 */
+    --input: 0 0% 91%;
+    --ring: 213 99% 30%;              /* #014898 */
+    --radius: 0.75rem;
+
+    /* Rail (coluna lateral de módulos) — brand-900 */
+    --rail: 212 100% 10%;             /* #001834 */
+    --rail-foreground: 0 0% 100%;
+  }
+
+  .dark {
+    /* Fundo institucional escuro */
+    --background: 212 100% 10%;       /* #001834 */
+    --foreground: 0 0% 100%;
+    --card: 220 67% 21%;              /* #112A59 */
+    --card-foreground: 0 0% 100%;
+    --popover: 220 67% 21%;
+    --popover-foreground: 0 0% 100%;
+
+    /* Brand — primária mais brilhante para contraste */
+    --primary: 200 100% 41%;          /* #008BD2 */
+    --primary-foreground: 0 0% 100%;
+    --brand-900: 212 100% 10%;
+    --brand-800: 220 67% 21%;
+    --brand-700: 220 74% 33%;
+    --brand-500: 213 99% 30%;
+
+    /* Superfícies */
+    --secondary: 220 67% 18%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 220 50% 16%;
+    --muted-foreground: 0 0% 78%;
+
+    /* Accent */
+    --accent: 200 100% 41%;
+    --accent-foreground: 0 0% 100%;
+
+    /* Estados */
+    --success: 95 59% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 18 88% 55%;
+    --warning-foreground: 0 0% 100%;
+    --info: 200 100% 41%;
+    --info-foreground: 0 0% 100%;
+    --highlight: 178 41% 58%;
+    --highlight-foreground: 212 100% 10%;
+
+    /* Destrutivo */
+    --destructive: 18 88% 49%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Bordas / inputs / foco */
+    --border: 220 50% 25%;
+    --input: 220 50% 25%;
+    --ring: 200 100% 41%;
+
+    /* Rail */
+    --rail: 212 100% 7%;
+    --rail-foreground: 0 0% 100%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    margin: 0;
+    font-family: system-ui, -apple-system, sans-serif;
+    height: 100%;
+    min-height: 100%;
+  }
+
+  /* Encadeia altura até o React root para layouts flex + overflow-y-auto funcionarem */
+  html {
+    height: 100%;
+  }
+  #root {
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+}
+
+@layer utilities {
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Superfície do rail de módulos (coluna de ícones) */
+  .rail-surface {
+    background: hsl(var(--rail));
+    color: hsl(var(--rail-foreground));
+  }
+
+  /* Scrollbar fina para sidebar/listas */
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 8px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  /* Toast/dialog entry animations */
+  .animate-in {
+    animation: animate-in 0.15s ease-out;
+  }
+  .slide-in-from-right-5 {
+    --tw-translate-x: 1.25rem;
+  }
+  @keyframes animate-in {
+    from {
+      opacity: 0;
+      transform: translateX(var(--tw-translate-x, 0)) translateY(var(--tw-translate-y, 0));
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0) translateY(0);
+    }
+  }
+}

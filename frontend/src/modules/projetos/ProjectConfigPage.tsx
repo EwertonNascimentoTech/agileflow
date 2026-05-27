@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { Check, Pencil, Plus, Settings2, Trash2, X } from "lucide-react"
+import { Check, Pencil, Plus, Trash2, X } from "lucide-react"
 
 import { projetosApi, type Project, type ProjectFunnel, type ProjectStatus } from "@/api/projetos"
 import { Button } from "@/components/ui/button"
@@ -9,7 +9,6 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
-import { EmptyState } from "@/components/EmptyState"
 
 export default function ProjectConfigPage() {
   const [projects, setProjects] = useState<Project[]>([])
@@ -23,6 +22,11 @@ export default function ProjectConfigPage() {
   const [newFunnelColor, setNewFunnelColor] = useState("#7C3AED")
   const [newStatusName, setNewStatusName] = useState("")
   const [newStatusColor, setNewStatusColor] = useState("#6B7280")
+  const [newProcessName, setNewProcessName] = useState("")
+  const [newProcessDescription, setNewProcessDescription] = useState("")
+  const [editingProcessId, setEditingProcessId] = useState<string | null>(null)
+  const [processDraftName, setProcessDraftName] = useState("")
+  const [processDraftDescription, setProcessDraftDescription] = useState("")
   const [draggingFunnelId, setDraggingFunnelId] = useState<string | null>(null)
   const [draggingStatusId, setDraggingStatusId] = useState<string | null>(null)
   const [editingFunnelId, setEditingFunnelId] = useState<string | null>(null)
@@ -51,12 +55,17 @@ export default function ProjectConfigPage() {
   useEffect(() => {
     projetosApi.listProjects(true).then((data) => {
       setProjects(data)
-      if (data[0]) setSelectedProjectId(data[0].id)
+      setSelectedProjectId((current) => current || data[0]?.id || "")
     }).finally(() => setLoading(false))
   }, [])
 
   useEffect(() => {
-    if (!selectedProjectId) return
+    if (!selectedProjectId) {
+      setFunnels([])
+      setStatuses([])
+      setSelectedFunnelId("")
+      return
+    }
     projetosApi.listFunnels(selectedProjectId, false).then((data) => {
       const ordered = [...data].sort((a, b) => a.order - b.order)
       setFunnels(ordered)
@@ -89,6 +98,46 @@ export default function ProjectConfigPage() {
     setFunnels([...ordered].sort((a, b) => a.order - b.order))
     setSelectedFunnelId(created.id)
     setNewFunnelName("")
+  }
+
+  async function handleCreateProcess() {
+    if (!newProcessName.trim()) return
+    const created = await projetosApi.createProject({
+      name: newProcessName.trim(),
+      description: newProcessDescription.trim() || undefined,
+    })
+    setProjects((prev) => [created, ...prev])
+    setSelectedProjectId(created.id)
+    setNewProcessName("")
+    setNewProcessDescription("")
+  }
+
+  function beginEditProcess(project: Project) {
+    setEditingProcessId(project.id)
+    setProcessDraftName(project.name)
+    setProcessDraftDescription(project.description ?? "")
+  }
+
+  async function saveEditProcess(projectId: string) {
+    if (!processDraftName.trim()) return
+    const updated = await projetosApi.updateProject(projectId, {
+      name: processDraftName.trim(),
+      description: processDraftDescription.trim() || null,
+    })
+    setProjects((prev) => prev.map((p) => (p.id === projectId ? updated : p)))
+    setEditingProcessId(null)
+  }
+
+  async function handleDeleteProcess(projectId: string) {
+    if (!window.confirm("Tem certeza que deseja excluir este processo? Esta ação remove funis, colunas e cards relacionados.")) {
+      return
+    }
+    await projetosApi.deleteProject(projectId)
+    setProjects((prev) => {
+      const next = prev.filter((p) => p.id !== projectId)
+      setSelectedProjectId((current) => (current === projectId ? (next[0]?.id ?? "") : current))
+      return next
+    })
   }
 
   async function handleDeleteFunnel(funnelId: string) {
@@ -200,38 +249,109 @@ export default function ProjectConfigPage() {
     )
   }
 
-  if (projects.length === 0) {
-    return (
-      <EmptyState
-        icon={Settings2}
-        title="Sem projetos ativos"
-        description="Crie um projeto para configurar funis e colunas do kanban."
-      />
-    )
-  }
-
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-2xl font-bold">Configurações de Projetos</h1>
+        <h1 className="text-2xl font-bold">Configurações de Processos</h1>
         <p className="text-sm text-muted-foreground">Cadastre múltiplos funis e organize as colunas de cada funil.</p>
       </div>
 
-      <div className="max-w-sm">
-        <Label>Projeto</Label>
-        <Select value={selectedProjectId} onValueChange={setSelectedProjectId}>
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {projects.map((project) => (
-              <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card className="lg:col-span-1">
+          <CardHeader>
+            <CardTitle>Processos (CRUD)</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="space-y-2 rounded-md border p-3">
+              <Label>Novo processo</Label>
+              <Input
+                placeholder="Nome do processo"
+                value={newProcessName}
+                onChange={(e) => setNewProcessName(e.target.value)}
+              />
+              <Input
+                placeholder="Descrição (opcional)"
+                value={newProcessDescription}
+                onChange={(e) => setNewProcessDescription(e.target.value)}
+              />
+              <Button type="button" onClick={handleCreateProcess}>
+                <Plus size={14} className="mr-1" />
+                Criar processo
+              </Button>
+            </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+            <div className="space-y-2">
+              {projects.length === 0 && (
+                <p className="text-sm text-muted-foreground">Sem processos cadastrados.</p>
+              )}
+              {projects.map((project) => (
+                <div key={project.id} className="rounded-md border p-2">
+                  {editingProcessId === project.id ? (
+                    <div className="space-y-2">
+                      <Input value={processDraftName} onChange={(e) => setProcessDraftName(e.target.value)} />
+                      <Input value={processDraftDescription} onChange={(e) => setProcessDraftDescription(e.target.value)} />
+                      <div className="flex gap-1">
+                        <Button type="button" size="icon" variant="ghost" onClick={() => void saveEditProcess(project.id)}>
+                          <Check size={14} />
+                        </Button>
+                        <Button type="button" size="icon" variant="ghost" onClick={() => setEditingProcessId(null)}>
+                          <X size={14} />
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        className="min-w-0 text-left"
+                        onClick={() => setSelectedProjectId(project.id)}
+                      >
+                        <p className={selectedProjectId === project.id ? "font-semibold text-primary" : "font-medium"}>
+                          {project.name}
+                        </p>
+                        {project.description && (
+                          <p className="truncate text-xs text-muted-foreground">{project.description}</p>
+                        )}
+                      </button>
+                      <div className="flex items-center gap-1">
+                        <Button type="button" variant="ghost" size="icon" onClick={() => beginEditProcess(project)}>
+                          <Pencil size={14} />
+                        </Button>
+                        <Button type="button" variant="ghost" size="icon" onClick={() => void handleDeleteProcess(project.id)}>
+                          <Trash2 size={14} />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="space-y-4 lg:col-span-2">
+          <div className="max-w-sm">
+            <Label>Processo</Label>
+            <Select value={selectedProjectId} onValueChange={setSelectedProjectId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione um processo" />
+              </SelectTrigger>
+              <SelectContent>
+                {projects.map((project) => (
+                  <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {!selectedProjectId ? (
+            <Card>
+              <CardContent className="py-8">
+                <p className="text-sm text-muted-foreground">Selecione ou crie um processo para gerenciar funis e colunas.</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle>Funis</CardTitle>
@@ -361,6 +481,9 @@ export default function ProjectConfigPage() {
             )}
           </CardContent>
         </Card>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

@@ -86,7 +86,7 @@ class ProjectService:
         default_funnel = ProjectFunnel(
             project_id=project.id,
             name="Padrão",
-            description="Funil padrão do projeto.",
+            description="Funil padrão do processo.",
             color="#7C3AED",
             order=0,
             is_default=True,
@@ -148,6 +148,12 @@ class ProjectService:
         await db.commit()
         await db.refresh(project)
         return project
+
+    @staticmethod
+    async def delete(db: AsyncSession, project_id: uuid.UUID) -> None:
+        project = await ProjectService.get(db, project_id)
+        await db.delete(project)
+        await db.commit()
 
 
 class ProjectDemandTypeService:

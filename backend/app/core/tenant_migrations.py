@@ -1350,7 +1350,7 @@ async def _step_026_projetos_demand_types(conn: AsyncConnection, schema: str) ->
 
 
 async def _step_029_default_project(conn: AsyncConnection, schema: str) -> None:
-    """Garante que cada tenant tenha pelo menos um projeto + funil + status iniciais."""
+    """Garante que cada tenant tenha pelo menos um processo + funil + status iniciais."""
     if not await _table_exists(conn, schema, "project_projects"):
         return
 
@@ -1360,7 +1360,7 @@ async def _step_029_default_project(conn: AsyncConnection, schema: str) -> None:
 
     project = await conn.execute(text(f"""
         INSERT INTO {schema}.project_projects (id, name, description, is_active, created_at, updated_at)
-        VALUES (gen_random_uuid(), 'Padrão', 'Projeto padrão criado automaticamente.', TRUE, now(), now())
+        VALUES (gen_random_uuid(), 'Processo padrão', 'Processo padrão criado automaticamente.', TRUE, now(), now())
         RETURNING id
     """))
     project_id = project.scalar()

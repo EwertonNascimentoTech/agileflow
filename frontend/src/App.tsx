@@ -85,6 +85,7 @@ import ProjectDemandTypesConfigPage from "@/modules/projetos/config/ProjectDeman
 import ProjectDemandTypeFormEditorPage from "@/modules/projetos/config/ProjectDemandTypeFormEditorPage"
 import ProjectFunnelsConfigPage from "@/modules/projetos/config/ProjectFunnelsConfigPage"
 import ProjectStatusesConfigPage from "@/modules/projetos/config/ProjectStatusesConfigPage"
+import ProjectConfigPage from "@/modules/projetos/ProjectConfigPage"
 import BasicNewRequestPage from "@/modules/projetos/basic/BasicNewRequestPage"
 import BasicMyRequestsPage from "@/modules/projetos/basic/BasicMyRequestsPage"
 import GanttPage from "@/modules/projetos/GanttPage"
@@ -189,12 +190,20 @@ export default function App() {
                   {/* Projetos */}
                   <Route path="modules/projetos" element={<ProjetosLayout />}>
                     <Route index element={<ProjectBoardPage />} />
+                    <Route path="board" element={<ProjectBoardPage />} />
+                    <Route path="lista" element={<ProjectBoardPage />} />
+                    <Route path="calendario" element={<ProjectBoardPage />} />
+                    <Route path="gantt" element={<GanttPage />} />
                     <Route path="cronograma" element={<GanttPage />} />
                     <Route path="relatorios" element={<ProjetosReportsPage />} />
                     <Route path="solicitacoes" element={<BasicNewRequestPage />} />
                     <Route path="minhas" element={<BasicMyRequestsPage />} />
                     <Route path=":projectId/board" element={<ProjectBoardPage />} />
+                    <Route path=":projectId/lista" element={<ProjectBoardPage />} />
+                    <Route path=":projectId/calendario" element={<ProjectBoardPage />} />
+                    <Route path=":projectId/gantt" element={<GanttPage />} />
                     <Route path="config" element={<ProjectConfigHomePage />} />
+                    <Route path="config/processos" element={<ProjectConfigPage />} />
                     <Route path="config/demand-types" element={<ProjectDemandTypesConfigPage />} />
                     <Route path="config/demand-types/:demandTypeId" element={<ProjectDemandTypeFormEditorPage />} />
                     <Route path="config/funnels" element={<ProjectFunnelsConfigPage />} />

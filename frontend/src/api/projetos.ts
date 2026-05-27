@@ -238,6 +238,8 @@ export const projetosApi = {
     due_date: string | null
     is_active: boolean
   }>) => api.patch<Project>(`/projetos/projects/${projectId}`, data).then((r) => r.data),
+  deleteProject: (projectId: string) =>
+    api.delete<void>(`/projetos/projects/${projectId}`).then((r) => r.data),
 
   listDemandTypes: (activeOnly = false) =>
     api.get<ProjectDemandType[]>("/projetos/config/demand-types", { params: { active_only: activeOnly } }).then((r) => r.data),

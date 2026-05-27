@@ -20,6 +20,10 @@ export function ContextualSidebar({
   icon: Icon,
   color,
   sections,
+  projectItems,
+  activeProjectId,
+  onProjectSelect,
+  onCreateProject,
   user,
   onLogout,
   onNavigate,
@@ -28,6 +32,10 @@ export function ContextualSidebar({
   icon: ElementType
   color?: string
   sections: SidebarSection[]
+  projectItems?: Array<{ id: string; name: string; color?: string }>
+  activeProjectId?: string
+  onProjectSelect?: (projectId: string) => void
+  onCreateProject?: () => void
   user: { name: string; email: string; initials: string }
   onLogout: () => void
   onNavigate?: () => void
@@ -36,13 +44,16 @@ export function ContextualSidebar({
 
   function isPathActive(to: string, end?: boolean): boolean {
     const path = location.pathname
-    const matches = end ? path === to : path === to || path.startsWith(to + "/")
+    const normalizedPath = path.replace(/^\/app\/modules\/projetos\/[^/]+\//, "/app/modules/projetos/")
+    const matches = end
+      ? normalizedPath === to
+      : normalizedPath === to || normalizedPath.startsWith(to + "/")
     if (!matches) return false
     // Se houver outra seção com prefixo mais específico que também combine, esta não fica ativa.
     return !sections.some((other) => {
       if (other.to === to) return false
       if (!other.to.startsWith(to + "/")) return false
-      return path === other.to || path.startsWith(other.to + "/")
+      return normalizedPath === other.to || normalizedPath.startsWith(other.to + "/")
     })
   }
 
@@ -81,6 +92,48 @@ export function ContextualSidebar({
             </NavLink>
           )
         })}
+
+        {projectItems && projectItems.length > 0 && (
+          <>
+            <div className="mx-1 my-2 h-px bg-border" />
+            <p className="px-3 pb-1 pt-2 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+              Processos ativos
+            </p>
+
+            {projectItems.map((project) => (
+              <button
+                key={project.id}
+                onClick={() => {
+                  onProjectSelect?.(project.id)
+                  onNavigate?.()
+                }}
+                className={cn(
+                  "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition",
+                  activeProjectId === project.id
+                    ? "bg-primary/15 font-medium text-primary"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+              >
+                <span
+                  className="h-2.5 w-2.5 shrink-0 rounded-[4px]"
+                  style={{ backgroundColor: project.color ?? "hsl(var(--muted-foreground))" }}
+                />
+                <span className="truncate">{project.name}</span>
+              </button>
+            ))}
+
+            <button
+              onClick={() => {
+                onCreateProject?.()
+                onNavigate?.()
+              }}
+              className="mt-0.5 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            >
+              <span className="text-base leading-none">+</span>
+              Novo processo
+            </button>
+          </>
+        )}
       </nav>
 
       {/* Card do usuário */}

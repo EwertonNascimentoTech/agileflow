@@ -1,385 +1,402 @@
 import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "react-router-dom"
-import { CalendarRange, Loader2 } from "lucide-react"
+import {
+  BarChart3, Calendar, CalendarCheck, Check, ChevronDown, Folder, GitBranch, Loader2, Plus, User as UserIcon, X,
+} from "lucide-react"
 
 import { companyApi } from "@/api/crm"
-import { projetosApi, type ProjectDemandType, type ProjectScheduleBinding, type ProjectTask } from "@/api/projetos"
+import {
+  projetosApi,
+  type Project, type ProjectDemandType, type ProjectFunnel, type ProjectScheduleBinding,
+  type ProjectStatus, type ProjectTask,
+} from "@/api/projetos"
 import type { User } from "@/types"
-import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Textarea } from "@/components/ui/textarea"
 import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyState } from "@/components/EmptyState"
-import { GanttChart } from "@/modules/projetos/GanttChart"
 import { toast } from "@/lib/toast"
 
-const NO_ASSIGNEE = "__none__"
+const DOW = ["DOM", "SEG", "TER", "QUA", "QUI", "SEX", "SÁB"]
+const MON = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"]
+
+function initials(name: string | undefined): string {
+  if (!name) return "?"
+  const p = name.trim().split(/\s+/).filter(Boolean)
+  if (p.length === 0) return "?"
+  if (p.length === 1) return p[0].slice(0, 2).toUpperCase()
+  return (p[0][0] + p[p.length - 1][0]).toUpperCase()
+}
+function colorForUser(id: string | null | undefined): string {
+  if (!id) return "#94a3b8"
+  let hash = 0
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0
+  const palette = ["#7C3AED", "#008BD2", "#6AB42F", "#E84E0F", "#014898", "#DB2777", "#0F766E", "#64748B"]
+  return palette[Math.abs(hash) % palette.length]
+}
+function dayOnly(iso: string): Date { return new Date(iso.slice(0, 10) + "T00:00:00") }
+function isoFromInput(v: string): string | null { return v ? new Date(v + "T00:00:00").toISOString() : null }
 
 export default function GanttPage() {
+  const [searchParams] = useSearchParams()
+  const rootParam = searchParams.get("root")
+
+  const [projects, setProjects] = useState<Project[]>([])
+  const [projectId, setProjectId] = useState("")
+  const [funnels, setFunnels] = useState<ProjectFunnel[]>([])
+  const [statuses, setStatuses] = useState<ProjectStatus[]>([])
   const [tasks, setTasks] = useState<ProjectTask[]>([])
   const [demandTypes, setDemandTypes] = useState<ProjectDemandType[]>([])
   const [bindings, setBindings] = useState<ProjectScheduleBinding[]>([])
   const [users, setUsers] = useState<User[]>([])
-  const [projectId, setProjectId] = useState<string>("")
   const [loading, setLoading] = useState(true)
-  const [rootId, setRootId] = useState<string>("")
-  const [editId, setEditId] = useState<string | null>(null)
-
-  // Diálogo de criação (raiz quando parentId = null; filho caso contrário)
-  const [createOpen, setCreateOpen] = useState(false)
-  const [createParentId, setCreateParentId] = useState<string | null>(null)
-  const [createTitle, setCreateTitle] = useState("")
-  const [createDescription, setCreateDescription] = useState("")
-  const [createTypeId, setCreateTypeId] = useState("")
-  const [createStart, setCreateStart] = useState("")
-  const [createDue, setCreateDue] = useState("")
-  const [createAssignee, setCreateAssignee] = useState(NO_ASSIGNEE)
-  const [savingCreate, setSavingCreate] = useState(false)
-
-  async function reload(pid = projectId) {
-    if (!pid) return
-    const ts = await projetosApi.listTasks(pid)
-    setTasks(ts)
-  }
-
-  // Edição rápida de datas direto na linha (otimista; reverte no erro).
-  async function handleUpdateDates(task: ProjectTask, patch: { start_date?: string | null; due_date?: string | null }) {
-    if (!projectId) return
-    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, ...patch } : t)))
-    try {
-      await projetosApi.updateTask(projectId, task.id, patch)
-    } catch (err) {
-      const e = err as { response?: { data?: { detail?: unknown } } }
-      toast.error(typeof e.response?.data?.detail === "string" ? e.response.data.detail : "Não foi possível atualizar a data.")
-      await reload()
-    }
-  }
+  const [scale, setScale] = useState<"day" | "week">("day")
+  const [projOpen, setProjOpen] = useState(false)
+  const [editing, setEditing] = useState<ProjectTask | null>(null)
 
   useEffect(() => {
     async function load() {
-      const projects = await projetosApi.listProjects(true)
-      const pid = projects[0]?.id
-      if (!pid) return
-      setProjectId(pid)
-      const [ts, dts, bs, us] = await Promise.all([
-        projetosApi.listTasks(pid),
-        projetosApi.listDemandTypes(true),
-        projetosApi.listScheduleBindings().catch(() => [] as ProjectScheduleBinding[]),
+      const [ps, dts, us] = await Promise.all([
+        projetosApi.listProjects(true),
+        projetosApi.listDemandTypes(true).catch(() => [] as ProjectDemandType[]),
         companyApi.listUsers({ active_only: true }).catch(() => [] as User[]),
       ])
-      setTasks(ts)
+      setProjects(ps)
       setDemandTypes(dts)
-      setBindings(bs)
       setUsers(us)
+      // Pré-seleciona o projeto da tarefa vinda do botão "Cronograma" (?root), senão o primeiro.
+      let pid = ps[0]?.id ?? ""
+      if (rootParam) {
+        const allTasks = await Promise.all(ps.map((p) => projetosApi.listTasks(p.id).catch(() => [])))
+        const idx = allTasks.findIndex((ts) => ts.some((t) => t.id === rootParam))
+        if (idx >= 0) pid = ps[idx].id
+      }
+      setProjectId(pid)
     }
     load().finally(() => setLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const typeName = useMemo(() => {
-    const m = new Map(demandTypes.map((t) => [t.id, t.name]))
-    return (id: string | null) => (id ? m.get(id) ?? null : null)
-  }, [demandTypes])
-
-  // Um item entra no cronograma quando os DOIS filtros permitem:
-  //  (1) o tipo está marcado como "aparece no Cronograma" (show_in_schedule); e
-  //  (2) o card está numa etapa vinculada ao plugin Cronograma (fluxo+etapa).
-  // Nuance: com o AND sobre o status atual, um filho que não esteja numa etapa
-  // vinculada não aparece na árvore — se for indesejado, expandir para descendentes
-  // de qualquer raiz que qualifique.
-  const scheduleTasks = useMemo(() => {
-    const showTypeIds = new Set(demandTypes.filter((d) => d.show_in_schedule).map((d) => d.id))
-    const boundStatusIds = new Set(bindings.filter((b) => b.is_active).map((b) => b.status_id))
-    return tasks.filter(
-      (t) => !!t.demand_type_id && showTypeIds.has(t.demand_type_id) && boundStatusIds.has(t.status_id),
-    )
-  }, [tasks, demandTypes, bindings])
-
-  // Raízes do cronograma: cards que já têm filhos OU itens de topo de um tipo "container"
-  // (tipo que aceita filhos) — assim um Projeto recém-criado já aparece para planejar.
-  const roots = useMemo(() => {
-    const parentIds = new Set(scheduleTasks.map((t) => t.parent_task_id).filter(Boolean) as string[])
-    const containerTypeIds = new Set(
-      demandTypes.filter((d) => (d.allowed_child_type_ids ?? []).length > 0).map((d) => d.id),
-    )
-    return scheduleTasks
-      .filter(
-        (t) =>
-          parentIds.has(t.id) ||
-          (!t.parent_task_id && !!t.demand_type_id && containerTypeIds.has(t.demand_type_id)),
-      )
-      .sort((a, b) => a.title.localeCompare(b.title))
-  }, [scheduleTasks, demandTypes])
-
-  // Foco inicial: se veio ?root=<taskId> (botão "Cronograma" do card), seleciona a
-  // raiz ancestral daquele card; senão cai na primeira raiz disponível.
-  const [searchParams] = useSearchParams()
-  const rootParam = searchParams.get("root")
   useEffect(() => {
-    if (rootId || roots.length === 0) return
-    if (rootParam) {
-      const byId = new Map(tasks.map((t) => [t.id, t]))
-      let cur = byId.get(rootParam)
-      let guard = 0
-      while (cur?.parent_task_id && byId.get(cur.parent_task_id) && guard++ < 50) {
-        cur = byId.get(cur.parent_task_id)
-      }
-      const candidate = cur?.id ?? rootParam
-      if (roots.some((r) => r.id === candidate)) {
-        setRootId(candidate)
-        return
-      }
-    }
-    setRootId(roots[0].id)
-  }, [roots, rootId, rootParam, tasks])
+    if (!projectId) return
+    Promise.all([
+      projetosApi.listFunnels(projectId, true),
+      projetosApi.listStatuses(projectId, undefined, true),
+      projetosApi.listTasks(projectId),
+      projetosApi.listScheduleBindings().catch(() => [] as ProjectScheduleBinding[]),
+    ]).then(([fs, sts, ts, bs]) => {
+      setFunnels([...fs].sort((a, b) => a.order - b.order))
+      setStatuses(sts)
+      setTasks(ts)
+      setBindings(bs)
+    })
+  }, [projectId])
 
-  // Tipos oferecidos no diálogo de criação
-  const createTypeOptions = useMemo(() => {
-    if (createParentId) {
-      const parent = tasks.find((t) => t.id === createParentId)
-      const parentType = demandTypes.find((d) => d.id === parent?.demand_type_id)
-      const allowed = parentType?.allowed_child_type_ids ?? []
-      return demandTypes.filter((d) => d.is_active && allowed.includes(d.id))
-    }
-    const containers = demandTypes.filter((d) => d.is_active && d.funnel_id && (d.allowed_child_type_ids ?? []).length > 0)
-    return containers.length > 0 ? containers : demandTypes.filter((d) => d.is_active && d.funnel_id)
-  }, [createParentId, tasks, demandTypes])
-
-  function openCreate(parentId: string | null) {
-    setEditId(null)
-    setCreateParentId(parentId)
-    setCreateTitle("")
-    setCreateDescription("")
-    setCreateStart("")
-    setCreateDue("")
-    setCreateAssignee(NO_ASSIGNEE)
-    setCreateTypeId("")
-    setCreateOpen(true)
-  }
-
-  function openEdit(task: ProjectTask) {
-    setEditId(task.id)
-    setCreateParentId(task.parent_task_id ?? null)
-    setCreateTitle(task.title)
-    setCreateDescription(task.description ?? "")
-    setCreateTypeId(task.demand_type_id ?? "")
-    setCreateStart(task.start_date ? task.start_date.slice(0, 10) : "")
-    setCreateDue(task.due_date ? task.due_date.slice(0, 10) : "")
-    setCreateAssignee(task.assigned_to ?? NO_ASSIGNEE)
-    setCreateOpen(true)
-  }
-
-  async function handleCreate() {
-    if (!projectId || !createTitle.trim()) return
-    // Modo edição: atualiza o item (sem mexer em etapa/kanban/tipo).
-    if (editId) {
-      setSavingCreate(true)
-      try {
-        await projetosApi.updateTask(projectId, editId, {
-          title: createTitle.trim().slice(0, 200),
-          description: createDescription.trim() || null,
-          start_date: createStart ? new Date(`${createStart}T00:00:00`).toISOString() : null,
-          due_date: createDue ? new Date(`${createDue}T00:00:00`).toISOString() : null,
-          assigned_to: createAssignee !== NO_ASSIGNEE ? createAssignee : null,
-        })
-        await reload()
-        setCreateOpen(false)
-        toast.success("Item atualizado.")
-      } catch (err) {
-        const e = err as { response?: { data?: { detail?: unknown } } }
-        toast.error(typeof e.response?.data?.detail === "string" ? e.response.data.detail : "Não foi possível salvar.")
-      } finally {
-        setSavingCreate(false)
-      }
-      return
-    }
-    const typeId = createTypeId || createTypeOptions[0]?.id
-    const type = demandTypes.find((d) => d.id === typeId)
-    if (!type) {
-      toast.error("Selecione um tipo.")
-      return
-    }
-    setSavingCreate(true)
+  async function handleUpdate(id: string, patch: Partial<Pick<ProjectTask, "title" | "start_date" | "due_date" | "assigned_to">>) {
+    if (!projectId) return
+    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)))
     try {
-      let statusId = ""
-      if (type.funnel_id) {
-        const sts = await projetosApi.listStatuses(projectId, type.funnel_id, true)
-        const initial = sts.find((s) => s.is_initial) ?? [...sts].sort((a, b) => a.order - b.order)[0]
-        statusId = initial?.id ?? ""
-      }
-      if (!statusId) {
-        toast.error("O tipo precisa estar vinculado a um kanban com etapa inicial.")
-        return
-      }
-      const created = await projetosApi.createTask(projectId, {
-        status_id: statusId,
-        demand_type_id: typeId,
-        parent_task_id: createParentId,
-        title: createTitle.trim().slice(0, 200),
-        description: createDescription.trim() || null,
-        start_date: createStart ? new Date(`${createStart}T00:00:00`).toISOString() : null,
-        due_date: createDue ? new Date(`${createDue}T00:00:00`).toISOString() : null,
-        assigned_to: createAssignee !== NO_ASSIGNEE ? createAssignee : null,
-      })
-      await reload()
-      if (!createParentId) setRootId(created.id)
-      setCreateOpen(false)
-      toast.success(createParentId ? "Item filho criado." : "Item criado.")
+      await projetosApi.updateTask(projectId, id, patch)
     } catch (err) {
       const e = err as { response?: { data?: { detail?: unknown } } }
-      toast.error(typeof e.response?.data?.detail === "string" ? e.response.data.detail : "Não foi possível criar o item.")
-    } finally {
-      setSavingCreate(false)
+      toast.error(typeof e.response?.data?.detail === "string" ? e.response.data.detail : "Não foi possível salvar.")
+      const next = await projetosApi.listTasks(projectId)
+      setTasks(next)
     }
   }
 
-  if (loading) return <div className="p-4"><Skeleton className="h-96 rounded-lg" /></div>
+  const project = projects.find((p) => p.id === projectId) ?? null
+  const statusById = useMemo(() => new Map(statuses.map((s) => [s.id, s])), [statuses])
+  const showTypeIds = useMemo(() => new Set(demandTypes.filter((d) => d.show_in_schedule).map((d) => d.id)), [demandTypes])
+  const boundStatusIds = useMemo(() => new Set(bindings.filter((b) => b.is_active).map((b) => b.status_id)), [bindings])
+
+  // Tarefas visíveis: têm início+prazo, tipo aparece no cronograma e estão numa etapa vinculada.
+  const visible = useMemo(
+    () => tasks.filter((t) =>
+      t.start_date && t.due_date &&
+      (!t.demand_type_id || showTypeIds.has(t.demand_type_id)) &&
+      (boundStatusIds.size === 0 || boundStatusIds.has(t.status_id))),
+    [tasks, showTypeIds, boundStatusIds],
+  )
+
+  // Janela de dias a partir dos dados (com folga), ou hoje ±7 se vazio.
+  const days = useMemo(() => {
+    const today = new Date(new Date().toDateString())
+    let start = new Date(today); start.setDate(start.getDate() - 7)
+    let end = new Date(today); end.setDate(end.getDate() + 21)
+    if (visible.length) {
+      const starts = visible.map((t) => dayOnly(t.start_date!).getTime())
+      const ends = visible.map((t) => dayOnly(t.due_date!).getTime())
+      start = new Date(Math.min(...starts)); start.setDate(start.getDate() - 2)
+      end = new Date(Math.max(...ends)); end.setDate(end.getDate() + 2)
+      const minToday = new Date(today); minToday.setDate(minToday.getDate() - 2)
+      if (start > minToday) start = minToday
+    }
+    const out: Date[] = []
+    for (const d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) out.push(new Date(d))
+    return out
+  }, [visible])
+
+  const dayPct = 100 / days.length
+  const today = new Date(new Date().toDateString())
+  const todayIdx = days.findIndex((d) => d.toDateString() === today.toDateString())
+  const todayLeft = todayIdx >= 0 ? (todayIdx + 0.5) * dayPct : -1
+
+  const weeks = useMemo(() => {
+    const out: { label: string; cols: number }[] = []
+    let cur: { key: string; label: string; cols: number } | null = null
+    days.forEach((d) => {
+      const monday = new Date(d); monday.setDate(d.getDate() - ((d.getDay() + 6) % 7))
+      const key = monday.toDateString()
+      if (!cur || cur.key !== key) {
+        const sun = new Date(monday); sun.setDate(monday.getDate() + 6)
+        cur = { key, label: `${MON[monday.getMonth()]} ${monday.getDate()}–${sun.getDate()}`, cols: 0 }
+        out.push(cur)
+      }
+      cur.cols += 1
+    })
+    return out
+  }, [days])
+
+  const swimlanes = useMemo(() => funnels.map((f) => {
+    const statusIds = new Set(statuses.filter((s) => s.funnel_id === f.id).map((s) => s.id))
+    const rows = visible
+      .filter((t) => statusIds.has(t.status_id))
+      .map((t) => {
+        const s = dayOnly(t.start_date!); const e = dayOnly(t.due_date!)
+        let sIdx = days.findIndex((d) => d.toDateString() === s.toDateString())
+        let eIdx = days.findIndex((d) => d.toDateString() === e.toDateString())
+        if (sIdx === -1) sIdx = s < days[0] ? 0 : days.length - 1
+        if (eIdx === -1) eIdx = e > days[days.length - 1] ? days.length - 1 : 0
+        return { task: t, sIdx, eIdx }
+      })
+    return { funnel: f, rows }
+  }), [funnels, statuses, visible, days])
+
+  function barColor(t: ProjectTask): string {
+    if (t.completed_at) return "var(--af-success)"
+    if (t.sla_state === "breached") return "var(--af-destructive)"
+    if (t.sla_state === "warning") return "var(--af-warning)"
+    return "var(--af-primary)"
+  }
+
+  if (loading) return <div className="p-1"><Skeleton className="h-96 rounded-lg" /></div>
+
+  const isEmpty = swimlanes.every((s) => s.rows.length === 0)
 
   return (
-    <div className="w-full space-y-4 p-1">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-lg font-bold">Cronograma</h2>
-          <p className="text-sm text-muted-foreground">
-            Linha do tempo de um programa ou projeto e seus itens. Clique num item para editar datas e responsável; use “+” para adicionar filhos.
-          </p>
+    <div className="afx w-full">
+      {projOpen && <div style={{ position: "fixed", inset: 0, zIndex: 20 }} onClick={() => setProjOpen(false)} />}
+
+      <div className="gantt-toolbar" style={{ position: "relative", zIndex: 25 }}>
+        <div className="title">
+          <h1>Gantt</h1>
+          <span className="slash">/</span>
+          <span className="project-name">{project?.name}</span>
+          <span className="count-pill">{visible.length}</span>
         </div>
-        {roots.length > 0 && (
-          <Select value={rootId} onValueChange={setRootId}>
-            <SelectTrigger className="w-[300px]">
-              <SelectValue placeholder="Escolha o programa/projeto" />
-            </SelectTrigger>
-            <SelectContent>
-              {roots.map((r) => (
-                <SelectItem key={r.id} value={r.id}>
-                  {r.title}{typeName(r.demand_type_id) ? ` · ${typeName(r.demand_type_id)}` : ""}
-                </SelectItem>
+
+        <div className="relative" style={{ marginLeft: 8 }}>
+          <button className="filter-btn" onClick={() => setProjOpen((o) => !o)}>
+            <Folder size={13} /><span>{project?.name ?? "Selecionar projeto"}</span><ChevronDown size={12} />
+          </button>
+          {projOpen && (
+            <div className="dd-menu">
+              <div className="dd-head">Filtrar por projeto</div>
+              {projects.map((p) => (
+                <div key={p.id} className="dd-item" onClick={() => { setProjectId(p.id); setProjOpen(false) }}>
+                  <Folder size={13} style={{ color: "var(--af-muted-fg)" }} />
+                  <span style={{ flex: 1 }}>{p.name}</span>
+                  {projectId === p.id && <Check size={13} style={{ color: "var(--af-primary)" }} />}
+                </div>
               ))}
-            </SelectContent>
-          </Select>
-        )}
+            </div>
+          )}
+        </div>
+
+        <span className="spacer" />
+
+        <div className="scale-toggle">
+          <button className={scale === "day" ? "on" : ""} onClick={() => setScale("day")}>Dia</button>
+          <button className={scale === "week" ? "on" : ""} onClick={() => setScale("week")}>Semana</button>
+        </div>
       </div>
 
-      {roots.length === 0 ? (
+      {isEmpty ? (
         <EmptyState
-          icon={CalendarRange}
-          title="Nada para exibir no cronograma"
-          description="Em Configurações, escolha em quais fluxos e etapas o cronograma deve ser preenchido. Os cards que estiverem nessas etapas (e cujo tipo apareça no cronograma) entram aqui para montar a linha do tempo."
+          icon={BarChart3}
+          title="Nenhuma demanda com prazo neste projeto"
+          description="Adicione data de início e prazo às demandas (e configure os vínculos do cronograma) para visualizá-las aqui."
         />
       ) : (
-        <>
-          <GanttChart
-            rootId={rootId}
-            tasks={scheduleTasks}
-            users={users}
-            onOpenTask={(t) => openEdit(t)}
-            onAddChild={(t) => openCreate(t.id)}
-            onUpdateDates={handleUpdateDates}
-          />
-          <div className="flex flex-wrap items-center gap-4 text-[11px] text-muted-foreground">
-            <span className="flex items-center gap-1.5"><span className="h-3 w-4 rounded bg-primary" /> em andamento</span>
-            <span className="flex items-center gap-1.5"><span className="h-3 w-4 rounded bg-success" /> concluído</span>
-            <span className="flex items-center gap-1.5"><span className="h-3 w-4 rounded bg-warning" /> SLA em alerta</span>
-            <span className="flex items-center gap-1.5"><span className="h-3 w-4 rounded bg-destructive" /> SLA estourado</span>
-            <span className="flex items-center gap-1.5"><span className="h-3 w-px bg-destructive/60" /> hoje</span>
+        <div className="gantt">
+          {/* Week strip */}
+          <div className="gantt-row-grid">
+            <div className="gantt-head-cell">Demanda</div>
+            <div className="gantt-head-cell right">
+              <div className="gantt-weeks">
+                {weeks.map((w, i) => <div key={i} className="gantt-week" style={{ flex: w.cols }}>{w.label}</div>)}
+              </div>
+            </div>
           </div>
-        </>
+          {/* Day strip */}
+          <div className="gantt-row-grid">
+            <div className="gantt-head-cell" style={{ color: "var(--af-muted-fg)", fontWeight: 500 }}>
+              {visible.length} demanda{visible.length !== 1 ? "s" : ""}
+            </div>
+            <div className="gantt-head-cell right">
+              <div className="gantt-days">
+                {days.map((d, i) => {
+                  const weekend = d.getDay() === 0 || d.getDay() === 6
+                  const isToday = d.toDateString() === today.toDateString()
+                  return (
+                    <div key={i} className={`gantt-day ${weekend ? "weekend" : ""} ${isToday ? "today" : ""}`}>
+                      <div className="dow">{DOW[d.getDay()]}</div>
+                      <div className="num">{d.getDate()}</div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+
+          {swimlanes.map((sw) => (
+            <div key={sw.funnel.id}>
+              <div className="gantt-group-row">
+                <div className="label">
+                  <GitBranch size={13} style={{ color: "var(--af-muted-fg)" }} />
+                  <span>{sw.funnel.name}</span>
+                  <span className="count">{sw.rows.length}</span>
+                </div>
+                <div className="right" />
+              </div>
+              {sw.rows.map((bar) => {
+                const left = bar.sIdx * dayPct
+                const width = Math.max(dayPct * 0.9, (bar.eIdx - bar.sIdx + 1) * dayPct)
+                const color = barColor(bar.task)
+                const assignee = users.find((u) => u.id === bar.task.assigned_to) ?? null
+                return (
+                  <div key={bar.task.id} className="gantt-task-row">
+                    <div className="label">
+                      <span style={{ width: 6, height: 6, borderRadius: 3, background: color, flexShrink: 0 }} />
+                      <span className="text" style={{ cursor: "pointer" }} title="Clique para editar" onClick={() => setEditing(bar.task)}>
+                        {bar.task.title}
+                      </span>
+                      <span className="assignee-avatar" style={{ background: colorForUser(assignee?.id ?? null), width: 20, height: 20, fontSize: 9 }}>
+                        {assignee ? initials(assignee.full_name) : "?"}
+                      </span>
+                    </div>
+                    <div className="gantt-track" style={{ minHeight: 44 }}>
+                      {days.map((d, i) => {
+                        const weekend = d.getDay() === 0 || d.getDay() === 6
+                        return <div key={i} className={`cell ${weekend ? "weekend" : ""}`} />
+                      })}
+                      {todayLeft >= 0 && <div className="gantt-today-line" style={{ left: todayLeft + "%" }} />}
+                      <div className="gantt-bar" style={{ left: left + "%", width: width + "%", background: color }} onClick={() => setEditing(bar.task)}>
+                        <span className="bar-title">{bar.task.title}</span>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ))}
+        </div>
       )}
 
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>
-              {editId
-                ? "Editar item"
-                : createParentId
-                  ? `Novo item filho de “${tasks.find((t) => t.id === createParentId)?.title ?? ""}”`
-                  : "Novo item do cronograma"}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <Label>Título</Label>
-              <Input
-                value={createTitle}
-                onChange={(e) => setCreateTitle(e.target.value)}
-                placeholder="Ex.: Portal do Cliente"
-                autoFocus
-              />
+      {editing && (
+        <GanttEditModal
+          task={editing}
+          statusName={statusById.get(editing.status_id)?.name ?? null}
+          users={users}
+          onClose={() => setEditing(null)}
+          onSave={async (patch) => { await handleUpdate(editing.id, patch); setEditing(null) }}
+        />
+      )}
+    </div>
+  )
+}
+
+function GanttEditModal({
+  task,
+  statusName,
+  users,
+  onClose,
+  onSave,
+}: {
+  task: ProjectTask
+  statusName: string | null
+  users: User[]
+  onClose: () => void
+  onSave: (patch: Partial<Pick<ProjectTask, "title" | "start_date" | "due_date" | "assigned_to">>) => Promise<void>
+}) {
+  const [title, setTitle] = useState(task.title)
+  const [start, setStart] = useState(task.start_date ? task.start_date.slice(0, 10) : "")
+  const [due, setDue] = useState(task.due_date ? task.due_date.slice(0, 10) : "")
+  const [assignee, setAssignee] = useState(task.assigned_to ?? "")
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [onClose])
+
+  const inverted = !!(start && due && start > due)
+
+  return (
+    <div className="afx af-modal-overlay" onClick={onClose}>
+      <div className="af-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <div style={{ flex: 1 }}>
+            <h2>Editar demanda</h2>
+            <div className="crumb">{statusName ?? "—"}</div>
+          </div>
+          <button className="icon-btn" onClick={onClose}><X size={16} /></button>
+        </div>
+        <div className="modal-body">
+          <div className="form-field">
+            <label className="form-label">Título</label>
+            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
+          </div>
+          <div className="form-row">
+            <div className="form-field">
+              <label className="form-label"><Calendar size={12} /> Início</label>
+              <input type="date" value={start} onChange={(e) => setStart(e.target.value)} />
             </div>
-            <div className="space-y-1.5">
-              <Label>Descrição</Label>
-              <Textarea
-                rows={3}
-                value={createDescription}
-                onChange={(e) => setCreateDescription(e.target.value)}
-                placeholder="Detalhes do item (opcional)"
-              />
-            </div>
-            {editId ? (
-              <div className="space-y-1.5">
-                <Label>Tipo</Label>
-                <div className="flex h-10 items-center rounded-md border bg-muted/40 px-3 text-sm text-muted-foreground">
-                  {typeName(createTypeId) ?? "—"}
-                </div>
-              </div>
-            ) : createTypeOptions.length === 0 ? (
-              <p className="text-[11px] text-destructive">
-                {createParentId
-                  ? "O tipo do item pai não aceita filhos. Configure em Tipos de Demanda → “Aceita como filhos”."
-                  : "Nenhum tipo disponível. Configure um tipo vinculado a um kanban em Tipos de Demanda."}
-              </p>
-            ) : (
-              <div className="space-y-1.5">
-                <Label>Tipo</Label>
-                <Select value={createTypeId || createTypeOptions[0].id} onValueChange={setCreateTypeId}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {createTypeOptions.map((d) => (
-                      <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Início</Label>
-                <Input type="date" value={createStart} onChange={(e) => setCreateStart(e.target.value)} />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Prazo</Label>
-                <Input type="date" value={createDue} onChange={(e) => setCreateDue(e.target.value)} />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Responsável</Label>
-              <Select value={createAssignee} onValueChange={setCreateAssignee}>
-                <SelectTrigger><SelectValue placeholder="Sem responsável" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NO_ASSIGNEE}>Sem responsável</SelectItem>
-                  {users.map((u) => (
-                    <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="form-field">
+              <label className="form-label"><CalendarCheck size={12} /> Vencimento</label>
+              <input type="date" value={due} onChange={(e) => setDue(e.target.value)} />
             </div>
           </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>Cancelar</Button>
-            <Button
-              type="button"
-              onClick={() => void handleCreate()}
-              disabled={savingCreate || !createTitle.trim() || (!editId && createTypeOptions.length === 0)}
-            >
-              {savingCreate && <Loader2 size={13} className="animate-spin mr-1.5" />}
-              {editId ? "Salvar" : "Criar"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          {inverted && <div className="form-hint" style={{ color: "var(--af-destructive)" }}>⚠ Início é posterior ao vencimento.</div>}
+          <div className="form-field">
+            <label className="form-label"><UserIcon size={12} /> Responsável</label>
+            <select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
+              <option value="">— Sem responsável —</option>
+              {users.map((m) => <option key={m.id} value={m.id}>{m.full_name}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="modal-foot">
+          <button className="btn ghost" onClick={onClose}>Cancelar</button>
+          <span className="spacer" />
+          <button
+            className="btn primary"
+            disabled={saving}
+            onClick={async () => {
+              setSaving(true)
+              await onSave({
+                title: title.trim() || task.title,
+                start_date: isoFromInput(start),
+                due_date: isoFromInput(due),
+                assigned_to: assignee || null,
+              })
+              setSaving(false)
+            }}
+          >
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Salvar
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

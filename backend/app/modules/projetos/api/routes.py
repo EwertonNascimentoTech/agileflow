@@ -138,6 +138,15 @@ async def update_project(
     return await ProjectService.update(ctx.db, project_id, data)
 
 
+@router.delete("/projects/{project_id}", status_code=204)
+async def delete_project(
+    project_id: uuid.UUID,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_project_manage),
+):
+    await ProjectService.delete(ctx.db, project_id)
+
+
 @router.get("/config/demand-types", response_model=list[ProjectDemandTypeResponse])
 async def list_demand_types(
     active_only: bool = Query(False),

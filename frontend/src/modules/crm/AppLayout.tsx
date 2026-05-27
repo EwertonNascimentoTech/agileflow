@@ -7,6 +7,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext"
 import { useTheme } from "@/contexts/ThemeContext"
 import { companyApi, type ActiveModule } from "@/api/crm"
+import { projetosApi, type Project } from "@/api/projetos"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { NotificationBell } from "@/components/NotificationBell"
@@ -49,6 +50,7 @@ export default function AppLayout() {
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [modules, setModules] = useState<ActiveModule[]>([])
+  const [projectItems, setProjectItems] = useState<Project[]>([])
   const [searchOpen, setSearchOpen] = useState(false)
 
   const isAdmin = user?.role === "company_admin" || user?.role === "super_admin"
@@ -60,9 +62,17 @@ export default function AppLayout() {
   const activeModuleSlug = getActiveModuleSlug(location.pathname)
   const inSettings = location.pathname.startsWith("/app/settings")
   const activeModule = activeModuleSlug ? modules.find(m => m.slug === activeModuleSlug) : null
+  const activeProjectIdFromPath = useMemo(() => {
+    const match = location.pathname.match(/^\/app\/modules\/projetos\/([^/]+)\//)
+    return match?.[1] ?? null
+  }, [location.pathname])
   const hasProjetosModule = modules.some((m) => m.slug === "projetos")
   const basicNewRequestRoute = hasProjetosModule ? "/app/modules/projetos/solicitacoes" : "/app/modules/crm/attendances/new"
   const basicMyRequestsRoute = hasProjetosModule ? "/app/modules/projetos/minhas" : "/app/modules/crm/kanban"
+  const activeProject = useMemo(
+    () => projectItems.find((p) => p.id === activeProjectIdFromPath) ?? projectItems[0] ?? null,
+    [projectItems, activeProjectIdFromPath]
+  )
 
   // Chave ativa do rail
   const activeKey = isBasicUser ? "home" : (activeModuleSlug ?? (inSettings ? "settings" : "home"))
@@ -84,6 +94,13 @@ export default function AppLayout() {
       .then(t => setModules(t?.active_modules ?? []))
       .catch(() => setModules([]))
   }, [])
+
+  useEffect(() => {
+    if (activeModuleSlug !== "projetos") return
+    projetosApi.listProjects(true)
+      .then(setProjectItems)
+      .catch(() => setProjectItems([]))
+  }, [activeModuleSlug])
 
 
   function handleLogout() {
@@ -162,9 +179,10 @@ export default function AppLayout() {
 
   // Seção atual (para o breadcrumb) — match mais específico vence
   const currentSectionLabel = useMemo(() => {
+    const normalizedPath = location.pathname.replace(/^\/app\/modules\/projetos\/[^/]+\//, "/app/modules/projetos/")
     const match = [...sections]
       .sort((a, b) => b.to.length - a.to.length)
-      .find(s => location.pathname === s.to || location.pathname.startsWith(s.to + "/"))
+      .find(s => normalizedPath === s.to || normalizedPath.startsWith(s.to + "/"))
     return match?.label
   }, [sections, location.pathname])
 
@@ -194,6 +212,10 @@ export default function AppLayout() {
           icon={sidebarIcon}
           color={sidebarColor}
           sections={sections}
+          projectItems={activeModuleSlug === "projetos" ? projectItems : undefined}
+          activeProjectId={activeProject?.id ?? undefined}
+          onProjectSelect={(projectId) => navigate(`/app/modules/projetos/${projectId}/board`)}
+          onCreateProject={() => navigate("/app/modules/projetos/config")}
           user={{ name: user?.full_name ?? "", email: user?.email ?? "", initials }}
           onLogout={handleLogout}
           onNavigate={closeSidebar}
@@ -209,6 +231,12 @@ export default function AppLayout() {
           {/* Breadcrumb */}
           <div className="flex items-center gap-1.5 text-sm">
             <span className="text-muted-foreground">{sidebarTitle}</span>
+            {activeModuleSlug === "projetos" && activeProject?.name && (
+              <>
+                <ChevronRight size={15} className="text-muted-foreground" />
+                <span className="font-medium">{activeProject.name}</span>
+              </>
+            )}
             {currentSectionLabel && (
               <>
                 <ChevronRight size={15} className="text-muted-foreground" />
