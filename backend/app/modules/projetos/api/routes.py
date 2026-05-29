@@ -18,6 +18,8 @@ from app.modules.projetos.schemas import (
     ProjectDemandFormSectionReorder,
     ProjectDemandFormSectionResponse,
     ProjectDemandFormSectionUpdate,
+    ProjectDefaultFormFieldResponse,
+    ProjectDefaultFormFieldsUpdate,
     ProjectDemandFormSubmissionResponse,
     ProjectDemandFormSubmissionUpsert,
     ProjectDemandTypeCreate,
@@ -37,6 +39,8 @@ from app.modules.projetos.schemas import (
     ProjectStatusCreate,
     ProjectStatusReorder,
     ProjectStatusResponse,
+    ProjectStatusDefaultFormLinkCreate,
+    ProjectStatusDefaultFormLinkResponse,
     ProjectStatusSectionLinkCreate,
     ProjectStatusSectionLinkResponse,
     ProjectStatusUpdate,
@@ -50,6 +54,7 @@ from app.modules.projetos.schemas import (
 )
 from app.modules.projetos.service import (
     ProjectAutomationService,
+    ProjectDefaultFormService,
     ProjectDemandFormFieldService,
     ProjectDemandFormSectionService,
     ProjectDemandFormSubmissionService,
@@ -62,6 +67,7 @@ from app.modules.projetos.service import (
     ProjectStatusService,
     ProjectTaskCommentService,
     ProjectTaskService,
+    ProjectStatusDefaultFormLinkService,
     ProjectStatusSectionLinkService,
 )
 from app.modules.super_admin.models import Role, RolePermission, UserRole
@@ -417,6 +423,53 @@ async def delete_status_section_link(
     await ProjectStatusSectionLinkService.delete(ctx.db, project_id, status_id, link_id)
 
 
+@router.get(
+    "/projects/{project_id}/statuses/{status_id}/default-form-links",
+    response_model=list[ProjectStatusDefaultFormLinkResponse],
+)
+async def list_status_default_form_links(
+    project_id: uuid.UUID,
+    status_id: uuid.UUID,
+    ctx: ModuleContext = Depends(_ctx),
+):
+    return await ProjectStatusDefaultFormLinkService.list(ctx.db, project_id, status_id)
+
+
+@router.post(
+    "/projects/{project_id}/statuses/{status_id}/default-form-links",
+    response_model=ProjectStatusDefaultFormLinkResponse,
+    status_code=201,
+)
+async def upsert_status_default_form_link(
+    project_id: uuid.UUID,
+    status_id: uuid.UUID,
+    data: ProjectStatusDefaultFormLinkCreate,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_form_manage),
+):
+    return await ProjectStatusDefaultFormLinkService.upsert(
+        ctx.db,
+        project_id=project_id,
+        status_id=status_id,
+        field_key=data.field_key,
+        mode=data.mode,
+    )
+
+
+@router.delete(
+    "/projects/{project_id}/statuses/{status_id}/default-form-links/{link_id}",
+    status_code=204,
+)
+async def delete_status_default_form_link(
+    project_id: uuid.UUID,
+    status_id: uuid.UUID,
+    link_id: uuid.UUID,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_form_manage),
+):
+    await ProjectStatusDefaultFormLinkService.delete(ctx.db, project_id, status_id, link_id)
+
+
 @router.get("/projects/{project_id}/funnels", response_model=list[ProjectFunnelResponse])
 async def list_funnels(
     project_id: uuid.UUID,
@@ -675,6 +728,24 @@ async def create_task_comment(
         data,
         author_id=ctx.user.id,
     )
+
+
+# ─────────────────────────────────────────────
+# Formulário padrão de demandas
+# ─────────────────────────────────────────────
+
+@router.get("/config/default-form", response_model=list[ProjectDefaultFormFieldResponse])
+async def list_default_form_fields(ctx: ModuleContext = Depends(_ctx)):
+    return await ProjectDefaultFormService.list(ctx.db)
+
+
+@router.put("/config/default-form", response_model=list[ProjectDefaultFormFieldResponse])
+async def update_default_form_fields(
+    data: ProjectDefaultFormFieldsUpdate,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_form_manage),
+):
+    return await ProjectDefaultFormService.replace_all(ctx.db, data)
 
 
 # ─────────────────────────────────────────────

@@ -24,10 +24,6 @@ from app.modules.super_admin.models import (
     UserRole,
 )
 
-# Registry slug -> slugs usados nos códigos de permissão (CRM agrupa 2 módulos de permissão).
-MODULE_PERM_SLUGS: dict[str, set[str]] = {
-    "crm": {"atendimento", "propostas_contratos"},
-}
 from app.modules.teamops.models import (
     Absence,
     AbsenceStatus,
@@ -229,7 +225,7 @@ class PositionService:
                 )
             )).all()
             for (slug,) in active:
-                allowed |= MODULE_PERM_SLUGS.get(slug, {slug})
+                allowed.add(slug)
         rows = await db.execute(
             select(ModulePermission).order_by(ModulePermission.module_slug, ModulePermission.code)
         )
@@ -843,6 +839,7 @@ class PersonService:
                 full_name=p.full_name,
                 email=u.email,
                 position_name=p.position.name if p.position else None,
+                position_slug=p.position.slug if p.position else None,
                 access_level="gestor" if u.role == UserRole.COMPANY_ADMIN else "com_acesso",
             ))
         return members

@@ -44,6 +44,8 @@ export function PersonFormDialog({ person, areas, onClose, onSaved }: Props) {
   const [fullName, setFullName] = useState(person?.full_name ?? "")
   const [email, setEmail] = useState(person?.email ?? "")
   const [phone, setPhone] = useState(person?.phone ?? "")
+  const [whatsapp, setWhatsapp] = useState(person?.whatsapp ?? "")
+  const [birthDate, setBirthDate] = useState<string>(person?.birth_date ?? "")
   const [positionId, setPositionId] = useState<string>(person?.position_id ?? "")
   const [areaId, setAreaId] = useState<string>(person?.area_id ?? NONE)
   const [poPersonId, setPoPersonId] = useState<string>(person?.po_person_id ?? NONE)
@@ -91,6 +93,8 @@ export function PersonFormDialog({ person, areas, onClose, onSaved }: Props) {
         full_name: fullName,
         email,
         phone: phone || null,
+        whatsapp: whatsapp || null,
+        birth_date: birthDate || null,
         position_id: positionId,
         area_id: areaId === NONE ? null : areaId,
         po_person_id: poPersonId === NONE ? null : poPersonId,
@@ -143,6 +147,18 @@ export function PersonFormDialog({ person, areas, onClose, onSaved }: Props) {
           <div>
             <Label>Telefone</Label>
             <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
+          </div>
+          <div>
+            <Label>WhatsApp</Label>
+            <Input
+              value={whatsapp}
+              onChange={(e) => setWhatsapp(e.target.value)}
+              placeholder="(00) 00000-0000"
+            />
+          </div>
+          <div>
+            <Label>Data de nascimento</Label>
+            <Input type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} />
           </div>
           <div>
             <Label>Cargo *</Label>

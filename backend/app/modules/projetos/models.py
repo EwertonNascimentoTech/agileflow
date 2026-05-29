@@ -94,6 +94,12 @@ class ProjectStatusConfig(TenantBase):
         ForeignKey("project_funnels.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # Ao entrar nesta etapa, move o card de origem (origin_task_id) para a etapa indicada.
+    updates_origin_status_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("project_status_configs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     # Funções (roles do tenant) autorizadas a mover um card PARA esta etapa.
     # NULL/vazio = sem restrição. company_admin/super_admin sempre podem.
     move_in_role_ids: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
@@ -144,6 +150,8 @@ class ProjectTask(TenantBase):
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     assigned_to: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)  # public.users.id
+    diretoria: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    area: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     start_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     due_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -357,6 +365,25 @@ class ProjectStatusSectionLink(TenantBase):
     section: Mapped["ProjectDemandFormSection"] = relationship(back_populates="status_links")
 
 
+class ProjectStatusDefaultFormLink(TenantBase):
+    """Visibilidade/obrigatoriedade de um campo do formulário padrão por etapa (status)."""
+
+    __tablename__ = "project_status_default_form_links"
+    __table_args__ = (UniqueConstraint("status_id", "field_key"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    status_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("project_status_configs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    field_key: Mapped[str] = mapped_column(String(40), nullable=False)
+    mode: Mapped[str] = mapped_column(String(20), nullable=False, default="visible")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    status: Mapped["ProjectStatusConfig"] = relationship()
+
+
 class ProjectDemandFormSubmission(TenantBase):
     __tablename__ = "project_demand_form_submissions"
     __table_args__ = (UniqueConstraint("task_id"),)
@@ -428,6 +455,25 @@ class ProjectScheduleBinding(TenantBase):
     )
     require_fill: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ProjectDefaultFormField(TenantBase):
+    """Campos do formulário padrão de demandas (título, descrição, responsável, datas)."""
+
+    __tablename__ = "project_default_form_fields"
+    __table_args__ = (UniqueConstraint("field_key"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    field_key: Mapped[str] = mapped_column(String(40), nullable=False)
+    label: Mapped[str] = mapped_column(String(120), nullable=False)
+    field_type: Mapped[str] = mapped_column(String(30), nullable=False, default="text")
+    options: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    is_visible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    is_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

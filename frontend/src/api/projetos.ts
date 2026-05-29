@@ -24,6 +24,7 @@ export interface ProjectStatus {
   is_active: boolean
   creates_demand_type_id: string | null
   moves_to_funnel_id: string | null
+  updates_origin_status_id: string | null
   move_in_role_ids: string[] | null
   sla_hours: number | null
   sla_warning_pct: number
@@ -55,6 +56,8 @@ export interface ProjectTask {
   title: string
   description: string | null
   assigned_to: string | null
+  diretoria: string | null
+  area: string | null
   start_date: string | null
   due_date: string | null
   order: number
@@ -155,6 +158,14 @@ export interface ProjectStatusSectionLink {
   created_at: string
 }
 
+export interface ProjectStatusDefaultFormLink {
+  id: string
+  status_id: string
+  field_key: DefaultFormFieldKey
+  mode: "visible" | "editable" | "required" | "hidden"
+  created_at: string
+}
+
 export interface ProjectDemandFormSubmission {
   id: string
   task_id: string
@@ -176,6 +187,29 @@ export interface ProjectAutomationRule {
   action_config: Record<string, unknown> | null
   order: number
   is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type DefaultFormFieldKey =
+  | "title"
+  | "description"
+  | "assigned_to"
+  | "diretoria"
+  | "area"
+  | "start_date"
+  | "due_date"
+
+export interface ProjectDefaultFormField {
+  id: string
+  field_key: DefaultFormFieldKey
+  label: string
+  field_type: string
+  options: { items?: Array<{ value: string; label: string; color?: string }> } | null
+  is_visible: boolean
+  is_required: boolean
+  order: number
+  is_system: boolean
   created_at: string
   updated_at: string
 }
@@ -332,6 +366,22 @@ export const projetosApi = {
   deleteStatusSectionLink: (projectId: string, statusId: string, linkId: string) =>
     api.delete<void>(`/projetos/projects/${projectId}/statuses/${statusId}/section-links/${linkId}`).then((r) => r.data),
 
+  listStatusDefaultFormLinks: (projectId: string, statusId: string) =>
+    api.get<ProjectStatusDefaultFormLink[]>(
+      `/projetos/projects/${projectId}/statuses/${statusId}/default-form-links`,
+    ).then((r) => r.data),
+  upsertStatusDefaultFormLink: (projectId: string, statusId: string, data: {
+    field_key: DefaultFormFieldKey
+    mode?: "visible" | "editable" | "required" | "hidden"
+  }) => api.post<ProjectStatusDefaultFormLink>(
+    `/projetos/projects/${projectId}/statuses/${statusId}/default-form-links`,
+    data,
+  ).then((r) => r.data),
+  deleteStatusDefaultFormLink: (projectId: string, statusId: string, linkId: string) =>
+    api.delete<void>(
+      `/projetos/projects/${projectId}/statuses/${statusId}/default-form-links/${linkId}`,
+    ).then((r) => r.data),
+
   listFunnels: (projectId: string, activeOnly = false) =>
     api.get<ProjectFunnel[]>(`/projetos/projects/${projectId}/funnels`, { params: { active_only: activeOnly } }).then((r) => r.data),
   createFunnel: (projectId: string, data: {
@@ -387,6 +437,7 @@ export const projetosApi = {
     is_active: boolean
     creates_demand_type_id: string | null
     moves_to_funnel_id: string | null
+    updates_origin_status_id: string | null
     move_in_role_ids: string[] | null
     sla_hours: number | null
     sla_warning_pct: number
@@ -405,6 +456,8 @@ export const projetosApi = {
     title: string
     description?: string | null
     assigned_to?: string | null
+    diretoria?: string | null
+    area?: string | null
     start_date?: string | null
     due_date?: string | null
     order?: number
@@ -417,6 +470,8 @@ export const projetosApi = {
     title: string
     description: string | null
     assigned_to: string | null
+    diretoria: string | null
+    area: string | null
     start_date: string | null
     due_date: string | null
     order: number
@@ -461,6 +516,19 @@ export const projetosApi = {
     api.get<ProjectReports>(`/projetos/reports`).then((r) => r.data),
 
   // Cronograma: vínculos fluxo + etapa
+  getDefaultFormFields: () =>
+    api.get<ProjectDefaultFormField[]>("/projetos/config/default-form").then((r) => r.data),
+  updateDefaultFormFields: (fields: Array<{
+    field_key: DefaultFormFieldKey
+    label: string
+    field_type: string
+    options?: { items: Array<{ value: string; label: string; color?: string }> } | null
+    is_visible: boolean
+    is_required: boolean
+    order: number
+  }>) =>
+    api.put<ProjectDefaultFormField[]>("/projetos/config/default-form", { fields }).then((r) => r.data),
+
   listScheduleBindings: () =>
     api.get<ProjectScheduleBinding[]>(`/projetos/config/schedule-bindings`).then((r) => r.data),
   saveScheduleBindings: (bindings: ProjectScheduleBindingInput[]) =>

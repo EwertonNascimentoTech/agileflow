@@ -166,7 +166,7 @@ export default function LoginPage() {
             Toda a operação da sua empresa em um só lugar.
           </h2>
           <p className="mt-3 max-w-md text-white/70">
-            CRM, estoque, PDV e propostas — módulos que conversam entre si.
+            Processos e gestão de times — módulos integrados à operação da sua empresa.
           </p>
         </div>
       </div>

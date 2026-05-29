@@ -133,6 +133,8 @@ export interface Person {
   full_name: string
   email: string
   phone: string | null
+  whatsapp: string | null
+  birth_date: string | null
   position_id: string
   area_id: string | null
   po_person_id: string | null
@@ -165,7 +167,17 @@ export interface TeamMember {
   full_name: string
   email: string
   position_name: string | null
+  position_slug: string | null
   access_level: AccessLevel
+}
+
+/** Slugs conhecidos do cargo Product Owner no TeamOps. */
+export const PRODUCT_OWNER_POSITION_SLUGS = new Set(["po", "product_owner"])
+
+export function isProductOwnerPosition(slug: string | null | undefined, name?: string | null): boolean {
+  if (slug && PRODUCT_OWNER_POSITION_SLUGS.has(slug)) return true
+  const n = (name ?? "").trim().toLowerCase()
+  return n === "product owner" || n.includes("product owner")
 }
 
 export interface PersonStack {

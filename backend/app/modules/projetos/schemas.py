@@ -227,6 +227,21 @@ class ProjectStatusSectionLinkResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ProjectStatusDefaultFormLinkCreate(BaseModel):
+    field_key: str = Field(..., min_length=1, max_length=40)
+    mode: str = Field("visible", pattern=r"^(visible|editable|required|hidden)$")
+
+
+class ProjectStatusDefaultFormLinkResponse(BaseModel):
+    id: uuid.UUID
+    status_id: uuid.UUID
+    field_key: str
+    mode: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class ProjectDemandFormSubmissionUpsert(BaseModel):
     values: dict
 
@@ -252,6 +267,7 @@ class ProjectStatusCreate(BaseModel):
     is_active: bool = True
     creates_demand_type_id: Optional[uuid.UUID] = None
     moves_to_funnel_id: Optional[uuid.UUID] = None
+    updates_origin_status_id: Optional[uuid.UUID] = None
     move_in_role_ids: Optional[list[uuid.UUID]] = None
     sla_hours: Optional[int] = Field(None, ge=1)
     sla_warning_pct: int = Field(80, ge=1, le=100)
@@ -266,6 +282,7 @@ class ProjectStatusUpdate(BaseModel):
     is_active: Optional[bool] = None
     creates_demand_type_id: Optional[uuid.UUID] = None
     moves_to_funnel_id: Optional[uuid.UUID] = None
+    updates_origin_status_id: Optional[uuid.UUID] = None
     move_in_role_ids: Optional[list[uuid.UUID]] = None
     sla_hours: Optional[int] = Field(None, ge=1)
     sla_warning_pct: Optional[int] = Field(None, ge=1, le=100)
@@ -287,6 +304,7 @@ class ProjectStatusResponse(BaseModel):
     is_active: bool
     creates_demand_type_id: Optional[uuid.UUID] = None
     moves_to_funnel_id: Optional[uuid.UUID] = None
+    updates_origin_status_id: Optional[uuid.UUID] = None
     move_in_role_ids: Optional[list[uuid.UUID]] = None
     sla_hours: Optional[int] = None
     sla_warning_pct: int = 80
@@ -303,6 +321,8 @@ class ProjectTaskCreate(BaseModel):
     title: str = Field(..., min_length=2, max_length=200)
     description: Optional[str] = None
     assigned_to: Optional[uuid.UUID] = None
+    diretoria: Optional[str] = Field(None, max_length=120)
+    area: Optional[str] = Field(None, max_length=120)
     start_date: Optional[datetime] = None
     due_date: Optional[datetime] = None
     order: int = Field(0, ge=0)
@@ -316,6 +336,8 @@ class ProjectTaskUpdate(BaseModel):
     title: Optional[str] = Field(None, min_length=2, max_length=200)
     description: Optional[str] = None
     assigned_to: Optional[uuid.UUID] = None
+    diretoria: Optional[str] = Field(None, max_length=120)
+    area: Optional[str] = Field(None, max_length=120)
     start_date: Optional[datetime] = None
     due_date: Optional[datetime] = None
     order: Optional[int] = Field(None, ge=0)
@@ -335,6 +357,8 @@ class ProjectTaskResponse(BaseModel):
     title: str
     description: Optional[str]
     assigned_to: Optional[uuid.UUID]
+    diretoria: Optional[str]
+    area: Optional[str]
     start_date: Optional[datetime]
     due_date: Optional[datetime]
     order: int
@@ -526,4 +550,39 @@ class ProjectScheduleBindingResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ─────────────────────────────────────────────
+# Formulário padrão de demandas
+# ─────────────────────────────────────────────
+
+
+class ProjectDefaultFormFieldResponse(BaseModel):
+    id: uuid.UUID
+    field_key: str
+    label: str
+    field_type: str
+    options: Optional[dict] = None
+    is_visible: bool
+    is_required: bool
+    order: int
+    is_system: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ProjectDefaultFormFieldUpdateItem(BaseModel):
+    field_key: str = Field(..., min_length=1, max_length=40)
+    label: str = Field(..., min_length=1, max_length=120)
+    field_type: str = Field("text", min_length=1, max_length=30)
+    options: Optional[dict] = None
+    is_visible: bool = True
+    is_required: bool = False
+    order: int = Field(0, ge=0)
+
+
+class ProjectDefaultFormFieldsUpdate(BaseModel):
+    fields: list[ProjectDefaultFormFieldUpdateItem]
 

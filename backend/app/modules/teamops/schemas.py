@@ -267,6 +267,8 @@ class PersonCreate(BaseModel):
     full_name: str = Field(..., min_length=2, max_length=200)
     email: EmailStr
     phone: Optional[str] = Field(None, max_length=30)
+    whatsapp: Optional[str] = Field(None, max_length=30)
+    birth_date: Optional[date] = None
     position_id: uuid.UUID
     area_id: Optional[uuid.UUID] = None
     po_person_id: Optional[uuid.UUID] = None
@@ -287,6 +289,8 @@ class PersonUpdate(BaseModel):
     full_name: Optional[str] = Field(None, min_length=2, max_length=200)
     email: Optional[EmailStr] = None
     phone: Optional[str] = Field(None, max_length=30)
+    whatsapp: Optional[str] = Field(None, max_length=30)
+    birth_date: Optional[date] = None
     position_id: Optional[uuid.UUID] = None
     area_id: Optional[uuid.UUID] = None
     po_person_id: Optional[uuid.UUID] = None
@@ -318,6 +322,8 @@ class PersonResponse(BaseModel):
     full_name: str
     email: str
     phone: Optional[str]
+    whatsapp: Optional[str]
+    birth_date: Optional[date]
     position_id: uuid.UUID
     area_id: Optional[uuid.UUID]
     po_person_id: Optional[uuid.UUID]
@@ -352,6 +358,7 @@ class TeamMemberResponse(BaseModel):
     full_name: str
     email: str
     position_name: Optional[str] = None
+    position_slug: Optional[str] = None
     access_level: AccessLevel = "executor"
 
 

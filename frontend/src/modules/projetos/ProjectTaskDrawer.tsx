@@ -1,10 +1,20 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { CalendarRange, Check, ChevronDown, FileText, Link as LinkIcon, Loader2, Pencil, Plus, Trash2, X } from "lucide-react"
+import { CalendarRange, Check, ChevronDown, ClipboardList, FileText, GitBranch, Link as LinkIcon, Loader2, MessageSquare, Pencil, Plus, Trash2, X } from "lucide-react"
 
-import { projetosApi, type ProjectDemandFormField, type ProjectDemandFormSection, type ProjectDemandType, type ProjectStatus, type ProjectStatusSectionLink, type ProjectTask, type ProjectTaskComment } from "@/api/projetos"
+import {
+  projetosApi,
+  type ProjectDemandFormField,
+  type ProjectDemandFormSection,
+  type ProjectDemandType,
+  type ProjectStatus,
+  type ProjectStatusDefaultFormLink,
+  type ProjectStatusSectionLink,
+  type ProjectTask,
+  type ProjectTaskComment,
+} from "@/api/projetos"
 import { Badge } from "@/components/ui/badge"
-import { GitBranch } from "lucide-react"
+import { CollapsibleFormSection } from "@/modules/projetos/CollapsibleFormSection"
 import { teamopsApi } from "@/api/teamops"
 import type { User } from "@/types"
 import { Button } from "@/components/ui/button"
@@ -13,8 +23,19 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { FormFieldRenderer, getFieldVisibility, type FieldVisibilityMode } from "@/modules/projetos/FormFieldRenderer"
-import { getRowBreak, groupIntoRows } from "@/modules/projetos/layout"
+import { getFieldVisibility, type FieldVisibilityMode } from "@/modules/projetos/FormFieldRenderer"
+import { DemandFormSectionsPanel } from "@/modules/projetos/DemandFormSectionsPanel"
+import { DefaultFormFieldSlot } from "@/modules/projetos/DefaultFormFields"
+import { defaultFormPlanningFields, groupDefaultFormFieldsIntoRows } from "@/modules/projetos/defaultFormLayout"
+import { defaultFieldMap, validateDefaultFormValues } from "@/modules/projetos/defaultFormUtils"
+import { isDefaultFieldShown } from "@/modules/projetos/defaultFormVisibility"
+import {
+  defaultDateToIso,
+  isoToDefaultDateInput,
+  normalizeDefaultFieldType,
+} from "@/modules/projetos/defaultFormFieldTypes"
+import { normalizeFieldType } from "@/modules/projetos/FormFieldRenderer"
+import { useDefaultFormConfig } from "@/modules/projetos/useDefaultFormConfig"
 import { formatMissingFieldsMessage, validateRequiredFields } from "@/modules/projetos/validation"
 import { toast } from "@/lib/toast"
 
@@ -51,12 +72,15 @@ export function ProjectTaskDrawer({
   const [formSections, setFormSections] = useState<ProjectDemandFormSection[]>([])
   const [fieldsBySection, setFieldsBySection] = useState<Record<string, ProjectDemandFormField[]>>({})
   const [sectionLinks, setSectionLinks] = useState<ProjectStatusSectionLink[]>([])
+  const [defaultFormLinks, setDefaultFormLinks] = useState<ProjectStatusDefaultFormLink[]>([])
   const [formValues, setFormValues] = useState<Record<string, unknown>>({})
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
   const [assignedTo, setAssignedTo] = useState<string>(NO_ASSIGNEE)
   const [startDate, setStartDate] = useState("")
   const [dueDate, setDueDate] = useState("")
+  const [diretoria, setDiretoria] = useState<string | null>(null)
+  const [area, setArea] = useState<string | null>(null)
   const [parentTaskId, setParentTaskId] = useState<string>(NO_ASSIGNEE)
   const [demandTypes, setDemandTypes] = useState<ProjectDemandType[]>([])
   const [allTasks, setAllTasks] = useState<ProjectTask[]>([])
@@ -69,6 +93,7 @@ export function ProjectTaskDrawer({
   const [changingStatus, setChangingStatus] = useState(false)
   const [statusConvPrompt, setStatusConvPrompt] = useState<{ newStatusId: string; typeName: string; name: string } | null>(null)
   const [assigneeMenuOpen, setAssigneeMenuOpen] = useState(false)
+  const [statusMenuOpen, setStatusMenuOpen] = useState(false)
   const [assigneeSearch, setAssigneeSearch] = useState("")
   const [linkMenuOpen, setLinkMenuOpen] = useState(false)
   const [linkDialogOpen, setLinkDialogOpen] = useState(false)
@@ -82,6 +107,8 @@ export function ProjectTaskDrawer({
   const [removing, setRemoving] = useState(false)
   const [sendingComment, setSendingComment] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  const { fields: defaultFormFields } = useDefaultFormConfig()
+  const defaultFieldsByKey = defaultFieldMap(defaultFormFields)
 
   useEffect(() => {
     if (!open || !task) return
@@ -92,13 +119,19 @@ export function ProjectTaskDrawer({
     setLinkDialogOpen(false)
     setStatusConvPrompt(null)
     setAssigneeMenuOpen(false)
+    setStatusMenuOpen(false)
     setAssigneeSearch("")
+    const cfg = defaultFieldMap(defaultFormFields)
     const timer = setTimeout(() => {
       setTitle(task.title)
       setDescription(task.description ?? "")
       setAssignedTo(task.assigned_to ?? NO_ASSIGNEE)
-      setStartDate(task.start_date ? task.start_date.slice(0, 10) : "")
-      setDueDate(task.due_date ? task.due_date.slice(0, 10) : "")
+      setDiretoria(task.diretoria ?? null)
+      setArea(task.area ?? null)
+      const startType = normalizeDefaultFieldType("start_date", cfg.get("start_date")?.field_type)
+      const dueType = normalizeDefaultFieldType("due_date", cfg.get("due_date")?.field_type)
+      setStartDate(isoToDefaultDateInput(startType, task.start_date))
+      setDueDate(isoToDefaultDateInput(dueType, task.due_date))
       setSelectedDemandTypeId(task.demand_type_id ?? "")
       setParentTaskId(task.parent_task_id ?? NO_ASSIGNEE)
       setStatusId(task.status_id)
@@ -111,7 +144,16 @@ export function ProjectTaskDrawer({
     projetosApi.getTaskFormSubmission(projectId, task.id).then((submission) => {
       setFormValues(submission?.values ?? {})
     }).catch(() => setFormValues({}))
-    projetosApi.listStatusSectionLinks(projectId, task.status_id).then(setSectionLinks).catch(() => setSectionLinks([]))
+    Promise.all([
+      projetosApi.listStatusSectionLinks(projectId, task.status_id),
+      projetosApi.listStatusDefaultFormLinks(projectId, task.status_id),
+    ]).then(([links, defaultLinks]) => {
+      setSectionLinks(links)
+      setDefaultFormLinks(defaultLinks)
+    }).catch(() => {
+      setSectionLinks([])
+      setDefaultFormLinks([])
+    })
     projetosApi.listDemandTypes().then(setDemandTypes).catch(() => setDemandTypes([]))
     projetosApi.listTasks(projectId).then(setAllTasks).catch(() => setAllTasks([]))
     projetosApi.listTaskChildren(projectId, task.id).then(setChildren).catch(() => setChildren([]))
@@ -120,7 +162,7 @@ export function ProjectTaskDrawer({
       setStatusMap(Object.fromEntries(sts.map((s) => [s.id, { name: s.name, color: s.color }])))
     }).catch(() => { setAllStatuses([]); setStatusMap({}) })
     return () => clearTimeout(timer)
-  }, [open, task, projectId])
+  }, [open, task, projectId, defaultFormFields])
 
   // Fecha o slide-over com Esc (a casca agora é custom, não o Dialog do shadcn).
   useEffect(() => {
@@ -441,6 +483,19 @@ export function ProjectTaskDrawer({
 
   async function handleSave() {
     if (!task || !title.trim()) return
+    const defaultCheck = validateDefaultFormValues(defaultFormFields, {
+      title,
+      description,
+      assigned_to: assignedTo === NO_ASSIGNEE ? null : assignedTo,
+      diretoria,
+      area,
+      start_date: startDate,
+      due_date: dueDate,
+    }, defaultFormLinks)
+    if (defaultCheck.missingLabels.length > 0) {
+      toast.error(`Preencha os campos obrigatórios: ${defaultCheck.missingLabels.join(", ")}.`)
+      return
+    }
     const { errors, missingLabels } = validateRequiredFields({
       statusId: task.status_id,
       formSections,
@@ -456,14 +511,18 @@ export function ProjectTaskDrawer({
     setFieldErrors({})
     setSaving(true)
     try {
+      const startType = normalizeDefaultFieldType("start_date", defaultFieldsByKey.get("start_date")?.field_type)
+      const dueType = normalizeDefaultFieldType("due_date", defaultFieldsByKey.get("due_date")?.field_type)
       const updated = await projetosApi.updateTask(projectId, task.id, {
         demand_type_id: selectedDemandTypeId || null,
         parent_task_id: parentTaskId === NO_ASSIGNEE ? null : parentTaskId,
         title: title.trim(),
         description: description.trim() || null,
         assigned_to: isBasicUser ? undefined : (assignedTo === NO_ASSIGNEE ? null : assignedTo),
-        start_date: startDate ? new Date(`${startDate}T00:00:00`).toISOString() : null,
-        due_date: dueDate ? new Date(`${dueDate}T00:00:00`).toISOString() : null,
+        diretoria,
+        area,
+        start_date: defaultDateToIso(startType, startDate),
+        due_date: defaultDateToIso(dueType, dueDate),
         form_values: formValues,
       })
       onSaved(updated)
@@ -534,15 +593,6 @@ export function ProjectTaskDrawer({
                   <FileText size={12} />
                   {demandTypeName(task.demand_type_id) ?? "Card"}
                 </Badge>
-                {statusMap[statusId] && (
-                  <span
-                    className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium"
-                    style={{ backgroundColor: `${statusMap[statusId].color}1A`, color: statusMap[statusId].color }}
-                  >
-                    <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: statusMap[statusId].color }} />
-                    {statusMap[statusId].name}
-                  </span>
-                )}
                 {task.sla_state && task.sla_state !== "none" && (
                   <Badge variant={task.sla_state === "breached" ? "destructive" : "secondary"} className="text-[10px]">
                     {task.sla_state === "breached" ? "SLA estourado" : task.sla_state === "warning" ? "SLA em alerta" : "No prazo"}
@@ -552,14 +602,26 @@ export function ProjectTaskDrawer({
                   Atualizado em {new Date(task.updated_at).toLocaleDateString("pt-BR")}
                 </span>
               </div>
-              <Input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className="h-auto border-0 px-0 text-lg font-bold shadow-none focus-visible:ring-0"
-                placeholder="Título do card"
-              />
+              {defaultFieldsByKey.get("title") && isDefaultFieldShown(defaultFieldsByKey.get("title")!, defaultFormLinks) && (
+                normalizeFieldType(normalizeDefaultFieldType("title", defaultFieldsByKey.get("title")?.field_type)) === "text_long" ? (
+                  <Textarea
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    rows={2}
+                    className="min-h-0 resize-none border-0 px-0 text-lg font-bold shadow-none focus-visible:ring-0"
+                    placeholder={defaultFieldsByKey.get("title")?.label ?? "Título do card"}
+                  />
+                ) : (
+                  <Input
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    className="h-auto border-0 px-0 text-lg font-bold shadow-none focus-visible:ring-0"
+                    placeholder={defaultFieldsByKey.get("title")?.label ?? "Título do card"}
+                  />
+                )
+              )}
               <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                {isBasicUser ? (
+                {defaultFieldsByKey.get("assigned_to") && isDefaultFieldShown(defaultFieldsByKey.get("assigned_to")!, defaultFormLinks) && (isBasicUser ? (
                   <span className="inline-flex items-center gap-1.5">
                     <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
                       {assignedUser ? initials(assignedUser.full_name) : "?"}
@@ -627,177 +689,208 @@ export function ProjectTaskDrawer({
                       </>
                     )}
                   </div>
+                ))}
+                {defaultFieldsByKey.get("assigned_to") && isDefaultFieldShown(defaultFieldsByKey.get("assigned_to")!, defaultFormLinks) && statusMap[statusId] && (
+                  <span>·</span>
                 )}
-                <span>·</span>
+                {statusMap[statusId] && (isBasicUser ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <span
+                      className="flex h-5 w-5 items-center justify-center rounded-full"
+                      style={{ backgroundColor: `${statusMap[statusId].color}22` }}
+                    >
+                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: statusMap[statusId].color }} />
+                    </span>
+                    {statusMap[statusId].name}
+                  </span>
+                ) : (
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setStatusMenuOpen((o) => !o)}
+                      disabled={changingStatus}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-transparent px-1.5 py-0.5 hover:border-border hover:bg-muted disabled:opacity-60"
+                    >
+                      <span
+                        className="flex h-5 w-5 items-center justify-center rounded-full"
+                        style={{ backgroundColor: `${statusMap[statusId].color}22` }}
+                      >
+                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: statusMap[statusId].color }} />
+                      </span>
+                      <span>{statusMap[statusId].name}</span>
+                      <ChevronDown size={12} />
+                    </button>
+                    {statusMenuOpen && (
+                      <>
+                        <div className="fixed inset-0 z-10" onClick={() => setStatusMenuOpen(false)} />
+                        <div className="absolute left-0 z-20 mt-1 w-56 rounded-md border bg-popover p-1 shadow-md">
+                          {currentFunnelStatuses.map((s) => (
+                            <button
+                              key={s.id}
+                              type="button"
+                              onClick={() => {
+                                setStatusMenuOpen(false)
+                                void handleSelectStatus(s.id)
+                              }}
+                              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-muted"
+                            >
+                              <span
+                                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
+                                style={{ backgroundColor: `${s.color}22` }}
+                              >
+                                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.color }} />
+                              </span>
+                              <span className="text-sm">{s.name}</span>
+                              {statusId === s.id && <Check size={14} className="ml-auto text-primary" />}
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))}
+                {(defaultFieldsByKey.get("assigned_to") && isDefaultFieldShown(defaultFieldsByKey.get("assigned_to")!, defaultFormLinks)) || statusMap[statusId] ? (
+                  <span>·</span>
+                ) : null}
                 <span>{comments.length} comentário{comments.length === 1 ? "" : "s"}</span>
               </div>
             </div>
 
-            {/* Corpo em 3 colunas: Descrição | Planejamento | Trabalho relacionado */}
-            <div className="grid gap-6 lg:grid-cols-4">
-              {/* Coluna 1 — Descrição + formulário do tipo */}
-              <div className="space-y-5 lg:col-span-2">
-                <div className="space-y-1.5">
-                  <Label>Descrição</Label>
-                  <Textarea rows={5} value={description} onChange={(e) => setDescription(e.target.value)} />
-                </div>
-
-            {formSections.length > 0 && (
-              <div className="space-y-6">
-                {formSections.map((section) => {
-                  const secMode = sectionMode(section.id)
-                  const visibleFields = (fieldsBySection[section.id] ?? [])
-                    .filter((f) => f.is_active)
-                    .filter((f) => fieldMode(f, secMode) !== "hidden")
-                  if (visibleFields.length === 0) return null
-                  return (
-                    <div key={section.id} className="space-y-3 border-t border-border pt-4 first:border-t-0 first:pt-0">
-                      <div className="flex items-center gap-2">
-                        <span className="h-4 w-1 rounded-full bg-primary" />
-                        <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">
-                          {section.title}
-                        </p>
-                        {secMode === "visible" && (
-                          <span className="text-[10px] uppercase tracking-wide text-muted-foreground">somente leitura</span>
-                        )}
-                        {secMode === "required" && (
-                          <span className="text-[10px] uppercase tracking-wide text-destructive">obrigatória</span>
-                        )}
-                      </div>
-                      <div className="space-y-3">
-                        {groupIntoRows(
-                          visibleFields,
-                          (f) => getRowBreak(f.validation),
-                        ).map((row, rowIdx) => (
-                          <div key={rowIdx} className="flex flex-col md:flex-row gap-3">
-                            {row.items.map((field) => {
-                              const mode = fieldMode(field, secMode)
-                              const isReadOnly = mode === "visible"
-                              const isRequired = mode === "required" || (mode === "editable" && field.is_required)
-                              const fieldError = fieldErrors[field.id]
-                              return (
-                                <div key={field.id} className="space-y-1 flex-1 min-w-0">
-                                  <Label>
-                                    {field.label}
-                                    {isRequired && <span className="text-destructive ml-0.5">*</span>}
-                                    {isReadOnly && (
-                                      <span className="ml-2 text-[10px] uppercase tracking-wide text-muted-foreground">só leitura</span>
-                                    )}
-                                  </Label>
-                                  <div className={fieldError ? "rounded-md ring-2 ring-destructive/60" : ""}>
-                                    <FormFieldRenderer
-                                      field={field}
-                                      value={formValues[field.field_key]}
-                                      onChange={(v) => {
-                                        setFormValues((prev) => ({ ...prev, [field.field_key]: v }))
-                                        if (fieldErrors[field.id]) {
-                                          setFieldErrors((prev) => {
-                                            const next = { ...prev }
-                                            delete next[field.id]
-                                            return next
-                                          })
-                                        }
-                                      }}
-                                      users={users}
-                                      disabled={isReadOnly}
-                                    />
-                                  </div>
-                                  {fieldError && (
-                                    <p className="text-[11px] text-destructive">{fieldError}</p>
-                                  )}
-                                </div>
-                              )
-                            })}
-                          </div>
+            {/* Corpo: Planejamento e, abaixo das datas, Descrição */}
+            {(() => {
+              const planningFields = defaultFormPlanningFields(defaultFormFields, defaultFormLinks)
+              const descriptionField = defaultFieldsByKey.get("description")
+              const showDescription = descriptionField && isDefaultFieldShown(descriptionField, defaultFormLinks)
+              if (planningFields.length === 0 && !showDescription) return null
+              const formValues = {
+                title,
+                description,
+                assigned_to: assignedTo === NO_ASSIGNEE ? null : assignedTo,
+                diretoria,
+                area,
+                start_date: startDate,
+                due_date: dueDate,
+              }
+              const onPatch = (patch: Partial<typeof formValues>) => {
+                if (patch.diretoria !== undefined) setDiretoria(patch.diretoria)
+                if (patch.area !== undefined) setArea(patch.area)
+                if (patch.start_date !== undefined) setStartDate(patch.start_date)
+                if (patch.due_date !== undefined) setDueDate(patch.due_date)
+                if (patch.description !== undefined) setDescription(patch.description)
+              }
+              return (
+                <CollapsibleFormSection sectionId="default-form-planning" title="Planejamento" icon={ClipboardList}>
+                  {groupDefaultFormFieldsIntoRows(planningFields, defaultFormLinks).map((row, rowIdx) => {
+                    if (row.length === 1) {
+                      const key = row[0].field_key
+                      return (
+                        <DefaultFormFieldSlot
+                          key={key}
+                          fields={defaultFormFields}
+                          fieldKey={key}
+                          defaultFormLinks={defaultFormLinks}
+                          values={formValues}
+                          onChange={onPatch}
+                        />
+                      )
+                    }
+                    return (
+                      <div key={`plan-row-${rowIdx}`} className="grid gap-3 sm:grid-cols-2">
+                        {row.map((cfg) => (
+                          <DefaultFormFieldSlot
+                            key={cfg.field_key}
+                            fields={defaultFormFields}
+                            fieldKey={cfg.field_key}
+                            defaultFormLinks={defaultFormLinks}
+                            values={formValues}
+                            onChange={onPatch}
+                          />
                         ))}
                       </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-              </div>
-
-              {/* Coluna 2 — Planejamento (campos do nosso modelo) */}
-              <div className="space-y-4">
-                <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">Planejamento</p>
-                <div className="space-y-1.5">
-                  <Label>Início</Label>
-                  <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Prazo</Label>
-                  <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Etapa</Label>
-                  {isBasicUser ? (
-                    <p className="text-sm">{statusMap[statusId]?.name ?? "—"}</p>
-                  ) : (
-                    <Select value={statusId} onValueChange={(v) => void handleSelectStatus(v)} disabled={changingStatus}>
-                      <SelectTrigger><SelectValue placeholder="Selecionar etapa" /></SelectTrigger>
-                      <SelectContent>
-                        {currentFunnelStatuses.map((s) => (
-                          <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    )
+                  })}
+                  {showDescription && (
+                    <DefaultFormFieldSlot
+                      fields={defaultFormFields}
+                      fieldKey="description"
+                      defaultFormLinks={defaultFormLinks}
+                      values={formValues}
+                      onChange={onPatch}
+                    />
                   )}
-                </div>
-              </div>
+                </CollapsibleFormSection>
+              )
+            })()}
 
-              {/* Coluna 3 — Trabalho relacionado (origem, pai e filhos) */}
-              <div className="space-y-3 rounded-md border border-border p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <GitBranch size={14} className="text-primary" />
-                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">Trabalho relacionado</p>
+            <DemandFormSectionsPanel
+              sections={formSections}
+              fieldsBySection={fieldsBySection}
+              sectionMode={sectionMode}
+              fieldMode={fieldMode}
+              formValues={formValues}
+              fieldErrors={fieldErrors}
+              users={users}
+              onFieldChange={(fieldKey, value, fieldId) => {
+                setFormValues((prev) => ({ ...prev, [fieldKey]: value }))
+                if (fieldErrors[fieldId]) {
+                  setFieldErrors((prev) => {
+                    const next = { ...prev }
+                    delete next[fieldId]
+                    return next
+                  })
+                }
+              }}
+            />
+
+            <CollapsibleFormSection
+              sectionId="related-work"
+              title="Trabalho relacionado"
+              icon={GitBranch}
+              headerEnd={
+                !isBasicUser ? (
+                  <div className="relative">
+                    <Button type="button" variant="outline" size="icon" className="h-7 w-7" onClick={() => setLinkMenuOpen((o) => !o)} title="Adicionar vínculo">
+                      <Plus size={14} />
+                    </Button>
+                    {linkMenuOpen && (
+                      <>
+                        <div className="fixed inset-0 z-10" onClick={() => setLinkMenuOpen(false)} />
+                        <div className="absolute right-0 z-20 mt-1 w-44 rounded-md border bg-popover p-1 shadow-md">
+                          <button
+                            type="button"
+                            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted"
+                            onClick={() => openLinkDialog("existing")}
+                          >
+                            <LinkIcon size={14} /> Item existente
+                          </button>
+                          <button
+                            type="button"
+                            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted"
+                            onClick={() => openLinkDialog("new")}
+                          >
+                            <Pencil size={14} /> Novo item
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
-                  {!isBasicUser && (
-                    <div className="relative">
-                      <Button type="button" variant="outline" size="icon" className="h-7 w-7" onClick={() => setLinkMenuOpen((o) => !o)} title="Adicionar vínculo">
-                        <Plus size={14} />
-                      </Button>
-                      {linkMenuOpen && (
-                        <>
-                          <div className="fixed inset-0 z-10" onClick={() => setLinkMenuOpen(false)} />
-                          <div className="absolute right-0 z-20 mt-1 w-44 rounded-md border bg-popover p-1 shadow-md">
-                            <button
-                              type="button"
-                              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted"
-                              onClick={() => openLinkDialog("existing")}
-                            >
-                              <LinkIcon size={14} /> Item existente
-                            </button>
-                            <button
-                              type="button"
-                              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted"
-                              onClick={() => openLinkDialog("new")}
-                            >
-                              <Pencil size={14} /> Novo item
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </div>
-
+                ) : undefined
+              }
+            >
+              <div className="grid gap-4 rounded-md border border-border p-3 sm:grid-cols-3">
                 {originTask && (
                   <div className="space-y-1">
                     <p className="text-[11px] font-semibold text-muted-foreground">Origem</p>
                     {relationRow(originTask)}
                   </div>
                 )}
-
                 <div className="space-y-1">
                   <p className="text-[11px] font-semibold text-muted-foreground">Pai</p>
                   {parentTask
                     ? relationRow(parentTask, () => void handleUnlinkParent())
                     : <p className="text-[11px] italic text-muted-foreground/70">Sem card pai.</p>}
                 </div>
-
-                <div className="space-y-1">
+                <div className="space-y-1 sm:col-span-1">
                   <p className="text-[11px] font-semibold text-muted-foreground">Filhos ({children.length})</p>
                   {children.length === 0 ? (
                     <p className="text-[11px] italic text-muted-foreground/70">Nenhum item filho.</p>
@@ -810,15 +903,9 @@ export function ProjectTaskDrawer({
                   )}
                 </div>
               </div>
-            </div>
+            </CollapsibleFormSection>
 
-            <div className="space-y-3 border-t border-border pt-4">
-              <div className="flex items-center gap-2">
-                <span className="h-4 w-1 rounded-full bg-primary" />
-                <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">
-                  Comentários
-                </p>
-              </div>
+            <CollapsibleFormSection sectionId="comments" title="Comentários" icon={MessageSquare}>
               <div className="max-h-44 overflow-y-auto space-y-2 rounded-md border p-2">
                 {comments.length === 0 ? (
                   <p className="text-xs text-muted-foreground">Nenhum comentário ainda.</p>
@@ -842,7 +929,7 @@ export function ProjectTaskDrawer({
                   Enviar
                 </Button>
               </div>
-            </div>
+            </CollapsibleFormSection>
           </div>
           </div>
 

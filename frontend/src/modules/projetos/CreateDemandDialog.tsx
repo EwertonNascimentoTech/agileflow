@@ -8,9 +8,9 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { FormFieldRenderer, applyAutoFillCurrentFields } from "@/modules/projetos/FormFieldRenderer"
+import { applyAutoFillCurrentFields } from "@/modules/projetos/FormFieldRenderer"
+import { DemandFormSectionsPanel } from "@/modules/projetos/DemandFormSectionsPanel"
 import { formatMissingFieldsMessage, resolveFieldMode, resolveSectionMode, validateRequiredFields } from "@/modules/projetos/validation"
-import { getRowBreak, groupIntoRows } from "@/modules/projetos/layout"
 import { toast } from "@/lib/toast"
 
 function getApiError(err: unknown): string {
@@ -164,78 +164,25 @@ export function CreateDemandDialog({
           </div>
 
           {formSections.length > 0 && targetStatusId && (
-            <div className="space-y-6">
-              {formSections.map((section) => {
-                const secMode = resolveSectionMode(section.id, sectionLinks)
-                const visibleFields = (fieldsBySection[section.id] ?? [])
-                  .filter((f) => f.is_active)
-                  .filter((f) => resolveFieldMode(f, targetStatusId, secMode) !== "hidden")
-                if (visibleFields.length === 0) return null
-                return (
-                  <div key={section.id} className="space-y-3 border-t border-border pt-4 first:border-t-0 first:pt-0">
-                    <div className="flex items-center gap-2">
-                      <span className="h-4 w-1 rounded-full bg-primary" />
-                      <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">
-                        {section.title}
-                      </p>
-                      {secMode === "visible" && (
-                        <span className="text-[10px] uppercase tracking-wide text-muted-foreground">somente leitura</span>
-                      )}
-                      {secMode === "required" && (
-                        <span className="text-[10px] uppercase tracking-wide text-destructive">obrigatória</span>
-                      )}
-                    </div>
-                    <div className="space-y-3">
-                      {groupIntoRows(
-                        visibleFields,
-                        (f) => getRowBreak(f.validation),
-                      ).map((row, rowIdx) => (
-                        <div key={rowIdx} className="flex flex-col md:flex-row gap-3">
-                          {row.items.map((field) => {
-                            const mode = resolveFieldMode(field, targetStatusId, secMode)
-                            const isReadOnly = mode === "visible"
-                            const isRequired = mode === "required" || (mode === "editable" && field.is_required)
-                            const fieldError = fieldErrors[field.id]
-                            return (
-                              <div key={field.id} className="space-y-1 flex-1 min-w-0">
-                                <Label>
-                                  {field.label}
-                                  {isRequired && <span className="text-destructive ml-0.5">*</span>}
-                                  {isReadOnly && (
-                                    <span className="ml-2 text-[10px] uppercase tracking-wide text-muted-foreground">só leitura</span>
-                                  )}
-                                </Label>
-                                <div className={fieldError ? "rounded-md ring-2 ring-destructive/60" : ""}>
-                                  <FormFieldRenderer
-                                    field={field}
-                                    value={formValues[field.field_key]}
-                                    onChange={(v) => {
-                                      setFormValues((prev) => ({ ...prev, [field.field_key]: v }))
-                                      if (fieldErrors[field.id]) {
-                                        setFieldErrors((prev) => {
-                                          const next = { ...prev }
-                                          delete next[field.id]
-                                          return next
-                                        })
-                                      }
-                                    }}
-                                    users={users}
-                                    disabled={isReadOnly}
-                                  />
-                                </div>
-                                {fieldError && (
-                                  <p className="text-[11px] text-destructive">{fieldError}</p>
-                                )}
-                              </div>
-                            )
-                          })}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
+            <DemandFormSectionsPanel
+              sections={formSections}
+              fieldsBySection={fieldsBySection}
+              sectionMode={(sectionId) => resolveSectionMode(sectionId, sectionLinks)}
+              fieldMode={(field, parentMode) => resolveFieldMode(field, targetStatusId, parentMode)}
+              formValues={formValues}
+              fieldErrors={fieldErrors}
+              users={users}
+              onFieldChange={(fieldKey, value, fieldId) => {
+                setFormValues((prev) => ({ ...prev, [fieldKey]: value }))
+                if (fieldErrors[fieldId]) {
+                  setFieldErrors((prev) => {
+                    const next = { ...prev }
+                    delete next[fieldId]
+                    return next
+                  })
+                }
+              }}
+            />
           )}
         </div>
         <DialogFooter>

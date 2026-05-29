@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { ArrowRight, FileText, Search } from "lucide-react"
 
-import { companyApi } from "@/api/crm"
+import { companyApi } from "@/api/company"
 import { projetosApi, type ProjectDemandType } from "@/api/projetos"
 import type { User } from "@/types"
 import { Input } from "@/components/ui/input"

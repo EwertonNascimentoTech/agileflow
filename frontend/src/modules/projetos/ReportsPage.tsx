@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { AlertTriangle, BarChart3, CheckCircle2, Clock, Layers, TrendingUp } from "lucide-react"
 
-import { companyApi } from "@/api/crm"
+import { companyApi } from "@/api/company"
 import { projetosApi, type ProjectReports } from "@/api/projetos"
 import type { User } from "@/types"
 import { KpiCard } from "@/components/KpiCard"

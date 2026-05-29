@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 from app.modules.projetos.models import (
     ProjectAutomationAction,
     ProjectAutomationRule,
+    ProjectDefaultFormField,
     ProjectDemandFormField,
     ProjectDemandFormSection,
     ProjectDemandFormSubmission,
@@ -21,6 +22,7 @@ from app.modules.projetos.models import (
     Project,
     ProjectMember,
     ProjectScheduleBinding,
+    ProjectStatusDefaultFormLink,
     ProjectStatusSectionLink,
     ProjectStatusConfig,
     ProjectTask,
@@ -30,6 +32,8 @@ from app.modules.projetos.schemas import (
     ProjectAutomationRuleCreate,
     ProjectAutomationRuleUpdate,
     ProjectCreate,
+    ProjectDefaultFormFieldUpdateItem,
+    ProjectDefaultFormFieldsUpdate,
     ProjectDemandFormFieldCreate,
     ProjectDemandFormFieldUpdate,
     ProjectDemandFormSubmissionUpsert,
@@ -250,6 +254,217 @@ class ProjectDemandTypeService:
         item = await ProjectDemandTypeService.get(db, demand_type_id)
         await db.delete(item)
         await db.commit()
+
+
+_DEFAULT_FORM_SEED: list[dict] = [
+    {"field_key": "title", "label": "Título", "field_type": "text", "options": None, "is_visible": True, "is_required": True, "order": 0},
+    {"field_key": "description", "label": "Descrição", "field_type": "text_long", "options": None, "is_visible": True, "is_required": False, "order": 1},
+    {"field_key": "assigned_to", "label": "Responsável", "field_type": "user", "options": None, "is_visible": True, "is_required": False, "order": 2},
+    {"field_key": "diretoria", "label": "Diretoria", "field_type": "select", "options": {"items": []}, "is_visible": True, "is_required": False, "order": 3},
+    {"field_key": "area", "label": "Área", "field_type": "select", "options": {"items": []}, "is_visible": True, "is_required": False, "order": 4},
+    {"field_key": "start_date", "label": "Data de início", "field_type": "date", "options": None, "is_visible": True, "is_required": False, "order": 5},
+    {"field_key": "due_date", "label": "Prazo", "field_type": "date", "options": None, "is_visible": True, "is_required": False, "order": 6},
+]
+
+_DEFAULT_FORM_KEYS = {row["field_key"] for row in _DEFAULT_FORM_SEED}
+
+_DEFAULT_FORM_ALLOWED_TYPES: dict[str, set[str]] = {
+    "title": {"text", "text_long"},
+    "description": {"text", "text_long", "url"},
+    "assigned_to": {"user"},
+    "diretoria": {"select"},
+    "area": {"select"},
+    "start_date": {"date", "datetime"},
+    "due_date": {"date", "datetime"},
+}
+
+_DEFAULT_FORM_TYPE_FALLBACK: dict[str, str] = {
+    row["field_key"]: row["field_type"] for row in _DEFAULT_FORM_SEED
+}
+
+
+class ProjectDefaultFormService:
+    @staticmethod
+    def _slug_option_value(label: str, fallback: str = "opcao") -> str:
+        import re
+        slug = re.sub(r"[^a-z0-9]+", "_", (label or "").strip().lower()).strip("_")
+        return slug[:80] if slug else fallback
+
+    @staticmethod
+    def _normalize_options(raw: Optional[dict]) -> Optional[dict]:
+        if raw is None:
+            return None
+        items = raw.get("items") if isinstance(raw, dict) else None
+        if not isinstance(items, list):
+            return {"items": []}
+        out: list[dict] = []
+        seen: set[str] = set()
+        for idx, item in enumerate(items):
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("label") or "").strip()
+            if not label:
+                continue
+            value = str(item.get("value") or "").strip()
+            if not value:
+                value = ProjectDefaultFormService._slug_option_value(label, f"opcao_{idx + 1}")
+            base = value
+            n = 2
+            while value in seen:
+                value = f"{base}_{n}"
+                n += 1
+            seen.add(value)
+            row: dict = {"value": value, "label": label}
+            if isinstance(item.get("color"), str) and item["color"].strip():
+                row["color"] = item["color"].strip()
+            out.append(row)
+        return {"items": out}
+
+    @staticmethod
+    def _option_values(cfg: ProjectDefaultFormField) -> set[str]:
+        opts = cfg.options or {}
+        items = opts.get("items") if isinstance(opts, dict) else []
+        if not isinstance(items, list):
+            return set()
+        return {str(i.get("value")) for i in items if isinstance(i, dict) and i.get("value")}
+
+    @staticmethod
+    def _normalize_field_type(field_key: str, field_type: str) -> str:
+        raw = (field_type or "").strip().lower()
+        legacy = {"textarea": "text_long"}
+        normalized = legacy.get(raw, raw)
+        allowed = _DEFAULT_FORM_ALLOWED_TYPES.get(field_key, {"text"})
+        fallback = _DEFAULT_FORM_TYPE_FALLBACK.get(field_key, "text")
+        return normalized if normalized in allowed else fallback
+
+    @staticmethod
+    async def ensure_seeded(db: AsyncSession) -> None:
+        result = await db.execute(select(ProjectDefaultFormField).limit(1))
+        if result.scalar_one_or_none() is not None:
+            await ProjectDefaultFormService.ensure_missing_fields(db)
+            return
+        for row in _DEFAULT_FORM_SEED:
+            db.add(ProjectDefaultFormField(**row, is_system=True))
+        await db.commit()
+
+    @staticmethod
+    async def ensure_missing_fields(db: AsyncSession) -> None:
+        result = await db.execute(select(ProjectDefaultFormField.field_key))
+        existing = {row[0] for row in result.all()}
+        added = False
+        for row in _DEFAULT_FORM_SEED:
+            if row["field_key"] in existing:
+                continue
+            db.add(ProjectDefaultFormField(**row, is_system=True))
+            added = True
+        if added:
+            await db.commit()
+
+    @staticmethod
+    async def list(db: AsyncSession) -> list[ProjectDefaultFormField]:
+        await ProjectDefaultFormService.ensure_seeded(db)
+        await ProjectDefaultFormService.ensure_missing_fields(db)
+        result = await db.execute(
+            select(ProjectDefaultFormField).order_by(
+                ProjectDefaultFormField.order.asc(),
+                ProjectDefaultFormField.field_key.asc(),
+            )
+        )
+        return list(result.scalars().all())
+
+    @staticmethod
+    async def replace_all(
+        db: AsyncSession,
+        data: ProjectDefaultFormFieldsUpdate,
+    ) -> list[ProjectDefaultFormField]:
+        await ProjectDefaultFormService.ensure_seeded(db)
+        by_key = {item.field_key: item for item in data.fields}
+        if set(by_key.keys()) != _DEFAULT_FORM_KEYS:
+            raise HTTPException(
+                status_code=400,
+                detail="Envie todos os campos do formulário padrão.",
+            )
+        title = by_key["title"]
+        if not title.is_visible or not title.is_required:
+            raise HTTPException(
+                status_code=400,
+                detail="O campo Título deve permanecer visível e obrigatório.",
+            )
+        existing = await ProjectDefaultFormService.list(db)
+        for row in existing:
+            patch = by_key[row.field_key]
+            row.label = patch.label.strip()
+            row.field_type = ProjectDefaultFormService._normalize_field_type(
+                row.field_key, patch.field_type
+            )
+            if patch.options is not None or row.field_type == "select":
+                row.options = ProjectDefaultFormService._normalize_options(
+                    patch.options if patch.options is not None else row.options
+                )
+            row.is_visible = patch.is_visible if row.field_key != "title" else True
+            row.is_required = patch.is_required if row.field_key != "title" else True
+            row.order = patch.order
+            row.updated_at = datetime.utcnow()
+        await db.commit()
+        return await ProjectDefaultFormService.list(db)
+
+    @staticmethod
+    def _value_empty(field_key: str, value) -> bool:
+        if field_key == "title":
+            return value is None or not str(value).strip()
+        if field_key == "description":
+            return value is None or not str(value).strip()
+        if field_key == "assigned_to":
+            return value is None
+        if field_key in ("start_date", "due_date"):
+            return value is None
+        if field_key in ("diretoria", "area"):
+            return value is None or not str(value).strip()
+        return value in (None, "")
+
+    @staticmethod
+    async def validate_task_data(
+        db: AsyncSession,
+        *,
+        title: Optional[str] = None,
+        description: Optional[str] = None,
+        assigned_to: Optional[uuid.UUID] = None,
+        diretoria: Optional[str] = None,
+        area: Optional[str] = None,
+        start_date=None,
+        due_date=None,
+        existing: Optional[ProjectTask] = None,
+    ) -> None:
+        fields = await ProjectDefaultFormService.list(db)
+        merged = {
+            "title": title if title is not None else (existing.title if existing else None),
+            "description": description if description is not None else (existing.description if existing else None),
+            "assigned_to": assigned_to if assigned_to is not None else (existing.assigned_to if existing else None),
+            "diretoria": diretoria if diretoria is not None else (existing.diretoria if existing else None),
+            "area": area if area is not None else (existing.area if existing else None),
+            "start_date": start_date if start_date is not None else (existing.start_date if existing else None),
+            "due_date": due_date if due_date is not None else (existing.due_date if existing else None),
+        }
+        missing: list[str] = []
+        for cfg in fields:
+            if not cfg.is_visible:
+                continue
+            val = merged.get(cfg.field_key)
+            if cfg.is_required and ProjectDefaultFormService._value_empty(cfg.field_key, val):
+                missing.append(cfg.label)
+                continue
+            if cfg.field_type == "select" and val not in (None, ""):
+                allowed = ProjectDefaultFormService._option_values(cfg)
+                if allowed and str(val) not in allowed:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Valor inválido para o campo {cfg.label}.",
+                    )
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Campos obrigatórios não preenchidos: {', '.join(missing)}",
+            )
 
 
 class ProjectDemandFormSectionService:
@@ -518,6 +733,15 @@ class ProjectStatusService:
         payload = data.model_dump(exclude_unset=True)
         if "move_in_role_ids" in payload:
             payload["move_in_role_ids"] = ProjectStatusService._normalize_role_ids(payload["move_in_role_ids"])
+        if "updates_origin_status_id" in payload and payload["updates_origin_status_id"]:
+            origin_status_res = await db.execute(
+                select(ProjectStatusConfig).where(
+                    ProjectStatusConfig.id == payload["updates_origin_status_id"],
+                    ProjectStatusConfig.project_id == project_id,
+                )
+            )
+            if not origin_status_res.scalar_one_or_none():
+                raise HTTPException(status_code=400, detail="Etapa de origem inválida para este projeto.")
         if payload.get("is_active") is False:
             has_tasks = await db.execute(
                 select(ProjectTask.id).where(ProjectTask.status_id == status_id).limit(1)
@@ -803,6 +1027,84 @@ class ProjectStatusSectionLinkService:
             select(ProjectStatusSectionLink).where(
                 ProjectStatusSectionLink.id == link_id,
                 ProjectStatusSectionLink.status_id == status_id,
+            )
+        )
+        item = result.scalar_one_or_none()
+        if not item:
+            raise HTTPException(status_code=404, detail="Vínculo não encontrado.")
+        await db.delete(item)
+        await db.commit()
+
+
+class ProjectStatusDefaultFormLinkService:
+    @staticmethod
+    async def list(db: AsyncSession, project_id: uuid.UUID, status_id: uuid.UUID) -> list[ProjectStatusDefaultFormLink]:
+        status_row = await db.execute(
+            select(ProjectStatusConfig).where(
+                ProjectStatusConfig.id == status_id,
+                ProjectStatusConfig.project_id == project_id,
+            )
+        )
+        if not status_row.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Coluna não encontrada.")
+        result = await db.execute(
+            select(ProjectStatusDefaultFormLink).where(ProjectStatusDefaultFormLink.status_id == status_id)
+        )
+        return list(result.scalars().all())
+
+    @staticmethod
+    async def upsert(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        status_id: uuid.UUID,
+        field_key: str,
+        mode: str,
+    ) -> ProjectStatusDefaultFormLink:
+        status_row = await db.execute(
+            select(ProjectStatusConfig).where(
+                ProjectStatusConfig.id == status_id,
+                ProjectStatusConfig.project_id == project_id,
+            )
+        )
+        if not status_row.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Coluna não encontrada.")
+        field_row = await db.execute(
+            select(ProjectDefaultFormField).where(ProjectDefaultFormField.field_key == field_key)
+        )
+        if not field_row.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Campo do formulário padrão não encontrado.")
+        existing = await db.execute(
+            select(ProjectStatusDefaultFormLink).where(
+                ProjectStatusDefaultFormLink.status_id == status_id,
+                ProjectStatusDefaultFormLink.field_key == field_key,
+            )
+        )
+        item = existing.scalar_one_or_none()
+        if item:
+            item.mode = mode
+            await db.commit()
+            await db.refresh(item)
+            return item
+        item = ProjectStatusDefaultFormLink(status_id=status_id, field_key=field_key, mode=mode)
+        db.add(item)
+        await db.commit()
+        await db.refresh(item)
+        return item
+
+    @staticmethod
+    async def delete(db: AsyncSession, project_id: uuid.UUID, status_id: uuid.UUID, link_id: uuid.UUID) -> None:
+        status_row = await db.execute(
+            select(ProjectStatusConfig).where(
+                ProjectStatusConfig.id == status_id,
+                ProjectStatusConfig.project_id == project_id,
+            )
+        )
+        if not status_row.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Coluna não encontrada.")
+        result = await db.execute(
+            select(ProjectStatusDefaultFormLink).where(
+                ProjectStatusDefaultFormLink.id == link_id,
+                ProjectStatusDefaultFormLink.status_id == status_id,
             )
         )
         item = result.scalar_one_or_none()
@@ -1098,6 +1400,48 @@ class ProjectTaskService:
         task.sla_state = ProjectTaskService._sla_initial(init_status)
 
     @staticmethod
+    async def _maybe_update_origin_on_status(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        task: ProjectTask,
+        status_obj: Optional[ProjectStatusConfig],
+    ) -> None:
+        """Se a fase de destino define updates_origin_status_id, move o card de origem
+        (origin_task_id) para essa etapa. Ação interna: sem automações/conversão."""
+        if not status_obj or not status_obj.updates_origin_status_id:
+            return
+        if not task.origin_task_id:
+            return
+        target_status_id = status_obj.updates_origin_status_id
+        origin_res = await db.execute(
+            select(ProjectTask).where(
+                ProjectTask.id == task.origin_task_id,
+                ProjectTask.project_id == project_id,
+            )
+        )
+        origin = origin_res.scalar_one_or_none()
+        if not origin or origin.status_id == target_status_id:
+            return
+        target_res = await db.execute(
+            select(ProjectStatusConfig).where(
+                ProjectStatusConfig.id == target_status_id,
+                ProjectStatusConfig.project_id == project_id,
+                ProjectStatusConfig.is_active == True,  # noqa: E712
+            )
+        )
+        target_origin_status = target_res.scalar_one_or_none()
+        if not target_origin_status:
+            return
+        origin.status_id = target_status_id
+        origin.status_entered_at = datetime.utcnow()
+        origin.sla_state = ProjectTaskService._sla_initial(target_origin_status)
+        if target_origin_status.is_final:
+            origin.completed_at = datetime.utcnow()
+        else:
+            origin.completed_at = None
+        origin.updated_at = datetime.utcnow()
+
+    @staticmethod
     async def list_children(db: AsyncSession, project_id: uuid.UUID, task_id: uuid.UUID) -> list[ProjectTask]:
         await ProjectTaskService.get(db, project_id, task_id)
         result = await db.execute(
@@ -1207,6 +1551,19 @@ class ProjectTaskService:
             status_id=payload.get("status_id"),
             form_values=form_values,
         )
+        await ProjectDefaultFormService.validate_task_data(
+            db,
+            title=payload.get("title"),
+            description=payload.get("description"),
+            assigned_to=payload.get("assigned_to"),
+            diretoria=payload.get("diretoria"),
+            area=payload.get("area"),
+            start_date=payload.get("start_date"),
+            due_date=payload.get("due_date"),
+        )
+        for key in ("diretoria", "area"):
+            if payload.get(key) == "":
+                payload[key] = None
         payload["due_date"] = _to_naive_utc(payload.get("due_date"))
         payload["start_date"] = _to_naive_utc(payload.get("start_date"))
         task = ProjectTask(
@@ -1296,6 +1653,20 @@ class ProjectTaskService:
             status_id=target_status_id,
             form_values=merged_values,
         )
+        await ProjectDefaultFormService.validate_task_data(
+            db,
+            title=payload.get("title"),
+            description=payload.get("description"),
+            assigned_to=payload.get("assigned_to"),
+            diretoria=payload.get("diretoria"),
+            area=payload.get("area"),
+            start_date=payload.get("start_date"),
+            due_date=payload.get("due_date"),
+            existing=task,
+        )
+        for key in ("diretoria", "area"):
+            if payload.get(key) == "":
+                payload[key] = None
 
         if payload.get("status_id"):
             status_row = await db.execute(
@@ -1338,6 +1709,8 @@ class ProjectTaskService:
             await ProjectTaskService._maybe_convert_on_status(db, project_id, task, status_obj, conversion_title)
             # Gatilho de transição: se a fase de destino move o card para outro kanban.
             await ProjectTaskService._maybe_move_to_funnel(db, project_id, task, status_obj)
+            # Sincroniza card de origem (ex.: Planejamento concluído → Triagem avança).
+            await ProjectTaskService._maybe_update_origin_on_status(db, project_id, task, status_obj)
 
         task.updated_at = datetime.utcnow()
         await ProjectTaskService._upsert_form_submission(db, task.id, form_values, None)

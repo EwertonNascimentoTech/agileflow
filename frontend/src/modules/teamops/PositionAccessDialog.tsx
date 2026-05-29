@@ -7,12 +7,8 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Skeleton } from "@/components/ui/skeleton"
 
 const MODULE_LABELS: Record<string, string> = {
-  atendimento: "Atendimento (CRM)",
-  propostas_contratos: "Propostas & Contratos",
-  projetos: "Projetos",
-  teamops: "Gestão de Times",
-  estoque: "Estoque",
-  pdv: "PDV",
+  projetos: "Processos",
+  teamops: "Gestão de Times e Capacidade",
 }
 
 const OP_LABELS: Record<string, string> = {

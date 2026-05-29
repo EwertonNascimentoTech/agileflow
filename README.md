@@ -25,8 +25,10 @@ Plataforma SaaS modular para gestão empresarial. Cada empresa (tenant) ativa os
 
 | Módulo | Slug | Descrição |
 |--------|------|-----------|
-| Atendimento (CRM) | `atendimento` | Kanban, clientes, omnichannel (WhatsApp/Instagram), tarefas, automações |
-| Propostas e Contratos | `propostas_contratos` | Propostas versionadas, templates, assinatura eletrônica, contratos |
+| Processos | `projetos` | Board kanban, tarefas, demandas, Gantt, SLA e relatórios |
+| Gestão de Times e Capacidade | `teamops` | Pessoas, organograma, stacks, competências e ausências |
+
+A infraestrutura da empresa (usuários, roles, notificações) fica em `backend/app/modules/company` e `frontend/src/modules/company`.
 
 Novos módulos seguem o guia em [MODULES.md](MODULES.md).
 
@@ -35,7 +37,83 @@ Novos módulos seguem o guia em [MODULES.md](MODULES.md).
 ## Pré-requisitos
 
 - [Docker](https://docs.docker.com/get-docker/) + [Docker Compose](https://docs.docker.com/compose/) v2
-- Porta 80, 8000, 5432, 6379, 5672, 9000 livres
+- Portas livres no host (em servidor compartilhado, ver [Deploy no servidor FIEA](#deploy-no-servidor-fiea))
+
+---
+
+## Deploy no servidor FIEA
+
+Stack em `/opt/agileflow`, atrás do **Caddy** (`/opt/MCP-s/deploy/Caddyfile`), que escuta **80/443** no host.
+
+### DNS
+
+| Registro | Valor |
+|----------|--------|
+| `agileflow.tdsistemafiea.com.br` (A) | `187.124.129.85` |
+
+### Portas no host (evitam conflito com outros apps em `/opt`)
+
+| Serviço | Porta host | Uso |
+|---------|------------|-----|
+| Frontend | **18082** | App + proxy `/api/` interno |
+| API (Swagger) | **18084** | Testes diretos |
+| PostgreSQL | **5437** | Acesso externo ao DB |
+| Redis | **6380** | |
+| MinIO API / Console | **9002** / **9003** | |
+| RabbitMQ / UI | **5672** / **15672** | |
+| Flower | **5555** | |
+
+Definidas em `.env` (`FRONTEND_HOST_PORT`, `API_HOST_PORT`, etc.) e em `docker-compose.yml`.
+
+### Proxy reverso (Caddy)
+
+Equivalente ao bloco nginx `proxy_pass http://127.0.0.1:18082` — no Caddy usa-se o IP do host porque o proxy roda em container:
+
+```caddyfile
+agileflow.tdsistemafiea.com.br {
+	encode gzip
+	reverse_proxy 187.124.129.85:18082 {
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+}
+```
+
+Recarregar após editar o Caddyfile:
+
+```bash
+docker exec mcp-s-caddy-1 caddy validate --config /etc/caddy/Caddyfile
+docker exec mcp-s-caddy-1 caddy reload --config /etc/caddy/Caddyfile
+```
+
+### CORS
+
+Incluir o domínio público em `.env`:
+
+```bash
+ALLOWED_ORIGINS=["http://localhost:18082","https://agileflow.tdsistemafiea.com.br","http://agileflow.tdsistemafiea.com.br"]
+```
+
+Depois: `docker compose restart api`
+
+### URLs em produção
+
+| Serviço | URL |
+|---------|-----|
+| Aplicação | https://agileflow.tdsistemafiea.com.br |
+| API / Swagger (direto) | http://187.124.129.85:18084/docs |
+| MinIO Console | http://187.124.129.85:9003 |
+
+### Comandos no servidor
+
+```bash
+cd /opt/agileflow
+cp .env.example .env   # se ainda não existir
+docker compose up -d --build
+docker exec saas_api alembic upgrade head
+```
 
 ---
 
@@ -69,13 +147,17 @@ A API aplica automaticamente no startup:
 
 ### 4. Acessar
 
+Em ambiente local com portas padrão do `docker-compose.yml` (sem variáveis de porta no `.env`):
+
 | Serviço | URL |
 |---------|-----|
-| Aplicação | http://localhost |
-| API / Swagger | http://localhost:8000/docs |
+| Aplicação | http://localhost:18082 |
+| API / Swagger | http://localhost:18084/docs |
 | RabbitMQ Management | http://localhost:15672 |
 | Celery Flower | http://localhost:5555 |
-| MinIO Console | http://localhost:9001 |
+| MinIO Console | http://localhost:9003 |
+
+Em produção FIEA, use [Deploy no servidor FIEA](#deploy-no-servidor-fiea).
 
 **Login padrão (super admin seed):**
 ```

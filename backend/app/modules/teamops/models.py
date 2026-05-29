@@ -267,6 +267,8 @@ class Person(TenantBase):
     full_name: Mapped[str] = mapped_column(String(200), nullable=False)
     email: Mapped[str] = mapped_column(String(255), nullable=False)
     phone: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    whatsapp: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    birth_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     position_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("team_positions.id", ondelete="RESTRICT"),
