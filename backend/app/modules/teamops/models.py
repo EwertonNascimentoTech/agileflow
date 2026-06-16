@@ -2,11 +2,12 @@
 
 import enum
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Optional
 
 from sqlalchemy import (
     Boolean,
+    Column,
     Date,
     DateTime,
     Enum as SAEnum,
@@ -14,16 +15,39 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    Table,
     Text,
+    Time,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import TenantBase
 
 
 _enum_values = lambda obj: [e.value for e in obj]
+
+
+# ─────────────────────────────────────────────
+# Tabelas de associação N:N
+# ─────────────────────────────────────────────
+# Uma pessoa pode pertencer a várias áreas e ter vários POs (a fonte única é a
+# própria pessoa, via estas associações — substitui as antigas FKs únicas).
+
+team_person_areas = Table(
+    "team_person_areas",
+    TenantBase.metadata,
+    Column("person_id", UUID(as_uuid=True), ForeignKey("team_persons.id", ondelete="CASCADE"), primary_key=True),
+    Column("area_id", UUID(as_uuid=True), ForeignKey("team_areas.id", ondelete="CASCADE"), primary_key=True),
+)
+
+team_person_pos = Table(
+    "team_person_pos",
+    TenantBase.metadata,
+    Column("person_id", UUID(as_uuid=True), ForeignKey("team_persons.id", ondelete="CASCADE"), primary_key=True),
+    Column("po_person_id", UUID(as_uuid=True), ForeignKey("team_persons.id", ondelete="CASCADE"), primary_key=True),
+)
 
 
 # ─────────────────────────────────────────────
@@ -202,50 +226,22 @@ class Area(TenantBase):
         nullable=False,
         default=AreaType.NEGOCIO,
     )
-    po_person_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("team_persons.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    tech_reference_person_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("team_persons.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    coordinator_person_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("team_persons.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    manager_person_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("team_persons.id", ondelete="SET NULL"),
-        nullable=True,
-    )
+    # Os papéis de PO / Referência Técnica / Coordenador / Gerente da área NÃO são mais
+    # armazenados aqui (evita fonte de verdade duplicada com Person). Eles são derivados
+    # das pessoas alocadas na área pelo CARGO (ver AreaService.role_people).
     status: Mapped[AreaStatus] = mapped_column(
         SAEnum(AreaStatus, native_enum=False, values_callable=_enum_values),
         nullable=False,
         default=AreaStatus.ATIVA,
     )
+    # Derivado de `status` (status == ATIVA). Mantido por compatibilidade de leitura.
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    po_person: Mapped[Optional["Person"]] = relationship(
-        foreign_keys=[po_person_id], lazy="joined", post_update=True,
-    )
-    tech_reference_person: Mapped[Optional["Person"]] = relationship(
-        foreign_keys=[tech_reference_person_id], lazy="joined", post_update=True,
-    )
-    coordinator_person: Mapped[Optional["Person"]] = relationship(
-        foreign_keys=[coordinator_person_id], lazy="joined", post_update=True,
-    )
-    manager_person: Mapped[Optional["Person"]] = relationship(
-        foreign_keys=[manager_person_id], lazy="joined", post_update=True,
-    )
     persons: Mapped[list["Person"]] = relationship(
-        back_populates="area",
-        foreign_keys="Person.area_id",
+        secondary=team_person_areas,
+        back_populates="areas",
     )
     parent_area: Mapped[Optional["Area"]] = relationship(
         remote_side="Area.id",
@@ -274,16 +270,7 @@ class Person(TenantBase):
         ForeignKey("team_positions.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    area_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("team_areas.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    po_person_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("team_persons.id", ondelete="SET NULL"),
-        nullable=True,
-    )
+    # Áreas e POs são N:N (uma pessoa pode estar em várias áreas e ter vários POs).
     tech_reference_person_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("team_persons.id", ondelete="SET NULL"),
@@ -307,14 +294,20 @@ class Person(TenantBase):
         nullable=False,
         default=PersonStatus.ATIVO,
     )
+    visible_in_org_chart: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     position: Mapped["Position"] = relationship(lazy="joined")
-    area: Mapped[Optional["Area"]] = relationship(back_populates="persons", foreign_keys=[area_id])
-    po_person: Mapped[Optional["Person"]] = relationship(
-        remote_side="Person.id", foreign_keys=[po_person_id],
+    areas: Mapped[list["Area"]] = relationship(
+        secondary=team_person_areas,
+        back_populates="persons",
+    )
+    pos: Mapped[list["Person"]] = relationship(
+        secondary=team_person_pos,
+        primaryjoin=lambda: Person.id == team_person_pos.c.person_id,
+        secondaryjoin=lambda: Person.id == team_person_pos.c.po_person_id,
     )
     tech_reference_person: Mapped[Optional["Person"]] = relationship(
         remote_side="Person.id", foreign_keys=[tech_reference_person_id],
@@ -404,3 +397,52 @@ class Absence(TenantBase):
     approver_person: Mapped[Optional["Person"]] = relationship(
         foreign_keys=[approver_person_id], lazy="joined",
     )
+
+
+# ─────────────────────────────────────────────
+# Calendário de trabalho corporativo (singleton por tenant) + feriados
+# ─────────────────────────────────────────────
+
+
+class WorkCalendar(TenantBase):
+    """Calendário corporativo do tenant (linha única). Define o expediente, o almoço e os
+    dias úteis usados pelo motor de cronograma (horas úteis) e pelo cálculo de capacidade.
+    As horas úteis por dia são derivadas das janelas (expediente − almoço)."""
+
+    __tablename__ = "team_work_calendar"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    day_start: Mapped[time] = mapped_column(Time, nullable=False, default=time(8, 0))
+    day_end: Mapped[time] = mapped_column(Time, nullable=False, default=time(17, 0))
+    lunch_start: Mapped[Optional[time]] = mapped_column(Time, nullable=True, default=time(12, 0))
+    lunch_end: Mapped[Optional[time]] = mapped_column(Time, nullable=True, default=time(13, 0))
+    # Dias úteis da semana no padrão Python (0=seg … 6=dom).
+    work_days: Mapped[list] = mapped_column(JSONB, nullable=False, default=lambda: [0, 1, 2, 3, 4])
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="America/Maceio")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    @property
+    def hours_per_day(self) -> float:
+        """Horas úteis por dia derivadas das janelas (expediente − almoço)."""
+        ds = self.day_start.hour * 60 + self.day_start.minute
+        de = self.day_end.hour * 60 + self.day_end.minute
+        lunch = 0
+        if self.lunch_start and self.lunch_end:
+            lunch = (self.lunch_end.hour * 60 + self.lunch_end.minute) - (
+                self.lunch_start.hour * 60 + self.lunch_start.minute
+            )
+        return max(0, de - ds - lunch) / 60.0
+
+
+class Holiday(TenantBase):
+    """Feriado corporativo. `is_recurring` = feriado anual fixo (compara mês/dia, ignora o ano)."""
+
+    __tablename__ = "team_holidays"
+    __table_args__ = (UniqueConstraint("day", "is_recurring", name="uq_team_holiday_day"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    day: Mapped[date] = mapped_column(Date, nullable=False)
+    name: Mapped[str] = mapped_column(String(140), nullable=False)
+    is_recurring: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

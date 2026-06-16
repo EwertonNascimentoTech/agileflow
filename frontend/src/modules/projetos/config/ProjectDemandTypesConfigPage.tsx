@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { ArrowLeft, ArrowRight, FileText, GitBranch, Loader2, Pencil, Plus, Settings2, Trash2 } from "lucide-react"
+import { ArrowLeft, ArrowRight, Check, FileText, GitBranch, Loader2, Pencil, Plus, Settings2, Trash2, X } from "lucide-react"
 
 import { projetosApi, type Project, type ProjectDemandType, type ProjectFunnel } from "@/api/projetos"
 import { Badge } from "@/components/ui/badge"
@@ -36,6 +36,9 @@ export default function ProjectDemandTypesConfigPage() {
   const [active, setActive] = useState(true)
   const [availableForBasic, setAvailableForBasic] = useState(true)
   const [showInSchedule, setShowInSchedule] = useState(true)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editName, setEditName] = useState("")
+  const [savingName, setSavingName] = useState(false)
 
   useEffect(() => {
     async function load() {
@@ -108,6 +111,27 @@ export default function ProjectDemandTypesConfigPage() {
       resetCreateForm()
     } finally {
       setSavingCreate(false)
+    }
+  }
+
+  function startEditName(item: ProjectDemandType) {
+    setEditingId(item.id)
+    setEditName(item.name)
+  }
+
+  async function saveEditName(item: ProjectDemandType) {
+    const trimmed = editName.trim()
+    if (!trimmed || trimmed === item.name) {
+      setEditingId(null)
+      return
+    }
+    setSavingName(true)
+    try {
+      const updated = await projetosApi.updateDemandType(item.id, { name: trimmed })
+      setItems((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
+      setEditingId(null)
+    } finally {
+      setSavingName(false)
     }
   }
 
@@ -193,7 +217,51 @@ export default function ProjectDemandTypesConfigPage() {
                       </div>
                       <div className="min-w-0 flex-1 space-y-1">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <p className="font-semibold text-sm">{item.name}</p>
+                          {editingId === item.id ? (
+                            <span className="flex items-center gap-1">
+                              <Input
+                                value={editName}
+                                onChange={(e) => setEditName(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") void saveEditName(item)
+                                  else if (e.key === "Escape") setEditingId(null)
+                                }}
+                                autoFocus
+                                className="h-7 w-52 text-sm"
+                              />
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 text-success"
+                                disabled={savingName}
+                                onClick={() => void saveEditName(item)}
+                              >
+                                {savingName ? <Loader2 size={13} className="animate-spin" /> : <Check size={14} />}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 text-muted-foreground"
+                                onClick={() => setEditingId(null)}
+                              >
+                                <X size={14} />
+                              </Button>
+                            </span>
+                          ) : (
+                            <span className="group/name flex items-center gap-1">
+                              <p className="font-semibold text-sm">{item.name}</p>
+                              <button
+                                type="button"
+                                className="text-muted-foreground opacity-0 transition hover:text-primary group-hover/name:opacity-100"
+                                title="Renomear tipo"
+                                onClick={() => startEditName(item)}
+                              >
+                                <Pencil size={12} />
+                              </button>
+                            </span>
+                          )}
                           {!item.is_active && <Badge variant="secondary" className="text-[10px]">inativo</Badge>}
                           {!item.available_for_basic && (
                             <Badge variant="outline" className="text-[10px] text-warning border-warning/40">

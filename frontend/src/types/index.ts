@@ -47,6 +47,7 @@ export interface User {
   role_id: string | null
   role_name: string | null
   permissions: string[]  // permissões efetivas; ["*"] = acesso total (super/company admin)
+  position_slug: string | null  // slug do cargo no TeamOps (ex: "coordenador")
   tenant_id: string | null
   is_active: boolean
   last_login: string | null

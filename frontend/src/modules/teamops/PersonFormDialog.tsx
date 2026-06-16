@@ -11,6 +11,7 @@ import {
 import {
   teamopsApi,
   EMPLOYMENT_TYPE_LABELS,
+  MANUAL_PERSON_STATUSES,
   PERSON_STATUS_LABELS,
   type AccessLevel,
   type Area,
@@ -21,6 +22,10 @@ import {
 } from "@/api/teamops"
 
 const NONE = "__none__"
+
+function isAbsenceDrivenStatus(s: PersonStatus): boolean {
+  return s === "ferias" || s === "afastado"
+}
 
 // Acesso agora é binário: o que a pessoa PODE fazer vem da matriz de permissões do cargo.
 function normalizeAccess(level?: AccessLevel | null): "none" | "com_acesso" {
@@ -104,9 +109,11 @@ export function PersonFormDialog({ person, areas, onClose, onSaved }: Props) {
         daily_hours: Number(dailyHours),
         weekly_hours: Number(weeklyHours),
         start_date: startDate || null,
-        status,
         notes: notes || null,
         access_level: accessLevel,
+      }
+      if (!isAbsenceDrivenStatus(status)) {
+        payload.status = status
       }
       if (needsNewPassword && password) payload.password = password
       if (canResetPassword && resetPassword) payload.reset_password = resetPassword
@@ -127,6 +134,7 @@ export function PersonFormDialog({ person, areas, onClose, onSaved }: Props) {
   const hasLoginAlready = isEdit && (person?.access_level ?? "none") !== "none"
   const needsNewPassword = accessLevel !== "none" && !hasLoginAlready
   const canResetPassword = hasLoginAlready && accessLevel !== "none"
+  const absenceDriven = isAbsenceDrivenStatus(status)
 
   return (
     <Dialog open onOpenChange={onClose}>
@@ -224,14 +232,23 @@ export function PersonFormDialog({ person, areas, onClose, onSaved }: Props) {
           </div>
           <div>
             <Label>Status</Label>
-            <Select value={status} onValueChange={(v) => setStatus(v as PersonStatus)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {Object.entries(PERSON_STATUS_LABELS).map(([v, l]) => (
-                  <SelectItem key={v} value={v}>{l}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {absenceDriven ? (
+              <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+                {PERSON_STATUS_LABELS[status]}
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Definido automaticamente pelas ausências (TeamOps → Ausências).
+                </p>
+              </div>
+            ) : (
+              <Select value={status} onValueChange={(v) => setStatus(v as PersonStatus)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {MANUAL_PERSON_STATUSES.map((v) => (
+                    <SelectItem key={v} value={v}>{PERSON_STATUS_LABELS[v]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
           <div>
             <Label>Horas/dia</Label>

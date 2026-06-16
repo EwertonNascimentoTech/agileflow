@@ -23,6 +23,8 @@ from app.modules.teamops.schemas import (
     AreaUpdate,
     CompetencyMapResponse,
     DashboardKpis,
+    HolidayCreate,
+    HolidayResponse,
     OrgTreeResponse,
     PersonCreate,
     PersonResponse,
@@ -42,6 +44,8 @@ from app.modules.teamops.schemas import (
     StackCreate,
     StackResponse,
     StackUpdate,
+    WorkCalendarResponse,
+    WorkCalendarUpdate,
 )
 from app.modules.teamops.service import (
     AbsenceService,
@@ -56,6 +60,7 @@ from app.modules.teamops.service import (
     PositionService,
     StackCategoryService,
     StackService,
+    WorkCalendarService,
 )
 from app.modules.teamops.models import Person
 from app.modules.super_admin.models import UserRole
@@ -97,7 +102,7 @@ async def get_alerts(ctx: ModuleContext = Depends(_ctx)):
 
 @router.get("/org/tree", response_model=OrgTreeResponse)
 async def get_org_tree(ctx: ModuleContext = Depends(_ctx)):
-    return await OrgService.tree(ctx.db)
+    return await OrgService.area_tree(ctx.db)
 
 
 @router.get("/competency-map", response_model=CompetencyMapResponse)
@@ -209,6 +214,17 @@ async def set_position_permissions(
     _=Depends(_can_config_manage),
 ):
     return await PositionService.set_permissions(ctx.db, position_id, data.codes, ctx.user.tenant_id)
+
+
+@router.post("/positions/{position_id}/access-role")
+async def ensure_position_access_role(
+    position_id: uuid.UUID,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_config_manage),
+):
+    """Garante o role do cargo e devolve seu id — chave usada no access_control dos kanbans."""
+    role_id = await PositionService.ensure_role(ctx.db, position_id, ctx.user.tenant_id)
+    return {"role_id": str(role_id)}
 
 
 # ─────────────────────────────────────────────
@@ -521,3 +537,45 @@ async def reject_absence(
 ):
     approver_pid = await _current_person_id(ctx)
     return await AbsenceService.decide(ctx.db, absence_id, approve=False, data=data, approver_person_id=approver_pid)
+
+
+# ─────────────────────────────────────────────
+# Calendário de trabalho + feriados (base do cronograma)
+# ─────────────────────────────────────────────
+
+
+@router.get("/work-calendar", response_model=WorkCalendarResponse)
+async def get_work_calendar(ctx: ModuleContext = Depends(_ctx)):
+    return await WorkCalendarService.get(ctx.db)
+
+
+@router.put("/work-calendar", response_model=WorkCalendarResponse)
+async def update_work_calendar(
+    data: WorkCalendarUpdate,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_config_manage),
+):
+    return await WorkCalendarService.update(ctx.db, data)
+
+
+@router.get("/holidays", response_model=list[HolidayResponse])
+async def list_holidays(ctx: ModuleContext = Depends(_ctx)):
+    return await WorkCalendarService.list_holidays(ctx.db)
+
+
+@router.post("/holidays", response_model=HolidayResponse, status_code=201)
+async def create_holiday(
+    data: HolidayCreate,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_config_manage),
+):
+    return await WorkCalendarService.create_holiday(ctx.db, data)
+
+
+@router.delete("/holidays/{holiday_id}", status_code=204)
+async def delete_holiday(
+    holiday_id: uuid.UUID,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_config_manage),
+):
+    await WorkCalendarService.delete_holiday(ctx.db, holiday_id)

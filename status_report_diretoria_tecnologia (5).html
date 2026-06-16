@@ -1,0 +1,1312 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Status Report | Projetos de TI — Diretoria de Gestão Estratégica</title>
+  <style>
+    :root {
+      --bg: #ececee;
+      --surface: #ffffff;
+      --surface-soft: #f5f6f8;
+      --ink: #1c2433;
+      --muted: #5c6675;
+      --border: #d9dee6;
+      --navy: #1b3a8f;
+      --navy-dark: #142d73;
+      --cyan: #00a3e0;
+      --cyan-soft: #e3f4fc;
+      --navy-soft: #e8edf9;
+      --green: #1e8e3e;
+      --green-bg: #e9f5ec;
+      --amber: #9a6a00;
+      --amber-bg: #fdf3da;
+      --red: #b42323;
+      --red-bg: #fdeaea;
+      --gray-bg: #e9ecf1;
+      --radius: 10px;
+      --shadow: 0 6px 22px rgba(20, 45, 115, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Trebuchet MS", Tahoma, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      min-height: 100vh;
+    }
+
+    .page {
+      width: min(1320px, calc(100% - 48px));
+      margin: 0 auto;
+      padding: 28px 0 60px;
+    }
+
+    .display {
+      font-style: italic;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: -0.015em;
+      line-height: 0.98;
+    }
+
+    .label-caps {
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      font-weight: 700;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    /* ===== Hero ===== */
+    .hero {
+      background: linear-gradient(180deg, #f4f5f6 0%, #ebedef 100%);
+      border: 1px solid #e2e5ea;
+      border-radius: 14px;
+      position: relative;
+      overflow: hidden;
+      margin-bottom: 20px;
+      min-height: 320px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      box-shadow: var(--shadow);
+    }
+
+    .hero-shapes { position: absolute; inset: 0; pointer-events: none; }
+    .hero-shapes span { position: absolute; transform: skewX(-20deg); border-radius: 6px; }
+    .hero-shapes .s1 { width: 320px; height: 150%; right: 2%; top: -25%; background: linear-gradient(180deg, #29b3e8 0%, #0f7fc4 55%, #b9c6d6 100%); }
+    .hero-shapes .s2 { width: 140px; height: 70%; right: 27%; top: -30%; background: linear-gradient(180deg, #1b3a8f 0%, #2f6fc0 100%); opacity: .92; }
+    .hero-shapes .s3 { width: 110px; height: 65%; right: -3%; bottom: -28%; background: linear-gradient(180deg, #cfe9f7 0%, #9fd4ef 100%); opacity: .85; }
+    .hero-shapes .s4 { width: 56px; height: 45%; right: 23.5%; bottom: -18%; background: #d7dee8; opacity: .8; }
+
+    .hero-dots {
+      position: absolute;
+      left: 26px; top: 46%;
+      width: 54px; height: 26px;
+      background-image: radial-gradient(circle, #c9cfd8 1.6px, transparent 1.7px);
+      background-size: 13px 13px;
+      opacity: .9;
+    }
+
+    .hero-top { position: relative; z-index: 2; padding: 24px 30px 0; }
+
+    .brand { display: inline-block; color: var(--navy); line-height: 1.05; }
+    .brand .brand-sistema { display: block; font-size: 12px; font-weight: 700; font-style: italic; letter-spacing: .02em; }
+    .brand .brand-fiea { display: block; font-size: 28px; font-weight: 900; font-style: italic; letter-spacing: -0.02em; }
+    .brand .brand-entidades { display: block; font-size: 9px; font-weight: 800; letter-spacing: .22em; margin-top: 1px; }
+
+    .hero-main { position: relative; z-index: 2; padding: 22px 30px 0; max-width: 62%; }
+    .hero-main h1 { margin: 0; font-size: clamp(32px, 4.4vw, 56px); }
+    .hero-main h1 .t-cyan { display: block; color: var(--cyan); }
+    .hero-main h1 .t-navy { display: block; color: var(--navy); }
+    .hero-main .hero-tag {
+      margin-top: 12px;
+      color: var(--cyan);
+      text-transform: uppercase;
+      letter-spacing: .14em;
+      font-weight: 600;
+      font-size: 13px;
+    }
+
+    .hero-foot { position: relative; z-index: 2; padding: 22px 30px 24px; display: flex; align-items: flex-end; gap: 40px; flex-wrap: wrap; }
+    .hero-foot .foot-block strong {
+      display: block;
+      color: var(--navy);
+      text-transform: uppercase;
+      font-weight: 800;
+      font-size: 13.5px;
+      letter-spacing: .02em;
+      line-height: 1.35;
+    }
+    .hero-foot .foot-block small { display: block; color: var(--muted); font-size: 12px; margin-bottom: 2px; }
+
+    /* ===== Navegação por abas ===== */
+    .tab-nav {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin: 0 0 20px;
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      background: var(--bg);
+      padding: 12px 0;
+    }
+
+    button { appearance: none; border: 0; cursor: pointer; font-family: inherit; }
+
+    .tab-btn, .print-btn {
+      padding: 10px 16px;
+      background: white;
+      color: var(--navy);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-weight: 800;
+      font-style: italic;
+      text-transform: uppercase;
+      font-size: 12px;
+      letter-spacing: .03em;
+      transform: skewX(-12deg);
+      transition: .18s ease;
+    }
+
+    .tab-btn > span, .print-btn > span { display: inline-block; transform: skewX(12deg); }
+
+    .tab-btn:hover, .print-btn:hover { border-color: var(--cyan); color: var(--cyan); }
+
+    .tab-btn.active {
+      background: var(--navy);
+      border-color: var(--navy);
+      color: #fff;
+      box-shadow: 0 4px 12px rgba(27, 58, 143, 0.28);
+    }
+
+    .tab-nav .spacer { flex: 1; }
+
+    /* ===== Conteúdo das abas ===== */
+    .tab-content { display: none; }
+    .tab-content.active { display: block; animation: tabIn .22s ease; }
+
+    @keyframes tabIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .tab-content.active { animation: none; }
+    }
+
+    /* ===== Blocos de seção ===== */
+    .section-block {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 22px 24px;
+      box-shadow: var(--shadow);
+      margin-bottom: 20px;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 16px;
+    }
+
+    .section-header h2 {
+      margin: 0;
+      font-size: 18px;
+      color: var(--navy);
+      font-style: italic;
+      font-weight: 900;
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .section-header h2::before {
+      content: "";
+      width: 14px;
+      height: 20px;
+      background: var(--cyan);
+      transform: skewX(-20deg);
+      border-radius: 2px;
+      flex: 0 0 auto;
+    }
+
+    .section-header p { margin: 0; color: var(--muted); font-size: 13px; }
+
+    /* ===== KPIs ===== */
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+
+    .kpi {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-top: 4px solid var(--cyan);
+      border-radius: var(--radius);
+      padding: 16px 18px;
+      box-shadow: var(--shadow);
+    }
+
+    .kpi:first-child { border-top-color: var(--navy); }
+
+    .kpi strong {
+      display: block;
+      margin-top: 8px;
+      font-size: 34px;
+      color: var(--navy);
+      font-style: italic;
+      font-weight: 900;
+      letter-spacing: -0.03em;
+      line-height: 1;
+    }
+
+    .kpi span { display: block; margin-top: 6px; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+
+    /* ===== Cards executivos ===== */
+    .exec-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 16px;
+    }
+
+    .exec-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .exec-card::before {
+      content: "";
+      display: block;
+      height: 5px;
+      background: linear-gradient(100deg, var(--navy) 0%, var(--navy) 38%, var(--cyan) 70%, #8fd3f0 100%);
+    }
+
+    .exec-card.done::before { background: linear-gradient(100deg, var(--green) 0%, #4caf6d 60%, #a7dcb8 100%); }
+    .exec-card.nodate::before { background: linear-gradient(100deg, #6a7686 0%, #98a3b2 60%, #cbd2db 100%); }
+
+    .exec-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 16px 18px 10px;
+    }
+
+    .exec-head h3 {
+      margin: 0;
+      font-size: 16.5px;
+      color: var(--navy);
+      font-style: italic;
+      font-weight: 900;
+      text-transform: uppercase;
+      line-height: 1.15;
+    }
+
+    .exec-desc {
+      padding: 0 18px;
+      margin: 0 0 12px;
+      color: var(--muted);
+      font-size: 12.5px;
+      line-height: 1.5;
+    }
+
+    .exec-progress { padding: 0 18px; margin-bottom: 12px; }
+
+    .exec-progress .progress-head {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 6px;
+      font-size: 10.5px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      color: var(--navy);
+    }
+
+    .exec-facts {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1px;
+      background: var(--border);
+      border-top: 1px solid var(--border);
+      margin-top: auto;
+    }
+
+    .exec-fact { background: var(--surface-soft); padding: 11px 18px; }
+
+    .exec-fact small {
+      display: block;
+      color: var(--muted);
+      font-size: 9.5px;
+      text-transform: uppercase;
+      font-weight: 800;
+      letter-spacing: .07em;
+      margin-bottom: 4px;
+    }
+
+    .exec-fact strong { font-size: 12.5px; color: #2a3344; line-height: 1.35; font-weight: 700; }
+
+    .exec-footer {
+      border-top: 1px solid var(--border);
+      padding: 10px 18px;
+      display: flex;
+      justify-content: flex-end;
+      background: #fbfcfd;
+    }
+
+    .exec-link {
+      background: none;
+      color: var(--cyan);
+      font-weight: 800;
+      font-style: italic;
+      text-transform: uppercase;
+      font-size: 11.5px;
+      letter-spacing: .04em;
+      padding: 4px 2px;
+    }
+
+    .exec-link:hover { color: var(--navy); text-decoration: underline; }
+
+    /* ===== Badges ===== */
+    .badge {
+      display: inline-block;
+      padding: 5px 11px;
+      font-size: 10.5px;
+      font-weight: 900;
+      font-style: italic;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      white-space: nowrap;
+      transform: skewX(-12deg);
+      border-radius: 3px;
+    }
+
+    .badge > span { display: inline-block; transform: skewX(12deg); }
+
+    .badge.execucao { background: var(--cyan-soft); color: #086d99; }
+    .badge.planejamento { background: var(--navy-soft); color: var(--navy); }
+    .badge.backlog { background: var(--gray-bg); color: #4a5568; }
+    .badge.concluido { background: var(--green-bg); color: var(--green); }
+    .badge.atencao { background: var(--amber-bg); color: var(--amber); }
+
+    /* ===== Card detalhado de projeto ===== */
+    .project-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      margin: 0 0 22px;
+      overflow: hidden;
+    }
+
+    .project-card::before {
+      content: "";
+      display: block;
+      height: 5px;
+      background: linear-gradient(100deg, var(--navy) 0%, var(--navy) 38%, var(--cyan) 70%, #8fd3f0 100%);
+    }
+
+    .project-top {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 18px;
+      padding: 22px 26px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    }
+
+    .project-title h2 {
+      margin: 0 0 8px;
+      font-size: 22px;
+      color: var(--navy);
+      font-style: italic;
+      font-weight: 900;
+      text-transform: uppercase;
+      line-height: 1.12;
+    }
+
+    .project-title p { margin: 0; color: var(--muted); max-width: 860px; line-height: 1.55; font-size: 13.5px; }
+
+    .status-stack { display: flex; align-items: flex-end; flex-direction: column; gap: 8px; }
+
+    .project-body {
+      padding: 22px 26px 26px;
+      display: grid;
+      grid-template-columns: .9fr 1.1fr;
+      gap: 22px;
+    }
+
+    .info-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 16px; }
+
+    .info-box {
+      background: var(--surface-soft);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 13px 14px;
+      min-height: 76px;
+    }
+
+    .info-box small {
+      display: block;
+      color: var(--muted);
+      font-size: 10.5px;
+      text-transform: uppercase;
+      font-weight: 800;
+      letter-spacing: .06em;
+      margin-bottom: 6px;
+    }
+
+    .info-box strong { font-size: 13.5px; line-height: 1.35; color: #2a3344; }
+
+    .progress-wrap {
+      background: var(--surface-soft);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 15px 16px;
+    }
+
+    .progress-wrap .progress-head {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 10px;
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      color: var(--navy);
+    }
+
+    .progress { height: 10px; overflow: hidden; background: #dfe4eb; border-radius: 3px; }
+
+    .progress span {
+      display: block;
+      height: 100%;
+      background: linear-gradient(90deg, var(--navy), var(--cyan));
+      transform: skewX(-12deg);
+      transform-origin: left;
+      border-radius: 0 3px 3px 0;
+    }
+
+    .progress span.done { background: var(--green); }
+
+    .executive-note {
+      margin-top: 16px;
+      background: var(--navy-soft);
+      border-left: 4px solid var(--navy);
+      border-radius: 6px;
+      padding: 14px 16px;
+      color: #25304a;
+      line-height: 1.55;
+      font-size: 13.5px;
+    }
+
+    .executive-note strong {
+      color: var(--navy);
+      text-transform: uppercase;
+      font-style: italic;
+      font-size: 12px;
+      letter-spacing: .03em;
+    }
+
+    .panel {
+      background: var(--surface-soft);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 14px;
+    }
+
+    .panel h3 {
+      margin: 0;
+      padding: 13px 16px;
+      background: #ffffff;
+      border-bottom: 1px solid var(--border);
+      font-size: 12.5px;
+      color: var(--navy);
+      font-style: italic;
+      font-weight: 900;
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    table { width: 100%; border-collapse: collapse; }
+
+    th, td {
+      padding: 11px 14px;
+      text-align: left;
+      vertical-align: top;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    th {
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      font-size: 10px;
+      background: #fbfcfd;
+    }
+
+    tr:last-child td { border-bottom: 0; }
+
+    .mini-status {
+      display: inline-block;
+      padding: 4px 9px;
+      font-size: 10.5px;
+      font-weight: 800;
+      font-style: italic;
+      text-transform: uppercase;
+      background: var(--gray-bg);
+      color: #4a5568;
+      white-space: nowrap;
+      transform: skewX(-12deg);
+      border-radius: 3px;
+    }
+
+    .mini-status > span { display: inline-block; transform: skewX(12deg); }
+
+    .mini-status.done { background: var(--green-bg); color: var(--green); }
+    .mini-status.running { background: var(--cyan-soft); color: #086d99; }
+    .mini-status.pending { background: var(--amber-bg); color: var(--amber); }
+
+    /* ===== Timeline ===== */
+    .timeline { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 18px; }
+
+    .timeline-item {
+      background: var(--surface-soft);
+      border: 1px solid var(--border);
+      border-top: 4px solid var(--cyan);
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .timeline-item:first-child { border-top-color: var(--navy); }
+    .timeline-item:last-child { border-top-color: #8fd3f0; }
+
+    .timeline-item small { color: var(--muted); font-weight: 800; text-transform: uppercase; letter-spacing: .07em; font-size: 10.5px; }
+
+    .timeline-item h3 {
+      margin: 8px 0 8px;
+      font-size: 15px;
+      color: var(--navy);
+      font-style: italic;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+
+    .timeline-item p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+
+    /* ===== Rodapé ===== */
+    .footer-bar {
+      margin-top: 30px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 20px;
+      flex-wrap: wrap;
+      box-shadow: var(--shadow);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .footer-bar::after {
+      content: "";
+      position: absolute;
+      right: -20px; top: -40%;
+      width: 90px; height: 180%;
+      background: linear-gradient(180deg, var(--cyan), var(--navy));
+      transform: skewX(-20deg);
+      opacity: .14;
+    }
+
+    .footer-bar strong { color: var(--navy); text-transform: uppercase; font-style: italic; font-weight: 900; font-size: 13px; }
+    .footer-bar span { color: var(--muted); font-size: 12.5px; }
+
+    /* ===== Responsivo ===== */
+    @media (max-width: 1100px) {
+      .project-body, .exec-grid { grid-template-columns: 1fr; }
+      .summary-grid { grid-template-columns: repeat(2, 1fr); }
+      .status-stack { align-items: flex-start; }
+      .hero-main { max-width: 100%; }
+      .hero-shapes .s2, .hero-shapes .s4 { display: none; }
+    }
+
+    @media (max-width: 760px) {
+      .page { width: min(100% - 24px, 1320px); padding-top: 14px; }
+      .summary-grid, .info-grid, .timeline { grid-template-columns: 1fr; }
+      .project-top { grid-template-columns: 1fr; }
+      .project-body { padding: 18px; }
+      th, td { padding: 10px; }
+      .hero { min-height: 0; }
+      .hero-shapes .s1 { width: 150px; right: -8%; }
+      .tab-nav { position: static; }
+    }
+
+    /* ===== Impressão: mostra tudo ===== */
+    @media print {
+      body { background: white; }
+      .page { width: 100%; padding: 0; }
+      .tab-nav { display: none; }
+      .tab-content { display: block !important; }
+      .exec-footer { display: none; }
+      .hero, .project-card, .section-block, .kpi, .exec-card, .footer-bar { box-shadow: none; }
+      .project-card, .exec-card { break-inside: avoid; page-break-inside: avoid; }
+      .tab-content[data-project] { page-break-before: always; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+
+    <!-- HERO -->
+    <section class="hero">
+      <div class="hero-shapes" aria-hidden="true">
+        <span class="s1"></span><span class="s2"></span><span class="s3"></span><span class="s4"></span>
+      </div>
+      <div class="hero-dots" aria-hidden="true"></div>
+
+      <div class="hero-top">
+        <div class="brand">
+          <span class="brand-sistema">Sistema</span>
+          <span class="brand-fiea">FIEA</span>
+          <span class="brand-entidades">SESI&nbsp;|&nbsp;SENAI&nbsp;|&nbsp;IEL</span>
+        </div>
+      </div>
+
+      <div class="hero-main">
+        <h1 class="display">
+          <span class="t-cyan">Status Report</span>
+          <span class="t-navy">Projetos de TI</span>
+        </h1>
+        <div class="hero-tag">Tecnologias Digitais</div>
+      </div>
+
+      <div class="hero-foot">
+        <div class="foot-block">
+          <strong>Diretoria de Gestão<br>Estratégica</strong>
+        </div>
+        <div class="foot-block">
+          <small>Data</small>
+          <strong>11 de Junho de 2026</strong>
+        </div>
+        <div class="foot-block">
+          <small>Horário</small>
+          <strong>14h30 às 15h30</strong>
+        </div>
+      </div>
+    </section>
+
+    <!-- NAVEGAÇÃO POR ABAS -->
+    <nav class="tab-nav" aria-label="Navegação do status report">
+      <button class="tab-btn active" data-tab="visao-geral"><span>Visão Geral</span></button>
+      <button class="tab-btn" data-tab="idcortex"><span>IDCortex</span></button>
+      <button class="tab-btn" data-tab="orcamento"><span>Orçamento Plurianual</span></button>
+      <button class="tab-btn" data-tab="riscos"><span>Unificação de Riscos</span></button>
+      <button class="tab-btn" data-tab="indicadores"><span>Indicadores</span></button>
+      <button class="tab-btn" data-tab="simulador"><span>Simulador de Gratuidade</span></button>
+      <div class="spacer"></div>
+      <button class="print-btn" onclick="window.print()"><span>Imprimir / PDF</span></button>
+    </nav>
+
+    <!-- ============ ABA: VISÃO GERAL ============ -->
+    <div class="tab-content active" id="tab-visao-geral">
+
+      <section class="summary-grid">
+        <article class="kpi">
+          <span class="label-caps">Total de projetos</span>
+          <strong>5</strong>
+          <span>Projetos acompanhados no portfólio de tecnologia da Diretoria.</span>
+        </article>
+        <article class="kpi">
+          <span class="label-caps">Concluído</span>
+          <strong>1</strong>
+          <span>IDCortex — apresentação prevista para 15/06.</span>
+        </article>
+        <article class="kpi">
+          <span class="label-caps">Planejados</span>
+          <strong>3</strong>
+          <span>Orçamento Plurianual, Unificação de Riscos e Automatização de Indicadores.</span>
+        </article>
+        <article class="kpi">
+          <span class="label-caps">Sem data prevista</span>
+          <strong>1</strong>
+          <span>Melhorias do Simulador de Gratuidade — pacote planejado.</span>
+        </article>
+      </section>
+
+      <section class="section-block">
+        <div class="section-header">
+          <h2>Resumo executivo por projeto</h2>
+          <p>Visão de um relance — detalhes em cada aba.</p>
+        </div>
+        <div class="exec-grid">
+
+          <article class="exec-card done">
+            <div class="exec-head">
+              <h3>IDCortex</h3>
+              <span class="badge concluido"><span>Concluído</span></span>
+            </div>
+            <p class="exec-desc">Plataforma corporativa de IA: autenticação segura, agentes do Azure AI Studio e chat com prompts curados. Uso governado e padronizado de IA na organização.</p>
+            <div class="exec-progress">
+              <div class="progress-head"><span>Progresso do MVP</span><span>100%</span></div>
+              <div class="progress"><span class="done" style="width:100%"></span></div>
+            </div>
+            <div class="exec-facts">
+              <div class="exec-fact"><small>Próximo marco</small><strong>Apresentação oficial em 15/06</strong></div>
+              <div class="exec-fact"><small>Decisão necessária</small><strong>Plano de adoção e rollout por áreas</strong></div>
+            </div>
+            <div class="exec-footer">
+              <button class="exec-link" data-goto="idcortex">Ver detalhes do projeto</button>
+            </div>
+          </article>
+
+          <article class="exec-card">
+            <div class="exec-head">
+              <h3>Orçamento Plurianual</h3>
+              <span class="badge planejamento"><span>Planejado</span></span>
+            </div>
+            <p class="exec-desc">Sistema web para construção, simulação, análise e oficialização do orçamento plurianual: ciclos orçamentários, cenários, projeções e versões até a consolidação oficial.</p>
+            <div class="exec-progress">
+              <div class="progress-head"><span>Progresso</span><span>0%</span></div>
+              <div class="progress"><span style="width:0%"></span></div>
+            </div>
+            <div class="exec-facts">
+              <div class="exec-fact"><small>Cronograma</small><strong>Não definido — aguarda priorização</strong></div>
+              <div class="exec-fact"><small>Decisão necessária</small><strong>Priorização dos projetos pela Diretoria</strong></div>
+            </div>
+            <div class="exec-footer">
+              <button class="exec-link" data-goto="orcamento">Ver detalhes do projeto</button>
+            </div>
+          </article>
+
+          <article class="exec-card">
+            <div class="exec-head">
+              <h3>Unificação de Riscos</h3>
+              <span class="badge planejamento"><span>Planejado</span></span>
+            </div>
+            <p class="exec-desc">Unificação das ferramentas de Riscos Estratégicos e Operacionais, com avaliação de integração com a aplicação de Gestão de Risco da Governança Corporativa.</p>
+            <div class="exec-progress">
+              <div class="progress-head"><span>Progresso</span><span>0%</span></div>
+              <div class="progress"><span style="width:0%"></span></div>
+            </div>
+            <div class="exec-facts">
+              <div class="exec-fact"><small>Cronograma</small><strong>Não definido — aguarda priorização</strong></div>
+              <div class="exec-fact"><small>Decisão necessária</small><strong>Priorização dos projetos pela Diretoria</strong></div>
+            </div>
+            <div class="exec-footer">
+              <button class="exec-link" data-goto="riscos">Ver detalhes do projeto</button>
+            </div>
+          </article>
+
+          <article class="exec-card">
+            <div class="exec-head">
+              <h3>Automatização de Indicadores</h3>
+              <span class="badge planejamento"><span>Planejado</span></span>
+            </div>
+            <p class="exec-desc">Automatização da coleta, tratamento e disponibilização de ~160 indicadores da Estratégia Organizacional, com o DW como fonte oficial de dados.</p>
+            <div class="exec-progress">
+              <div class="progress-head"><span>Progresso</span><span>0%</span></div>
+              <div class="progress"><span style="width:0%"></span></div>
+            </div>
+            <div class="exec-facts">
+              <div class="exec-fact"><small>Cronograma</small><strong>Não definido — aguarda priorização</strong></div>
+              <div class="exec-fact"><small>Decisão necessária</small><strong>Priorização dos projetos pela Diretoria</strong></div>
+            </div>
+            <div class="exec-footer">
+              <button class="exec-link" data-goto="indicadores">Ver detalhes do projeto</button>
+            </div>
+          </article>
+
+          <article class="exec-card nodate">
+            <div class="exec-head">
+              <h3>Melhorias do Simulador de Gratuidade</h3>
+              <span class="badge backlog"><span>Sem data prevista</span></span>
+            </div>
+            <p class="exec-desc">Pacote em três frentes: novas fontes de produção no DW, módulo de previsão com dados da Solução 360 e módulo de simulações manuais de produção e orçamento.</p>
+            <div class="exec-progress">
+              <div class="progress-head"><span>Progresso</span><span>0%</span></div>
+              <div class="progress"><span style="width:0%"></span></div>
+            </div>
+            <div class="exec-facts">
+              <div class="exec-fact"><small>Cronograma</small><strong>Não definido — aguarda priorização</strong></div>
+              <div class="exec-fact"><small>Decisão necessária</small><strong>Priorização dos projetos pela Diretoria</strong></div>
+            </div>
+            <div class="exec-footer">
+              <button class="exec-link" data-goto="simulador">Ver detalhes do projeto</button>
+            </div>
+          </article>
+
+        </div>
+      </section>
+
+      <section class="section-block">
+        <div class="section-header">
+          <h2>Plano 30 / 60 / 90 dias</h2>
+          <p>Resumo de condução sugerida para os próximos ciclos.</p>
+        </div>
+        <div class="timeline">
+          <article class="timeline-item">
+            <small>Próximos 30 dias</small>
+            <h3>Apresentar e refinar</h3>
+            <p>Apresentar o IDCortex (15/06), iniciar refinamento do Orçamento Plurianual e o levantamento da Unificação de Riscos.</p>
+          </article>
+          <article class="timeline-item">
+            <small>Próximos 60 dias</small>
+            <h3>Estruturar e priorizar</h3>
+            <p>Consolidar escopos, backlogs e cronogramas macro dos projetos planejados e validar as fontes dos indicadores no DW.</p>
+          </article>
+          <article class="timeline-item">
+            <small>Próximos 90 dias</small>
+            <h3>Executar por ondas</h3>
+            <p>Iniciar execução conforme priorização da Diretoria e definir a janela das melhorias do Simulador de Gratuidade.</p>
+          </article>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- ============ ABA: IDCORTEX ============ -->
+    <div class="tab-content" id="tab-idcortex" data-project>
+      <section class="project-card">
+        <div class="project-top">
+          <div class="project-title">
+            <h2>IDCortex</h2>
+            <p>
+              Plataforma corporativa que permite aos usuários autenticar-se com segurança, acessar agentes de IA
+              previamente configurados no Azure AI Studio e interagir com esses agentes por meio de uma interface de chat,
+              utilizando prompts corporativos curados.
+            </p>
+          </div>
+          <div class="status-stack">
+            <span class="badge concluido"><span>Concluído</span></span>
+            <span class="badge execucao"><span>Apresentação 15/06</span></span>
+          </div>
+        </div>
+
+        <div class="project-body">
+          <div>
+            <div class="info-grid">
+              <div class="info-box"><small>Objetivo de negócio</small><strong>Uso governado e padronizado de IA na organização</strong></div>
+              <div class="info-box"><small>Plataforma</small><strong>Azure AI Studio + interface de chat corporativa</strong></div>
+              <div class="info-box"><small>Fase atual</small><strong>Concluído — preparação da apresentação</strong></div>
+              <div class="info-box"><small>Próximo marco</small><strong>Apresentação em 15/06/2026</strong></div>
+            </div>
+
+            <div class="progress-wrap">
+              <div class="progress-head"><span>Progresso do MVP</span><span>100%</span></div>
+              <div class="progress" aria-label="Progresso de 100%"><span class="done" style="width:100%"></span></div>
+            </div>
+
+            <div class="executive-note">
+              <strong>Resumo executivo:</strong> MVP concluído, viabilizando o uso governado e padronizado de
+              Inteligência Artificial na organização, com aumento de produtividade dos usuários e garantia de
+              controle de acesso, sem expor complexidades técnicas. Apresentação oficial prevista para 15/06.
+            </div>
+          </div>
+
+          <div>
+            <div class="panel">
+              <h3>Entregas realizadas <span class="mini-status done"><span>Concluído</span></span></h3>
+              <table>
+                <thead><tr><th>Entrega</th><th>Status</th></tr></thead>
+                <tbody>
+                  <tr><td>Autenticação segura dos usuários</td><td><span class="mini-status done"><span>Concluído</span></span></td></tr>
+                  <tr><td>Acesso a agentes de IA configurados no Azure AI Studio</td><td><span class="mini-status done"><span>Concluído</span></span></td></tr>
+                  <tr><td>Interface de chat para interação com os agentes</td><td><span class="mini-status done"><span>Concluído</span></span></td></tr>
+                  <tr><td>Biblioteca de prompts corporativos curados</td><td><span class="mini-status done"><span>Concluído</span></span></td></tr>
+                  <tr><td>Controle de acesso e governança do MVP</td><td><span class="mini-status done"><span>Concluído</span></span></td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="panel">
+              <h3>Próximas atividades</h3>
+              <table>
+                <thead><tr><th>Atividade</th><th>Responsável</th><th>Previsão</th></tr></thead>
+                <tbody>
+                  <tr><td>Apresentação oficial da plataforma</td><td>PO / TI</td><td>15/06/2026</td></tr>
+                  <tr><td>Coletar feedback dos primeiros usuários</td><td>PO</td><td>Jun/2026</td></tr>
+                  <tr><td>Definir plano de adoção e rollout por áreas</td><td>TI / Diretoria</td><td>Jun-Jul/2026</td></tr>
+                  <tr><td>Planejar evoluções pós-MVP (roadmap V2)</td><td>PO / TI</td><td>Jul/2026</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="panel">
+              <h3>Riscos e decisões necessárias</h3>
+              <table>
+                <thead><tr><th>Ponto</th><th>Impacto</th><th>Ação</th></tr></thead>
+                <tbody>
+                  <tr><td>Adoção pelos usuários nas áreas</td><td>Médio</td><td>Plano de comunicação e capacitação</td></tr>
+                  <tr><td>Governança e curadoria contínua dos prompts</td><td>Médio</td><td>Definir responsáveis pela curadoria</td></tr>
+                  <tr><td>Custos de consumo de IA conforme escala de uso</td><td>Médio</td><td>Monitorar consumo e definir limites</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ============ ABA: ORÇAMENTO PLURIANUAL ============ -->
+    <div class="tab-content" id="tab-orcamento" data-project>
+      <section class="project-card">
+        <div class="project-top">
+          <div class="project-title">
+            <h2>Orçamento Plurianual</h2>
+            <p>
+              Sistema web para construção, simulação, análise e oficialização do orçamento plurianual da instituição,
+              permitindo a gestão de ciclos orçamentários, importação da base orçamentária, criação de cenários,
+              simulações, análise de projeções e acompanhamento das versões até a consolidação oficial.
+            </p>
+          </div>
+          <div class="status-stack">
+            <span class="badge planejamento"><span>Planejado</span></span>
+          </div>
+        </div>
+
+        <div class="project-body">
+          <div>
+            <div class="info-grid">
+              <div class="info-box"><small>Área demandante</small><strong>Planejamento / Orçamento</strong></div>
+              <div class="info-box"><small>Escopo central</small><strong>Ciclos orçamentários, cenários e simulações</strong></div>
+              <div class="info-box"><small>Fase atual</small><strong>Planejamento e estruturação</strong></div>
+              <div class="info-box"><small>Cronograma</small><strong>Não definido — aguarda priorização</strong></div>
+            </div>
+
+            <div class="progress-wrap">
+              <div class="progress-head"><span>Progresso</span><span>0%</span></div>
+              <div class="progress" aria-label="Progresso de 0%"><span style="width:0%"></span></div>
+            </div>
+
+            <div class="executive-note">
+              <strong>Resumo executivo:</strong> projeto planejado, de alto valor estratégico para a governança orçamentária.
+              A solução permitirá criar cenários e simulações sobre a base orçamentária, acompanhar versões e conduzir
+              o ciclo até a consolidação oficial do orçamento plurianual.
+            </div>
+          </div>
+
+          <div>
+            <div class="panel">
+              <h3>Cenário atual <span class="mini-status pending"><span>Em definição</span></span></h3>
+              <table>
+                <thead><tr><th>Item</th><th>Status</th></tr></thead>
+                <tbody>
+                  <tr><td>Conceito da solução e visão funcional</td><td><span class="mini-status done"><span>Concluído</span></span></td></tr>
+                  <tr><td>Mapeamento das regras e do ciclo orçamentário</td><td><span class="mini-status running"><span>Em andamento</span></span></td></tr>
+                  <tr><td>Definição de infraestrutura (SSO, banco, domínio)</td><td><span class="mini-status pending"><span>Pendente</span></span></td></tr>
+                  <tr><td>Plano de homologação e testes de segurança</td><td><span class="mini-status pending"><span>Pendente</span></span></td></tr>
+                  <tr><td>Cronograma macro de execução</td><td><span class="mini-status pending"><span>Pendente</span></span></td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="panel">
+              <h3>Próximas atividades</h3>
+              <table>
+                <thead><tr><th>Atividade</th><th>Responsável</th><th>Previsão</th></tr></thead>
+                <tbody>
+                  <tr><td>Refinar escopo funcional com a área demandante</td><td>PO / Orçamento</td><td>Jun/2026</td></tr>
+                  <tr><td>Definir infraestrutura (SSO, banco de dados, domínio)</td><td>TI / Infra</td><td>Jun-Jul/2026</td></tr>
+                  <tr><td>Planejar homologação e testes de segurança</td><td>TI / Segurança</td><td>Jul/2026</td></tr>
+                  <tr><td>Estruturar backlog e cronograma macro</td><td>PO</td><td>Jul/2026</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="panel">
+              <h3>Riscos e decisões necessárias</h3>
+              <table>
+                <thead><tr><th>Ponto</th><th>Impacto</th><th>Ação</th></tr></thead>
+                <tbody>
+                  <tr><td>Complexidade das regras orçamentárias</td><td>Alto</td><td>Workshops de refinamento com a área</td></tr>
+                  <tr><td>Dependências de infraestrutura e segurança</td><td>Alto</td><td>Antecipar definições de SSO, banco e domínio</td></tr>
+                  <tr><td>Aderência ao calendário do ciclo orçamentário</td><td>Alto</td><td>Alinhar prazos com a janela do ciclo institucional</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ============ ABA: UNIFICAÇÃO DE RISCOS ============ -->
+    <div class="tab-content" id="tab-riscos" data-project>
+      <section class="project-card">
+        <div class="project-top">
+          <div class="project-title">
+            <h2>Unificação das Ferramentas de Riscos Estratégicos e Operacionais</h2>
+            <p>
+              Aplicação para avaliação, acompanhamento e gestão dos riscos estratégicos da organização,
+              com possibilidade de integração com a aplicação de Gestão de Risco utilizada pela área de
+              Governança Corporativa.
+            </p>
+          </div>
+          <div class="status-stack">
+            <span class="badge planejamento"><span>Planejado</span></span>
+            <span class="badge atencao"><span>Integração em avaliação</span></span>
+          </div>
+        </div>
+
+        <div class="project-body">
+          <div>
+            <div class="info-grid">
+              <div class="info-box"><small>Áreas envolvidas</small><strong>Estratégia Organizacional / Governança Corporativa</strong></div>
+              <div class="info-box"><small>Escopo central</small><strong>Gestão unificada de riscos estratégicos e operacionais</strong></div>
+              <div class="info-box"><small>Fase atual</small><strong>Planejamento e avaliação de integração</strong></div>
+              <div class="info-box"><small>Cronograma</small><strong>Não definido — aguarda priorização</strong></div>
+            </div>
+
+            <div class="progress-wrap">
+              <div class="progress-head"><span>Progresso</span><span>0%</span></div>
+              <div class="progress" aria-label="Progresso de 0%"><span style="width:0%"></span></div>
+            </div>
+
+            <div class="executive-note">
+              <strong>Resumo executivo:</strong> iniciativa planejada para unificar a visão de riscos estratégicos e
+              operacionais em uma única solução, com avaliação da integração com a ferramenta de Gestão de Risco
+              já utilizada pela Governança Corporativa, evitando retrabalho e duplicidade de cadastros.
+            </div>
+          </div>
+
+          <div>
+            <div class="panel">
+              <h3>Cenário atual <span class="mini-status pending"><span>Inicial</span></span></h3>
+              <table>
+                <thead><tr><th>Item</th><th>Status</th></tr></thead>
+                <tbody>
+                  <tr><td>Identificação da necessidade de unificação</td><td><span class="mini-status done"><span>Concluído</span></span></td></tr>
+                  <tr><td>Levantamento dos processos das duas frentes de risco</td><td><span class="mini-status pending"><span>Pendente</span></span></td></tr>
+                  <tr><td>Análise da ferramenta utilizada pela Governança</td><td><span class="mini-status pending"><span>Pendente</span></span></td></tr>
+                  <tr><td>Definição do modelo de integração/unificação</td><td><span class="mini-status pending"><span>Pendente</span></span></td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="panel">
+              <h3>Próximas atividades</h3>
+              <table>
+                <thead><tr><th>Atividade</th><th>Responsável</th><th>Previsão</th></tr></thead>
+                <tbody>
+                  <tr><td>Mapear processos de riscos estratégicos e operacionais</td><td>PO / Áreas</td><td>Jun-Jul/2026</td></tr>
+                  <tr><td>Avaliar viabilidade de integração com a solução da Governança</td><td>TI / Governança</td><td>Jul/2026</td></tr>
+                  <tr><td>Definir modelo unificado (integrar x consolidar)</td><td>TI / Diretoria</td><td>Jul/2026</td></tr>
+                  <tr><td>Construir backlog inicial e cronograma macro</td><td>PO</td><td>Ago/2026</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="panel">
+              <h3>Riscos e decisões necessárias</h3>
+              <table>
+                <thead><tr><th>Ponto</th><th>Impacto</th><th>Ação</th></tr></thead>
+                <tbody>
+                  <tr><td>Compatibilidade com a ferramenta da Governança</td><td>Alto</td><td>Diagnóstico técnico de integração</td></tr>
+                  <tr><td>Metodologias distintas entre as áreas de risco</td><td>Médio</td><td>Alinhar taxonomia e critérios comuns</td></tr>
+                  <tr><td>Patrocínio e priorização entre as áreas</td><td>Médio</td><td>Definir patrocinador e responsáveis na Diretoria</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ============ ABA: AUTOMATIZAÇÃO DE INDICADORES ============ -->
+    <div class="tab-content" id="tab-indicadores" data-project>
+      <section class="project-card">
+        <div class="project-top">
+          <div class="project-title">
+            <h2>Automatização de Indicadores</h2>
+            <p>
+              Projeto para automatizar a coleta, tratamento, atualização e disponibilização dos indicadores
+              institucionais, iniciando pelos indicadores da área de Estratégia Organizacional. A primeira etapa
+              contempla aproximadamente 160 indicadores, utilizando o DW como fonte oficial de dados.
+            </p>
+          </div>
+          <div class="status-stack">
+            <span class="badge planejamento"><span>Planejado</span></span>
+            <span class="badge atencao"><span>Alto volume de indicadores</span></span>
+          </div>
+        </div>
+
+        <div class="project-body">
+          <div>
+            <div class="info-grid">
+              <div class="info-box"><small>Área demandante</small><strong>Estratégia Organizacional</strong></div>
+              <div class="info-box"><small>Fonte oficial</small><strong>DW institucional</strong></div>
+              <div class="info-box"><small>Fase atual</small><strong>Planejamento e levantamento inicial</strong></div>
+              <div class="info-box"><small>Volume da 1ª etapa</small><strong>~160 indicadores</strong></div>
+            </div>
+
+            <div class="progress-wrap">
+              <div class="progress-head"><span>Progresso</span><span>0%</span></div>
+              <div class="progress" aria-label="Progresso de 0%"><span style="width:0%"></span></div>
+            </div>
+
+            <div class="executive-note">
+              <strong>Resumo executivo:</strong> projeto planejado, com foco em eliminar coleta e atualização manual
+              de indicadores. A condução proposta é organizar os ~160 indicadores, validar as fontes no DW e priorizar
+              por ondas de entrega, reduzindo risco e acelerando geração de valor.
+            </div>
+          </div>
+
+          <div>
+            <div class="panel">
+              <h3>Cenário atual <span class="mini-status pending"><span>Inicial</span></span></h3>
+              <table>
+                <thead><tr><th>Item</th><th>Status</th></tr></thead>
+                <tbody>
+                  <tr><td>Identificação do escopo inicial de indicadores</td><td><span class="mini-status done"><span>Concluído</span></span></td></tr>
+                  <tr><td>Definição do DW como fonte oficial</td><td><span class="mini-status done"><span>Concluído</span></span></td></tr>
+                  <tr><td>Classificação dos ~160 indicadores</td><td><span class="mini-status pending"><span>Pendente</span></span></td></tr>
+                  <tr><td>Validação de disponibilidade dos dados no DW</td><td><span class="mini-status pending"><span>Pendente</span></span></td></tr>
+                  <tr><td>Priorização por ondas de entrega</td><td><span class="mini-status pending"><span>Pendente</span></span></td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="panel">
+              <h3>Próximas atividades</h3>
+              <table>
+                <thead><tr><th>Atividade</th><th>Responsável</th><th>Previsão</th></tr></thead>
+                <tbody>
+                  <tr><td>Consolidar lista completa dos indicadores</td><td>Estratégia</td><td>Jun/2026</td></tr>
+                  <tr><td>Classificar indicadores por tema, área e prioridade</td><td>PO / Estratégia</td><td>Jun-Jul/2026</td></tr>
+                  <tr><td>Validar existência e qualidade das fontes no DW</td><td>TI / Dados</td><td>Jul/2026</td></tr>
+                  <tr><td>Definir primeira onda de automatização</td><td>TI / Diretoria</td><td>Jul/2026</td></tr>
+                  <tr><td>Estruturar backlog e cronograma inicial</td><td>PO</td><td>Ago/2026</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="panel">
+              <h3>Riscos e decisões necessárias</h3>
+              <table>
+                <thead><tr><th>Ponto</th><th>Impacto</th><th>Ação</th></tr></thead>
+                <tbody>
+                  <tr><td>Grande volume de indicadores</td><td>Alto</td><td>Organizar entregas por ondas e prioridade</td></tr>
+                  <tr><td>Qualidade e disponibilidade dos dados no DW</td><td>Alto</td><td>Executar diagnóstico técnico por indicador</td></tr>
+                  <tr><td>Critérios de priorização ainda não definidos</td><td>Médio</td><td>Validar critérios com Diretoria e Estratégia</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ============ ABA: SIMULADOR DE GRATUIDADE ============ -->
+    <div class="tab-content" id="tab-simulador" data-project>
+      <section class="project-card">
+        <div class="project-top">
+          <div class="project-title">
+            <h2>Melhorias do Simulador de Gratuidade</h2>
+            <p>
+              Pacote de melhorias do Simulador de Gratuidade contemplando três frentes de atuação: integração com novas
+              fontes de dados de produção no DW, criação de um módulo de previsão com dados da Solução 360 e criação de
+              um módulo de simulações para inserção manual de cenários de produção e orçamento.
+            </p>
+          </div>
+          <div class="status-stack">
+            <span class="badge backlog"><span>Sem data prevista</span></span>
+            <span class="badge planejamento"><span>Pacote planejado</span></span>
+          </div>
+        </div>
+
+        <div class="project-body">
+          <div>
+            <div class="info-grid">
+              <div class="info-box"><small>Frente 1</small><strong>Novas fontes de dados de produção no DW</strong></div>
+              <div class="info-box"><small>Frente 2</small><strong>Módulo de previsão com dados da Solução 360</strong></div>
+              <div class="info-box"><small>Frente 3</small><strong>Módulo de simulações manuais (produção e orçamento)</strong></div>
+              <div class="info-box"><small>Execução</small><strong>Sem data prevista — aguarda priorização</strong></div>
+            </div>
+
+            <div class="progress-wrap">
+              <div class="progress-head"><span>Progresso</span><span>0%</span></div>
+              <div class="progress" aria-label="Progresso de 0%"><span style="width:0%"></span></div>
+            </div>
+
+            <div class="executive-note">
+              <strong>Resumo executivo:</strong> pacote de melhorias planejado e estruturado em três frentes, sem data
+              prevista de execução. A priorização junto à Diretoria definirá a janela de execução e a ordem das frentes,
+              considerando dependências de dados (DW e Solução 360).
+            </div>
+          </div>
+
+          <div>
+            <div class="panel">
+              <h3>Cenário atual <span class="mini-status pending"><span>Aguardando priorização</span></span></h3>
+              <table>
+                <thead><tr><th>Item</th><th>Status</th></tr></thead>
+                <tbody>
+                  <tr><td>Definição das três frentes de melhoria</td><td><span class="mini-status done"><span>Concluído</span></span></td></tr>
+                  <tr><td>Detalhamento do escopo de cada frente</td><td><span class="mini-status pending"><span>Pendente</span></span></td></tr>
+                  <tr><td>Validação das fontes de dados (DW e Solução 360)</td><td><span class="mini-status pending"><span>Pendente</span></span></td></tr>
+                  <tr><td>Definição da janela de execução</td><td><span class="mini-status pending"><span>Pendente</span></span></td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="panel">
+              <h3>Próximas atividades</h3>
+              <table>
+                <thead><tr><th>Atividade</th><th>Responsável</th><th>Previsão</th></tr></thead>
+                <tbody>
+                  <tr><td>Priorizar o pacote junto à Diretoria</td><td>Diretoria / PO</td><td>A definir</td></tr>
+                  <tr><td>Detalhar escopo das três frentes</td><td>PO / Área</td><td>Após priorização</td></tr>
+                  <tr><td>Avaliar disponibilidade de dados da Solução 360</td><td>TI / Dados</td><td>Após priorização</td></tr>
+                  <tr><td>Estimar esforço e definir janela de execução</td><td>TI</td><td>Após priorização</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="panel">
+              <h3>Riscos e decisões necessárias</h3>
+              <table>
+                <thead><tr><th>Ponto</th><th>Impacto</th><th>Ação</th></tr></thead>
+                <tbody>
+                  <tr><td>Ausência de data prevista de execução</td><td>Médio</td><td>Decidir priorização na pauta da Diretoria</td></tr>
+                  <tr><td>Dependência de dados da Solução 360</td><td>Alto</td><td>Validar integração e disponibilidade antecipadamente</td></tr>
+                  <tr><td>Qualidade das novas fontes de produção no DW</td><td>Médio</td><td>Diagnóstico técnico das fontes de dados</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <footer class="footer-bar">
+      <strong>Diretoria de Gestão Estratégica · Tecnologias Digitais</strong>
+      <span>Status Report — Projetos de TI · 11 de Junho de 2026 · 14h30 às 15h30</span>
+    </footer>
+  </main>
+
+  <script>
+    const tabButtons = document.querySelectorAll(".tab-btn");
+    const tabContents = document.querySelectorAll(".tab-content");
+
+    function openTab(tabId) {
+      tabButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.tab === tabId));
+      tabContents.forEach((content) => content.classList.toggle("active", content.id === "tab-" + tabId));
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    tabButtons.forEach((button) => {
+      button.addEventListener("click", () => openTab(button.dataset.tab));
+    });
+
+    document.querySelectorAll(".exec-link").forEach((link) => {
+      link.addEventListener("click", () => openTab(link.dataset.goto));
+    });
+  </script>
+</body>
+</html>

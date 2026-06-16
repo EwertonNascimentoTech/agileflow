@@ -1,5 +1,7 @@
 import api from "./client"
 
+// ── Projetos ────────────────────────────────────────────────────────────────
+
 export interface Project {
   id: string
   name: string
@@ -11,6 +13,25 @@ export interface Project {
   created_at: string
   updated_at: string
 }
+
+export type FunnelAccessLevel = "manage" | "view" | "none"
+
+export interface ProjectFunnel {
+  id: string
+  project_id: string
+  name: string
+  description: string | null
+  color: string
+  order: number
+  is_default: boolean
+  is_active: boolean
+  allowed_demand_type_ids: string[] | null
+  access_control: Record<string, FunnelAccessLevel> | null
+  created_at: string
+  updated_at: string
+}
+
+export type PriorityMode = "edit" | "view" | "hidden"
 
 export interface ProjectStatus {
   id: string
@@ -28,22 +49,20 @@ export interface ProjectStatus {
   move_in_role_ids: string[] | null
   sla_hours: number | null
   sla_warning_pct: number
+  priority_mode: PriorityMode
+  priority_required: boolean
+  cascade_children_on_move: boolean
+  children_to_funnel_id: string | null
+  grandchildren_to_funnel_id: string | null
   created_at: string
   updated_at: string
 }
 
-export interface ProjectFunnel {
-  id: string
-  project_id: string
-  name: string
-  description: string | null
-  color: string
-  order: number
-  is_default: boolean
-  is_active: boolean
-  allowed_demand_type_ids: string[] | null
-  created_at: string
-  updated_at: string
+export interface ProjectUpload {
+  object_name: string
+  filename: string
+  content_type: string
+  size: number
 }
 
 export interface ProjectTask {
@@ -56,15 +75,20 @@ export interface ProjectTask {
   title: string
   description: string | null
   assigned_to: string | null
+  planning_kind: string | null
   diretoria: string | null
   area: string | null
   start_date: string | null
   due_date: string | null
+  estimated_hours: number | null
+  actual_hours: number | null
+  percent_complete: number
   order: number
   created_by: string | null
   completed_at: string | null
   status_entered_at: string | null
   sla_state: "none" | "ok" | "warning" | "breached"
+  anexos?: ProjectUpload[] | null
   created_at: string
   updated_at: string
 }
@@ -158,6 +182,16 @@ export interface ProjectStatusSectionLink {
   created_at: string
 }
 
+export type DefaultFormFieldKey =
+  | "title"
+  | "description"
+  | "assigned_to"
+  | "diretoria"
+  | "area"
+  | "start_date"
+  | "due_date"
+  | "anexos"
+
 export interface ProjectStatusDefaultFormLink {
   id: string
   status_id: string
@@ -190,15 +224,6 @@ export interface ProjectAutomationRule {
   created_at: string
   updated_at: string
 }
-
-export type DefaultFormFieldKey =
-  | "title"
-  | "description"
-  | "assigned_to"
-  | "diretoria"
-  | "area"
-  | "start_date"
-  | "due_date"
 
 export interface ProjectDefaultFormField {
   id: string
@@ -250,7 +275,406 @@ export interface ProjectReports {
     completed_total: number
     avg_lead_time_days: number | null
   }
+  available_diretorias: string[]
+  available_areas: string[]
 }
+
+// ── Layout do card (quadro) ─────────────────────────────────────────────────
+
+export type CardFieldKey =
+  | "demand_type"
+  | "priority_quadrant"
+  | "schedule_sla"
+  | "code"
+  | "title"
+  | "description"
+  | "parent"
+  | "children_progress"
+  | "diretoria"
+  | "area"
+  | "due_date"
+  | "assignee"
+  | `form:${string}`
+
+export interface ProjectCardField {
+  id: string
+  funnel_id: string
+  field_key: CardFieldKey
+  label: string
+  is_visible: boolean
+  order: number
+}
+
+export interface ProjectCardAvailableField {
+  field_key: string
+  label: string
+  field_type: string
+}
+
+// ── Cronograma / Gantt ────────────────────────────────────────────────────────
+
+export type DependencyType = "FS" | "SS" | "FF" | "SF"
+
+export interface ProjectTaskDependency {
+  id: string
+  project_id: string
+  predecessor_id: string
+  successor_id: string
+  dep_type: DependencyType
+  lag_hours: number | string
+  created_at: string
+}
+
+export interface CriticalPathItem {
+  task_id: string
+  is_critical: boolean
+  total_float_hours: number
+  free_float_hours: number
+  late_start: string
+  late_finish: string
+}
+
+export interface WorkloadCell {
+  user_id: string
+  date: string
+  allocated_hours: number
+  capacity_hours: number
+  overallocated: boolean
+}
+
+export interface WorkloadResponse {
+  unit: "day" | "week"
+  cells: WorkloadCell[]
+}
+
+export interface AssigneeAbsenceItem {
+  start_date: string
+  end_date: string
+  type_name: string
+  status: string
+  partial_hours: number | null
+}
+
+export interface AssigneeAbsencesResponse {
+  by_user: Record<string, AssigneeAbsenceItem[]>
+}
+
+export interface TaskImportResult {
+  features_created: number
+  us_created: number
+  skipped: number
+  warnings: string[]
+}
+
+// ── Priorização ─────────────────────────────────────────────────────────────
+
+export type QuadrantCode = "quick_win" | "big_bet" | "fill_in" | "money_pit"
+
+export interface PriorityScalePoint {
+  value: number
+  description: string
+}
+
+export interface PriorityCriterion {
+  id: string
+  axis: "impact" | "effort"
+  code: string
+  label: string
+  weight: number
+  scale: PriorityScalePoint[]
+  order: number
+  is_active: boolean
+}
+
+export interface PriorityPillar {
+  id: string
+  code: string
+  label: string
+  perspective: string
+  modifier: number
+  color: string
+  order: number
+  is_active: boolean
+}
+
+export interface PriorityConfidenceLevel {
+  id: string
+  code: string
+  label: string
+  divisor: number
+  order: number
+  is_active: boolean
+}
+
+export interface PriorityQuadrant {
+  id: string
+  code: QuadrantCode
+  label: string
+  color: string
+  action_hint: string | null
+  order: number
+}
+
+export interface PrioritySettings {
+  id: string
+  impact_cut: number
+  effort_cut: number
+  confidence_id: string | null
+  is_enabled: boolean
+}
+
+export interface PriorityMatrixItem {
+  task_id: string
+  title: string
+  impacto_efetivo: number
+  esforco: number
+  quadrant_code: QuadrantCode
+  pillar_code: string | null
+  perspective: string | null
+  color: string | null
+  priority_rank: number | null
+}
+
+export interface PriorityScore {
+  id: string
+  task_id: string
+  pillar_id: string | null
+  pillar_ids: string[]
+  confidence_id: string | null
+  impact_scores: Record<string, number>
+  effort_scores: Record<string, number>
+  impacto_bruto: number
+  modulador: number
+  divisor: number
+  impacto_efetivo: number
+  esforco: number
+  quadrant_code: QuadrantCode
+  scored_by: string | null
+  scored_at: string
+}
+
+export interface PriorityScoreHistoryItem {
+  id: string
+  task_id: string
+  pillar_ids: string[]
+  impact_scores: Record<string, number>
+  effort_scores: Record<string, number>
+  impacto_efetivo: number
+  esforco: number
+  quadrant_code: QuadrantCode
+  scored_by: string | null
+  scored_at: string
+}
+
+export interface PriorityScoreInput {
+  pillar_ids?: string[]
+  pillar_id?: string | null
+  impact_scores: Record<string, number>
+  effort_scores: Record<string, number>
+}
+
+export interface PriorityComputeResult {
+  impacto_bruto: number
+  modulador: number
+  divisor: number
+  impacto_efetivo: number
+  esforco: number
+  quadrant_code: QuadrantCode
+}
+
+// ── Painel PO / Portfólio ─────────────────────────────────────────────────────
+
+export interface PendingStage {
+  funnel_name: string
+  status_name: string
+  status_entered_at: string | null
+}
+
+export interface PoPortfolioItem {
+  task_id: string
+  title: string
+  project_id: string
+  planning_kind: string
+  description: string | null
+  demand_type_id: string | null
+  start_date: string | null
+  due_date: string | null
+  next_due_date: string | null
+  pending_stages: PendingStage[]
+  quadrant_code: QuadrantCode | null
+  impacto_efetivo: number | null
+  esforco: number | null
+  priority_rank: number | null
+  pillar_code: string | null
+  perspective: string | null
+  color: string | null
+  progress_pct: number
+  expected_progress_pct: number | null
+  subtree_total: number
+  subtree_completed: number
+  overdue: boolean
+  breached_count: number
+  absence_conflict: boolean
+  unscored: boolean
+  no_due_date: boolean
+  critical_count: number
+  blocked_count: number
+  overallocated_users: string[]
+  on_time_completed: number
+  completed_count: number
+  est_hours: number
+  actual_hours: number
+  avg_lead_time_days: number | null
+  health: "verde" | "amarelo" | "vermelho"
+}
+
+export interface PoPortfolioAggregates {
+  rag: { verde: number; amarelo: number; vermelho: number }
+  total_projetos: number
+  total_programas: number
+  on_time_pct: number | null
+  avg_progress_pct: number | null
+  capacity_vs_demand: Record<string, number>
+}
+
+export interface PoPortfolioResponse {
+  po_id: string | null
+  items: PoPortfolioItem[]
+  aggregates: PoPortfolioAggregates
+  available_diretorias: string[]
+  available_areas: string[]
+}
+
+export interface PoOption {
+  person_id: string
+  user_id: string | null
+  full_name: string
+  has_login: boolean
+}
+
+export interface PoOverviewItem {
+  po_id: string
+  full_name: string
+  total_projetos: number
+  total_programas: number
+  rag: { verde: number; amarelo: number; vermelho: number }
+  on_time_pct: number | null
+  avg_progress_pct: number | null
+  overallocated_user_days: number
+}
+
+export interface PoOverviewResponse {
+  items: PoOverviewItem[]
+  available_diretorias: string[]
+  available_areas: string[]
+}
+
+// ── Status Report ───────────────────────────────────────────────────────────
+
+export interface StatusReportMeta {
+  diretoria: string | null
+  area: string | null
+  diretoria_label: string | null
+  area_label: string | null
+  generated_at: string
+}
+
+export interface StatusReportKpis {
+  total: number
+  concluido: number
+  planejado: number
+  sem_data: number
+  avg_progress_pct: number | null
+}
+
+export interface StatusReportCustomField {
+  label: string
+  field_type: string
+  value: string
+}
+
+export interface StatusReportCustomSection {
+  title: string
+  fields: StatusReportCustomField[]
+}
+
+export interface StatusReportRisk {
+  ponto: string
+  impacto: string
+  acao: string
+}
+
+export interface StatusReportOpenStage {
+  title: string
+  kanban: string | null
+  stage: string | null
+  is_root: boolean
+}
+
+export interface StatusReportScheduleItem {
+  title: string
+  level?: number
+  status: string | null
+  kanban: string | null
+  open: boolean
+  percent: number
+  planned_date: string | null
+  completed_at: string | null
+  responsavel: string | null
+}
+
+export interface StatusReportProject {
+  task_id: string
+  project_id: string
+  title: string
+  description: string | null
+  planning_kind: string
+  fase: string | null
+  health: "verde" | "amarelo" | "vermelho"
+  progress_pct: number
+  expected_progress_pct: number | null
+  start_date: string | null
+  due_date: string | null
+  next_due_date: string | null
+  responsavel: string | null
+  subtree_total: number
+  subtree_completed: number
+  no_due_date: boolean
+  entregas_realizadas: Array<{ title: string; responsavel: string | null; completed_at: string | null }>
+  proximas_atividades: Array<{ title: string; responsavel: string | null; previsao: string | null; status: string | null }>
+  cronograma: StatusReportScheduleItem[]
+  open_stages: StatusReportOpenStage[]
+  riscos: StatusReportRisk[]
+  custom_sections: StatusReportCustomSection[]
+  objetivo: string
+  resumo_executivo: string
+  decisoes: string[]
+}
+
+export interface StatusReportSnapshot {
+  meta: StatusReportMeta
+  kpis: StatusReportKpis
+  projects: StatusReportProject[]
+  plano: { d30: string; d60: string; d90: string }
+}
+
+export interface StatusReportListItem {
+  id: string
+  diretoria: string | null
+  area: string | null
+  diretoria_label: string | null
+  area_label: string | null
+  title: string
+  kpis: StatusReportKpis
+  generated_by: string | null
+  generated_at: string
+}
+
+export interface StatusReportResponse extends StatusReportListItem {
+  snapshot: StatusReportSnapshot
+}
+
+// ── API client ────────────────────────────────────────────────────────────────
 
 export const projetosApi = {
   listProjects: (activeOnly = false) =>
@@ -356,6 +780,8 @@ export const projetosApi = {
 
   listMyRequests: () =>
     api.get<ProjectTaskWithContext[]>(`/projetos/me/requests`).then((r) => r.data),
+  listAllTasks: (projectId?: string) =>
+    api.get<ProjectTaskWithContext[]>(`/projetos/tasks`, { params: projectId ? { project_id: projectId } : undefined }).then((r) => r.data),
 
   listStatusSectionLinks: (projectId: string, statusId: string) =>
     api.get<ProjectStatusSectionLink[]>(`/projetos/projects/${projectId}/statuses/${statusId}/section-links`).then((r) => r.data),
@@ -392,6 +818,7 @@ export const projetosApi = {
     is_default?: boolean
     is_active?: boolean
     allowed_demand_type_ids?: string[] | null
+    access_control?: Record<string, FunnelAccessLevel> | null
   }) => api.post<ProjectFunnel>(`/projetos/projects/${projectId}/funnels`, data).then((r) => r.data),
   reorderFunnels: (projectId: string, items: Array<{ id: string; order: number }>) =>
     api.patch<ProjectFunnel[]>(`/projetos/projects/${projectId}/funnels/reorder`, { items }).then((r) => r.data),
@@ -403,6 +830,7 @@ export const projetosApi = {
     is_default: boolean
     is_active: boolean
     allowed_demand_type_ids: string[] | null
+    access_control: Record<string, FunnelAccessLevel> | null
   }>) => api.patch<ProjectFunnel>(`/projetos/projects/${projectId}/funnels/${funnelId}`, data).then((r) => r.data),
   deleteFunnel: (projectId: string, funnelId: string) =>
     api.delete<void>(`/projetos/projects/${projectId}/funnels/${funnelId}`).then((r) => r.data),
@@ -424,9 +852,15 @@ export const projetosApi = {
     is_active?: boolean
     creates_demand_type_id?: string | null
     moves_to_funnel_id?: string | null
+    updates_origin_status_id?: string | null
     move_in_role_ids?: string[] | null
     sla_hours?: number | null
     sla_warning_pct?: number
+    priority_mode?: PriorityMode
+    priority_required?: boolean
+    cascade_children_on_move?: boolean
+    children_to_funnel_id?: string | null
+    grandchildren_to_funnel_id?: string | null
   }) => api.post<ProjectStatus>(`/projetos/projects/${projectId}/statuses`, data).then((r) => r.data),
   updateStatus: (projectId: string, funnelId: string, statusId: string, data: Partial<{
     name: string
@@ -441,6 +875,11 @@ export const projetosApi = {
     move_in_role_ids: string[] | null
     sla_hours: number | null
     sla_warning_pct: number
+    priority_mode: PriorityMode
+    priority_required: boolean
+    cascade_children_on_move: boolean
+    children_to_funnel_id: string | null
+    grandchildren_to_funnel_id: string | null
   }>) => api.patch<ProjectStatus>(`/projetos/projects/${projectId}/funnels/${funnelId}/statuses/${statusId}`, data).then((r) => r.data),
   reorderStatuses: (projectId: string, funnelId: string, items: Array<{ id: string; order: number }>) =>
     api.patch<ProjectStatus[]>(`/projetos/projects/${projectId}/funnels/${funnelId}/statuses/reorder`, { items }).then((r) => r.data),
@@ -460,7 +899,11 @@ export const projetosApi = {
     area?: string | null
     start_date?: string | null
     due_date?: string | null
+    estimated_hours?: number | null
+    actual_hours?: number | null
+    percent_complete?: number
     order?: number
+    anexos?: ProjectUpload[] | null
     form_values?: Record<string, unknown>
   }) => api.post<ProjectTask>(`/projetos/projects/${projectId}/tasks`, data).then((r) => r.data),
   updateTask: (projectId: string, taskId: string, data: Partial<{
@@ -474,14 +917,77 @@ export const projetosApi = {
     area: string | null
     start_date: string | null
     due_date: string | null
+    estimated_hours: number | null
+    actual_hours: number | null
+    percent_complete: number
     order: number
+    anexos: ProjectUpload[] | null
     form_values: Record<string, unknown>
     conversion_title: string
+    conversion_kind: string | null
+    conversion_description: string | null
+    conversion_items: Array<{ title: string; description?: string | null; start_date?: string | null; due_date?: string | null }>
+    conversion_assigned_to: string | null
   }>) => api.patch<ProjectTask>(`/projetos/projects/${projectId}/tasks/${taskId}`, data).then((r) => r.data),
   deleteTask: (projectId: string, taskId: string) =>
     api.delete<void>(`/projetos/projects/${projectId}/tasks/${taskId}`).then((r) => r.data),
+  reorderTasks: (projectId: string, items: Array<{ id: string; order: number }>) =>
+    api.patch<ProjectTask[]>(`/projetos/projects/${projectId}/tasks/reorder`, { items }).then((r) => r.data),
   listTaskChildren: (projectId: string, taskId: string) =>
     api.get<ProjectTask[]>(`/projetos/projects/${projectId}/tasks/${taskId}/children`).then((r) => r.data),
+  createScheduleStage: (projectId: string, parentTaskId: string, data: {
+    title: string
+    start_date?: string | null
+    due_date?: string | null
+  }) => api.post<ProjectTask>(`/projetos/projects/${projectId}/tasks/${parentTaskId}/schedule-stages`, data).then((r) => r.data),
+
+  listDependencies: (projectId: string) =>
+    api.get<ProjectTaskDependency[]>(`/projetos/projects/${projectId}/dependencies`).then((r) => r.data),
+  createDependency: (projectId: string, data: {
+    predecessor_id: string
+    successor_id: string
+    dep_type?: DependencyType
+    lag_hours?: number
+  }) => api.post<ProjectTaskDependency>(`/projetos/projects/${projectId}/dependencies`, data).then((r) => r.data),
+  deleteDependency: (projectId: string, depId: string) =>
+    api.delete<void>(`/projetos/projects/${projectId}/dependencies/${depId}`).then((r) => r.data),
+  getWorkload: (projectId: string, params?: { unit?: "day" | "week"; from?: string; to?: string }) =>
+    api.get<WorkloadResponse>(`/projetos/projects/${projectId}/workload`, { params }).then((r) => r.data),
+  getCriticalPath: (projectId: string, rootTaskId: string) =>
+    api.get<CriticalPathItem[]>(`/projetos/projects/${projectId}/critical-path`, { params: { root: rootTaskId } }).then((r) => r.data),
+  getAssigneeAbsences: (projectId: string) =>
+    api.get<AssigneeAbsencesResponse>(`/projetos/projects/${projectId}/assignee-absences`).then((r) => r.data),
+
+  listPlanningNodes: (projectId: string) =>
+    api.get<ProjectTask[]>(`/projetos/projects/${projectId}/planning-nodes`).then((r) => r.data),
+  importTasks: (
+    projectId: string,
+    file: File,
+    featureStatusId: string,
+    usStatusId?: string,
+    parentTaskId?: string,
+  ) => {
+    const fd = new FormData()
+    fd.append("file", file)
+    fd.append("target_status_id", featureStatusId)
+    if (usStatusId) fd.append("us_status_id", usStatusId)
+    if (parentTaskId) fd.append("parent_task_id", parentTaskId)
+    return api.post<TaskImportResult>(`/projetos/projects/${projectId}/import-tasks`, fd).then((r) => r.data)
+  },
+  downloadImportTemplate: (projectId: string) =>
+    api.get(`/projetos/projects/${projectId}/import-template`, { responseType: "blob" }).then((r) => {
+      const url = URL.createObjectURL(r.data)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = "modelo-importacao-features-us.xlsx"
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    }),
+
+  getProjectFormValues: (projectId: string) =>
+    api.get<Record<string, Record<string, unknown>>>(`/projetos/projects/${projectId}/form-values`).then((r) => r.data),
 
   listStatusAutomations: (projectId: string, statusId: string) =>
     api.get<ProjectAutomationRule[]>(`/projetos/projects/${projectId}/statuses/${statusId}/automations`).then((r) => r.data),
@@ -512,10 +1018,65 @@ export const projetosApi = {
   createTaskComment: (projectId: string, taskId: string, content: string) =>
     api.post<ProjectTaskComment>(`/projetos/projects/${projectId}/tasks/${taskId}/comments`, { content }).then((r) => r.data),
 
-  getReports: () =>
-    api.get<ProjectReports>(`/projetos/reports`).then((r) => r.data),
+  getReports: (params?: { po?: string | null; diretoria?: string | null; area?: string | null }) =>
+    api.get<ProjectReports>(`/projetos/reports`, {
+      params: {
+        ...(params?.po ? { po: params.po } : {}),
+        ...(params?.diretoria ? { diretoria: params.diretoria } : {}),
+        ...(params?.area ? { area: params.area } : {}),
+      },
+    }).then((r) => r.data),
 
-  // Cronograma: vínculos fluxo + etapa
+  listPos: () =>
+    api.get<PoOption[]>(`/projetos/pos`).then((r) => r.data),
+  getPoPortfolio: (poId?: string, filters?: { diretoria?: string | null; area?: string | null }) =>
+    api.get<PoPortfolioResponse>(`/projetos/po-portfolio`, {
+      params: {
+        ...(poId ? { po_id: poId } : {}),
+        ...(filters?.diretoria ? { diretoria: filters.diretoria } : {}),
+        ...(filters?.area ? { area: filters.area } : {}),
+      },
+    }).then((r) => r.data),
+  getPoOverview: (filters?: { diretoria?: string | null; area?: string | null }) =>
+    api.get<PoOverviewResponse>(`/projetos/po-portfolio/overview`, {
+      params: {
+        ...(filters?.diretoria ? { diretoria: filters.diretoria } : {}),
+        ...(filters?.area ? { area: filters.area } : {}),
+      },
+    }).then((r) => r.data),
+
+  previewStatusReport: (params: { diretoria?: string | null; area?: string | null }) =>
+    api.post<StatusReportSnapshot>(`/projetos/status-reports/preview`, {
+      diretoria: params.diretoria ?? null,
+      area: params.area ?? null,
+    }).then((r) => r.data),
+  createStatusReport: (data: {
+    diretoria?: string | null
+    area?: string | null
+    diretoria_label?: string | null
+    area_label?: string | null
+    title: string
+    snapshot: StatusReportSnapshot
+    kpis?: StatusReportKpis
+  }) => api.post<StatusReportResponse>(`/projetos/status-reports`, data).then((r) => r.data),
+  listStatusReports: (params?: { diretoria?: string | null; area?: string | null }) =>
+    api.get<StatusReportListItem[]>(`/projetos/status-reports`, {
+      params: {
+        ...(params?.diretoria ? { diretoria: params.diretoria } : {}),
+        ...(params?.area ? { area: params.area } : {}),
+      },
+    }).then((r) => r.data),
+  getStatusReport: (reportId: string) =>
+    api.get<StatusReportResponse>(`/projetos/status-reports/${reportId}`).then((r) => r.data),
+
+  uploadFile: (file: File) => {
+    const fd = new FormData()
+    fd.append("file", file)
+    return api.post<ProjectUpload>(`/projetos/uploads`, fd).then((r) => r.data)
+  },
+  getUploadUrl: (objectName: string) =>
+    api.get<{ url: string }>(`/projetos/uploads/url`, { params: { object_name: objectName } }).then((r) => r.data.url),
+
   getDefaultFormFields: () =>
     api.get<ProjectDefaultFormField[]>("/projetos/config/default-form").then((r) => r.data),
   updateDefaultFormFields: (fields: Array<{
@@ -535,5 +1096,48 @@ export const projetosApi = {
     api.put<ProjectScheduleBinding[]>(`/projetos/config/schedule-bindings`, { bindings }).then((r) => r.data),
   deleteScheduleBinding: (statusId: string) =>
     api.delete<void>(`/projetos/config/schedule-bindings/${statusId}`).then((r) => r.data),
-}
 
+  listCardFields: (funnelId: string) =>
+    api.get<ProjectCardField[]>(`/projetos/config/card-fields`, { params: { funnel_id: funnelId } }).then((r) => r.data),
+  listAvailableCardFields: (funnelId: string) =>
+    api.get<ProjectCardAvailableField[]>(`/projetos/config/card-fields/available`, { params: { funnel_id: funnelId } }).then((r) => r.data),
+  saveCardFields: (funnelId: string, fields: Array<{ field_key: string; label: string; is_visible: boolean; order: number }>) =>
+    api.put<ProjectCardField[]>(`/projetos/config/card-fields`, { fields }, { params: { funnel_id: funnelId } }).then((r) => r.data),
+
+  getPrioritySettings: () =>
+    api.get<PrioritySettings>(`/projetos/config/priority/settings`).then((r) => r.data),
+  updatePrioritySettings: (data: {
+    impact_cut: number
+    effort_cut: number
+    confidence_id?: string | null
+    is_enabled: boolean
+  }) => api.put<PrioritySettings>(`/projetos/config/priority/settings`, data).then((r) => r.data),
+  listPriorityCriteria: () =>
+    api.get<PriorityCriterion[]>(`/projetos/config/priority/criteria`).then((r) => r.data),
+  savePriorityCriteria: (criteria: Array<Omit<PriorityCriterion, "id">>) =>
+    api.put<PriorityCriterion[]>(`/projetos/config/priority/criteria`, { criteria }).then((r) => r.data),
+  listPriorityPillars: () =>
+    api.get<PriorityPillar[]>(`/projetos/config/priority/pillars`).then((r) => r.data),
+  savePriorityPillars: (pillars: Array<Omit<PriorityPillar, "id">>) =>
+    api.put<PriorityPillar[]>(`/projetos/config/priority/pillars`, { pillars }).then((r) => r.data),
+  listPriorityConfidence: () =>
+    api.get<PriorityConfidenceLevel[]>(`/projetos/config/priority/confidence-levels`).then((r) => r.data),
+  savePriorityConfidence: (levels: Array<Omit<PriorityConfidenceLevel, "id">>) =>
+    api.put<PriorityConfidenceLevel[]>(`/projetos/config/priority/confidence-levels`, { levels }).then((r) => r.data),
+  listPriorityQuadrants: () =>
+    api.get<PriorityQuadrant[]>(`/projetos/config/priority/quadrants`).then((r) => r.data),
+  savePriorityQuadrants: (quadrants: Array<Omit<PriorityQuadrant, "id">>) =>
+    api.put<PriorityQuadrant[]>(`/projetos/config/priority/quadrants`, { quadrants }).then((r) => r.data),
+  priorityMatrix: (params?: { funnel_id?: string; quadrant?: string; pillar_id?: string }) =>
+    api.get<PriorityMatrixItem[]>(`/projetos/priority/matrix`, { params }).then((r) => r.data),
+  getTaskPriority: (taskId: string) =>
+    api.get<PriorityScore | null>(`/projetos/tasks/${taskId}/priority`).then((r) => r.data),
+  getTaskPriorityHistory: (taskId: string) =>
+    api.get<PriorityScoreHistoryItem[]>(`/projetos/tasks/${taskId}/priority/history`).then((r) => r.data),
+  saveTaskPriority: (taskId: string, data: PriorityScoreInput) =>
+    api.put<PriorityScore>(`/projetos/tasks/${taskId}/priority`, data).then((r) => r.data),
+  deleteTaskPriority: (taskId: string) =>
+    api.delete<void>(`/projetos/tasks/${taskId}/priority`).then((r) => r.data),
+  previewTaskPriority: (taskId: string, data: PriorityScoreInput) =>
+    api.post<PriorityComputeResult>(`/projetos/tasks/${taskId}/priority/preview`, data).then((r) => r.data),
+}

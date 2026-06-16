@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { ArrowLeft, Eye, EyeOff, FileText, GripVertical, Loader2, Pencil, Plus, Trash2 } from "lucide-react"
+import { ArrowLeft, Check, ChevronDown, ChevronUp, Eye, EyeOff, FileText, GripVertical, Loader2, Pencil, Plus, Trash2, X } from "lucide-react"
 import {
   DndContext,
   PointerSensor,
@@ -53,11 +53,13 @@ const FIELD_TYPES: FieldTypeMeta[] = [
   { value: "datetime",         label: "Data e hora",     description: "Data com horário." },
   { value: "current_date",     label: "Data atual",      description: "Pré-preenche automaticamente com a data de hoje." },
   { value: "current_datetime", label: "Data e hora atual", description: "Pré-preenche automaticamente com a data e hora atual." },
+  { value: "current_user",     label: "Usuário logado",  description: "Pré-preenche automaticamente com o nome do usuário logado (somente leitura)." },
   { value: "select",           label: "Seleção única",   description: "Lista de opções; usuário escolhe uma.", hasOptions: true },
   { value: "multi_select",     label: "Multi-seleção",   description: "Lista de opções; usuário escolhe várias.", hasOptions: true },
   { value: "checkbox",         label: "Sim / Não",       description: "Toggle (verdadeiro/falso)." },
   { value: "url",              label: "URL",             description: "Texto validado como link." },
   { value: "user",             label: "Usuário",         description: "Referência a um usuário do sistema." },
+  { value: "file",             label: "Anexo",           description: "Upload de arquivo (PDF, imagem, documento…), até 20 MB." },
 ]
 
 const LEGACY_TYPE_MAP: Record<string, string> = {
@@ -264,6 +266,9 @@ export default function ProjectDemandTypeFormEditorPage() {
   const [selectedSectionId, setSelectedSectionId] = useState("")
 
   const [newSectionTitle, setNewSectionTitle] = useState("")
+  const [editingSectionId, setEditingSectionId] = useState<string | null>(null)
+  const [sectionDraftTitle, setSectionDraftTitle] = useState("")
+  const [reorderingSections, setReorderingSections] = useState(false)
 
   const [openField, setOpenField] = useState(false)
   const [savingField, setSavingField] = useState(false)
@@ -324,6 +329,46 @@ export default function ProjectDemandTypeFormEditorPage() {
     const reordered = await projetosApi.reorderDemandSections(demandTypeId, next.map((x, index) => ({ id: x.id, order: index })))
     setSections(reordered)
     setSelectedSectionId(reordered[0]?.id ?? "")
+  }
+
+  function beginEditSection(section: ProjectDemandFormSection) {
+    setEditingSectionId(section.id)
+    setSectionDraftTitle(section.title)
+  }
+
+  function cancelEditSection() {
+    setEditingSectionId(null)
+    setSectionDraftTitle("")
+  }
+
+  async function saveEditSection(sectionId: string) {
+    if (!demandTypeId || !sectionDraftTitle.trim()) return
+    const updated = await projetosApi.updateDemandSection(demandTypeId, sectionId, {
+      title: sectionDraftTitle.trim(),
+    })
+    setSections((prev) => prev.map((s) => (s.id === sectionId ? updated : s)))
+    cancelEditSection()
+  }
+
+  async function handleMoveSection(sectionId: string, dir: -1 | 1) {
+    if (!demandTypeId || reorderingSections) return
+    const from = sections.findIndex((s) => s.id === sectionId)
+    const to = from + dir
+    if (from < 0 || to < 0 || to >= sections.length) return
+    const next = [...sections]
+    const [moved] = next.splice(from, 1)
+    next.splice(to, 0, moved)
+    setSections(next) // otimista
+    setReorderingSections(true)
+    try {
+      const reordered = await projetosApi.reorderDemandSections(
+        demandTypeId,
+        next.map((x, index) => ({ id: x.id, order: index })),
+      )
+      setSections(reordered)
+    } finally {
+      setReorderingSections(false)
+    }
   }
 
   function openCreateField() {
@@ -573,8 +618,48 @@ export default function ProjectDemandTypeFormEditorPage() {
               <p className="text-xs text-muted-foreground">Nenhuma sessão criada ainda.</p>
             ) : (
               <div className="space-y-1.5">
-                {sections.map((section) => {
+                {sections.map((section, index) => {
                   const isSelected = section.id === selectedSectionId
+                  const isEditing = editingSectionId === section.id
+                  if (isEditing) {
+                    return (
+                      <div key={section.id} className="rounded-md border border-primary/40 bg-primary/5">
+                        <div className="flex items-center gap-1 p-1.5">
+                          <Input
+                            autoFocus
+                            value={sectionDraftTitle}
+                            onChange={(e) => setSectionDraftTitle(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") { e.preventDefault(); void saveEditSection(section.id) }
+                              if (e.key === "Escape") { e.preventDefault(); cancelEditSection() }
+                            }}
+                            className="h-8"
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 shrink-0 text-primary"
+                            onClick={() => void saveEditSection(section.id)}
+                            disabled={!sectionDraftTitle.trim()}
+                            title="Salvar"
+                          >
+                            <Check size={14} />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 shrink-0"
+                            onClick={cancelEditSection}
+                            title="Cancelar"
+                          >
+                            <X size={14} />
+                          </Button>
+                        </div>
+                      </div>
+                    )
+                  }
                   return (
                     <div
                       key={section.id}
@@ -587,20 +672,55 @@ export default function ProjectDemandTypeFormEditorPage() {
                           setSelectedSectionId(section.id)
                         }
                       }}
-                      className={`cursor-pointer rounded-md border transition ${
+                      className={`group cursor-pointer rounded-md border transition ${
                         isSelected ? "border-primary/40 bg-primary/5" : "hover:bg-muted/40"
                       }`}
                     >
-                      <div className="flex items-center justify-between p-2">
+                      <div className="flex items-center gap-1 p-2">
+                        <div className="flex flex-col">
+                          <button
+                            type="button"
+                            className="text-muted-foreground transition enabled:hover:text-foreground disabled:opacity-30"
+                            disabled={index === 0 || reorderingSections}
+                            onClick={(e) => { e.stopPropagation(); void handleMoveSection(section.id, -1) }}
+                            title="Mover para cima"
+                          >
+                            <ChevronUp size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            className="text-muted-foreground transition enabled:hover:text-foreground disabled:opacity-30"
+                            disabled={index === sections.length - 1 || reorderingSections}
+                            onClick={(e) => { e.stopPropagation(); void handleMoveSection(section.id, 1) }}
+                            title="Mover para baixo"
+                          >
+                            <ChevronDown size={13} />
+                          </button>
+                        </div>
                         <div className="flex-1 text-left text-sm truncate">{section.title}</div>
                         <Button
                           type="button"
                           variant="ghost"
                           size="icon"
+                          className="h-8 w-8"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            beginEditSection(section)
+                          }}
+                          title="Renomear"
+                        >
+                          <Pencil size={13} />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
                           onClick={(e) => {
                             e.stopPropagation()
                             void handleDeleteSection(section.id)
                           }}
+                          title="Excluir"
                         >
                           <Trash2 size={13} />
                         </Button>

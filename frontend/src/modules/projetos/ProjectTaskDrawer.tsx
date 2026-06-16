@@ -1,20 +1,9 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { CalendarRange, Check, ChevronDown, ClipboardList, FileText, GitBranch, Link as LinkIcon, Loader2, MessageSquare, Pencil, Plus, Trash2, X } from "lucide-react"
+import { ArrowUpRight, CalendarRange, Check, ChevronDown, FileText, Link as LinkIcon, Loader2, Pencil, Plus, Trash2, X } from "lucide-react"
 
-import {
-  projetosApi,
-  type ProjectDemandFormField,
-  type ProjectDemandFormSection,
-  type ProjectDemandType,
-  type ProjectStatus,
-  type ProjectStatusDefaultFormLink,
-  type ProjectStatusSectionLink,
-  type ProjectTask,
-  type ProjectTaskComment,
-} from "@/api/projetos"
+import { projetosApi, type PriorityMode, type ProjectDemandFormField, type ProjectDemandFormSection, type ProjectDemandType, type ProjectStatus, type ProjectStatusDefaultFormLink, type ProjectStatusSectionLink, type ProjectTask, type ProjectTaskComment, type ProjectUpload } from "@/api/projetos"
 import { Badge } from "@/components/ui/badge"
-import { CollapsibleFormSection } from "@/modules/projetos/CollapsibleFormSection"
 import { teamopsApi } from "@/api/teamops"
 import type { User } from "@/types"
 import { Button } from "@/components/ui/button"
@@ -23,20 +12,16 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { getFieldVisibility, type FieldVisibilityMode } from "@/modules/projetos/FormFieldRenderer"
-import { DemandFormSectionsPanel } from "@/modules/projetos/DemandFormSectionsPanel"
+import { FormFieldRenderer, getFieldVisibility, normalizeFieldType, type FieldVisibilityMode } from "@/modules/projetos/FormFieldRenderer"
 import { DefaultFormFieldSlot } from "@/modules/projetos/DefaultFormFields"
 import { defaultFormPlanningFields, groupDefaultFormFieldsIntoRows } from "@/modules/projetos/defaultFormLayout"
-import { defaultFieldMap, validateDefaultFormValues } from "@/modules/projetos/defaultFormUtils"
+import { defaultFieldMap, validateDefaultFormValues, type DefaultFormValues } from "@/modules/projetos/defaultFormUtils"
 import { isDefaultFieldShown } from "@/modules/projetos/defaultFormVisibility"
-import {
-  defaultDateToIso,
-  isoToDefaultDateInput,
-  normalizeDefaultFieldType,
-} from "@/modules/projetos/defaultFormFieldTypes"
-import { normalizeFieldType } from "@/modules/projetos/FormFieldRenderer"
+import { defaultDateToIso, isoToDefaultDateInput, normalizeDefaultFieldType } from "@/modules/projetos/defaultFormFieldTypes"
 import { useDefaultFormConfig } from "@/modules/projetos/useDefaultFormConfig"
+import { getRowBreak, groupIntoRows } from "@/modules/projetos/layout"
 import { formatMissingFieldsMessage, validateRequiredFields } from "@/modules/projetos/validation"
+import { ProjectPriorityWidget } from "@/modules/projetos/priority/ProjectPriorityWidget"
 import { toast } from "@/lib/toast"
 
 const NO_ASSIGNEE = "__none__"
@@ -76,6 +61,7 @@ export function ProjectTaskDrawer({
   const [formValues, setFormValues] = useState<Record<string, unknown>>({})
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
+  const [anexos, setAnexos] = useState<ProjectUpload[]>([])
   const [assignedTo, setAssignedTo] = useState<string>(NO_ASSIGNEE)
   const [startDate, setStartDate] = useState("")
   const [dueDate, setDueDate] = useState("")
@@ -87,14 +73,14 @@ export function ProjectTaskDrawer({
   const [children, setChildren] = useState<ProjectTask[]>([])
   const [childTitle, setChildTitle] = useState("")
   const [childTypeId, setChildTypeId] = useState("")
-  const [statusMap, setStatusMap] = useState<Record<string, { name: string; color: string }>>({})
+  const [statusMap, setStatusMap] = useState<Record<string, { name: string; color: string; priority_mode: PriorityMode }>>({})
   const [allStatuses, setAllStatuses] = useState<ProjectStatus[]>([])
   const [statusId, setStatusId] = useState("")
   const [changingStatus, setChangingStatus] = useState(false)
   const [statusConvPrompt, setStatusConvPrompt] = useState<{ newStatusId: string; typeName: string; name: string } | null>(null)
   const [assigneeMenuOpen, setAssigneeMenuOpen] = useState(false)
-  const [statusMenuOpen, setStatusMenuOpen] = useState(false)
   const [assigneeSearch, setAssigneeSearch] = useState("")
+  const [statusMenuOpen, setStatusMenuOpen] = useState(false)
   const [linkMenuOpen, setLinkMenuOpen] = useState(false)
   const [linkDialogOpen, setLinkDialogOpen] = useState(false)
   const [linkMode, setLinkMode] = useState<"existing" | "new">("existing")
@@ -119,12 +105,13 @@ export function ProjectTaskDrawer({
     setLinkDialogOpen(false)
     setStatusConvPrompt(null)
     setAssigneeMenuOpen(false)
-    setStatusMenuOpen(false)
     setAssigneeSearch("")
+    setStatusMenuOpen(false)
     const cfg = defaultFieldMap(defaultFormFields)
     const timer = setTimeout(() => {
       setTitle(task.title)
       setDescription(task.description ?? "")
+      setAnexos(task.anexos ?? [])
       setAssignedTo(task.assigned_to ?? NO_ASSIGNEE)
       setDiretoria(task.diretoria ?? null)
       setArea(task.area ?? null)
@@ -137,16 +124,33 @@ export function ProjectTaskDrawer({
       setStatusId(task.status_id)
     }, 0)
 
-    teamopsApi.listMembers()
-      .then((ms) => setUsers(ms.map((m) => ({ id: m.id, full_name: m.full_name, email: m.email })) as unknown as User[]))
+    // Responsável = Pessoa do teamops (todas, inclusive sem login).
+    teamopsApi.listPersons()
+      .then((ps) => setUsers(ps.map((p) => ({ id: p.id, full_name: p.full_name, email: p.email })) as unknown as User[]))
       .catch(() => setUsers([]))
     projetosApi.listTaskComments(projectId, task.id).then(setComments).catch(() => setComments([]))
     projetosApi.getTaskFormSubmission(projectId, task.id).then((submission) => {
       setFormValues(submission?.values ?? {})
     }).catch(() => setFormValues({}))
+    projetosApi.listDemandTypes().then(setDemandTypes).catch(() => setDemandTypes([]))
+    projetosApi.listTasks(projectId).then(setAllTasks).catch(() => setAllTasks([]))
+    projetosApi.listTaskChildren(projectId, task.id).then(setChildren).catch(() => setChildren([]))
+    projetosApi.listStatuses(projectId).then((sts) => {
+      setAllStatuses(sts)
+      setStatusMap(Object.fromEntries(sts.map((s) => [s.id, { name: s.name, color: s.color, priority_mode: s.priority_mode }])))
+    }).catch(() => { setAllStatuses([]); setStatusMap({}) })
+    return () => clearTimeout(timer)
+  }, [open, task, projectId, defaultFormFields])
+
+  useEffect(() => {
+    if (!open || !projectId || !statusId) {
+      setSectionLinks([])
+      setDefaultFormLinks([])
+      return
+    }
     Promise.all([
-      projetosApi.listStatusSectionLinks(projectId, task.status_id),
-      projetosApi.listStatusDefaultFormLinks(projectId, task.status_id),
+      projetosApi.listStatusSectionLinks(projectId, statusId),
+      projetosApi.listStatusDefaultFormLinks(projectId, statusId),
     ]).then(([links, defaultLinks]) => {
       setSectionLinks(links)
       setDefaultFormLinks(defaultLinks)
@@ -154,23 +158,7 @@ export function ProjectTaskDrawer({
       setSectionLinks([])
       setDefaultFormLinks([])
     })
-    projetosApi.listDemandTypes().then(setDemandTypes).catch(() => setDemandTypes([]))
-    projetosApi.listTasks(projectId).then(setAllTasks).catch(() => setAllTasks([]))
-    projetosApi.listTaskChildren(projectId, task.id).then(setChildren).catch(() => setChildren([]))
-    projetosApi.listStatuses(projectId).then((sts) => {
-      setAllStatuses(sts)
-      setStatusMap(Object.fromEntries(sts.map((s) => [s.id, { name: s.name, color: s.color }])))
-    }).catch(() => { setAllStatuses([]); setStatusMap({}) })
-    return () => clearTimeout(timer)
-  }, [open, task, projectId, defaultFormFields])
-
-  // Fecha o slide-over com Esc (a casca agora é custom, não o Dialog do shadcn).
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onOpenChange(false) }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [open, onOpenChange])
+  }, [open, projectId, statusId])
 
   useEffect(() => {
     if (!selectedDemandTypeId) {
@@ -197,6 +185,8 @@ export function ProjectTaskDrawer({
 
   const assignedUser = assignedTo !== NO_ASSIGNEE ? users.find((u) => u.id === assignedTo) ?? null : null
   const assigneeLabel = assignedUser?.full_name ?? "Sem responsável"
+  const currentStatus = statusMap[statusId]
+  const statusLabel = currentStatus?.name ?? "Sem etapa"
   const assigneeCandidates = users.filter((u) => {
     const q = assigneeSearch.trim().toLowerCase()
     return !q || u.full_name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)
@@ -245,6 +235,9 @@ export function ProjectTaskDrawer({
 
   const parentTask = parentTaskId !== NO_ASSIGNEE ? allTasks.find((t) => t.id === parentTaskId) ?? null : null
 
+  // Cards criados A PARTIR deste por conversão (origin_task_id aponta para este card).
+  const convertedCards = task ? allTasks.filter((t) => t.origin_task_id === task.id) : []
+
   // Itens existentes elegíveis a virar filho: tipo compatível, não a si mesmo e ainda não filho.
   const childExistingCandidates = task
     ? allTasks.filter(
@@ -260,15 +253,30 @@ export function ProjectTaskDrawer({
     (t) => !linkSearch.trim() || t.title.toLowerCase().includes(linkSearch.trim().toLowerCase()),
   )
 
-  function relationRow(t: ProjectTask, onRemove?: () => void) {
+  function goToCard(t: ProjectTask) {
+    const funnelId = allStatuses.find((s) => s.id === t.status_id)?.funnel_id
+    onOpenChange(false)
+    const params = new URLSearchParams()
+    if (funnelId) params.set("funnel", funnelId)
+    params.set("task", t.id)
+    navigate(`/app/modules/projetos/${t.project_id}/board?${params.toString()}`)
+  }
+
+  function relationRow(t: ProjectTask, onRemove?: () => void, clickable = true) {
     const st = statusMap[t.status_id]
     const typeName = demandTypeName(t.demand_type_id)
+    const canClick = clickable && t.id !== task?.id
     return (
       <div className="flex items-center justify-between gap-2 rounded-md border bg-card px-2.5 py-1.5">
-        <div className="flex min-w-0 items-center gap-2">
+        <div
+          className={`flex min-w-0 items-center gap-2 ${canClick ? "cursor-pointer rounded hover:text-primary" : ""}`}
+          {...(canClick
+            ? { role: "button", tabIndex: 0, title: "Abrir card no kanban", onClick: () => goToCard(t) }
+            : {})}
+        >
           <FileText size={14} className="shrink-0 text-muted-foreground" />
           <div className="min-w-0">
-            <p className="truncate text-sm font-medium">{t.title}</p>
+            <p className={`truncate text-sm font-medium ${canClick ? "hover:underline" : ""}`}>{t.title}</p>
             <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
               {typeName && <span>{typeName}</span>}
               {st && (
@@ -395,6 +403,25 @@ export function ProjectTaskDrawer({
     }
   }
 
+  // Envia um projeto (item) para o kanban de desenvolvimento: move-o para a etapa do seu funil
+  // que transita para outro kanban (moves_to_funnel_id). Mantém o vínculo com o Programa.
+  async function handleSendChildToDev(child: ProjectTask) {
+    const childFunnel = allStatuses.find((s) => s.id === child.status_id)?.funnel_id
+    const moveStage = allStatuses.find((s) => s.funnel_id === childFunnel && s.moves_to_funnel_id)
+    if (!moveStage) {
+      toast.error("Configure uma etapa que mova para o kanban de desenvolvimento (Etapas Kanban → 'mover para o kanban').")
+      return
+    }
+    try {
+      const updated = await projetosApi.updateTask(projectId, child.id, { status_id: moveStage.id })
+      setChildren((prev) => prev.map((c) => (c.id === child.id ? updated : c)))
+      if (task) onSaved(task)
+      toast.success("Projeto enviado para o desenvolvimento.")
+    } catch {
+      toast.error("Não foi possível enviar o projeto para o desenvolvimento.")
+    }
+  }
+
   // ── Mudança de etapa pelo modal (respeita validação, conversão, transição e permissão) ──
   function stripStatusPrefix(t: string): string {
     return t.replace(/^\s*(projeto|programa|demanda)\s*:\s*/i, "").trim() || t
@@ -439,6 +466,20 @@ export function ProjectTaskDrawer({
     // Avançar de etapa exige os campos obrigatórios da etapa atual preenchidos.
     const isForward = !!(current && target.funnel_id === current.funnel_id && target.order > current.order)
     if (isForward) {
+      const defaultCheck = validateDefaultFormValues(defaultFormFields, {
+        title,
+        description,
+        anexos,
+        assigned_to: assignedTo === NO_ASSIGNEE ? null : assignedTo,
+        diretoria,
+        area,
+        start_date: startDate,
+        due_date: dueDate,
+      }, defaultFormLinks)
+      if (defaultCheck.missingLabels.length > 0) {
+        toast.error(`Preencha os campos obrigatórios: ${defaultCheck.missingLabels.join(", ")}.`)
+        return
+      }
       const { errors, missingLabels } = validateRequiredFields({
         statusId: task.status_id, formSections, fieldsBySection, sectionLinks, formValues,
       })
@@ -486,6 +527,7 @@ export function ProjectTaskDrawer({
     const defaultCheck = validateDefaultFormValues(defaultFormFields, {
       title,
       description,
+      anexos,
       assigned_to: assignedTo === NO_ASSIGNEE ? null : assignedTo,
       diretoria,
       area,
@@ -518,6 +560,7 @@ export function ProjectTaskDrawer({
         parent_task_id: parentTaskId === NO_ASSIGNEE ? null : parentTaskId,
         title: title.trim(),
         description: description.trim() || null,
+        anexos,
         assigned_to: isBasicUser ? undefined : (assignedTo === NO_ASSIGNEE ? null : assignedTo),
         diretoria,
         area,
@@ -560,7 +603,7 @@ export function ProjectTaskDrawer({
   return (
     <>
     {open && task && (
-      <div className="afx af-drawer-overlay" onClick={() => onOpenChange(false)}>
+      <div className="afx af-drawer-overlay">
         <div className="af-drawer" onClick={(e) => e.stopPropagation()}>
           <div className="drawer-head">
             <div className="crumb">
@@ -620,7 +663,7 @@ export function ProjectTaskDrawer({
                   />
                 )
               )}
-              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                 {defaultFieldsByKey.get("assigned_to") && isDefaultFieldShown(defaultFieldsByKey.get("assigned_to")!, defaultFormLinks) && (isBasicUser ? (
                   <span className="inline-flex items-center gap-1.5">
                     <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
@@ -632,7 +675,7 @@ export function ProjectTaskDrawer({
                   <div className="relative">
                     <button
                       type="button"
-                      onClick={() => setAssigneeMenuOpen((o) => !o)}
+                      onClick={() => { setAssigneeMenuOpen((o) => !o); setStatusMenuOpen(false) }}
                       className="inline-flex items-center gap-1.5 rounded-full border border-transparent px-1.5 py-0.5 hover:border-border hover:bg-muted"
                     >
                       <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
@@ -690,164 +733,249 @@ export function ProjectTaskDrawer({
                     )}
                   </div>
                 ))}
-                {defaultFieldsByKey.get("assigned_to") && isDefaultFieldShown(defaultFieldsByKey.get("assigned_to")!, defaultFormLinks) && statusMap[statusId] && (
+
+                {defaultFieldsByKey.get("assigned_to") && isDefaultFieldShown(defaultFieldsByKey.get("assigned_to")!, defaultFormLinks) && currentStatus && (
                   <span>·</span>
                 )}
-                {statusMap[statusId] && (isBasicUser ? (
+
+                {currentStatus && (isBasicUser ? (
                   <span className="inline-flex items-center gap-1.5">
                     <span
                       className="flex h-5 w-5 items-center justify-center rounded-full"
-                      style={{ backgroundColor: `${statusMap[statusId].color}22` }}
+                      style={{ backgroundColor: `${currentStatus.color}1A` }}
                     >
-                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: statusMap[statusId].color }} />
+                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: currentStatus.color }} />
                     </span>
-                    {statusMap[statusId].name}
+                    {statusLabel}
                   </span>
                 ) : (
                   <div className="relative">
                     <button
                       type="button"
-                      onClick={() => setStatusMenuOpen((o) => !o)}
+                      onClick={() => { setStatusMenuOpen((o) => !o); setAssigneeMenuOpen(false) }}
                       disabled={changingStatus}
                       className="inline-flex items-center gap-1.5 rounded-full border border-transparent px-1.5 py-0.5 hover:border-border hover:bg-muted disabled:opacity-60"
                     >
                       <span
                         className="flex h-5 w-5 items-center justify-center rounded-full"
-                        style={{ backgroundColor: `${statusMap[statusId].color}22` }}
+                        style={{ backgroundColor: `${currentStatus.color}1A` }}
                       >
-                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: statusMap[statusId].color }} />
+                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: currentStatus.color }} />
                       </span>
-                      <span>{statusMap[statusId].name}</span>
+                      <span>{statusLabel}</span>
                       <ChevronDown size={12} />
                     </button>
                     {statusMenuOpen && (
                       <>
                         <div className="fixed inset-0 z-10" onClick={() => setStatusMenuOpen(false)} />
-                        <div className="absolute left-0 z-20 mt-1 w-56 rounded-md border bg-popover p-1 shadow-md">
-                          {currentFunnelStatuses.map((s) => (
-                            <button
-                              key={s.id}
-                              type="button"
-                              onClick={() => {
-                                setStatusMenuOpen(false)
-                                void handleSelectStatus(s.id)
-                              }}
-                              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-muted"
-                            >
-                              <span
-                                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
-                                style={{ backgroundColor: `${s.color}22` }}
+                        <div className="absolute left-0 z-20 mt-1 w-64 rounded-md border bg-popover shadow-md">
+                          <div className="max-h-60 overflow-y-auto p-1">
+                            {currentFunnelStatuses.map((s) => (
+                              <button
+                                key={s.id}
+                                type="button"
+                                onClick={() => { setStatusMenuOpen(false); void handleSelectStatus(s.id) }}
+                                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-muted"
                               >
-                                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.color }} />
-                              </span>
-                              <span className="text-sm">{s.name}</span>
-                              {statusId === s.id && <Check size={14} className="ml-auto text-primary" />}
-                            </button>
-                          ))}
+                                <span
+                                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
+                                  style={{ backgroundColor: `${s.color}1A` }}
+                                >
+                                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: s.color }} />
+                                </span>
+                                <span className="text-sm">{s.name}</span>
+                                {statusId === s.id && <Check size={14} className="ml-auto shrink-0 text-primary" />}
+                              </button>
+                            ))}
+                            {currentFunnelStatuses.length === 0 && (
+                              <p className="px-2 py-1.5 text-[11px] italic text-muted-foreground/70">Nenhuma etapa disponível.</p>
+                            )}
+                          </div>
                         </div>
                       </>
                     )}
                   </div>
                 ))}
-                {(defaultFieldsByKey.get("assigned_to") && isDefaultFieldShown(defaultFieldsByKey.get("assigned_to")!, defaultFormLinks)) || statusMap[statusId] ? (
-                  <span>·</span>
-                ) : null}
+
+                <span>·</span>
                 <span>{comments.length} comentário{comments.length === 1 ? "" : "s"}</span>
               </div>
             </div>
 
-            {/* Corpo: Planejamento e, abaixo das datas, Descrição */}
             {(() => {
               const planningFields = defaultFormPlanningFields(defaultFormFields, defaultFormLinks)
               const descriptionField = defaultFieldsByKey.get("description")
               const showDescription = descriptionField && isDefaultFieldShown(descriptionField, defaultFormLinks)
-              if (planningFields.length === 0 && !showDescription) return null
-              const formValues = {
+              const anexosField = defaultFieldsByKey.get("anexos")
+              const showAnexos = anexosField && isDefaultFieldShown(anexosField, defaultFormLinks)
+              if (planningFields.length === 0 && !showDescription && !showAnexos) return null
+              const defaultValues: DefaultFormValues = {
                 title,
                 description,
+                anexos,
                 assigned_to: assignedTo === NO_ASSIGNEE ? null : assignedTo,
                 diretoria,
                 area,
                 start_date: startDate,
                 due_date: dueDate,
               }
-              const onPatch = (patch: Partial<typeof formValues>) => {
+              const onDefaultPatch = (patch: Partial<DefaultFormValues>) => {
                 if (patch.diretoria !== undefined) setDiretoria(patch.diretoria)
                 if (patch.area !== undefined) setArea(patch.area)
                 if (patch.start_date !== undefined) setStartDate(patch.start_date)
                 if (patch.due_date !== undefined) setDueDate(patch.due_date)
                 if (patch.description !== undefined) setDescription(patch.description)
+                if (patch.anexos !== undefined) setAnexos(patch.anexos ?? [])
               }
               return (
-                <CollapsibleFormSection sectionId="default-form-planning" title="Planejamento" icon={ClipboardList}>
-                  {groupDefaultFormFieldsIntoRows(planningFields, defaultFormLinks).map((row, rowIdx) => {
-                    if (row.length === 1) {
-                      const key = row[0].field_key
-                      return (
-                        <DefaultFormFieldSlot
-                          key={key}
-                          fields={defaultFormFields}
-                          fieldKey={key}
-                          defaultFormLinks={defaultFormLinks}
-                          values={formValues}
-                          onChange={onPatch}
-                        />
-                      )
-                    }
-                    return (
-                      <div key={`plan-row-${rowIdx}`} className="grid gap-3 sm:grid-cols-2">
-                        {row.map((cfg) => (
+                <div className="space-y-3 border-t border-border pt-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="h-4 w-1 rounded-full bg-primary" />
+                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">
+                      Dados do Projeto
+                    </p>
+                  </div>
+                  <div className="space-y-4">
+                    {groupDefaultFormFieldsIntoRows(planningFields, defaultFormLinks).map((row, rowIdx) => {
+                      if (row.length === 1) {
+                        const key = row[0].field_key
+                        return (
                           <DefaultFormFieldSlot
-                            key={cfg.field_key}
+                            key={key}
                             fields={defaultFormFields}
-                            fieldKey={cfg.field_key}
+                            fieldKey={key}
                             defaultFormLinks={defaultFormLinks}
-                            values={formValues}
-                            onChange={onPatch}
+                            values={defaultValues}
+                            onChange={onDefaultPatch}
+                            users={users}
+                            disabled={isBasicUser}
                           />
-                        ))}
-                      </div>
-                    )
-                  })}
-                  {showDescription && (
-                    <DefaultFormFieldSlot
-                      fields={defaultFormFields}
-                      fieldKey="description"
-                      defaultFormLinks={defaultFormLinks}
-                      values={formValues}
-                      onChange={onPatch}
-                    />
-                  )}
-                </CollapsibleFormSection>
+                        )
+                      }
+                      return (
+                        <div key={`plan-row-${rowIdx}`} className="grid gap-3 md:grid-cols-2">
+                          {row.map((cfg) => (
+                            <DefaultFormFieldSlot
+                              key={cfg.field_key}
+                              fields={defaultFormFields}
+                              fieldKey={cfg.field_key}
+                              defaultFormLinks={defaultFormLinks}
+                              values={defaultValues}
+                              onChange={onDefaultPatch}
+                              users={users}
+                              disabled={isBasicUser}
+                            />
+                          ))}
+                        </div>
+                      )
+                    })}
+                    {showDescription && (
+                      <DefaultFormFieldSlot
+                        fields={defaultFormFields}
+                        fieldKey="description"
+                        defaultFormLinks={defaultFormLinks}
+                        values={defaultValues}
+                        onChange={onDefaultPatch}
+                        users={users}
+                        disabled={isBasicUser}
+                      />
+                    )}
+                    {showAnexos && (
+                      <DefaultFormFieldSlot
+                        fields={defaultFormFields}
+                        fieldKey="anexos"
+                        defaultFormLinks={defaultFormLinks}
+                        values={defaultValues}
+                        onChange={onDefaultPatch}
+                        users={users}
+                        disabled={isBasicUser}
+                      />
+                    )}
+                  </div>
+                </div>
               )
             })()}
 
-            <DemandFormSectionsPanel
-              sections={formSections}
-              fieldsBySection={fieldsBySection}
-              sectionMode={sectionMode}
-              fieldMode={fieldMode}
-              formValues={formValues}
-              fieldErrors={fieldErrors}
-              users={users}
-              onFieldChange={(fieldKey, value, fieldId) => {
-                setFormValues((prev) => ({ ...prev, [fieldKey]: value }))
-                if (fieldErrors[fieldId]) {
-                  setFieldErrors((prev) => {
-                    const next = { ...prev }
-                    delete next[fieldId]
-                    return next
-                  })
-                }
-              }}
-            />
+            {formSections.map((section) => {
+              const secMode = sectionMode(section.id)
+              const visibleFields = (fieldsBySection[section.id] ?? [])
+                .filter((f) => f.is_active)
+                .filter((f) => fieldMode(f, secMode) !== "hidden")
+              if (visibleFields.length === 0) return null
+              return (
+                <div key={section.id} className="space-y-3 border-t border-border pt-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="h-4 w-1 rounded-full bg-primary" />
+                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">
+                      {section.title}
+                    </p>
+                    {secMode === "visible" && (
+                      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">somente leitura</span>
+                    )}
+                    {secMode === "required" && (
+                      <span className="text-[10px] uppercase tracking-wide text-destructive">obrigatória</span>
+                    )}
+                  </div>
+                  <div className="space-y-3">
+                    {groupIntoRows(
+                      visibleFields,
+                      (f) => getRowBreak(f.validation),
+                    ).map((row, rowIdx) => (
+                      <div key={rowIdx} className="flex flex-col gap-3 md:flex-row">
+                        {row.items.map((field) => {
+                          const mode = fieldMode(field, secMode)
+                          const isReadOnly = mode === "visible"
+                          const isRequired = mode === "required" || (mode === "editable" && field.is_required)
+                          const fieldError = fieldErrors[field.id]
+                          return (
+                            <div key={field.id} className="min-w-0 flex-1 space-y-1">
+                              <Label>
+                                {field.label}
+                                {isRequired && <span className="ml-0.5 text-destructive">*</span>}
+                                {isReadOnly && (
+                                  <span className="ml-2 text-[10px] uppercase tracking-wide text-muted-foreground">só leitura</span>
+                                )}
+                              </Label>
+                              <div className={fieldError ? "rounded-md ring-2 ring-destructive/60" : ""}>
+                                <FormFieldRenderer
+                                  field={field}
+                                  value={formValues[field.field_key]}
+                                  onChange={(v) => {
+                                    setFormValues((prev) => ({ ...prev, [field.field_key]: v }))
+                                    if (fieldErrors[field.id]) {
+                                      setFieldErrors((prev) => {
+                                        const next = { ...prev }
+                                        delete next[field.id]
+                                        return next
+                                      })
+                                    }
+                                  }}
+                                  users={users}
+                                  disabled={isReadOnly}
+                                />
+                              </div>
+                              {fieldError && (
+                                <p className="text-[11px] text-destructive">{fieldError}</p>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
 
-            <CollapsibleFormSection
-              sectionId="related-work"
-              title="Trabalho relacionado"
-              icon={GitBranch}
-              headerEnd={
-                !isBasicUser ? (
+            <div className="space-y-3 border-t border-border pt-4">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="h-4 w-1 rounded-full bg-primary" />
+                  <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">
+                    Trabalho relacionado
+                  </p>
+                </div>
+                {!isBasicUser && (
                   <div className="relative">
                     <Button type="button" variant="outline" size="icon" className="h-7 w-7" onClick={() => setLinkMenuOpen((o) => !o)} title="Adicionar vínculo">
                       <Plus size={14} />
@@ -874,38 +1002,79 @@ export function ProjectTaskDrawer({
                       </>
                     )}
                   </div>
-                ) : undefined
-              }
-            >
-              <div className="grid gap-4 rounded-md border border-border p-3 sm:grid-cols-3">
+                )}
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-3">
                 {originTask && (
-                  <div className="space-y-1">
+                  <div className="space-y-1.5 rounded-md border p-3">
                     <p className="text-[11px] font-semibold text-muted-foreground">Origem</p>
                     {relationRow(originTask)}
                   </div>
                 )}
-                <div className="space-y-1">
+
+                <div className="space-y-1.5 rounded-md border p-3">
                   <p className="text-[11px] font-semibold text-muted-foreground">Pai</p>
                   {parentTask
                     ? relationRow(parentTask, () => void handleUnlinkParent())
                     : <p className="text-[11px] italic text-muted-foreground/70">Sem card pai.</p>}
                 </div>
-                <div className="space-y-1 sm:col-span-1">
+
+                <div className="space-y-1.5 rounded-md border p-3 sm:col-span-2">
                   <p className="text-[11px] font-semibold text-muted-foreground">Filhos ({children.length})</p>
                   {children.length === 0 ? (
                     <p className="text-[11px] italic text-muted-foreground/70">Nenhum item filho.</p>
                   ) : (
-                    <div className="space-y-1">
-                      {children.map((c) => (
-                        <div key={c.id}>{relationRow(c, () => void handleUnlinkChild(c))}</div>
-                      ))}
+                    <div className="space-y-1.5">
+                      {children.map((c) => {
+                        const taskFunnel = allStatuses.find((s) => s.id === statusId)?.funnel_id
+                        const childFunnel = allStatuses.find((s) => s.id === c.status_id)?.funnel_id
+                        const samePlanningFunnel = !!taskFunnel && childFunnel === taskFunnel
+                        return (
+                          <div key={c.id} className="space-y-1">
+                            {relationRow(c, () => void handleUnlinkChild(c))}
+                            {!isBasicUser && samePlanningFunnel && (
+                              <button
+                                type="button"
+                                onClick={() => void handleSendChildToDev(c)}
+                                className="flex items-center gap-1 pl-1 text-[11px] font-medium text-primary hover:underline"
+                              >
+                                <ArrowUpRight size={12} /> Enviar para desenvolvimento
+                              </button>
+                            )}
+                          </div>
+                        )
+                      })}
                     </div>
                   )}
                 </div>
-              </div>
-            </CollapsibleFormSection>
 
-            <CollapsibleFormSection sectionId="comments" title="Comentários" icon={MessageSquare}>
+                {convertedCards.length > 0 && (
+                  <div className="space-y-1.5 rounded-md border p-3 sm:col-span-3">
+                    <p className="text-[11px] font-semibold text-muted-foreground">
+                      Criados a partir deste ({convertedCards.length})
+                    </p>
+                    <div className="space-y-1">
+                      {convertedCards.map((c) => (
+                        <div key={c.id}>{relationRow(c)}</div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {!isBasicUser && task && (
+              <ProjectPriorityWidget taskId={task.id} mode={currentStatus?.priority_mode ?? "edit"} />
+            )}
+
+            <div className="space-y-3 border-t border-border pt-4">
+              <div className="flex items-center gap-2">
+                <span className="h-4 w-1 rounded-full bg-primary" />
+                <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">
+                  Comentários
+                </p>
+              </div>
               <div className="max-h-44 overflow-y-auto space-y-2 rounded-md border p-2">
                 {comments.length === 0 ? (
                   <p className="text-xs text-muted-foreground">Nenhum comentário ainda.</p>
@@ -929,7 +1098,7 @@ export function ProjectTaskDrawer({
                   Enviar
                 </Button>
               </div>
-            </CollapsibleFormSection>
+            </div>
           </div>
           </div>
 
@@ -959,7 +1128,7 @@ export function ProjectTaskDrawer({
           {task && (
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">Você está adicionando um vínculo a partir de:</p>
-              {relationRow(task)}
+              {relationRow(task, undefined, false)}
             </div>
           )}
 

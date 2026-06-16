@@ -212,6 +212,7 @@ class UserResponse(BaseModel):
     role_id: Optional[uuid.UUID]
     role_name: Optional[str] = None  # nome da role custom (para o frontend decidir a visão)
     permissions: List[str] = Field(default_factory=list)  # permissões efetivas; ["*"] = acesso total
+    position_slug: Optional[str] = None  # slug do cargo no TeamOps (ex: "coordenador") — frontend usa p/ menu
     tenant_id: Optional[uuid.UUID]
     is_active: bool
     last_login: Optional[datetime]

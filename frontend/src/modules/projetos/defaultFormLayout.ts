@@ -47,6 +47,7 @@ export function defaultFormPlanningFields(
     .filter((f) => isDefaultFieldShown(f, defaultFormLinks))
     .filter((f) => !DRAWER_HEADER_FIELD_KEYS.has(f.field_key))
     .filter((f) => f.field_key !== "description")
+    .filter((f) => f.field_key !== "anexos")
 }
 
 export function moveDefaultFormFieldOrder<T extends { field_key: DefaultFormFieldKey; order: number }>(

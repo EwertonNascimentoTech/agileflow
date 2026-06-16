@@ -1,4 +1,4 @@
-import type { DefaultFormFieldKey, ProjectDefaultFormField, ProjectStatusDefaultFormLink } from "@/api/projetos"
+import type { DefaultFormFieldKey, ProjectDefaultFormField, ProjectStatusDefaultFormLink, ProjectUpload } from "@/api/projetos"
 import { isDefaultFieldRequired, isDefaultFieldShown } from "@/modules/projetos/defaultFormVisibility"
 import { optionLabelByValue, parseDefaultFieldOptions } from "@/modules/projetos/defaultFormOptions"
 
@@ -10,6 +10,7 @@ export const FALLBACK_DEFAULT_FORM_FIELDS: ProjectDefaultFormField[] = [
   { id: "area", field_key: "area", label: "Área", field_type: "select", options: { items: [] }, is_visible: true, is_required: false, order: 4, is_system: true, created_at: "", updated_at: "" },
   { id: "start_date", field_key: "start_date", label: "Data de início", field_type: "date", options: null, is_visible: true, is_required: false, order: 5, is_system: true, created_at: "", updated_at: "" },
   { id: "due_date", field_key: "due_date", label: "Prazo", field_type: "date", options: null, is_visible: true, is_required: false, order: 6, is_system: true, created_at: "", updated_at: "" },
+  { id: "anexos", field_key: "anexos", label: "Anexos", field_type: "file", options: null, is_visible: true, is_required: false, order: 7, is_system: true, created_at: "", updated_at: "" },
 ]
 
 export function sortDefaultFormFields(fields: ProjectDefaultFormField[]): ProjectDefaultFormField[] {
@@ -44,6 +45,7 @@ export function isDefaultFieldEmpty(key: DefaultFormFieldKey, value: unknown): b
   if (key === "assigned_to") return value === null || value === undefined || value === ""
   if (key === "start_date" || key === "due_date") return value === null || value === undefined || value === ""
   if (key === "diretoria" || key === "area") return value === null || value === undefined || value === ""
+  if (key === "anexos") return !Array.isArray(value) || value.length === 0
   return value === null || value === undefined
 }
 
@@ -55,6 +57,7 @@ export interface DefaultFormValues {
   area: string | null
   start_date: string
   due_date: string
+  anexos?: ProjectUpload[] | null
 }
 
 export function validateDefaultFormValues(

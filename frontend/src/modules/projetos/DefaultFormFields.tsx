@@ -1,6 +1,7 @@
 import type { DefaultFormFieldKey, ProjectDefaultFormField, ProjectStatusDefaultFormLink } from "@/api/projetos"
 import type { User } from "@/types"
 import { DefaultFormFieldControl } from "@/modules/projetos/DefaultFormFieldControl"
+import { DefaultFormAttachmentControl } from "@/modules/projetos/DefaultFormAttachmentControl"
 import { DefaultFormOrderedFields } from "@/modules/projetos/DefaultFormOrderedFields"
 import { defaultFieldMap, type DefaultFormValues } from "@/modules/projetos/defaultFormUtils"
 import { isDefaultFieldReadOnly, isDefaultFieldShown } from "@/modules/projetos/defaultFormVisibility"
@@ -63,9 +64,23 @@ export function DefaultFormFieldSlot({
   const cfg = defaultFieldMap(fields).get(fieldKey)
   if (!cfg || !isDefaultFieldShown(cfg, defaultFormLinks)) return null
 
+  const readOnly = isDefaultFieldReadOnly(cfg, defaultFormLinks)
+
+  // Anexos: campo padrão multi-arquivo (não usa o controle string genérico).
+  if (fieldKey === "anexos") {
+    return (
+      <DefaultFormAttachmentControl
+        field={cfg}
+        value={values.anexos}
+        onChange={(files) => onChange({ anexos: files })}
+        disabled={disabled || readOnly}
+        error={error}
+      />
+    )
+  }
+
   const v = values[fieldKey]
   const strVal = v === null || v === undefined ? null : String(v)
-  const readOnly = isDefaultFieldReadOnly(cfg, defaultFormLinks)
 
   return (
     <DefaultFormFieldControl

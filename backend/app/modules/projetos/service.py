@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import math
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Optional
 
 from fastapi import HTTPException, status
-from sqlalchemy import and_, delete as sa_delete, or_, select
+from sqlalchemy import and_, delete as sa_delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -13,6 +15,7 @@ from sqlalchemy.orm import selectinload
 from app.modules.projetos.models import (
     ProjectAutomationAction,
     ProjectAutomationRule,
+    ProjectCardField,
     ProjectDefaultFormField,
     ProjectDemandFormField,
     ProjectDemandFormSection,
@@ -21,12 +24,21 @@ from app.modules.projetos.models import (
     ProjectFunnel,
     Project,
     ProjectMember,
+    ProjectPriorityConfidenceLevel,
+    ProjectPriorityCriterion,
+    ProjectPriorityPillar,
+    ProjectPriorityQuadrant,
+    ProjectPriorityScore,
+    ProjectPriorityScoreHistory,
+    ProjectPrioritySettings,
     ProjectScheduleBinding,
     ProjectStatusDefaultFormLink,
     ProjectStatusSectionLink,
     ProjectStatusConfig,
+    ProjectStatusReport,
     ProjectTask,
     ProjectTaskComment,
+    ProjectTaskDependency,
 )
 from app.modules.projetos.schemas import (
     ProjectAutomationRuleCreate,
@@ -43,8 +55,18 @@ from app.modules.projetos.schemas import (
     ProjectDemandTypeUpdate,
     ProjectFunnelCreate,
     ProjectFunnelUpdate,
+    ProjectCardFieldsUpdate,
     ProjectMemberCreate,
+    PriorityCriteriaUpsert,
+    PriorityConfidenceUpsert,
+    PriorityPillarsUpsert,
+    PriorityQuadrantsUpsert,
+    PriorityScoreInput,
+    PrioritySettingsUpdate,
     ProjectScheduleBindingItem,
+    ScheduleStageCreate,
+    TaskDependencyCreate,
+    WorkloadCell,
     ProjectStatusCreate,
     ProjectStatusUpdate,
     ProjectTaskCommentCreate,
@@ -54,6 +76,15 @@ from app.modules.projetos.schemas import (
 )
 from sqlalchemy import text as _sa_text
 from app.modules.super_admin.models import User, UserRole
+from app.modules.teamops.calendar import load_calendar
+from app.modules.teamops.models import Absence, AbsenceStatus, AbsenceType, Person
+from app.modules.projetos.schedule_engine import (
+    EngineEdge,
+    EngineNode,
+    ScheduleCycleError,
+    compute_cpm,
+    schedule_tree,
+)
 
 
 def _to_naive_utc(value: Optional[datetime]) -> Optional[datetime]:
@@ -62,6 +93,51 @@ def _to_naive_utc(value: Optional[datetime]) -> Optional[datetime]:
     if value.tzinfo is None:
         return value
     return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+# Cronograma: capacidade diária padrão e helpers de dias úteis (seg–sex, sem feriados).
+HOURS_PER_DAY = 8.0
+
+
+def _is_business_day(d: datetime | date) -> bool:
+    return d.weekday() < 5  # 0=seg … 4=sex
+
+
+def _add_business_days(d: datetime, n: int) -> datetime:
+    """Soma `n` dias úteis a `d` (pula sáb/dom). n pode ser 0 (apenas alinha em dia útil
+    para frente)."""
+    cur = d
+    # Se já cair em fim de semana e n>=0, primeiro joga para o próximo dia útil.
+    while not _is_business_day(cur):
+        cur = cur + timedelta(days=1)
+    step = 0
+    while step < n:
+        cur = cur + timedelta(days=1)
+        if _is_business_day(cur):
+            step += 1
+    return cur
+
+
+def _business_days_between(start: datetime, end: datetime) -> int:
+    """Número de dias úteis no intervalo inclusivo [start, end]. Mínimo 1."""
+    if end < start:
+        start, end = end, start
+    count = 0
+    cur = start
+    while cur.date() <= end.date():
+        if _is_business_day(cur):
+            count += 1
+        cur = cur + timedelta(days=1)
+    return max(1, count)
+
+
+def _duration_days_from_hours(estimated_hours: Optional[Decimal], hours_per_day: float = HOURS_PER_DAY) -> Optional[int]:
+    if estimated_hours is None:
+        return None
+    h = float(estimated_hours)
+    if h <= 0:
+        return None
+    return max(1, math.ceil(h / hours_per_day))
 
 
 def _normalize_slug(value: str) -> str:
@@ -264,6 +340,7 @@ _DEFAULT_FORM_SEED: list[dict] = [
     {"field_key": "area", "label": "Área", "field_type": "select", "options": {"items": []}, "is_visible": True, "is_required": False, "order": 4},
     {"field_key": "start_date", "label": "Data de início", "field_type": "date", "options": None, "is_visible": True, "is_required": False, "order": 5},
     {"field_key": "due_date", "label": "Prazo", "field_type": "date", "options": None, "is_visible": True, "is_required": False, "order": 6},
+    {"field_key": "anexos", "label": "Anexos", "field_type": "file", "options": None, "is_visible": True, "is_required": False, "order": 7},
 ]
 
 _DEFAULT_FORM_KEYS = {row["field_key"] for row in _DEFAULT_FORM_SEED}
@@ -276,6 +353,7 @@ _DEFAULT_FORM_ALLOWED_TYPES: dict[str, set[str]] = {
     "area": {"select"},
     "start_date": {"date", "datetime"},
     "due_date": {"date", "datetime"},
+    "anexos": {"file"},
 }
 
 _DEFAULT_FORM_TYPE_FALLBACK: dict[str, str] = {
@@ -420,6 +498,8 @@ class ProjectDefaultFormService:
             return value is None
         if field_key in ("diretoria", "area"):
             return value is None or not str(value).strip()
+        if field_key == "anexos":
+            return not isinstance(value, list) or len(value) == 0
         return value in (None, "")
 
     @staticmethod
@@ -433,6 +513,7 @@ class ProjectDefaultFormService:
         area: Optional[str] = None,
         start_date=None,
         due_date=None,
+        anexos=None,
         existing: Optional[ProjectTask] = None,
     ) -> None:
         fields = await ProjectDefaultFormService.list(db)
@@ -444,6 +525,7 @@ class ProjectDefaultFormService:
             "area": area if area is not None else (existing.area if existing else None),
             "start_date": start_date if start_date is not None else (existing.start_date if existing else None),
             "due_date": due_date if due_date is not None else (existing.due_date if existing else None),
+            "anexos": anexos if anexos is not None else (existing.anexos if existing else None),
         }
         missing: list[str] = []
         for cfg in fields:
@@ -814,14 +896,31 @@ class ProjectStatusService:
 
 class ProjectFunnelService:
     @staticmethod
-    async def list(db: AsyncSession, project_id: uuid.UUID, active_only: bool = False) -> list[ProjectFunnel]:
+    async def list(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        active_only: bool = False,
+        current_user: Optional[User] = None,
+    ) -> list[ProjectFunnel]:
         await ProjectService.get(db, project_id)
         q = select(ProjectFunnel).where(ProjectFunnel.project_id == project_id)
         if active_only:
             q = q.where(ProjectFunnel.is_active == True)  # noqa: E712
         q = q.order_by(ProjectFunnel.order.asc(), ProjectFunnel.created_at.asc())
         result = await db.execute(q)
-        return list(result.scalars().all())
+        funnels = list(result.scalars().all())
+        # Esconde kanbans com acesso "none" para a função do usuário. Admins veem tudo.
+        if (
+            current_user is not None
+            and current_user.role not in (UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN)
+            and current_user.role_id
+        ):
+            funnels = [
+                f
+                for f in funnels
+                if ProjectFunnelService.access_level(f.access_control, current_user.role_id) != "none"
+            ]
+        return funnels
 
     @staticmethod
     async def get(db: AsyncSession, project_id: uuid.UUID, funnel_id: uuid.UUID) -> ProjectFunnel:
@@ -836,6 +935,9 @@ class ProjectFunnelService:
             raise HTTPException(status_code=404, detail="Funil não encontrado.")
         return funnel
 
+    # Níveis de acesso por função (cargo) a um kanban.
+    ACCESS_LEVELS = ("manage", "view", "none")
+
     @staticmethod
     def _normalize_type_ids(value) -> Optional[list[str]]:
         """JSONB não serializa UUID — converte para strings."""
@@ -844,11 +946,33 @@ class ProjectFunnelService:
         return [str(x) for x in value]
 
     @staticmethod
+    def _normalize_access_control(value) -> Optional[dict]:
+        """Mapa { role_id(str): nível }. Mantém só níveis válidos; descarta "manage"
+        (é o padrão, não precisa persistir). None/{} = sem restrição."""
+        if not value:
+            return None
+        clean = {
+            str(k): v
+            for k, v in value.items()
+            if v in ProjectFunnelService.ACCESS_LEVELS and v != "manage"
+        }
+        return clean or None
+
+    @staticmethod
+    def access_level(access_control: Optional[dict], role_id) -> str:
+        """Nível efetivo de uma função no kanban. Função ausente do mapa = "manage"."""
+        if not access_control or not role_id:
+            return "manage"
+        return access_control.get(str(role_id)) or "manage"
+
+    @staticmethod
     async def create(db: AsyncSession, project_id: uuid.UUID, data: ProjectFunnelCreate) -> ProjectFunnel:
         await ProjectService.get(db, project_id)
         payload = data.model_dump()
         if "allowed_demand_type_ids" in payload:
             payload["allowed_demand_type_ids"] = ProjectFunnelService._normalize_type_ids(payload["allowed_demand_type_ids"])
+        if "access_control" in payload:
+            payload["access_control"] = ProjectFunnelService._normalize_access_control(payload["access_control"])
         existing_default = await db.execute(
             select(ProjectFunnel).where(
                 ProjectFunnel.project_id == project_id,
@@ -906,6 +1030,8 @@ class ProjectFunnelService:
         payload = data.model_dump(exclude_unset=True)
         if "allowed_demand_type_ids" in payload:
             payload["allowed_demand_type_ids"] = ProjectFunnelService._normalize_type_ids(payload["allowed_demand_type_ids"])
+        if "access_control" in payload:
+            payload["access_control"] = ProjectFunnelService._normalize_access_control(payload["access_control"])
         if payload.get("is_default") is True:
             existing = await db.execute(
                 select(ProjectFunnel).where(
@@ -1122,6 +1248,18 @@ class ProjectDemandFormSubmissionService:
         return result.scalar_one_or_none()
 
     @staticmethod
+    async def values_map_by_project(db: AsyncSession, project_id: uuid.UUID) -> dict[str, dict]:
+        """Mapa { task_id: values } das submissões de todas as tarefas do projeto.
+        Usado pelo quadro para renderizar campos personalizados nos cards sem N+1."""
+        await ProjectService.get(db, project_id)
+        result = await db.execute(
+            select(ProjectDemandFormSubmission.task_id, ProjectDemandFormSubmission.values)
+            .join(ProjectTask, ProjectTask.id == ProjectDemandFormSubmission.task_id)
+            .where(ProjectTask.project_id == project_id)
+        )
+        return {str(task_id): (values or {}) for task_id, values in result.all()}
+
+    @staticmethod
     async def upsert(
         db: AsyncSession,
         project_id: uuid.UUID,
@@ -1266,10 +1404,18 @@ class ProjectTaskService:
         task: ProjectTask,
         status_obj: Optional[ProjectStatusConfig],
         conversion_title: Optional[str] = None,
+        conversion_kind: Optional[str] = None,
+        conversion_description: Optional[str] = None,
+        conversion_items: Optional[list] = None,
+        conversion_assigned_to: Optional[uuid.UUID] = None,
     ) -> None:
         """Se a fase de destino dispara conversão, cria um novo card do tipo configurado
-        vinculado à task de origem (origin_task_id). O nome do card criado vem de
-        `conversion_title` (informado na aprovação); se vazio, copia o título da origem.
+        vinculado à task de origem (origin_task_id). O nome vem de `conversion_title`.
+
+        `conversion_kind`:
+        - 'projeto' (padrão): cria 1 card (título + descrição).
+        - 'programa': cria o card do Programa + 1 card FILHO por item de
+          `conversion_items` (cada um com título + descrição), sob o Programa.
         Idempotente."""
         if not status_obj or not status_obj.creates_demand_type_id:
             return
@@ -1309,16 +1455,73 @@ class ProjectTaskService:
                 detail=f"O kanban do tipo '{ttype.name}' não tem etapa inicial para receber a conversão.",
             )
         new_title = (conversion_title or "").strip() or task.title
-        db.add(ProjectTask(
+        kind = (conversion_kind or "projeto")
+        # PO responsável escolhido na aprovação; se não informado, herda o da origem.
+        assignee = conversion_assigned_to or task.assigned_to
+        # Herança da solicitação do card de origem: respostas do formulário de demanda
+        # (ProjectDemandFormSubmission.values). Os campos padrão (diretoria/área/datas)
+        # são colunas e são herdados direto na construção dos cards abaixo.
+        origin_values = (await db.execute(
+            select(ProjectDemandFormSubmission.values).where(
+                ProjectDemandFormSubmission.task_id == task.id
+            )
+        )).scalar_one_or_none()
+        main = ProjectTask(
             project_id=project_id,
             status_id=init_status.id,
             demand_type_id=ttype.id,
             title=new_title[:200],
-            description=task.description,
-            assigned_to=task.assigned_to,
+            description=(conversion_description if conversion_description is not None else task.description),
+            assigned_to=assignee,
+            diretoria=task.diretoria,
+            area=task.area,
+            start_date=task.start_date,
+            due_date=task.due_date,
             created_by=task.created_by,
             origin_task_id=task.id,
-        ))
+            planning_kind=kind,
+        )
+        db.add(main)
+        # Programa: cria um card FILHO por item informado (título + descrição). Cada filho
+        # também herda diretoria/área (e datas, se não informadas) do card de origem.
+        children: list[ProjectTask] = []
+        if kind == "programa" and conversion_items:
+            for item in conversion_items:
+                title = ((item.get("title") if isinstance(item, dict) else getattr(item, "title", None)) or "").strip()
+                if not title:
+                    continue
+                desc = item.get("description") if isinstance(item, dict) else getattr(item, "description", None)
+                istart = item.get("start_date") if isinstance(item, dict) else getattr(item, "start_date", None)
+                idue = item.get("due_date") if isinstance(item, dict) else getattr(item, "due_date", None)
+                child = ProjectTask(
+                    project_id=project_id,
+                    status_id=init_status.id,
+                    demand_type_id=ttype.id,
+                    title=title[:200],
+                    description=desc or None,
+                    diretoria=task.diretoria,
+                    area=task.area,
+                    start_date=_to_naive_utc(istart) or task.start_date,
+                    due_date=_to_naive_utc(idue) or task.due_date,
+                    assigned_to=assignee,
+                    created_by=task.created_by,
+                    parent_task_id=None,  # definido após flush de main
+                    planning_kind="projeto",
+                )
+                children.append(child)
+                db.add(child)
+        # Um único flush resolve os ids de main e filhos para vincular hierarquia + submissions.
+        await db.flush()
+        for child in children:
+            child.parent_task_id = main.id
+        # Herda TODAS as respostas da solicitação do pai para o card principal e os filhos.
+        if origin_values:
+            for t in (main, *children):
+                db.add(ProjectDemandFormSubmission(
+                    task_id=t.id,
+                    values=dict(origin_values),
+                    updated_by=task.created_by,
+                ))
 
     @staticmethod
     def _sla_initial(status_obj: Optional[ProjectStatusConfig]) -> str:
@@ -1345,6 +1548,45 @@ class ProjectTaskService:
             status_code=403,
             detail="Sua função não tem permissão para mover o card para esta etapa.",
         )
+
+    @staticmethod
+    async def _funnel_access(
+        db: AsyncSession, funnel_id: Optional[uuid.UUID], current_user: Optional[User]
+    ) -> str:
+        """Nível de acesso da função do usuário ao kanban: manage | view | none.
+        Sem usuário (ações internas) ou admin = "manage"."""
+        if current_user is None or funnel_id is None:
+            return "manage"
+        if current_user.role in (UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN):
+            return "manage"
+        if not current_user.role_id:
+            return "manage"
+        row = await db.execute(
+            select(ProjectFunnel.access_control).where(ProjectFunnel.id == funnel_id)
+        )
+        return ProjectFunnelService.access_level(row.scalar_one_or_none(), current_user.role_id)
+
+    @staticmethod
+    async def _check_funnel_writable(
+        db: AsyncSession, funnel_id: Optional[uuid.UUID], current_user: Optional[User]
+    ) -> None:
+        """Bloqueia escrita (criar/mover/editar/excluir cards) num kanban onde a função
+        do usuário é "view" (somente visualizar) ou "none" (sem acesso)."""
+        level = await ProjectTaskService._funnel_access(db, funnel_id, current_user)
+        if level != "manage":
+            raise HTTPException(
+                status_code=403,
+                detail="Você só pode visualizar este kanban — sem permissão para gerenciar os cards.",
+            )
+
+    @staticmethod
+    async def _funnel_id_of_status(db: AsyncSession, status_id: Optional[uuid.UUID]) -> Optional[uuid.UUID]:
+        if status_id is None:
+            return None
+        row = await db.execute(
+            select(ProjectStatusConfig.funnel_id).where(ProjectStatusConfig.id == status_id)
+        )
+        return row.scalar_one_or_none()
 
     @staticmethod
     async def _validate_type_allowed_in_funnel(
@@ -1398,6 +1640,120 @@ class ProjectTaskService:
         task.completed_at = None  # card continua ativo no novo kanban
         task.status_entered_at = datetime.utcnow()
         task.sla_state = ProjectTaskService._sla_initial(init_status)
+
+        # Cascata: se a etapa estiver configurada, leva os DESCENDENTES (etapas do
+        # cronograma) junto para a etapa inicial do mesmo kanban de destino.
+        if getattr(status_obj, "cascade_children_on_move", False):
+            await ProjectTaskService._cascade_children_to_status(db, task.id, init_status)
+
+    @staticmethod
+    async def _cascade_children_to_status(
+        db: AsyncSession, root_id: uuid.UUID, init_status: ProjectStatusConfig
+    ) -> None:
+        """Move todos os descendentes (filhos, netos…) para `init_status` (kanban destino).
+        Usado quando o pai transita de kanban e a etapa pede para levar os filhos junto."""
+        visited: set[uuid.UUID] = set()
+        frontier: list[uuid.UUID] = [root_id]
+        now = datetime.utcnow()
+        sla = ProjectTaskService._sla_initial(init_status)
+        while frontier:
+            res = await db.execute(
+                select(ProjectTask).where(ProjectTask.parent_task_id.in_(frontier))
+            )
+            children = list(res.scalars().all())
+            next_frontier: list[uuid.UUID] = []
+            for child in children:
+                if child.id in visited:
+                    continue
+                visited.add(child.id)
+                next_frontier.append(child.id)
+                if child.status_id != init_status.id:
+                    child.status_id = init_status.id
+                    child.completed_at = None
+                    child.status_entered_at = now
+                    child.sla_state = sla
+                    child.updated_at = now
+            frontier = next_frontier
+
+    @staticmethod
+    async def _cascade_children_split(
+        db: AsyncSession,
+        root_id: uuid.UUID,
+        level1_status: ProjectStatusConfig,
+        deeper_status: ProjectStatusConfig,
+    ) -> None:
+        """Move os FILHOS diretos para `level1_status` e os NETOS/descendentes mais
+        profundos para `deeper_status`. Quando `deeper_status is level1_status`, equivale
+        ao comportamento antigo (todos os descendentes no mesmo kanban)."""
+        visited: set[uuid.UUID] = set()
+        frontier: list[uuid.UUID] = [root_id]
+        depth = 0
+        now = datetime.utcnow()
+        while frontier:
+            depth += 1
+            target = level1_status if depth == 1 else deeper_status
+            sla = ProjectTaskService._sla_initial(target)
+            res = await db.execute(
+                select(ProjectTask).where(ProjectTask.parent_task_id.in_(frontier))
+            )
+            next_frontier: list[uuid.UUID] = []
+            for child in res.scalars().all():
+                if child.id in visited:
+                    continue
+                visited.add(child.id)
+                next_frontier.append(child.id)
+                if child.status_id != target.id:
+                    child.status_id = target.id
+                    child.completed_at = None
+                    child.status_entered_at = now
+                    child.sla_state = sla
+                    child.updated_at = now
+            frontier = next_frontier
+
+    @staticmethod
+    async def _initial_status_of_funnel(
+        db: AsyncSession, funnel_id: uuid.UUID
+    ) -> ProjectStatusConfig:
+        """Etapa inicial (ativa) de um funil destino. Levanta 400 se não houver."""
+        res = await db.execute(
+            select(ProjectStatusConfig)
+            .where(
+                ProjectStatusConfig.funnel_id == funnel_id,
+                ProjectStatusConfig.is_active == True,  # noqa: E712
+            )
+            .order_by(ProjectStatusConfig.is_initial.desc(), ProjectStatusConfig.order.asc())
+            .limit(1)
+        )
+        status = res.scalar_one_or_none()
+        if not status:
+            raise HTTPException(
+                status_code=400,
+                detail="O kanban de destino das tarefas não tem etapa inicial.",
+            )
+        return status
+
+    @staticmethod
+    async def _maybe_send_children_to_funnel(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        task: ProjectTask,
+        status_obj: Optional[ProjectStatusConfig],
+    ) -> None:
+        """Se a etapa define `children_to_funnel_id`, envia os FILHOS (tarefas do cronograma)
+        para a etapa inicial desse kanban. O card atual (projeto) PERMANECE onde está —
+        usado para mandar as tarefas ao Desenvolvimento como cards visíveis.
+
+        Se também define `grandchildren_to_funnel_id`, os NETOS (e descendentes mais
+        profundos) descem mais um nível, para a etapa inicial desse outro kanban."""
+        target_funnel_id = getattr(status_obj, "children_to_funnel_id", None) if status_obj else None
+        if not target_funnel_id:
+            return
+        init_status = await ProjectTaskService._initial_status_of_funnel(db, target_funnel_id)
+        deeper_status = init_status
+        grand_funnel_id = getattr(status_obj, "grandchildren_to_funnel_id", None) if status_obj else None
+        if grand_funnel_id and grand_funnel_id != target_funnel_id:
+            deeper_status = await ProjectTaskService._initial_status_of_funnel(db, grand_funnel_id)
+        await ProjectTaskService._cascade_children_split(db, task.id, init_status, deeper_status)
 
     @staticmethod
     async def _maybe_update_origin_on_status(
@@ -1473,6 +1829,17 @@ class ProjectTaskService:
         return list(result.scalars().all())
 
     @staticmethod
+    async def list_planning_nodes(db: AsyncSession, project_id: uuid.UUID) -> list[ProjectTask]:
+        """Nós de planejamento (Projeto/Programa) do projeto — destino da importação de Features/US."""
+        await ProjectService.get(db, project_id)
+        result = await db.execute(
+            select(ProjectTask)
+            .where(ProjectTask.project_id == project_id, ProjectTask.planning_kind.isnot(None))
+            .order_by(ProjectTask.planning_kind.desc(), ProjectTask.title.asc())
+        )
+        return list(result.scalars().all())
+
+    @staticmethod
     async def list_for_user(
         db: AsyncSession,
         user_id: uuid.UUID,
@@ -1500,6 +1867,27 @@ class ProjectTaskService:
         return list(result.scalars().all())
 
     @staticmethod
+    async def list_all(
+        db: AsyncSession,
+        project_id: Optional[uuid.UUID] = None,
+    ) -> list[ProjectTask]:
+        """Lista todas as demandas/cards do tenant (com contexto de projeto, etapa e
+        tipo) para a tela administrativa de gestão. Filtro opcional por projeto."""
+        q = (
+            select(ProjectTask)
+            .options(
+                selectinload(ProjectTask.project),
+                selectinload(ProjectTask.status),
+                selectinload(ProjectTask.demand_type),
+            )
+        )
+        if project_id:
+            q = q.where(ProjectTask.project_id == project_id)
+        q = q.order_by(ProjectTask.created_at.desc())
+        result = await db.execute(q)
+        return list(result.scalars().all())
+
+    @staticmethod
     async def get(db: AsyncSession, project_id: uuid.UUID, task_id: uuid.UUID) -> ProjectTask:
         result = await db.execute(
             select(ProjectTask).where(
@@ -1518,6 +1906,8 @@ class ProjectTaskService:
         project_id: uuid.UUID,
         data: ProjectTaskCreate,
         current_user_id: Optional[uuid.UUID] = None,
+        current_user: Optional[User] = None,
+        enforce_funnel_access: bool = True,
     ) -> ProjectTask:
         await ProjectService.get(db, project_id)
         status_row = await db.execute(
@@ -1529,6 +1919,11 @@ class ProjectTaskService:
         status_obj = status_row.scalar_one_or_none()
         if not status_obj:
             raise HTTPException(status_code=400, detail="Coluna inválida para este projeto.")
+        # Abrir solicitação (auto-atribuída a si) é uma funcionalidade básica de TODO usuário —
+        # não depende do acesso do Cargo ao funil. Só a gestão do board (mover/editar cards de
+        # terceiros) respeita o access_control. Por isso a checagem só vale quando enforce=True.
+        if enforce_funnel_access:
+            await ProjectTaskService._check_funnel_writable(db, status_obj.funnel_id, current_user)
 
         payload = data.model_dump()
         form_values = payload.pop("form_values", None)
@@ -1560,6 +1955,7 @@ class ProjectTaskService:
             area=payload.get("area"),
             start_date=payload.get("start_date"),
             due_date=payload.get("due_date"),
+            anexos=payload.get("anexos"),
         )
         for key in ("diretoria", "area"):
             if payload.get(key) == "":
@@ -1572,11 +1968,20 @@ class ProjectTaskService:
             created_by=current_user_id,
         )
         task.sla_state = ProjectTaskService._sla_initial(status_obj)
+        # Horas + início sem prazo explícito → deriva o prazo (dias úteis).
+        if task.due_date is None:
+            ProjectTaskService._apply_hours(task)
         db.add(task)
         await db.flush()
         await ProjectTaskService._upsert_form_submission(db, task.id, form_values, current_user_id)
+        # Automações de "ao entrar na etapa" valem também para a criação direta do card
+        # na coluna — não só no arraste. Atribui responsável, cria subtarefa, notifica, etc.
+        await ProjectAutomationRunner.run_on_enter(db, project_id, task, status_obj)
         await db.commit()
         await db.refresh(task)
+        # Card novo com pai/origem herda a priorização da família, se houver.
+        if task.parent_task_id or task.origin_task_id:
+            await PriorityScoreService.sync_family(db, task.id)
         return task
 
     @staticmethod
@@ -1609,6 +2014,22 @@ class ProjectTaskService:
             )
 
     @staticmethod
+    async def _enforce_priority_gate(db: AsyncSession, task: ProjectTask) -> None:
+        """Bloqueia a saída de uma etapa marcada como OBRIG. na priorização sem que a
+        demanda esteja pontuada (Impacto × Esforço)."""
+        status_obj = await db.get(ProjectStatusConfig, task.status_id)
+        if not status_obj or not getattr(status_obj, "priority_required", False):
+            return
+        score = await db.execute(
+            select(ProjectPriorityScore.id).where(ProjectPriorityScore.task_id == task.id).limit(1)
+        )
+        if score.scalar_one_or_none() is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Pontue a priorização (Impacto × Esforço) antes de sair desta etapa.",
+            )
+
+    @staticmethod
     async def update(
         db: AsyncSession,
         project_id: uuid.UUID,
@@ -1617,6 +2038,11 @@ class ProjectTaskService:
         current_user: Optional[User] = None,
     ) -> ProjectTask:
         task = await ProjectTaskService.get(db, project_id, task_id)
+        # Kanban "somente visualizar"/"sem acesso" para a função do usuário: bloqueia
+        # qualquer edição de cards já existentes neste kanban.
+        if current_user is not None:
+            source_funnel_id = await ProjectTaskService._funnel_id_of_status(db, task.status_id)
+            await ProjectTaskService._check_funnel_writable(db, source_funnel_id, current_user)
         payload = data.model_dump(exclude_unset=True)
         if "due_date" in payload:
             payload["due_date"] = _to_naive_utc(payload.get("due_date"))
@@ -1624,6 +2050,10 @@ class ProjectTaskService:
             payload["start_date"] = _to_naive_utc(payload.get("start_date"))
         form_values = payload.pop("form_values", None)
         conversion_title = payload.pop("conversion_title", None)
+        conversion_kind = payload.pop("conversion_kind", None)
+        conversion_description = payload.pop("conversion_description", None)
+        conversion_items = payload.pop("conversion_items", None)
+        conversion_assigned_to = payload.pop("conversion_assigned_to", None)
 
         target_demand_type_id = payload.get("demand_type_id", task.demand_type_id)
         if target_demand_type_id:
@@ -1662,6 +2092,7 @@ class ProjectTaskService:
             area=payload.get("area"),
             start_date=payload.get("start_date"),
             due_date=payload.get("due_date"),
+            anexos=payload.get("anexos"),
             existing=task,
         )
         for key in ("diretoria", "area"):
@@ -1681,6 +2112,8 @@ class ProjectTaskService:
             # Permissão de movimentação: só funções autorizadas movem o card para esta etapa.
             if payload["status_id"] != task.status_id:
                 ProjectTaskService._check_move_permission(target_status, current_user)
+                # E o kanban de destino não pode ser "somente visualizar"/"sem acesso".
+                await ProjectTaskService._check_funnel_writable(db, target_status.funnel_id, current_user)
 
         # O card mudou de etapa? (calculado antes do setattr)
         status_changed = bool(payload.get("status_id")) and payload["status_id"] != task.status_id
@@ -1689,9 +2122,19 @@ class ProjectTaskService:
         # sem início+prazo.
         if status_changed:
             await ProjectTaskService._enforce_schedule_gate(db, task, payload)
+            await ProjectTaskService._enforce_priority_gate(db, task)
+
+        schedule_changed = any(k in payload for k in ("start_date", "due_date", "estimated_hours"))
+        prev_hours = task.estimated_hours
+        hours_changed = "estimated_hours" in payload and payload["estimated_hours"] != prev_hours
 
         for key, value in payload.items():
             setattr(task, key, value)
+
+        # Horas estimadas + início → recalcula o prazo (dias úteis), a menos que o
+        # prazo tenha sido informado explicitamente nesta mesma edição.
+        if ("estimated_hours" in payload or "start_date" in payload) and "due_date" not in payload:
+            ProjectTaskService._apply_hours(task)
 
         # Gatilhos de "entrada na etapa" — só quando o card realmente muda de fase.
         if status_changed:
@@ -1706,23 +2149,692 @@ class ProjectTaskService:
             # Automações da fase em que o card entrou (atribuir, subtarefa, notificar, comentar).
             await ProjectAutomationRunner.run_on_enter(db, project_id, task, status_obj)
             # Gatilho de conversão: se a fase de destino gera outro tipo de card.
-            await ProjectTaskService._maybe_convert_on_status(db, project_id, task, status_obj, conversion_title)
+            await ProjectTaskService._maybe_convert_on_status(
+                db, project_id, task, status_obj, conversion_title,
+                conversion_kind=conversion_kind,
+                conversion_description=conversion_description,
+                conversion_items=conversion_items,
+                conversion_assigned_to=conversion_assigned_to,
+            )
             # Gatilho de transição: se a fase de destino move o card para outro kanban.
             await ProjectTaskService._maybe_move_to_funnel(db, project_id, task, status_obj)
+            # Envia as tarefas (filhos) para o kanban de execução, mantendo este card.
+            await ProjectTaskService._maybe_send_children_to_funnel(db, project_id, task, status_obj)
             # Sincroniza card de origem (ex.: Planejamento concluído → Triagem avança).
             await ProjectTaskService._maybe_update_origin_on_status(db, project_id, task, status_obj)
 
         task.updated_at = datetime.utcnow()
         await ProjectTaskService._upsert_form_submission(db, task.id, form_values, None)
+        # Auto-scheduling. Mudar horas estimadas recalcula TODA a subárvore do cronograma
+        # (âncora no início do projeto + sequência por ordem + predecessoras). Já um ajuste
+        # manual de datas (arrastar a barra) só empurra as sucessoras (FS) para frente,
+        # preservando a edição manual.
+        if "start_date" in payload and task.planning_kind in ("programa", "projeto"):
+            # Mudar o início do card raiz = redefinir a data-base do projeto. Grava em
+            # Project.start_date e recalcula TODA a subárvore (sequência + horas + predecessoras).
+            project = await db.get(Project, project_id)
+            if project is not None and task.start_date is not None:
+                project.start_date = task.start_date
+            await ProjectTaskService._reschedule_root(db, project_id, task.id)
+        elif hours_changed:
+            # Horas mudam a duração → recalcula a subárvore.
+            root_id = await ProjectTaskService._planning_root_id(db, project_id, task.id)
+            await ProjectTaskService._reschedule_root(db, project_id, root_id)
+        elif schedule_changed:
+            await ProjectTaskService._reschedule_dependents(db, project_id, task.id)
         await db.commit()
         await db.refresh(task)
+        # Propaga/herdar a priorização para a família — cobre vínculo de pai, conversão
+        # (novo Projeto com origin_task_id) e subtarefas criadas por automação.
+        await PriorityScoreService.sync_family(db, task.id)
         return task
 
     @staticmethod
-    async def delete(db: AsyncSession, project_id: uuid.UUID, task_id: uuid.UUID) -> None:
+    async def _effective_type_id(
+        db: AsyncSession, task: ProjectTask
+    ) -> Optional[uuid.UUID]:
+        """Tipo EFETIVO de um item no cronograma, seguindo a corrente de amarração:
+        - item tipado → seu próprio tipo;
+        - etapa sem tipo → avança N passos (N = distância até o ancestral tipado) na
+          corrente de filhos permitidos, exigindo exatamente 1 filho permitido por nível.
+        Retorna None quando o nível é indefinido (sem ancestral tipado, nível terminal
+        sem filhos, ou ambíguo com vários filhos permitidos)."""
+        if task.demand_type_id:
+            return task.demand_type_id
+        steps = 0
+        cur: Optional[ProjectTask] = task
+        while cur is not None and not cur.demand_type_id:
+            if cur.parent_task_id is None:
+                return None
+            cur = await db.get(ProjectTask, cur.parent_task_id)
+            steps += 1
+        if cur is None or not cur.demand_type_id:
+            return None
+        type_id: uuid.UUID = cur.demand_type_id
+        for _ in range(steps):
+            dt = await db.get(ProjectDemandType, type_id)
+            allowed = (dt.allowed_child_type_ids or []) if dt else []
+            if len(allowed) != 1:
+                return None
+            type_id = uuid.UUID(str(allowed[0]))
+        return type_id
+
+    @staticmethod
+    async def _can_add_schedule_child(db: AsyncSession, parent: ProjectTask) -> bool:
+        """Só permite etapa-filha onde o tipo EFETIVO do pai tem filhos permitidos."""
+        eff = await ProjectTaskService._effective_type_id(db, parent)
+        if eff is None:
+            return False
+        dt = await db.get(ProjectDemandType, eff)
+        return bool(dt and dt.allowed_child_type_ids)
+
+    @staticmethod
+    async def create_schedule_stage(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        parent_task_id: uuid.UUID,
+        data: "ScheduleStageCreate",
+        current_user_id: Optional[uuid.UUID] = None,
+    ) -> ProjectTask:
+        """Cria uma ETAPA do cronograma do projeto: atividade-filha simples (sem tipo de
+        demanda), no mesmo status do pai. Respeita a amarração de tipos: só permite criar
+        etapa onde o tipo EFETIVO do pai (corrente de allowed_child_type_ids) ainda tem um
+        nível-filho definido — evita criar níveis que não existem na hierarquia."""
+        parent = await ProjectTaskService.get(db, project_id, parent_task_id)
+        if not await ProjectTaskService._can_add_schedule_child(db, parent):
+            raise HTTPException(
+                status_code=400,
+                detail="Este item não tem um nível-filho definido na amarração de tipos; não é possível adicionar etapa.",
+            )
+        status_obj = await db.get(ProjectStatusConfig, parent.status_id)
+        stage = ProjectTask(
+            project_id=project_id,
+            status_id=parent.status_id,
+            parent_task_id=parent.id,
+            demand_type_id=None,
+            title=data.title.strip()[:200],
+            start_date=_to_naive_utc(data.start_date),
+            due_date=_to_naive_utc(data.due_date),
+            created_by=current_user_id,
+            sla_state=ProjectTaskService._sla_initial(status_obj),
+        )
+        db.add(stage)
+        await db.commit()
+        await db.refresh(stage)
+        # A etapa entra na família do projeto e herda a priorização, se houver.
+        await PriorityScoreService.sync_family(db, stage.id)
+        return stage
+
+    @staticmethod
+    async def reorder(db: AsyncSession, project_id: uuid.UUID, items: list[dict]) -> list[ProjectTask]:
+        """Reordena tarefas (irmãs do mesmo nível) no cronograma. Recebe [{id, order}]
+        e grava o novo `order`. Não mexe em datas nem em vínculo (pai)."""
+        ids = [i.get("id") for i in items if i.get("id")]
+        if not ids:
+            return []
+        result = await db.execute(
+            select(ProjectTask).where(
+                ProjectTask.project_id == project_id,
+                ProjectTask.id.in_(ids),
+            )
+        )
+        current = {str(t.id): t for t in result.scalars().all()}
+        for item in items:
+            tid = str(item.get("id"))
+            if tid in current and item.get("order") is not None:
+                current[tid].order = int(item["order"])
+                current[tid].updated_at = datetime.utcnow()
+        # Mudar a ordem reordena as datas: recalcula a subárvore do cronograma envolvida.
+        first = next(iter(current.values()), None)
+        if first is not None:
+            await db.flush()
+            root_id = await ProjectTaskService._planning_root_id(db, project_id, first.id)
+            await ProjectTaskService._reschedule_root(db, project_id, root_id)
+        await db.commit()
+        return list(current.values())
+
+    @staticmethod
+    def _apply_hours(task: ProjectTask) -> None:
+        """Deriva due_date a partir de estimated_hours + start_date (dias úteis).
+        Não faz nada se faltar horas ou início. A barra cobre [start, due] inclusive."""
+        duration = _duration_days_from_hours(task.estimated_hours)
+        if duration is None or task.start_date is None:
+            return
+        task.due_date = _add_business_days(task.start_date, duration - 1)
+
+    @staticmethod
+    async def _reschedule_dependents(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        changed_task_id: uuid.UUID,
+        *,
+        visited: Optional[set[uuid.UUID]] = None,
+    ) -> None:
+        """Empurrão FS de sucessoras (horas úteis) usado no ARRASTO MANUAL de uma barra
+        (mudar start/due sem mexer nas horas): preserva a data manual da tarefa movida e só
+        empurra as sucessoras para frente, mantendo a duração de cada uma. Os demais gatilhos
+        (horas/ordem/predecessora) usam o motor completo (`_reschedule_root`). Commit a cargo
+        do chamador."""
+        calendar = await load_calendar(db)
+        rows = await db.execute(
+            select(
+                ProjectTaskDependency.predecessor_id,
+                ProjectTaskDependency.successor_id,
+                ProjectTaskDependency.dep_type,
+                ProjectTaskDependency.lag_hours,
+            ).where(ProjectTaskDependency.project_id == project_id)
+        )
+        succ_by_pred: dict[uuid.UUID, list[tuple[uuid.UUID, str, float]]] = {}
+        for pred_id, succ_id, dt, lag in rows.all():
+            succ_by_pred.setdefault(pred_id, []).append((succ_id, dt or "FS", float(lag or 0)))
+
+        if visited is None:
+            visited = set()
+        # BFS empurrando sucessoras (apenas FS no caminho de arrasto; tipos completos no motor).
+        queue: list[uuid.UUID] = [changed_task_id]
+        while queue:
+            pred_id = queue.pop(0)
+            if pred_id in visited:
+                continue
+            visited.add(pred_id)
+            edges = succ_by_pred.get(pred_id)
+            if not edges:
+                continue
+            pred = await db.get(ProjectTask, pred_id)
+            if pred is None or pred.due_date is None:
+                continue
+            for succ_id, dep_type, lag in edges:
+                if dep_type != "FS":
+                    continue
+                succ = await db.get(ProjectTask, succ_id)
+                if succ is None:
+                    continue
+                new_start = calendar.add_working_hours(pred.due_date, lag)
+                # Só empurra para frente.
+                if succ.start_date is not None and succ.start_date >= new_start:
+                    continue
+                # Preserva a duração (horas): das horas estimadas, senão do span atual, senão 0.
+                if succ.estimated_hours is not None and float(succ.estimated_hours) > 0:
+                    duration = float(succ.estimated_hours)
+                elif succ.start_date is not None and succ.due_date is not None:
+                    duration = calendar.working_hours_between(succ.start_date, succ.due_date)
+                else:
+                    duration = 0.0
+                succ.start_date = new_start
+                succ.due_date = calendar.add_working_hours(new_start, duration)
+                succ.updated_at = datetime.utcnow()
+                queue.append(succ_id)
+
+    @staticmethod
+    async def _planning_root_id(db: AsyncSession, project_id: uuid.UUID, task_id: uuid.UUID) -> uuid.UUID:
+        """Sobe pela cadeia de pais até o card de planejamento (planning_kind programa/projeto),
+        que é a raiz do cronograma. Se nenhum ancestral for de planejamento, devolve o ancestral
+        mais ao topo (parent_task_id == None)."""
+        cur = await db.get(ProjectTask, task_id)
+        last = cur
+        while cur is not None:
+            last = cur
+            if cur.planning_kind in ("programa", "projeto"):
+                return cur.id
+            if cur.parent_task_id is None:
+                break
+            cur = await db.get(ProjectTask, cur.parent_task_id)
+        return last.id if last is not None else task_id
+
+    @staticmethod
+    async def _reschedule_root(db: AsyncSession, project_id: uuid.UUID, root_id: uuid.UUID) -> None:
+        """Recalcula em cascata as datas de TODA a subárvore de `root_id` (um card de
+        planejamento), gravando start_date/due_date.
+
+        Critérios:
+        - Âncora = Project.start_date (alinhada em dia útil); se ausente, hoje.
+        - Irmãos (mesmo pai) são sequenciais pela ordem: cada um começa no próximo dia útil
+          após o término do irmão anterior.
+        - Predecessoras explícitas (FS, dias úteis + lag) empurram a sucessora para frente —
+          vence a data mais tarde entre a sequência e as predecessoras.
+        - Pais herdam start = menor início e due = maior término dos filhos agendados (rollup).
+        - Folha agendável = tem horas estimadas OU já tem início+prazo. Duração = horas (ceil/8h)
+          ou, na falta, a duração atual; folhas sem horas e sem datas são ignoradas.
+
+        Commit a cargo do chamador.
+        """
+        root = await db.get(ProjectTask, root_id)
+        if root is None:
+            return
+
+        # Calendário corporativo (expediente/almoço/dias úteis/feriados) do módulo Pessoa.
+        calendar = await load_calendar(db)
+
+        project = await db.get(Project, project_id)
+        base = project.start_date if (project is not None and project.start_date is not None) else datetime.utcnow()
+        anchor = datetime.combine(base.date(), calendar.day_start)
+
+        rows = await db.execute(select(ProjectTask).where(ProjectTask.project_id == project_id))
+        by_id: dict[uuid.UUID, ProjectTask] = {t.id: t for t in rows.scalars().all()}
+
+        # Duração planejada em HORAS: horas estimadas, ou a duração atual (se já houver datas).
+        def duration_hours(t: ProjectTask) -> Optional[float]:
+            if t.estimated_hours is not None and float(t.estimated_hours) > 0:
+                return float(t.estimated_hours)
+            if t.start_date is not None and t.due_date is not None:
+                return calendar.working_hours_between(t.start_date, t.due_date)
+            return None
+
+        nodes = [
+            EngineNode(
+                id=t.id,
+                parent_id=t.parent_task_id,
+                order=t.order,
+                duration_hours=duration_hours(t),
+                tiebreak=t.created_at.isoformat() if t.created_at else "",
+            )
+            for t in by_id.values()
+        ]
+
+        dep_rows = await db.execute(
+            select(
+                ProjectTaskDependency.predecessor_id,
+                ProjectTaskDependency.successor_id,
+                ProjectTaskDependency.dep_type,
+                ProjectTaskDependency.lag_hours,
+            ).where(ProjectTaskDependency.project_id == project_id)
+        )
+        edges = [
+            EngineEdge(predecessor=p, successor=s, dep_type=(dt or "FS"), lag_hours=float(lag or 0))
+            for p, s, dt, lag in dep_rows.all()
+        ]
+
+        try:
+            sched = schedule_tree(nodes, edges, root_id, anchor, calendar)
+        except ScheduleCycleError:
+            return  # Ciclo (não deveria ocorrer — criação já bloqueia); não reescala.
+
+        now = datetime.utcnow()
+        for tid, (s, e) in sched.items():
+            t = by_id.get(tid)
+            if t is None:
+                continue
+            if t.start_date != s or t.due_date != e:
+                t.start_date = s
+                t.due_date = e
+                t.updated_at = now
+
+        # Rollup de horas: assim como as datas, o pai herda a SOMA das horas estimadas dos
+        # filhos (folhas mantêm a sua). O motor ignora horas de nós com filhos (usa min/max
+        # das datas dos filhos), então isto é só consolidação para exibição/relatórios.
+        children_map: dict[uuid.UUID, list[ProjectTask]] = {}
+        for t in by_id.values():
+            if t.parent_task_id is not None:
+                children_map.setdefault(t.parent_task_id, []).append(t)
+
+        def rollup_hours(tid: uuid.UUID) -> Decimal:
+            t = by_id.get(tid)
+            if t is None:
+                return Decimal(0)
+            kids = children_map.get(tid, [])
+            if not kids:
+                return t.estimated_hours if t.estimated_hours is not None else Decimal(0)
+            total = sum((rollup_hours(k.id) for k in kids), Decimal(0))
+            if t.estimated_hours != total:
+                t.estimated_hours = total
+                t.updated_at = now
+            return total
+
+        rollup_hours(root_id)
+
+        # Rollup de progresso: o pai herda a média ponderada pelas horas do progresso das US
+        # FOLHAS (folha = 100 se completed_at, senão percent_complete; peso = estimated_hours
+        # ou 1). Mesma fórmula do Gantt (GanttPage.progressById) e do portfólio do PO.
+        # Ao chegar a 100% o pai é marcado como concluído (completed_at); abaixo disso, reaberto.
+        def rollup_progress(tid: uuid.UUID) -> tuple[float, float]:
+            t = by_id.get(tid)
+            if t is None:
+                return (0.0, 0.0)
+            kids = children_map.get(tid, [])
+            if not kids:
+                pct = 100.0 if t.completed_at is not None else float(t.percent_complete or 0)
+                w = float(t.estimated_hours) if t.estimated_hours and float(t.estimated_hours) > 0 else 1.0
+                return (pct * w, w)
+            acc = 0.0
+            wsum = 0.0
+            for k in kids:
+                a, w = rollup_progress(k.id)
+                acc += a
+                wsum += w
+            pct = round(acc / wsum) if wsum > 0 else 0
+            if t.percent_complete != pct:
+                t.percent_complete = pct
+                t.updated_at = now
+            if pct >= 100 and t.completed_at is None:
+                t.completed_at = now
+                t.updated_at = now
+            elif pct < 100 and t.completed_at is not None:
+                t.completed_at = None
+                t.updated_at = now
+            return (acc, wsum)
+
+        rollup_progress(root_id)
+
+    @staticmethod
+    async def critical_path(db: AsyncSession, project_id: uuid.UUID, root_id: uuid.UUID) -> list[dict]:
+        """CPM (caminho crítico) da subárvore de `root_id`: backward pass + folgas sobre as datas
+        JÁ persistidas (early schedule do motor). Sem escrever no banco. Retorna por tarefa:
+        is_critical, total_float_hours, free_float_hours, late_start, late_finish."""
+        root = await db.get(ProjectTask, root_id)
+        if root is None:
+            return []
+        calendar = await load_calendar(db)
+        rows = await db.execute(select(ProjectTask).where(ProjectTask.project_id == project_id))
+        by_id: dict[uuid.UUID, ProjectTask] = {t.id: t for t in rows.scalars().all()}
+
+        children: dict[uuid.UUID, list[uuid.UUID]] = {}
+        for t in by_id.values():
+            if t.parent_task_id:
+                children.setdefault(t.parent_task_id, []).append(t.id)
+        subtree: set[uuid.UUID] = set()
+        stack = [root_id]
+        while stack:
+            cur = stack.pop()
+            if cur in subtree:
+                continue
+            subtree.add(cur)
+            stack.extend(children.get(cur, []))
+
+        nodes = [
+            EngineNode(
+                id=t.id, parent_id=t.parent_task_id, order=t.order, duration_hours=None,
+                tiebreak=t.created_at.isoformat() if t.created_at else "",
+            )
+            for t in by_id.values()
+        ]
+        dep_rows = await db.execute(
+            select(
+                ProjectTaskDependency.predecessor_id,
+                ProjectTaskDependency.successor_id,
+                ProjectTaskDependency.dep_type,
+                ProjectTaskDependency.lag_hours,
+            ).where(ProjectTaskDependency.project_id == project_id)
+        )
+        edges = [
+            EngineEdge(predecessor=p, successor=s, dep_type=(dt or "FS"), lag_hours=float(lag or 0))
+            for p, s, dt, lag in dep_rows.all()
+        ]
+        # Early schedule = datas persistidas, restritas à subárvore e com início+fim.
+        sched = {
+            t.id: (t.start_date, t.due_date)
+            for t in by_id.values()
+            if t.id in subtree and t.start_date is not None and t.due_date is not None
+        }
+        if root_id not in sched:
+            return []
+        cpm = compute_cpm(nodes, edges, root_id, sched, calendar)
+        return [
+            {
+                "task_id": tid,
+                "is_critical": r.is_critical,
+                "total_float_hours": r.total_float_hours,
+                "free_float_hours": r.free_float_hours,
+                "late_start": r.late_start,
+                "late_finish": r.late_finish,
+            }
+            for tid, r in cpm.items()
+        ]
+
+    @staticmethod
+    async def delete(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        task_id: uuid.UUID,
+        current_user: Optional[User] = None,
+    ) -> None:
         task = await ProjectTaskService.get(db, project_id, task_id)
+        if current_user is not None:
+            funnel_id = await ProjectTaskService._funnel_id_of_status(db, task.status_id)
+            await ProjectTaskService._check_funnel_writable(db, funnel_id, current_user)
+        # Não permite excluir um item que tenha filhos abaixo (amarração para baixo) —
+        # evita órfãos (o FK parent_task_id é SET NULL). Exclua os filhos primeiro.
+        child_check = await db.execute(
+            select(ProjectTask.id).where(ProjectTask.parent_task_id == task_id).limit(1)
+        )
+        if child_check.scalar_one_or_none():
+            raise HTTPException(
+                status_code=400,
+                detail="Não é possível excluir um item que tem itens filhos. Exclua os filhos primeiro.",
+            )
         await db.delete(task)
         await db.commit()
+
+
+class TaskDependencyService:
+    """Dependências entre tarefas do cronograma (FS por ora). A criação valida ciclo no
+    grafo de dependências e dispara o auto-scheduling das sucessoras."""
+
+    @staticmethod
+    async def list(db: AsyncSession, project_id: uuid.UUID) -> list[ProjectTaskDependency]:
+        result = await db.execute(
+            select(ProjectTaskDependency)
+            .where(ProjectTaskDependency.project_id == project_id)
+            .order_by(ProjectTaskDependency.created_at.asc())
+        )
+        return list(result.scalars().all())
+
+    @staticmethod
+    async def _task_in_project(db: AsyncSession, project_id: uuid.UUID, task_id: uuid.UUID) -> ProjectTask:
+        res = await db.execute(
+            select(ProjectTask).where(
+                ProjectTask.id == task_id,
+                ProjectTask.project_id == project_id,
+            )
+        )
+        task = res.scalar_one_or_none()
+        if task is None:
+            raise HTTPException(status_code=400, detail="Tarefa não encontrada neste projeto.")
+        return task
+
+    @staticmethod
+    async def _would_cycle(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        predecessor_id: uuid.UUID,
+        successor_id: uuid.UUID,
+    ) -> bool:
+        """Adicionar predecessor→successor cria ciclo se, partindo de successor pelas
+        arestas existentes, conseguimos alcançar predecessor."""
+        rows = await db.execute(
+            select(
+                ProjectTaskDependency.predecessor_id,
+                ProjectTaskDependency.successor_id,
+            ).where(ProjectTaskDependency.project_id == project_id)
+        )
+        succ_by_pred: dict[uuid.UUID, list[uuid.UUID]] = {}
+        for pred_id, succ_id in rows.all():
+            succ_by_pred.setdefault(pred_id, []).append(succ_id)
+        stack = [successor_id]
+        visited: set[uuid.UUID] = set()
+        while stack:
+            cur = stack.pop()
+            if cur == predecessor_id:
+                return True
+            if cur in visited:
+                continue
+            visited.add(cur)
+            stack.extend(succ_by_pred.get(cur, []))
+        return False
+
+    @staticmethod
+    async def create(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        data: TaskDependencyCreate,
+    ) -> ProjectTaskDependency:
+        if data.predecessor_id == data.successor_id:
+            raise HTTPException(status_code=400, detail="Uma tarefa não pode depender de si mesma.")
+        await TaskDependencyService._task_in_project(db, project_id, data.predecessor_id)
+        await TaskDependencyService._task_in_project(db, project_id, data.successor_id)
+        if await TaskDependencyService._would_cycle(db, project_id, data.predecessor_id, data.successor_id):
+            raise HTTPException(status_code=400, detail="Esta dependência criaria um ciclo entre as tarefas.")
+        dep = ProjectTaskDependency(
+            project_id=project_id,
+            predecessor_id=data.predecessor_id,
+            successor_id=data.successor_id,
+            dep_type=data.dep_type,
+            lag_hours=data.lag_hours,
+        )
+        db.add(dep)
+        try:
+            await db.flush()
+        except IntegrityError:
+            await db.rollback()
+            raise HTTPException(status_code=400, detail="Esta dependência já existe.")
+        # Nova predecessora recalcula a subárvore do cronograma da sucessora.
+        root_id = await ProjectTaskService._planning_root_id(db, project_id, data.successor_id)
+        await ProjectTaskService._reschedule_root(db, project_id, root_id)
+        await db.commit()
+        await db.refresh(dep)
+        return dep
+
+    @staticmethod
+    async def delete(db: AsyncSession, project_id: uuid.UUID, dep_id: uuid.UUID) -> None:
+        res = await db.execute(
+            select(ProjectTaskDependency).where(
+                ProjectTaskDependency.id == dep_id,
+                ProjectTaskDependency.project_id == project_id,
+            )
+        )
+        dep = res.scalar_one_or_none()
+        if dep is None:
+            raise HTTPException(status_code=404, detail="Dependência não encontrada.")
+        succ_id = dep.successor_id
+        await db.delete(dep)
+        await db.flush()
+        # Remover a predecessora pode liberar a sucessora para mais cedo: recalcula a subárvore.
+        root_id = await ProjectTaskService._planning_root_id(db, project_id, succ_id)
+        await ProjectTaskService._reschedule_root(db, project_id, root_id)
+        await db.commit()
+
+    @staticmethod
+    async def compute_workload(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+        unit: str = "day",
+    ) -> list[WorkloadCell]:
+        """Distribui as horas estimadas pelos DIAS ÚTEIS do calendário corporativo (pula
+        fim de semana e feriados) e agrega por (responsável, dia). A capacidade por dia vem da
+        jornada da Pessoa (Person.daily_hours) e é reduzida pelas Ausências aprovadas que afetam
+        a capacidade (dia inteiro → 0, ou menos as horas parciais). Superlotação = alocado > capacidade."""
+        calendar = await load_calendar(db)
+        result = await db.execute(
+            select(ProjectTask).where(
+                ProjectTask.project_id == project_id,
+                ProjectTask.assigned_to.isnot(None),
+                ProjectTask.start_date.isnot(None),
+                ProjectTask.due_date.isnot(None),
+                ProjectTask.estimated_hours.isnot(None),
+            )
+        )
+        tasks = list(result.scalars().all())
+        acc: dict[tuple[uuid.UUID, date], float] = {}
+        user_ids: set[uuid.UUID] = set()
+        for t in tasks:
+            hours = float(t.estimated_hours or 0)
+            if hours <= 0:
+                continue
+            # Dias úteis (calendário) cobertos pela tarefa.
+            work_days: list[date] = []
+            cur = t.start_date
+            while cur.date() <= t.due_date.date():
+                if calendar.is_working_day(cur.date()):
+                    work_days.append(cur.date())
+                cur = cur + timedelta(days=1)
+            if not work_days:
+                continue
+            per_day = hours / len(work_days)
+            for d in work_days:
+                if (date_from is None or d >= date_from) and (date_to is None or d <= date_to):
+                    acc[(t.assigned_to, d)] = acc.get((t.assigned_to, d), 0.0) + per_day
+            user_ids.add(t.assigned_to)
+
+        # Jornada e ausências por Pessoa (assigned_to == Person.id — responsável é Pessoa do teamops).
+        default_cap = calendar.hours_per_day()
+        daily_by_user: dict[uuid.UUID, float] = {}
+        absences_by_user: dict[uuid.UUID, list[tuple[date, date, Optional[float]]]] = {}
+        if user_ids:  # na prática person_ids (assigned_to == Person.id)
+            persons = (await db.execute(select(Person).where(Person.id.in_(user_ids)))).scalars().all()
+            for p in persons:
+                daily_by_user[p.id] = float(p.daily_hours) if p.daily_hours else default_cap
+            person_ids = [p.id for p in persons]
+            if person_ids:
+                abs_rows = (await db.execute(
+                    select(Absence, AbsenceType.affects_capacity)
+                    .join(AbsenceType, Absence.absence_type_id == AbsenceType.id)
+                    .where(
+                        Absence.person_id.in_(person_ids),
+                        Absence.status == AbsenceStatus.APROVADA,
+                        AbsenceType.affects_capacity.is_(True),
+                    )
+                )).all()
+                for ab, _affects in abs_rows:
+                    partial = float(ab.partial_hours) if ab.partial_hours is not None else None
+                    absences_by_user.setdefault(ab.person_id, []).append((ab.start_date, ab.end_date, partial))
+
+        def capacity_for(user_id: uuid.UUID, d: date) -> float:
+            if not calendar.is_working_day(d):
+                return 0.0
+            cap = daily_by_user.get(user_id, default_cap)
+            for s, e, partial in absences_by_user.get(user_id, []):
+                if s <= d <= e:
+                    cap = max(0.0, cap - partial) if partial is not None else 0.0
+            return cap
+
+        cells: list[WorkloadCell] = []
+        for (user_id, d), allocated in sorted(acc.items(), key=lambda kv: (str(kv[0][0]), kv[0][1])):
+            capacity = capacity_for(user_id, d)
+            cells.append(WorkloadCell(
+                user_id=user_id,
+                date=d,
+                allocated_hours=round(allocated, 2),
+                capacity_hours=round(capacity, 2),
+                overallocated=allocated > capacity + 1e-6,
+            ))
+        return cells
+
+    @staticmethod
+    async def assignee_absences(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        today: Optional[date] = None,
+    ) -> dict[uuid.UUID, list[tuple[date, date, str, Optional[float], str]]]:
+        """Ausências APROVADAS e PENDENTES (que afetam capacidade) dos responsáveis das
+        tarefas do projeto, com end_date >= hoje. assigned_to == Person.id (responsável é Pessoa).
+        Cada item é (start, end, type_name, partial_hours, status) — aprovada é risco
+        confirmado; pendente é aviso/atenção. Chave do dict = person_id (== assigned_to)."""
+        today = today or date.today()
+        res = await db.execute(
+            select(ProjectTask.assigned_to)
+            .where(ProjectTask.project_id == project_id, ProjectTask.assigned_to.isnot(None))
+            .distinct()
+        )
+        person_ids = {r for (r,) in res.all() if r is not None}
+        out: dict[uuid.UUID, list[tuple[date, date, str, Optional[float], str]]] = {}
+        if not person_ids:
+            return out
+        rows = (await db.execute(
+            select(Absence, AbsenceType.name)
+            .join(AbsenceType, Absence.absence_type_id == AbsenceType.id)
+            .where(
+                Absence.person_id.in_(person_ids),
+                Absence.status.in_([AbsenceStatus.APROVADA, AbsenceStatus.PENDENTE]),
+                AbsenceType.affects_capacity.is_(True),
+                Absence.end_date >= today,
+            )
+        )).all()
+        for ab, type_name in rows:
+            partial = float(ab.partial_hours) if ab.partial_hours is not None else None
+            status = ab.status.value if hasattr(ab.status, "value") else str(ab.status)
+            out.setdefault(ab.person_id, []).append((ab.start_date, ab.end_date, type_name, partial, status))
+        return out
 
 
 class ProjectTaskCommentService:
@@ -1994,13 +3106,19 @@ class ProjectSlaService:
                     warning += 1
                     msg = f"Alerta de SLA: o card '{task.title}' está próximo do limite na etapa '{status.name}'."
                 if task.assigned_to:
-                    await db.execute(
-                        _sa_text(
-                            "INSERT INTO notifications (id, user_id, title, body, entity_type, entity_id, is_read, created_at) "
-                            "VALUES (gen_random_uuid(), :uid, :t, :b, 'project_task', :eid, FALSE, now())"
-                        ),
-                        {"uid": str(task.assigned_to), "t": "SLA de projetos", "b": msg, "eid": str(task.id)},
-                    )
+                    # assigned_to é person_id; notifica o usuário vinculado à Pessoa (se tiver login).
+                    notify_uid = (await db.execute(
+                        _sa_text("SELECT user_id FROM team_persons WHERE id = :pid"),
+                        {"pid": str(task.assigned_to)},
+                    )).scalar()
+                    if notify_uid:
+                        await db.execute(
+                            _sa_text(
+                                "INSERT INTO notifications (id, user_id, title, body, entity_type, entity_id, is_read, created_at) "
+                                "VALUES (gen_random_uuid(), :uid, :t, :b, 'project_task', :eid, FALSE, now())"
+                            ),
+                            {"uid": str(notify_uid), "t": "SLA de projetos", "b": msg, "eid": str(task.id)},
+                        )
                 db.add(ProjectTaskComment(task_id=task.id, author_id=None, content=f"[SLA] {msg}"))
         await db.commit()
         return {"changed": changed, "warning": warning, "breached": breached}
@@ -2010,7 +3128,12 @@ class ProjectReportsService:
     """Agrega métricas do board (tenant-wide) para a página de Relatórios."""
 
     @staticmethod
-    async def build(db: AsyncSession) -> dict:
+    async def build(
+        db: AsyncSession,
+        po: Optional[uuid.UUID] = None,
+        diretoria: Optional[str] = None,
+        area: Optional[str] = None,
+    ) -> dict:
         now = datetime.utcnow()
         rows = await db.execute(
             select(ProjectTask).options(
@@ -2018,7 +3141,21 @@ class ProjectReportsService:
                 selectinload(ProjectTask.demand_type),
             )
         )
-        tasks = rows.scalars().all()
+        all_tasks = list(rows.scalars().all())
+        # Opções disponíveis para os filtros — derivadas de TODOS os cards (não dos filtrados),
+        # para que os selects continuem estáveis após aplicar um filtro.
+        available_diretorias = sorted({t.diretoria for t in all_tasks if t.diretoria})
+        available_areas = sorted({t.area for t in all_tasks if t.area})
+
+        # Aplica os filtros (PO = responsável, diretoria e área são strings do card).
+        tasks = all_tasks
+        if po is not None:
+            tasks = [t for t in tasks if t.assigned_to == po]
+        if diretoria:
+            tasks = [t for t in tasks if t.diretoria == diretoria]
+        if area:
+            tasks = [t for t in tasks if t.area == area]
+
         funnels = (await db.execute(select(ProjectFunnel))).scalars().all()
         funnel_by_id = {f.id: f for f in funnels}
 
@@ -2114,6 +3251,8 @@ class ProjectReportsService:
                 "completed_total": total_completed,
                 "avg_lead_time_days": avg_lead,
             },
+            "available_diretorias": available_diretorias,
+            "available_areas": available_areas,
         }
 
 
@@ -2184,3 +3323,1968 @@ class ProjectScheduleBindingService:
         )
         await db.commit()
 
+
+# ─────────────────────────────────────────────
+# Priorização: Matriz de Impacto × Esforço
+# ─────────────────────────────────────────────
+
+# Defaults da metodologia (Anexo A v2 — Sistema FIEA). Tudo editável por tenant.
+def _scale(r1: str, r3: str, r5: str) -> list[dict]:
+    """Gera a escala 1-5 a partir das rubricas 1/3/5 da planilha.
+    1 e 2 herdam o texto do nível baixo; 3 o médio; 4 e 5 o alto. Editável depois."""
+    return [
+        {"value": 1, "description": r1},
+        {"value": 2, "description": r1},
+        {"value": 3, "description": r3},
+        {"value": 4, "description": r5},
+        {"value": 5, "description": r5},
+    ]
+
+
+_PRIORITY_CRITERIA_SEED: list[dict] = [
+    # Eixo Impacto (soma 1.0)
+    {"axis": "impact", "code": "aderencia_estrategica", "label": "Aderência Estratégica", "weight": 0.35, "order": 0,
+     "scale": _scale("Sem aderência a nenhum dos 19 objetivos do Mapa", "Contribui com profundidade média para um pilar", "Sustentação central de um pilar do Mapa")},
+    {"axis": "impact", "code": "cliente", "label": "Cliente", "weight": 0.15, "order": 1,
+     "scale": _scale("Não impacta experiência do cliente", "Impacto moderado em satisfação", "Transforma experiência do cliente final")},
+    {"axis": "impact", "code": "financeiro", "label": "Financeiro", "weight": 0.15, "order": 2,
+     "scale": _scale("Sem impacto financeiro relevante", "Economia ou receita moderada", "Grande potencial de transformação econômica")},
+    {"axis": "impact", "code": "eficiencia", "label": "Eficiência Operacional", "weight": 0.10, "order": 3,
+     "scale": _scale("Não traz ganho de eficiência", "Ganho moderado de eficiência", "Efeito significativo em indicadores e chamados")},
+    {"axis": "impact", "code": "risco", "label": "Risco Regulatório", "weight": 0.15, "order": 4,
+     "scale": _scale("Sem implicação regulatória", "Implicação moderada, sem prazo crítico", "Crítico em LGPD, ANPD, TCU ou Sistema S")},
+    {"axis": "impact", "code": "alcance", "label": "Alcance", "weight": 0.10, "order": 5,
+     "scale": _scale("Afeta < 50 pessoas ou 1 unidade", "Afeta 500-5.000 pessoas ou múltiplas unidades", "Afeta > 10.000 pessoas ou todo o Sistema FIEA")},
+    # Eixo Esforço (soma 1.0)
+    {"axis": "effort", "code": "documentacao", "label": "Documentação existente", "weight": 0.15, "order": 0,
+     "scale": _scale("Documento qualificado do estado atual", "Documento existe mas não qualificado", "Não possui documentação")},
+    {"axis": "effort", "code": "areas", "label": "Áreas envolvidas", "weight": 0.15, "order": 1,
+     "scale": _scale("Até 2 áreas", "3 a 4 áreas", "5 ou mais áreas")},
+    {"axis": "effort", "code": "maturidade", "label": "Maturidade do escopo", "weight": 0.20, "order": 2,
+     "scale": _scale("Escopo claro, requisitos definidos", "Escopo parcial, alguns refinamentos", "Escopo em construção, muitos requisitos a definir")},
+    {"axis": "effort", "code": "complexidade", "label": "Complexidade técnica", "weight": 0.25, "order": 3,
+     "scale": _scale("Solução simples, padrões conhecidos", "Média complexidade, alguns padrões novos", "Alta complexidade, arquitetura ou tecnologia novas")},
+    {"axis": "effort", "code": "integracoes", "label": "Integrações e dependências", "weight": 0.25, "order": 4,
+     "scale": _scale("Solução isolada, sem integrações", "Integra com 1-2 sistemas internos", "Múltiplas integrações com legados e terceiros")},
+]
+_CRITERIA_SEED_BY_KEY = {(r["axis"], r["code"]): r for r in _PRIORITY_CRITERIA_SEED}
+
+# Cor por perspectiva do Mapa Estratégico.
+_PERSPECTIVE_COLORS: dict[str, str] = {
+    "Financeiro & Administrativo": "#2563EB",
+    "Marca": "#DB2777",
+    "Inovação": "#7C3AED",
+    "Cliente": "#059669",
+    "Capital Organizacional": "#D97706",
+    "Capital Humano": "#0891B2",
+}
+
+_PRIORITY_PILLARS_SEED: list[dict] = [
+    {"code": "F1", "perspective": "Financeiro & Administrativo", "label": "Sustentabilidade financeira e institucional"},
+    {"code": "F2", "perspective": "Financeiro & Administrativo", "label": "Governança Corporativa e Compliance"},
+    {"code": "F3", "perspective": "Financeiro & Administrativo", "label": "Impacto ambiental e social positivo"},
+    {"code": "M1", "perspective": "Marca", "label": "Fortalecer a marca em atributos e propósito"},
+    {"code": "I1", "perspective": "Inovação", "label": "Negócios sustentáveis e inovadores"},
+    {"code": "I2", "perspective": "Inovação", "label": "Soluções e produtos inovadores"},
+    {"code": "I3", "perspective": "Inovação", "label": "Cultura da inovação como motor"},
+    {"code": "C1", "perspective": "Cliente", "label": "Ampliar cobertura da indústria"},
+    {"code": "C2", "perspective": "Cliente", "label": "Conquistar, reter e expandir clientes"},
+    {"code": "C3", "perspective": "Cliente", "label": "Dominar pontos de contato com cliente"},
+    {"code": "O1", "perspective": "Capital Organizacional", "label": "Saúde e Segurança como solução"},
+    {"code": "O2", "perspective": "Capital Organizacional", "label": "Qualidade pedagógica Sesi"},
+    {"code": "O3", "perspective": "Capital Organizacional", "label": "Qualidade pedagógica Educação Profissional"},
+    {"code": "O4", "perspective": "Capital Organizacional", "label": "Expandir Serviços de Tecnologia e Inovação"},
+    {"code": "O5", "perspective": "Capital Organizacional", "label": "Gestão por processos"},
+    {"code": "O6", "perspective": "Capital Organizacional", "label": "Digitalização integrada"},
+    {"code": "O7", "perspective": "Capital Organizacional", "label": "Inteligência institucional e dados"},
+    {"code": "H1", "perspective": "Capital Humano", "label": "Talentos estratégicos e alta performance"},
+    {"code": "H2", "perspective": "Capital Humano", "label": "Lideranças com visão estratégica"},
+]
+
+_PRIORITY_CONFIDENCE_SEED: list[dict] = [
+    {"code": "alta", "label": "Alta", "divisor": 1.0, "order": 0},
+    {"code": "media", "label": "Média", "divisor": 1.0, "order": 1},
+    {"code": "baixa", "label": "Baixa", "divisor": 1.5, "order": 2},
+]
+
+_PRIORITY_QUADRANTS_SEED: list[dict] = [
+    {"code": "quick_win", "label": "Quick Win", "color": "#16A34A", "order": 0,
+     "action_hint": "Alto impacto, baixo esforço. Fazer primeiro."},
+    {"code": "big_bet", "label": "Big Bet", "color": "#2563EB", "order": 1,
+     "action_hint": "Alto impacto, alto esforço. Planejar com cuidado, exige sponsor."},
+    {"code": "fill_in", "label": "Fill In", "color": "#CA8A04", "order": 2,
+     "action_hint": "Baixo impacto, baixo esforço. Encaixar quando der."},
+    {"code": "money_pit", "label": "Money Pit", "color": "#DC2626", "order": 3,
+     "action_hint": "Baixo impacto, alto esforço. Evitar ou recusar."},
+]
+
+
+def compute_priority(
+    *,
+    impact_scores: dict[str, int],
+    effort_scores: dict[str, int],
+    impact_criteria: list[ProjectPriorityCriterion],
+    effort_criteria: list[ProjectPriorityCriterion],
+    pillar_modifier: float,
+    confidence_divisor: float,
+    impact_cut: float,
+    effort_cut: float,
+) -> dict:
+    """Motor puro da metodologia. Corte aplicado sobre o impacto EFETIVO (já modulado)."""
+    impacto_bruto = sum(
+        float(c.weight) * float(impact_scores.get(c.code, 0)) for c in impact_criteria if c.is_active
+    )
+    esforco = sum(
+        float(c.weight) * float(effort_scores.get(c.code, 0)) for c in effort_criteria if c.is_active
+    )
+    divisor = confidence_divisor if confidence_divisor else 1.0
+    impacto_efetivo = (impacto_bruto * pillar_modifier) / divisor
+
+    if impacto_efetivo >= impact_cut and esforco < effort_cut:
+        quadrant_code = "quick_win"
+    elif impacto_efetivo >= impact_cut and esforco >= effort_cut:
+        quadrant_code = "big_bet"
+    elif impacto_efetivo < impact_cut and esforco < effort_cut:
+        quadrant_code = "fill_in"
+    else:
+        quadrant_code = "money_pit"
+
+    return {
+        "impacto_bruto": round(impacto_bruto, 3),
+        "modulador": round(float(pillar_modifier), 2),
+        "divisor": round(float(divisor), 2),
+        "impacto_efetivo": round(impacto_efetivo, 3),
+        "esforco": round(esforco, 3),
+        "quadrant_code": quadrant_code,
+    }
+
+
+class PriorityConfigService:
+    """Config da metodologia de priorização — 100% customizável por tenant.
+    Seed lazy (padrão ProjectDefaultFormService) no primeiro GET, idempotente."""
+
+    @staticmethod
+    async def ensure_seeded(db: AsyncSession) -> None:
+        changed = False
+
+        # Critérios
+        res = await db.execute(select(ProjectPriorityCriterion))
+        existing_crit = {(c.axis, c.code): c for c in res.scalars().all()}
+        for row in _PRIORITY_CRITERIA_SEED:
+            current = existing_crit.get((row["axis"], row["code"]))
+            if current is None:
+                db.add(ProjectPriorityCriterion(**row))
+                changed = True
+            elif not current.scale:
+                # backfill da escala em tenants migrados de rubric_1/3/5 → scale
+                current.scale = row["scale"]
+                changed = True
+
+        # Pilares
+        res = await db.execute(select(ProjectPriorityPillar.code))
+        existing_codes = {c for (c,) in res.all()}
+        for row in _PRIORITY_PILLARS_SEED:
+            if row["code"] not in existing_codes:
+                db.add(ProjectPriorityPillar(
+                    code=row["code"], label=row["label"], perspective=row["perspective"],
+                    modifier=1.0, color=_PERSPECTIVE_COLORS.get(row["perspective"], "#6B7280"),
+                    order=_PRIORITY_PILLARS_SEED.index(row),
+                ))
+                changed = True
+
+        # Confiança
+        res = await db.execute(select(ProjectPriorityConfidenceLevel.code))
+        existing_codes = {c for (c,) in res.all()}
+        for row in _PRIORITY_CONFIDENCE_SEED:
+            if row["code"] not in existing_codes:
+                db.add(ProjectPriorityConfidenceLevel(**row))
+                changed = True
+
+        # Quadrantes
+        res = await db.execute(select(ProjectPriorityQuadrant.code))
+        existing_codes = {c for (c,) in res.all()}
+        for row in _PRIORITY_QUADRANTS_SEED:
+            if row["code"] not in existing_codes:
+                db.add(ProjectPriorityQuadrant(**row))
+                changed = True
+
+        # Settings singleton (com Fator de Confiança GLOBAL da metodologia)
+        res = await db.execute(select(ProjectPrioritySettings).limit(1))
+        settings = res.scalar_one_or_none()
+        if settings is None:
+            # confiança ativa default = "media" (divisor 1.0, neutra); PMO ajusta na config
+            conf_res = await db.execute(
+                select(ProjectPriorityConfidenceLevel).where(ProjectPriorityConfidenceLevel.code == "media")
+            )
+            default_conf = conf_res.scalar_one_or_none()
+            db.add(ProjectPrioritySettings(
+                impact_cut=3.0, effort_cut=3.0, is_enabled=True,
+                confidence_id=default_conf.id if default_conf else None,
+            ))
+            changed = True
+
+        if changed:
+            await db.commit()
+
+    @staticmethod
+    async def list_criteria(db: AsyncSession) -> list[ProjectPriorityCriterion]:
+        await PriorityConfigService.ensure_seeded(db)
+        res = await db.execute(
+            select(ProjectPriorityCriterion).order_by(
+                ProjectPriorityCriterion.axis.asc(), ProjectPriorityCriterion.order.asc()
+            )
+        )
+        return list(res.scalars().all())
+
+    @staticmethod
+    async def list_pillars(db: AsyncSession) -> list[ProjectPriorityPillar]:
+        await PriorityConfigService.ensure_seeded(db)
+        res = await db.execute(
+            select(ProjectPriorityPillar).order_by(ProjectPriorityPillar.order.asc())
+        )
+        return list(res.scalars().all())
+
+    @staticmethod
+    async def list_confidence(db: AsyncSession) -> list[ProjectPriorityConfidenceLevel]:
+        await PriorityConfigService.ensure_seeded(db)
+        res = await db.execute(
+            select(ProjectPriorityConfidenceLevel).order_by(ProjectPriorityConfidenceLevel.order.asc())
+        )
+        return list(res.scalars().all())
+
+    @staticmethod
+    async def list_quadrants(db: AsyncSession) -> list[ProjectPriorityQuadrant]:
+        await PriorityConfigService.ensure_seeded(db)
+        res = await db.execute(
+            select(ProjectPriorityQuadrant).order_by(ProjectPriorityQuadrant.order.asc())
+        )
+        return list(res.scalars().all())
+
+    @staticmethod
+    async def get_settings(db: AsyncSession) -> ProjectPrioritySettings:
+        await PriorityConfigService.ensure_seeded(db)
+        res = await db.execute(select(ProjectPrioritySettings).limit(1))
+        return res.scalar_one()
+
+    @staticmethod
+    async def save_criteria(db: AsyncSession, data: PriorityCriteriaUpsert) -> list[ProjectPriorityCriterion]:
+        await PriorityConfigService.ensure_seeded(db)
+        keep = {(i.axis, i.code) for i in data.criteria}
+        res = await db.execute(select(ProjectPriorityCriterion))
+        existing = {(c.axis, c.code): c for c in res.scalars().all()}
+        for key, row in existing.items():
+            if key not in keep:
+                await db.delete(row)
+        for item in data.criteria:
+            scale = [{"value": p.value, "description": p.description} for p in item.scale]
+            current = existing.get((item.axis, item.code))
+            if current is None:
+                db.add(ProjectPriorityCriterion(
+                    axis=item.axis, code=item.code, label=item.label, weight=item.weight,
+                    scale=scale, order=item.order, is_active=item.is_active,
+                ))
+            else:
+                current.label = item.label
+                current.weight = item.weight
+                current.scale = scale
+                current.order = item.order
+                current.is_active = item.is_active
+                current.updated_at = datetime.utcnow()
+        await db.commit()
+        await PriorityScoreService.recompute_all(db)
+        return await PriorityConfigService.list_criteria(db)
+
+    @staticmethod
+    async def save_pillars(db: AsyncSession, data: PriorityPillarsUpsert) -> list[ProjectPriorityPillar]:
+        await PriorityConfigService.ensure_seeded(db)
+        keep = {i.code for i in data.pillars}
+        res = await db.execute(select(ProjectPriorityPillar))
+        existing = {p.code: p for p in res.scalars().all()}
+        for code, row in existing.items():
+            if code not in keep:
+                await db.delete(row)
+        for item in data.pillars:
+            current = existing.get(item.code)
+            if current is None:
+                db.add(ProjectPriorityPillar(
+                    code=item.code, label=item.label, perspective=item.perspective,
+                    modifier=item.modifier, color=item.color, order=item.order, is_active=item.is_active,
+                ))
+            else:
+                current.label = item.label
+                current.perspective = item.perspective
+                current.modifier = item.modifier
+                current.color = item.color
+                current.order = item.order
+                current.is_active = item.is_active
+                current.updated_at = datetime.utcnow()
+        await db.commit()
+        await PriorityScoreService.recompute_all(db)
+        return await PriorityConfigService.list_pillars(db)
+
+    @staticmethod
+    async def save_confidence(db: AsyncSession, data: PriorityConfidenceUpsert) -> list[ProjectPriorityConfidenceLevel]:
+        await PriorityConfigService.ensure_seeded(db)
+        keep = {i.code for i in data.levels}
+        res = await db.execute(select(ProjectPriorityConfidenceLevel))
+        existing = {c.code: c for c in res.scalars().all()}
+        for code, row in existing.items():
+            if code not in keep:
+                await db.delete(row)
+        for item in data.levels:
+            current = existing.get(item.code)
+            if current is None:
+                db.add(ProjectPriorityConfidenceLevel(
+                    code=item.code, label=item.label, divisor=item.divisor,
+                    order=item.order, is_active=item.is_active,
+                ))
+            else:
+                current.label = item.label
+                current.divisor = item.divisor
+                current.order = item.order
+                current.is_active = item.is_active
+                current.updated_at = datetime.utcnow()
+        await db.commit()
+        await PriorityScoreService.recompute_all(db)
+        return await PriorityConfigService.list_confidence(db)
+
+    @staticmethod
+    async def save_quadrants(db: AsyncSession, data: PriorityQuadrantsUpsert) -> list[ProjectPriorityQuadrant]:
+        await PriorityConfigService.ensure_seeded(db)
+        res = await db.execute(select(ProjectPriorityQuadrant))
+        existing = {q.code: q for q in res.scalars().all()}
+        for item in data.quadrants:
+            current = existing.get(item.code)
+            if current is None:
+                db.add(ProjectPriorityQuadrant(
+                    code=item.code, label=item.label, color=item.color,
+                    action_hint=item.action_hint, order=item.order,
+                ))
+            else:
+                current.label = item.label
+                current.color = item.color
+                current.action_hint = item.action_hint
+                current.order = item.order
+                current.updated_at = datetime.utcnow()
+        await db.commit()  # quadrantes não afetam o cálculo — sem recompute
+        return await PriorityConfigService.list_quadrants(db)
+
+    @staticmethod
+    async def update_settings(db: AsyncSession, data: PrioritySettingsUpdate) -> ProjectPrioritySettings:
+        settings = await PriorityConfigService.get_settings(db)
+        if data.confidence_id is not None:
+            confidence = {c.id for c in await PriorityConfigService.list_confidence(db)}
+            if data.confidence_id not in confidence:
+                raise HTTPException(status_code=400, detail="Nível de confiança inválido.")
+        settings.impact_cut = data.impact_cut
+        settings.effort_cut = data.effort_cut
+        settings.confidence_id = data.confidence_id
+        settings.is_enabled = data.is_enabled
+        settings.updated_at = datetime.utcnow()
+        await db.commit()
+        await PriorityScoreService.recompute_all(db)
+        return await PriorityConfigService.get_settings(db)
+
+
+class PriorityScoreService:
+    """Pontuação das demandas (1:1 com ProjectTask)."""
+
+    @staticmethod
+    async def _load_config(db: AsyncSession):
+        criteria = await PriorityConfigService.list_criteria(db)
+        impact_criteria = [c for c in criteria if c.axis == "impact"]
+        effort_criteria = [c for c in criteria if c.axis == "effort"]
+        pillars = {p.id: p for p in await PriorityConfigService.list_pillars(db)}
+        confidence = {c.id: c for c in await PriorityConfigService.list_confidence(db)}
+        settings = await PriorityConfigService.get_settings(db)
+        return impact_criteria, effort_criteria, pillars, confidence, settings
+
+    @staticmethod
+    def _coerce_pillar_ids(raw) -> list[uuid.UUID]:
+        """Normaliza a lista de pilares (JSONB guarda strings) para UUIDs."""
+        out: list[uuid.UUID] = []
+        for item in raw or []:
+            if isinstance(item, uuid.UUID):
+                out.append(item)
+            else:
+                try:
+                    out.append(uuid.UUID(str(item)))
+                except (ValueError, AttributeError, TypeError):
+                    continue
+        return out
+
+    @staticmethod
+    def _primary_pillar(pillars, pillar_ids: list[uuid.UUID]) -> Optional[uuid.UUID]:
+        """Pilar de maior modificador entre os selecionados (desempate: ordem da lista).
+        Vira o `pillar_id` materializado para join/filtro da matriz."""
+        valid = [pid for pid in pillar_ids if pid in pillars]
+        if not valid:
+            return None
+        return max(valid, key=lambda pid: float(pillars[pid].modifier))
+
+    @staticmethod
+    def _compute_with(impact_criteria, effort_criteria, pillars, confidence, settings,
+                      *, pillar_ids, impact_scores, effort_scores) -> dict:
+        # Vários pilares → usa o MAIOR modificador entre os selecionados.
+        mods = [float(pillars[pid].modifier) for pid in pillar_ids if pid in pillars]
+        modifier = max(mods) if mods else 1.0
+        # Fator de Confiança é GLOBAL: vem de settings.confidence_id, não da demanda.
+        conf = confidence.get(settings.confidence_id)
+        divisor = float(conf.divisor) if conf else 1.0
+        return compute_priority(
+            impact_scores=impact_scores, effort_scores=effort_scores,
+            impact_criteria=impact_criteria, effort_criteria=effort_criteria,
+            pillar_modifier=modifier, confidence_divisor=divisor,
+            impact_cut=float(settings.impact_cut), effort_cut=float(settings.effort_cut),
+        )
+
+    @staticmethod
+    async def preview(db: AsyncSession, data: PriorityScoreInput) -> dict:
+        impact_criteria, effort_criteria, pillars, confidence, settings = await PriorityScoreService._load_config(db)
+        return PriorityScoreService._compute_with(
+            impact_criteria, effort_criteria, pillars, confidence, settings,
+            pillar_ids=data.effective_pillar_ids,
+            impact_scores=data.impact_scores, effort_scores=data.effort_scores,
+        )
+
+    @staticmethod
+    async def get_for_task(db: AsyncSession, task_id: uuid.UUID) -> Optional[ProjectPriorityScore]:
+        res = await db.execute(select(ProjectPriorityScore).where(ProjectPriorityScore.task_id == task_id))
+        return res.scalar_one_or_none()
+
+    @staticmethod
+    async def _related_task_ids(db: AsyncSession, task_id: uuid.UUID) -> set[uuid.UUID]:
+        """Família do card: conjunto conectado por ORIGEM (conversão Demanda→Projeto)
+        e por PAI/FILHO — transitivo. A priorização é compartilhada por toda a família."""
+        visited: set[uuid.UUID] = {task_id}
+        frontier: list[uuid.UUID] = [task_id]
+        while frontier:
+            res = await db.execute(
+                select(ProjectTask.id, ProjectTask.parent_task_id, ProjectTask.origin_task_id).where(
+                    or_(
+                        ProjectTask.id.in_(frontier),          # pega pai/origem do frontier
+                        ProjectTask.parent_task_id.in_(frontier),  # filhos
+                        ProjectTask.origin_task_id.in_(frontier),  # cards convertidos a partir do frontier
+                    )
+                )
+            )
+            new_ids: set[uuid.UUID] = set()
+            for tid, parent_id, origin_id in res.all():
+                for cand in (tid, parent_id, origin_id):
+                    if cand is not None and cand not in visited:
+                        visited.add(cand)
+                        new_ids.add(cand)
+            frontier = list(new_ids)
+        return visited
+
+    @staticmethod
+    def _copy_score(dst: ProjectPriorityScore, src: ProjectPriorityScore) -> None:
+        dst.pillar_id = src.pillar_id
+        dst.pillar_ids = list(src.pillar_ids or [])
+        dst.confidence_id = src.confidence_id
+        dst.impact_scores = src.impact_scores
+        dst.effort_scores = src.effort_scores
+        dst.impacto_bruto = src.impacto_bruto
+        dst.modulador = src.modulador
+        dst.divisor = src.divisor
+        dst.impacto_efetivo = src.impacto_efetivo
+        dst.esforco = src.esforco
+        dst.quadrant_code = src.quadrant_code
+        dst.scored_by = src.scored_by
+        dst.scored_at = src.scored_at
+        dst.updated_at = datetime.utcnow()
+
+    @staticmethod
+    async def score_task(
+        db: AsyncSession, task_id: uuid.UUID, data: PriorityScoreInput, user_id: Optional[uuid.UUID]
+    ) -> ProjectPriorityScore:
+        task = await db.get(ProjectTask, task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Demanda não encontrada.")
+        impact_criteria, effort_criteria, pillars, confidence, settings = await PriorityScoreService._load_config(db)
+        pillar_ids = data.effective_pillar_ids
+        invalid = [pid for pid in pillar_ids if pid not in pillars]
+        if invalid:
+            raise HTTPException(status_code=400, detail="Pilar estratégico inválido.")
+        primary_pillar_id = PriorityScoreService._primary_pillar(pillars, pillar_ids)
+        result = PriorityScoreService._compute_with(
+            impact_criteria, effort_criteria, pillars, confidence, settings,
+            pillar_ids=pillar_ids,
+            impact_scores=data.impact_scores, effort_scores=data.effort_scores,
+        )
+        # Aplica a TODA a família (origem, pai e filhos — transitivo): a priorização é herdada.
+        family = await PriorityScoreService._related_task_ids(db, task_id)
+        res = await db.execute(
+            select(ProjectPriorityScore).where(ProjectPriorityScore.task_id.in_(family))
+        )
+        rows = {r.task_id: r for r in res.scalars().all()}
+        ts = datetime.utcnow()
+        stored_pillar_ids = [str(pid) for pid in pillar_ids]
+        for tid in family:
+            row = rows.get(tid)
+            if row is None:
+                row = ProjectPriorityScore(task_id=tid)
+                db.add(row)
+            row.pillar_id = primary_pillar_id
+            row.pillar_ids = list(stored_pillar_ids)
+            row.confidence_id = settings.confidence_id
+            row.impact_scores = data.impact_scores
+            row.effort_scores = data.effort_scores
+            row.impacto_bruto = result["impacto_bruto"]
+            row.modulador = result["modulador"]
+            row.divisor = result["divisor"]
+            row.impacto_efetivo = result["impacto_efetivo"]
+            row.esforco = result["esforco"]
+            row.quadrant_code = result["quadrant_code"]
+            row.scored_by = user_id
+            row.scored_at = ts
+            row.updated_at = ts
+        # Auditoria: registra o evento de repriorização para a demanda pontuada.
+        db.add(ProjectPriorityScoreHistory(
+            task_id=task_id,
+            pillar_ids=list(stored_pillar_ids),
+            impact_scores=data.impact_scores,
+            effort_scores=data.effort_scores,
+            impacto_efetivo=result["impacto_efetivo"],
+            esforco=result["esforco"],
+            quadrant_code=result["quadrant_code"],
+            scored_by=user_id,
+            scored_at=ts,
+        ))
+        await db.commit()
+        return await PriorityScoreService.get_for_task(db, task_id)
+
+    @staticmethod
+    async def history(db: AsyncSession, task_id: uuid.UUID) -> list[ProjectPriorityScoreHistory]:
+        """Histórico de repriorização de uma demanda (mais recente primeiro)."""
+        res = await db.execute(
+            select(ProjectPriorityScoreHistory)
+            .where(ProjectPriorityScoreHistory.task_id == task_id)
+            .order_by(ProjectPriorityScoreHistory.scored_at.desc())
+        )
+        return list(res.scalars().all())
+
+    @staticmethod
+    async def sync_family(db: AsyncSession, anchor_task_id: uuid.UUID) -> None:
+        """Garante que toda a família compartilhe a MESMA pontuação. Usa como fonte o
+        score mais recente da família. Chamado quando um card novo entra na família
+        (conversão, criação de filho, vínculo de pai) para que ele herde a priorização."""
+        family = await PriorityScoreService._related_task_ids(db, anchor_task_id)
+        if len(family) <= 1:
+            return
+        res = await db.execute(
+            select(ProjectPriorityScore).where(ProjectPriorityScore.task_id.in_(family))
+        )
+        rows = {r.task_id: r for r in res.scalars().all()}
+        if not rows:
+            return
+        source = max(rows.values(), key=lambda r: r.scored_at or r.updated_at)
+        changed = False
+        for tid in family:
+            if tid == source.task_id:
+                continue
+            row = rows.get(tid)
+            if row is None:
+                row = ProjectPriorityScore(task_id=tid)
+                db.add(row)
+                PriorityScoreService._copy_score(row, source)
+                changed = True
+            elif row.impacto_efetivo != source.impacto_efetivo or row.esforco != source.esforco or row.quadrant_code != source.quadrant_code or row.impact_scores != source.impact_scores or row.effort_scores != source.effort_scores:
+                PriorityScoreService._copy_score(row, source)
+                changed = True
+        if changed:
+            await db.commit()
+
+    @staticmethod
+    async def delete(db: AsyncSession, task_id: uuid.UUID) -> None:
+        # Remove a pontuação de toda a família (mantém consistência da herança).
+        family = await PriorityScoreService._related_task_ids(db, task_id)
+        await db.execute(sa_delete(ProjectPriorityScore).where(ProjectPriorityScore.task_id.in_(family)))
+        await db.commit()
+
+    @staticmethod
+    async def recompute_all(db: AsyncSession) -> None:
+        """Recalcula os agregados de todos os scores com a config atual, preservando
+        os inputs brutos (1-5). Chamado quando pesos/moduladores/divisores/cortes mudam."""
+        impact_criteria, effort_criteria, pillars, confidence, settings = await PriorityScoreService._load_config(db)
+        res = await db.execute(select(ProjectPriorityScore))
+        scores = list(res.scalars().all())
+        for s in scores:
+            # Lista de pilares (com fallback para o legado pillar_id de scores antigos).
+            pillar_ids = PriorityScoreService._coerce_pillar_ids(s.pillar_ids)
+            if not pillar_ids and s.pillar_id is not None:
+                pillar_ids = [s.pillar_id]
+            s.pillar_ids = [str(pid) for pid in pillar_ids]
+            s.pillar_id = PriorityScoreService._primary_pillar(pillars, pillar_ids)
+            result = PriorityScoreService._compute_with(
+                impact_criteria, effort_criteria, pillars, confidence, settings,
+                pillar_ids=pillar_ids,
+                impact_scores=s.impact_scores or {}, effort_scores=s.effort_scores or {},
+            )
+            # confiança global vigente vira o snapshot do score
+            s.confidence_id = settings.confidence_id
+            s.impacto_bruto = result["impacto_bruto"]
+            s.modulador = result["modulador"]
+            s.divisor = result["divisor"]
+            s.impacto_efetivo = result["impacto_efetivo"]
+            s.esforco = result["esforco"]
+            s.quadrant_code = result["quadrant_code"]
+            s.updated_at = datetime.utcnow()
+        if scores:
+            await db.commit()
+
+    @staticmethod
+    async def quadrant_order_map(db: AsyncSession) -> dict[Optional[str], int]:
+        """Mapa {quadrant_code: order} para ordenação quadrante-primeiro. Fonte única
+        compartilhada por Matriz e Portfólio."""
+        res = await db.execute(
+            select(ProjectPriorityQuadrant.code, ProjectPriorityQuadrant.order)
+        )
+        return {code: order for code, order in res.all()}
+
+    @staticmethod
+    def priority_order_key(
+        quadrant_order: dict[Optional[str], int],
+        *,
+        quadrant_code: Optional[str],
+        impacto_efetivo: Optional[float],
+        esforco: Optional[float],
+        unscored: bool,
+    ) -> tuple:
+        """Chave de ordenação canônica da priorização (igual em Matriz e Portfólio):
+        1) itens sem score por último; 2) quadrante primeiro (quick_win → big_bet →
+        fill_in → money_pit, via `order`); 3) densidade de valor (impacto ÷ esforço) desc
+        como desempate dentro do quadrante; 4) impacto efetivo desc como último desempate."""
+        rank = (
+            impacto_efetivo / esforco
+            if (impacto_efetivo is not None and esforco is not None and esforco > 0)
+            else None
+        )
+        return (
+            1 if unscored else 0,
+            quadrant_order.get(quadrant_code, 9_999),
+            -(rank if rank is not None else 0.0),
+            -(impacto_efetivo if impacto_efetivo is not None else 0.0),
+        )
+
+    @staticmethod
+    async def matrix(
+        db: AsyncSession,
+        funnel_id: Optional[uuid.UUID] = None,
+        quadrant: Optional[str] = None,
+        pillar_id: Optional[uuid.UUID] = None,
+    ) -> list[dict]:
+        stmt = (
+            select(ProjectPriorityScore, ProjectTask, ProjectPriorityPillar)
+            .join(ProjectTask, ProjectTask.id == ProjectPriorityScore.task_id)
+            .join(ProjectStatusConfig, ProjectStatusConfig.id == ProjectTask.status_id)
+            .outerjoin(ProjectPriorityPillar, ProjectPriorityPillar.id == ProjectPriorityScore.pillar_id)
+        )
+        if funnel_id is not None:
+            stmt = stmt.where(ProjectStatusConfig.funnel_id == funnel_id)
+        if quadrant is not None:
+            stmt = stmt.where(ProjectPriorityScore.quadrant_code == quadrant)
+        if pillar_id is not None:
+            stmt = stmt.where(ProjectPriorityScore.pillar_id == pillar_id)
+        res = await db.execute(stmt)
+        quadrant_order = await PriorityScoreService.quadrant_order_map(db)
+        out: list[dict] = []
+        for score, task, pillar in res.all():
+            impacto = float(score.impacto_efetivo)
+            esforco = float(score.esforco)
+            # Densidade de valor (estilo RICE): impacto por unidade de esforço. É o
+            # desempate dentro de um mesmo quadrante — quanto maior, mais cedo fazer.
+            # None apenas no caso raro de esforço 0 (guarda da divisão por zero).
+            priority_rank = (impacto / esforco) if esforco > 0 else None
+            out.append({
+                "task_id": task.id,
+                "title": task.title,
+                "impacto_efetivo": impacto,
+                "esforco": esforco,
+                "quadrant_code": score.quadrant_code,
+                "pillar_code": pillar.code if pillar else None,
+                "perspective": pillar.perspective if pillar else None,
+                "color": pillar.color if pillar else None,
+                "priority_rank": round(priority_rank, 3) if priority_rank is not None else None,
+            })
+        # Ordem canônica: quadrante primeiro, densidade de valor desc como desempate
+        # dentro do quadrante, impacto desc por último. A UI agrupa por quadrante
+        # preservando esta ordem. Mesma chave usada pelo Portfólio (PoPortfolioService).
+        out.sort(
+            key=lambda r: PriorityScoreService.priority_order_key(
+                quadrant_order,
+                quadrant_code=r["quadrant_code"],
+                impacto_efetivo=r["impacto_efetivo"],
+                esforco=r["esforco"],
+                unscored=False,
+            )
+        )
+        return out
+
+
+class PoPortfolioService:
+    """Portfólio de um PO: projetos/programas (planning_kind) que ele POSSUI (assigned_to),
+    com prioridade, rollup de progresso da subárvore, riscos, gargalos e previsibilidade.
+    Compõe helpers existentes; carrega em poucas queries (sem N+1). Helpers per-project
+    (workload, ausências, dependências, CPM) são chamados por container (project_id) e
+    atribuídos a cada raiz pela pertença à subárvore."""
+
+    # Progresso abaixo do % de tempo decorrido por mais que esta folga (pontos) → vermelho.
+    PROGRESS_LAG_TOLERANCE = 15
+
+    @staticmethod
+    def _subtree(root_id, children) -> list:
+        """Ids da subárvore (inclui a raiz), via BFS sobre o mapa children."""
+        out: list = []
+        seen: set = set()
+        stack = [root_id]
+        while stack:
+            cur = stack.pop()
+            if cur in seen:
+                continue
+            seen.add(cur)
+            out.append(cur)
+            stack.extend(children.get(cur, []))
+        return out
+
+    @staticmethod
+    def _rollup_progress(root_id, children, by_id) -> int:
+        """Rollup ponderado por estimated_hours das FOLHAS — idêntico ao Gantt
+        (folha = 100 se completed_at, senão percent_complete; peso = estimated_hours ou 1)."""
+        def calc(tid):
+            ch = children.get(tid, [])
+            t = by_id[tid]
+            if not ch:
+                pct = 100 if t.completed_at else (t.percent_complete or 0)
+                w = float(t.estimated_hours) if t.estimated_hours and float(t.estimated_hours) > 0 else 1.0
+                return pct * w, w
+            acc = 0.0
+            wsum = 0.0
+            for c in ch:
+                a, w = calc(c)
+                acc += a
+                wsum += w
+            return acc, wsum
+        acc, wsum = calc(root_id)
+        return round(acc / wsum) if wsum > 0 else 0
+
+    @staticmethod
+    def _is_final_stage(t) -> bool:
+        """Card finalizado: concluído OU na etapa final (is_final) do kanban atual."""
+        return t.completed_at is not None or (t.status is not None and bool(t.status.is_final))
+
+    @staticmethod
+    def _tree_progress(sub) -> int:
+        """Progresso ponderado por horas sobre TODA a subárvore (inclui raiz e pais): um card
+        só conta 100% quando finalizado (etapa final OU concluído). Assim um card pai/raiz
+        parado numa etapa não-final impede o projeto de chegar a 100% (trava em 99 no
+        arredondamento enquanto houver algo em aberto). `sub` = tarefas da subárvore (com
+        `status` carregado)."""
+        done_w = tot_w = 0.0
+        any_open = False
+        for t in sub:
+            w = float(t.estimated_hours) if t.estimated_hours and float(t.estimated_hours) > 0 else 1.0
+            final = PoPortfolioService._is_final_stage(t)
+            done_w += (100 if final else (t.percent_complete or 0)) / 100.0 * w
+            tot_w += w
+            if not final:
+                any_open = True
+        p = round(100 * done_w / tot_w) if tot_w else 0
+        return 99 if (any_open and p >= 100) else p
+
+    @staticmethod
+    async def build(
+        db: AsyncSession,
+        po_id: Optional[uuid.UUID],
+        diretoria: Optional[str] = None,
+        area: Optional[str] = None,
+    ) -> dict:
+        now = datetime.utcnow()
+        empty_agg = {
+            "rag": {"verde": 0, "amarelo": 0, "vermelho": 0},
+            "total_projetos": 0, "total_programas": 0,
+            "on_time_pct": None, "avg_progress_pct": None,
+            "capacity_vs_demand": {"allocated_hours": 0.0, "capacity_hours": 0.0, "overallocated_user_days": 0},
+        }
+
+        # Opções dos filtros — diretoria/área distintas entre TODOS os projetos/programas do
+        # tenant (independente do PO/filtros), para os selects ficarem estáveis.
+        opt_res = await db.execute(
+            select(ProjectTask.diretoria, ProjectTask.area).where(
+                ProjectTask.planning_kind.in_(["projeto", "programa"])
+            )
+        )
+        diretorias_set: set[str] = set()
+        areas_set: set[str] = set()
+        for d, a in opt_res.all():
+            if d:
+                diretorias_set.add(d)
+            if a:
+                areas_set.add(a)
+        available_diretorias = sorted(diretorias_set)
+        available_areas = sorted(areas_set)
+
+        # Sem po_id → portfólio consolidado de TODOS os POs (roots possuídos por qualquer PO).
+        roots_filter = [ProjectTask.planning_kind.in_(["projeto", "programa"])]
+        if po_id is not None:
+            roots_filter.append(ProjectTask.assigned_to == po_id)
+        else:
+            po_ids = [p["person_id"] for p in await PoPortfolioService.list_pos(db)]
+            if not po_ids:
+                return {"po_id": None, "items": [], "aggregates": empty_agg,
+                        "available_diretorias": available_diretorias, "available_areas": available_areas}
+            roots_filter.append(ProjectTask.assigned_to.in_(po_ids))
+        if diretoria:
+            roots_filter.append(ProjectTask.diretoria == diretoria)
+        if area:
+            roots_filter.append(ProjectTask.area == area)
+
+        roots_res = await db.execute(
+            select(ProjectTask).where(*roots_filter)
+        )
+        roots = list(roots_res.scalars().all())
+        if not roots:
+            return {"po_id": po_id, "items": [], "aggregates": empty_agg,
+                    "available_diretorias": available_diretorias, "available_areas": available_areas}
+
+        container_ids = {r.project_id for r in roots}
+        tasks_res = await db.execute(
+            select(ProjectTask)
+            .where(ProjectTask.project_id.in_(container_ids))
+            .options(selectinload(ProjectTask.status))
+        )
+        all_tasks = list(tasks_res.scalars().all())
+        by_id = {t.id: t for t in all_tasks}
+        children: dict = {}
+        for t in all_tasks:
+            if t.parent_task_id:
+                children.setdefault(t.parent_task_id, []).append(t.id)
+
+        # Nome do kanban (funnel) por id — para detalhar as etapas em aberto.
+        funnels_res = await db.execute(
+            select(ProjectFunnel.id, ProjectFunnel.name).where(ProjectFunnel.project_id.in_(container_ids))
+        )
+        funnel_name_by_id = {fid: name for fid, name in funnels_res.all()}
+
+        score_rows = await db.execute(
+            select(ProjectPriorityScore, ProjectPriorityPillar)
+            .outerjoin(ProjectPriorityPillar, ProjectPriorityPillar.id == ProjectPriorityScore.pillar_id)
+            .where(ProjectPriorityScore.task_id.in_(list(by_id.keys())))
+        )
+        score_by_task = {sc.task_id: (sc, pillar) for sc, pillar in score_rows.all()}
+
+        # Workload + ausências por container (uma vez cada).
+        overalloc_dates_by_user: dict = {}
+        absences_by_user: dict = {}
+        cap = {"allocated_hours": 0.0, "capacity_hours": 0.0, "overallocated_user_days": 0}
+        for cid in container_ids:
+            for c in await TaskDependencyService.compute_workload(db, cid):
+                cap["allocated_hours"] += c.allocated_hours
+                cap["capacity_hours"] += c.capacity_hours
+                if c.overallocated:
+                    cap["overallocated_user_days"] += 1
+                    overalloc_dates_by_user.setdefault(c.user_id, set()).add(c.date)
+            for uid, items in (await TaskDependencyService.assignee_absences(db, cid)).items():
+                absences_by_user.setdefault(uid, []).extend(items)
+
+        dep_rows = await db.execute(
+            select(ProjectTaskDependency.predecessor_id, ProjectTaskDependency.successor_id)
+            .where(ProjectTaskDependency.project_id.in_(container_ids))
+        )
+        preds_of: dict = {}
+        for p, s in dep_rows.all():
+            preds_of.setdefault(s, []).append(p)
+
+        def overlaps_absence(t):
+            """Status mais forte de ausência que sobrepõe o período: 'aprovada' | 'pendente' | None."""
+            if not t.assigned_to or not t.start_date or not t.due_date:
+                return None
+            ds, de = t.start_date.date(), t.due_date.date()
+            lo, hi = (ds, de) if ds <= de else (de, ds)
+            sts = [st for (s, e, _tn, _ph, st) in absences_by_user.get(t.assigned_to, []) if e >= lo and s <= hi]
+            if not sts:
+                return None
+            return "aprovada" if "aprovada" in sts else "pendente"
+
+        items: list = []
+        for root in roots:
+            subtree_ids = PoPortfolioService._subtree(root.id, children)
+            sub = [by_id[i] for i in subtree_ids]
+            # Progresso/conclusão consideram toda a árvore (inclui raiz e pais); "finalizado"
+            # = etapa final OU concluído. Card pai/raiz parado em etapa não-final não fecha 100%.
+            progress_pct = PoPortfolioService._tree_progress(sub)
+            subtree_total = len(sub)
+            subtree_completed = sum(1 for t in sub if PoPortfolioService._is_final_stage(t))
+
+            sc_pillar = score_by_task.get(root.id)
+            if sc_pillar:
+                sc, pillar = sc_pillar
+                quadrant_code = sc.quadrant_code
+                impacto_efetivo = float(sc.impacto_efetivo)
+                esforco = float(sc.esforco)
+                pillar_code = pillar.code if pillar else None
+                perspective = pillar.perspective if pillar else None
+                color = pillar.color if pillar else None
+                unscored = False
+            else:
+                quadrant_code = impacto_efetivo = esforco = pillar_code = perspective = color = None
+                unscored = True
+
+            overdue = any(
+                t.completed_at is None and (t.sla_state == "breached" or (t.due_date is not None and t.due_date < now))
+                for t in sub
+            )
+            breached_count = sum(1 for t in sub if t.completed_at is None and t.sla_state == "breached")
+            absence_statuses = [s for s in (overlaps_absence(t) for t in sub) if s]
+            absence_approved = "aprovada" in absence_statuses
+            absence_pending = (not absence_approved) and "pendente" in absence_statuses
+            absence_conflict = bool(absence_statuses)
+            no_due_date = root.due_date is None
+
+            cpm = await ProjectTaskService.critical_path(db, root.project_id, root.id)
+            critical_ids = {c["task_id"] for c in cpm if c["is_critical"]}
+            critical_count = sum(1 for i in subtree_ids if i in critical_ids)
+
+            def is_blocked(t) -> bool:
+                if t.completed_at is not None:
+                    return False
+                return any((by_id.get(p) is not None and by_id[p].completed_at is None) for p in preds_of.get(t.id, []))
+            blocked_count = sum(1 for t in sub if is_blocked(t))
+
+            win_lo = root.start_date.date() if root.start_date else None
+            win_hi = root.due_date.date() if root.due_date else None
+            overallocated_users: list = []
+            for uid in {t.assigned_to for t in sub if t.assigned_to}:
+                dates = overalloc_dates_by_user.get(uid)
+                if not dates:
+                    continue
+                if win_lo and win_hi:
+                    if any(win_lo <= d <= win_hi for d in dates):
+                        overallocated_users.append(uid)
+                else:
+                    overallocated_users.append(uid)
+
+            completed_due = [t for t in sub if t.completed_at is not None and t.due_date is not None]
+            on_time_completed = sum(1 for t in completed_due if t.completed_at <= t.due_date)
+            completed_count = len(completed_due)
+            est_hours = round(sum(float(t.estimated_hours) for t in sub if t.estimated_hours), 2)
+            actual_hours = round(sum(float(t.actual_hours) for t in sub if t.actual_hours), 2)
+            lead = []
+            for t in sub:
+                if t.completed_at is not None:
+                    base = t.start_date or t.created_at
+                    if base:
+                        lead.append((t.completed_at - base).total_seconds() / 86400.0)
+            avg_lead_time_days = round(sum(lead) / len(lead), 1) if lead else None
+
+            expected_progress_pct = None
+            if root.start_date and root.due_date and root.due_date > root.start_date:
+                span = (root.due_date - root.start_date).total_seconds()
+                elapsed = (now - root.start_date).total_seconds()
+                expected_progress_pct = max(0, min(100, round(100 * elapsed / span)))
+
+            # Régua da saúde: vermelho = execução em risco confirmado (atraso, SLA, progresso
+            # muito atrás, ausência APROVADA no período); amarelo = atenção (ausência pendente,
+            # sobrecarga, bloqueio). "Sem score"/"sem prazo" são lacunas de CONFIG — viram só
+            # avisos informativos, NÃO afetam a saúde.
+            if overdue or breached_count > 0 or absence_approved or (
+                expected_progress_pct is not None and progress_pct < expected_progress_pct - PoPortfolioService.PROGRESS_LAG_TOLERANCE
+            ):
+                health = "vermelho"
+            elif absence_pending or overallocated_users or blocked_count > 0:
+                health = "amarelo"
+            else:
+                health = "verde"
+
+            # Próxima entrega: menor due_date futuro entre tarefas incompletas da subárvore.
+            upcoming = [t.due_date for t in sub if t.completed_at is None and t.due_date is not None and t.due_date >= now]
+            next_due_date = min(upcoming) if upcoming else None
+
+            # Etapas em aberto: cards da subárvore que ainda NÃO chegaram à etapa final.
+            # Deduplica por (kanban, etapa), mantendo a entrada mais antiga (espera maior).
+            pending_map: dict = {}
+            for t in sub:
+                if t.completed_at is not None or t.status is None:
+                    continue
+                fname = funnel_name_by_id.get(t.status.funnel_id, "—")
+                key = (fname, t.status.name)
+                entered = t.status_entered_at
+                if key not in pending_map or (entered and pending_map[key] and entered < pending_map[key]):
+                    pending_map[key] = entered
+            pending_stages = sorted(
+                (
+                    {"funnel_name": fname, "status_name": sname, "status_entered_at": entered}
+                    for (fname, sname), entered in pending_map.items()
+                ),
+                key=lambda r: (r["status_entered_at"] is None, r["status_entered_at"] or now),
+            )
+
+            items.append({
+                "task_id": root.id, "title": root.title, "project_id": root.project_id,
+                "planning_kind": root.planning_kind or "projeto",
+                "description": root.description, "demand_type_id": root.demand_type_id,
+                "start_date": root.start_date, "due_date": root.due_date, "next_due_date": next_due_date,
+                "pending_stages": pending_stages,
+                "quadrant_code": quadrant_code, "impacto_efetivo": impacto_efetivo, "esforco": esforco,
+                "priority_rank": round(impacto_efetivo / esforco, 3)
+                    if (impacto_efetivo is not None and esforco is not None and esforco > 0) else None,
+                "pillar_code": pillar_code, "perspective": perspective, "color": color,
+                "progress_pct": progress_pct, "expected_progress_pct": expected_progress_pct,
+                "subtree_total": subtree_total, "subtree_completed": subtree_completed,
+                "overdue": overdue, "breached_count": breached_count, "absence_conflict": absence_conflict,
+                "unscored": unscored, "no_due_date": no_due_date,
+                "critical_count": critical_count, "blocked_count": blocked_count,
+                "overallocated_users": overallocated_users,
+                "on_time_completed": on_time_completed, "completed_count": completed_count,
+                "est_hours": est_hours, "actual_hours": actual_hours, "avg_lead_time_days": avg_lead_time_days,
+                "health": health,
+            })
+
+        # Ordem de priorização canônica — idêntica à da Matriz (quadrante primeiro,
+        # densidade de valor desc como desempate, impacto desc por último, sem-score ao fim).
+        quadrant_order = await PriorityScoreService.quadrant_order_map(db)
+        items.sort(
+            key=lambda it: PriorityScoreService.priority_order_key(
+                quadrant_order,
+                quadrant_code=it["quadrant_code"],
+                impacto_efetivo=it["impacto_efetivo"],
+                esforco=it["esforco"],
+                unscored=it["unscored"],
+            )
+        )
+
+        rag = {"verde": 0, "amarelo": 0, "vermelho": 0}
+        for it in items:
+            rag[it["health"]] += 1
+        on_time_total = sum(it["on_time_completed"] for it in items)
+        completed_total = sum(it["completed_count"] for it in items)
+        aggregates = {
+            "rag": rag,
+            "total_projetos": sum(1 for it in items if it["planning_kind"] == "projeto"),
+            "total_programas": sum(1 for it in items if it["planning_kind"] == "programa"),
+            "on_time_pct": round(100 * on_time_total / completed_total, 1) if completed_total else None,
+            "avg_progress_pct": round(sum(it["progress_pct"] for it in items) / len(items), 1) if items else None,
+            "capacity_vs_demand": {
+                "allocated_hours": round(cap["allocated_hours"], 1),
+                "capacity_hours": round(cap["capacity_hours"], 1),
+                "overallocated_user_days": cap["overallocated_user_days"],
+            },
+        }
+        return {"po_id": po_id, "items": items, "aggregates": aggregates,
+                "available_diretorias": available_diretorias, "available_areas": available_areas}
+
+    @staticmethod
+    async def list_pos(db: AsyncSession) -> list[dict]:
+        """POs do tenant (Cargo 'po'/'product_owner'), com ou sem login vinculado.
+        POs sem user_id aparecem mas não podem possuir projetos."""
+        from app.modules.teamops.models import Person, PersonStatus, Position
+        rows = await db.execute(
+            select(Person)
+            .join(Position, Position.id == Person.position_id)
+            .where(Position.slug.in_(["po", "product_owner"]), Person.status == PersonStatus.ATIVO)
+            .order_by(Person.full_name.asc())
+        )
+        out = []
+        for p in rows.scalars().all():
+            out.append({
+                "person_id": p.id, "user_id": p.user_id, "full_name": p.full_name,
+                "has_login": p.user_id is not None,
+            })
+        return out
+
+    @classmethod
+    async def build_overview(
+        cls,
+        db: AsyncSession,
+        diretoria: Optional[str] = None,
+        area: Optional[str] = None,
+    ) -> dict:
+        """Modo gestão: agregados do portfólio de cada PO (responsável = Pessoa). POs são poucos.
+        Opcionalmente recorta por diretoria/área (aplicado a cada portfólio)."""
+        pos = await cls.list_pos(db)
+        out = []
+        available_diretorias: list[str] = []
+        available_areas: list[str] = []
+        for po in pos:
+            res = await cls.build(db, po["person_id"], diretoria=diretoria, area=area)
+            # As opções de filtro são tenant-wide (iguais em qualquer build) — basta o 1º.
+            if not available_diretorias and not available_areas:
+                available_diretorias = res.get("available_diretorias", [])
+                available_areas = res.get("available_areas", [])
+            agg = res["aggregates"]
+            if agg["total_projetos"] + agg["total_programas"] == 0:
+                continue
+            out.append({
+                "po_id": po["person_id"], "full_name": po["full_name"],
+                "total_projetos": agg["total_projetos"], "total_programas": agg["total_programas"],
+                "rag": agg["rag"], "on_time_pct": agg["on_time_pct"], "avg_progress_pct": agg["avg_progress_pct"],
+                "overallocated_user_days": agg["capacity_vs_demand"]["overallocated_user_days"],
+            })
+        # ordena por mais críticos primeiro
+        out.sort(key=lambda x: (-x["rag"]["vermelho"], -x["rag"]["amarelo"]))
+        return {"items": out, "available_diretorias": available_diretorias, "available_areas": available_areas}
+
+
+
+# ─────────────────────────────────────────────
+# Layout do card (quadro) — catálogo configurável de atributos
+# ─────────────────────────────────────────────
+
+# Catálogo de atributos exibíveis no card. Ordem = ordem default; is_visible = default.
+_CARD_FIELDS_SEED: list[dict] = [
+    {"field_key": "demand_type", "label": "Tipo da demanda", "is_visible": True, "order": 0},
+    {"field_key": "priority_quadrant", "label": "Classificação da prioridade", "is_visible": True, "order": 1},
+    {"field_key": "schedule_sla", "label": "Situação (SLA/cronograma)", "is_visible": True, "order": 2},
+    {"field_key": "code", "label": "Código", "is_visible": False, "order": 3},
+    {"field_key": "title", "label": "Título", "is_visible": True, "order": 4},
+    {"field_key": "description", "label": "Descrição", "is_visible": False, "order": 5},
+    {"field_key": "parent", "label": "Projeto pai", "is_visible": True, "order": 6},
+    {"field_key": "children_progress", "label": "Conclusão dos filhos", "is_visible": False, "order": 7},
+    {"field_key": "diretoria", "label": "Diretoria", "is_visible": False, "order": 8},
+    {"field_key": "area", "label": "Área", "is_visible": False, "order": 9},
+    {"field_key": "due_date", "label": "Prazo", "is_visible": True, "order": 10},
+    {"field_key": "assignee", "label": "Responsável", "is_visible": True, "order": 11},
+]
+_CARD_FIELD_KEYS = {row["field_key"] for row in _CARD_FIELDS_SEED}
+# Prefixo das chaves de campos personalizados do formulário no layout do card.
+_CARD_CUSTOM_PREFIX = "form:"
+
+
+class ProjectCardFieldService:
+    """Config do layout do card no quadro, POR KANBAN (funil). Catálogo fixo de chaves;
+    rótulo/visibilidade/ordem editáveis por funil. Seed lazy idempotente."""
+
+    @staticmethod
+    async def ensure_seeded(db: AsyncSession, funnel_id: uuid.UUID) -> None:
+        res = await db.execute(
+            select(ProjectCardField.field_key).where(ProjectCardField.funnel_id == funnel_id)
+        )
+        existing = {row[0] for row in res.all()}
+        added = False
+        for row in _CARD_FIELDS_SEED:
+            if row["field_key"] not in existing:
+                db.add(ProjectCardField(funnel_id=funnel_id, **row))
+                added = True
+        if added:
+            await db.commit()
+
+    @staticmethod
+    async def list(db: AsyncSession, funnel_id: uuid.UUID) -> list[ProjectCardField]:
+        await ProjectCardFieldService.ensure_seeded(db, funnel_id)
+        res = await db.execute(
+            select(ProjectCardField)
+            .where(ProjectCardField.funnel_id == funnel_id)
+            .order_by(ProjectCardField.order.asc(), ProjectCardField.field_key.asc())
+        )
+        return list(res.scalars().all())
+
+    @staticmethod
+    async def replace_all(
+        db: AsyncSession, funnel_id: uuid.UUID, data: ProjectCardFieldsUpdate
+    ) -> list[ProjectCardField]:
+        await ProjectCardFieldService.ensure_seeded(db, funnel_id)
+        by_key = {f.field_key: f for f in data.fields}
+        res = await db.execute(
+            select(ProjectCardField).where(ProjectCardField.funnel_id == funnel_id)
+        )
+        existing_rows = list(res.scalars().all())
+        existing_keys = {row.field_key for row in existing_rows}
+        for row in existing_rows:
+            patch = by_key.get(row.field_key)
+            if patch is None:
+                # Chave de sistema sem patch: preserva (nunca remove campos nativos).
+                # Campo personalizado (form:*) removido do layout: apaga a linha.
+                if row.field_key.startswith(_CARD_CUSTOM_PREFIX):
+                    await db.delete(row)
+                continue
+            row.label = patch.label.strip() or row.label
+            row.is_visible = patch.is_visible
+            row.order = patch.order
+            row.updated_at = datetime.utcnow()
+        # Inclui campos personalizados novos (form:<field_key>) ainda não presentes.
+        for key, patch in by_key.items():
+            if key in existing_keys or key in _CARD_FIELD_KEYS:
+                continue
+            if not key.startswith(_CARD_CUSTOM_PREFIX):
+                continue  # só campos de formulário podem ser adicionados ao catálogo
+            db.add(ProjectCardField(
+                funnel_id=funnel_id,
+                field_key=key,
+                label=patch.label.strip() or key,
+                is_visible=patch.is_visible,
+                order=patch.order,
+            ))
+        await db.commit()
+        return await ProjectCardFieldService.list(db, funnel_id)
+
+    @staticmethod
+    async def list_available_custom(db: AsyncSession, funnel_id: uuid.UUID) -> list[dict]:
+        """Campos personalizados do formulário que podem ser incluídos no layout do card
+        deste funil. Reúne os campos ativos dos tipos de demanda vinculados ao funil
+        (funnel_id == funil OU sem funil), dedup por field_key (espaço de chaves do
+        `values` da submissão é compartilhado)."""
+        res = await db.execute(
+            select(
+                ProjectDemandFormField.field_key,
+                ProjectDemandFormField.label,
+                ProjectDemandFormField.field_type,
+                ProjectDemandFormField.order,
+            )
+            .join(ProjectDemandFormSection, ProjectDemandFormSection.id == ProjectDemandFormField.section_id)
+            .join(ProjectDemandType, ProjectDemandType.id == ProjectDemandFormSection.demand_type_id)
+            .where(
+                ProjectDemandFormField.is_active == True,  # noqa: E712
+                ProjectDemandFormSection.is_active == True,  # noqa: E712
+                ProjectDemandType.is_active == True,  # noqa: E712
+                or_(
+                    ProjectDemandType.funnel_id == funnel_id,
+                    ProjectDemandType.funnel_id.is_(None),
+                ),
+            )
+            .order_by(ProjectDemandFormField.order.asc(), ProjectDemandFormField.label.asc())
+        )
+        seen: set[str] = set()
+        out: list[dict] = []
+        for field_key, label, field_type, _order in res.all():
+            if field_key in seen:
+                continue
+            seen.add(field_key)
+            out.append({"field_key": field_key, "label": label, "field_type": field_type})
+        return out
+
+
+# ─────────────────────────────────────────────
+# Importação de Features + User Stories por planilha (XLSX)
+# ─────────────────────────────────────────────
+
+class ProjectImportService:
+    """Importa Features + User Stories de uma planilha XLSX (migração em lote).
+    Layout agrupado por ordem: cada US pertence à Feature da linha imediatamente acima.
+    Inserção direta (sem automações), responsável casado por e-mail, dedupe por título."""
+
+    HEADER_ALIASES = {
+        "tipo": "tipo",
+        "titulo": "title",
+        "descricao": "description",
+        "responsavel": "email", "email": "email", "e-mail": "email",
+        "inicio": "start", "data inicio": "start", "data de inicio": "start",
+        "fim": "due", "termino": "due", "prazo": "due", "data fim": "due", "data de fim": "due",
+        "horas": "hours", "estimativa": "hours", "horas estimadas": "hours",
+    }
+
+    @staticmethod
+    def _norm(s) -> str:
+        import unicodedata
+        if s is None:
+            return ""
+        s = str(s).strip().lower()
+        return "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
+
+    @classmethod
+    def _resolve_demand_types(cls, demand_types):
+        feature = us = None
+        for dt in demand_types:
+            n = cls._norm(dt.name)
+            if feature is None and "feature" in n:
+                feature = dt
+            if us is None and (n == "us" or "user story" in n or "user-story" in n or "historia" in n):
+                us = dt
+        return feature, us
+
+    @staticmethod
+    def _parse_date(val):
+        if val is None or val == "":
+            return None
+        if isinstance(val, datetime):
+            return val
+        if isinstance(val, date):
+            return datetime(val.year, val.month, val.day)
+        s = str(val).strip()
+        for fmt in ("%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d", "%d-%m-%Y"):
+            try:
+                return datetime.strptime(s[:10], fmt)
+            except ValueError:
+                continue
+        return None
+
+    @staticmethod
+    def _parse_hours(val):
+        if val in (None, ""):
+            return None
+        try:
+            return Decimal(str(val).replace(",", "."))
+        except Exception:
+            return None
+
+    @classmethod
+    async def import_xlsx(cls, db: AsyncSession, project_id: uuid.UUID, data: bytes,
+                          target_status_id: uuid.UUID, current_user,
+                          parent_task_id: Optional[uuid.UUID] = None,
+                          us_status_id: Optional[uuid.UUID] = None) -> dict:
+        import io
+        from openpyxl import load_workbook
+
+        await ProjectService.get(db, project_id)
+
+        async def _load_status(sid: uuid.UUID):
+            return (await db.execute(
+                select(ProjectStatusConfig).where(
+                    ProjectStatusConfig.id == sid,
+                    ProjectStatusConfig.project_id == project_id,
+                )
+            )).scalar_one_or_none()
+
+        # Etapa das Features (target_status_id) e etapa das US (us_status_id).
+        # Se a etapa das US não for informada, as US herdam a etapa das Features.
+        feature_status = await _load_status(target_status_id)
+        if not feature_status:
+            raise HTTPException(status_code=400, detail="Etapa de destino das Features inválida para este projeto.")
+        if us_status_id is None or us_status_id == target_status_id:
+            us_status = feature_status
+        else:
+            us_status = await _load_status(us_status_id)
+            if not us_status:
+                raise HTTPException(status_code=400, detail="Etapa de destino das US inválida para este projeto.")
+
+        # Projeto/Programa de destino: as Features são criadas SOB ele (senão, no topo).
+        if parent_task_id is not None:
+            parent_ok = (await db.execute(
+                select(ProjectTask.id).where(ProjectTask.id == parent_task_id, ProjectTask.project_id == project_id)
+            )).scalar_one_or_none()
+            if not parent_ok:
+                raise HTTPException(status_code=400, detail="Projeto/Programa de destino inválido para este projeto.")
+
+        demand_types = await ProjectDemandTypeService.list(db, active_only=True)
+        feature_t, us_t = cls._resolve_demand_types(demand_types)
+        if not feature_t or not us_t:
+            raise HTTPException(status_code=400, detail="Crie os tipos de demanda 'Feature' e 'User Story' antes de importar.")
+
+        try:
+            wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Não foi possível ler a planilha (.xlsx).")
+        ws = wb.active
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows:
+            return {"features_created": 0, "us_created": 0, "skipped": 0, "warnings": ["Planilha vazia."]}
+
+        colmap: dict = {}
+        for i, h in enumerate(rows[0]):
+            key = cls.HEADER_ALIASES.get(cls._norm(h))
+            if key and key not in colmap:
+                colmap[key] = i
+        if "tipo" not in colmap or "title" not in colmap:
+            raise HTTPException(status_code=400, detail="A planilha precisa ter ao menos as colunas 'Tipo' e 'Título'.")
+
+        def cell(row, key):
+            i = colmap.get(key)
+            return row[i] if i is not None and i < len(row) else None
+
+        warnings: list = []
+        person_cache: dict = {}
+
+        async def resolve_person(raw):
+            if raw is None:
+                return None
+            e = str(raw).strip().lower()
+            if not e:
+                return None
+            if e in person_cache:
+                return person_cache[e]
+            p = (await db.execute(select(Person).where(func.lower(Person.email) == e))).scalar_one_or_none()
+            person_cache[e] = p.id if p else None
+            if not p:
+                warnings.append(f"Responsável não encontrado pelo e-mail: {raw}")
+            return person_cache[e]
+
+        # Dedupe: títulos já existentes no projeto.
+        existing = (await db.execute(
+            select(ProjectTask.id, ProjectTask.title, ProjectTask.parent_task_id).where(ProjectTask.project_id == project_id)
+        )).all()
+        feat_by_title: dict = {}
+        child_titles: dict = {}
+        for tid, title, pid in existing:
+            if pid == parent_task_id:  # Features = filhas diretas do destino (ou top-level se None)
+                feat_by_title.setdefault(cls._norm(title), tid)
+            if pid is not None:
+                child_titles.setdefault(pid, set()).add(cls._norm(title))
+
+        order = (await db.execute(
+            select(func.coalesce(func.max(ProjectTask.order), -1)).where(ProjectTask.project_id == project_id)
+        )).scalar_one() + 1
+        uid = getattr(current_user, "id", None)
+        feats = uss = skipped = 0
+        current_feature_id = None
+
+        for ridx, row in enumerate(rows[1:], start=2):
+            if row is None or all(c is None or str(c).strip() == "" for c in row):
+                continue
+            title = cell(row, "title")
+            if title is None or str(title).strip() == "":
+                continue
+            title = str(title).strip()
+            tipo = cls._norm(cell(row, "tipo"))
+            is_feature = "feature" in tipo or "epic" in tipo
+            is_us = tipo == "us" or "user story" in tipo or "user-story" in tipo or "historia" in tipo
+            desc_raw = cell(row, "description")
+            desc = str(desc_raw).strip() if desc_raw not in (None, "") else None
+            person_id = await resolve_person(cell(row, "email"))
+            start = _to_naive_utc(cls._parse_date(cell(row, "start")))
+            due = _to_naive_utc(cls._parse_date(cell(row, "due")))
+            hours = cls._parse_hours(cell(row, "hours"))
+
+            if is_feature:
+                nt = cls._norm(title)
+                if nt in feat_by_title:
+                    current_feature_id = feat_by_title[nt]
+                    warnings.append(f"Linha {ridx}: Feature '{title}' já existe — pulada (US serão vinculadas a ela).")
+                    skipped += 1
+                    continue
+                task = ProjectTask(
+                    project_id=project_id, title=title, description=desc, demand_type_id=feature_t.id,
+                    parent_task_id=parent_task_id, status_id=feature_status.id, assigned_to=person_id,
+                    start_date=start, due_date=due, estimated_hours=hours, order=order, created_by=uid,
+                    sla_state=ProjectTaskService._sla_initial(feature_status),
+                )
+                db.add(task)
+                await db.flush()
+                current_feature_id = task.id
+                feat_by_title[nt] = task.id
+                child_titles[task.id] = set()
+                order += 1
+                feats += 1
+            elif is_us:
+                if current_feature_id is None:
+                    warnings.append(f"Linha {ridx}: US '{title}' sem Feature acima — pulada.")
+                    skipped += 1
+                    continue
+                nt = cls._norm(title)
+                if nt in child_titles.get(current_feature_id, set()):
+                    warnings.append(f"Linha {ridx}: US '{title}' já existe nesta Feature — pulada.")
+                    skipped += 1
+                    continue
+                task = ProjectTask(
+                    project_id=project_id, title=title, description=desc, demand_type_id=us_t.id,
+                    parent_task_id=current_feature_id, status_id=us_status.id, assigned_to=person_id,
+                    start_date=start, due_date=due, estimated_hours=hours, order=order, created_by=uid,
+                    sla_state=ProjectTaskService._sla_initial(us_status),
+                )
+                db.add(task)
+                await db.flush()
+                child_titles.setdefault(current_feature_id, set()).add(nt)
+                order += 1
+                uss += 1
+            else:
+                warnings.append(f"Linha {ridx}: Tipo '{cell(row, 'tipo')}' não reconhecido (use Feature ou US) — pulada.")
+                skipped += 1
+
+        await db.commit()
+        return {"features_created": feats, "us_created": uss, "skipped": skipped, "warnings": warnings}
+
+    @staticmethod
+    def build_template() -> bytes:
+        import io
+        from openpyxl import Workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Importacao"
+        ws.append(["Tipo", "Título", "Descrição", "Responsável", "Início", "Fim", "Horas"])
+        ws.append(["Feature", "Experiência de Chat com IA", "Feature de exemplo", "ana@empresa.com", "09/03/2026", "17/04/2026", None])
+        ws.append(["US", "Conversar com a IA - [Frontend]", "", "bruno@empresa.com", "31/03/2026", "10/04/2026", 16])
+        ws.append(["US", "Histórico de Conversas - [Frontend]", "", "bruno@empresa.com", "06/04/2026", "17/04/2026", 24])
+        ws.append(["Feature", "Biblioteca de Prompts Corporativos", "", "ana@empresa.com", "31/03/2026", "17/04/2026", None])
+        ws.append(["US", "Visualizar Prompts - [Frontend]", "", "carla@empresa.com", "06/04/2026", "17/04/2026", 8])
+        widths = [12, 42, 30, 26, 14, 14, 8]
+        for i, w in enumerate(widths, start=1):
+            ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
+        buf = io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
+
+
+class StatusReportService:
+    """Status Report por recorte (diretoria/área): monta o estado atual dos projetos no
+    layout executivo e persiste snapshots imutáveis para a série histórica. Compõe os
+    helpers de portfólio (subárvore + rollup de progresso) sem restringir aos POs — pega
+    todos os projetos/programas do recorte."""
+
+    PROGRESS_LAG_TOLERANCE = PoPortfolioService.PROGRESS_LAG_TOLERANCE
+
+    @staticmethod
+    def _iso(value: Optional[datetime]) -> Optional[str]:
+        return value.isoformat() if value is not None else None
+
+    @staticmethod
+    async def _label_maps(db: AsyncSession) -> dict[str, dict[str, str]]:
+        """Mapa value→label dos campos 'diretoria' e 'area' (options.items do formulário)."""
+        res = await db.execute(
+            select(ProjectDefaultFormField).where(
+                ProjectDefaultFormField.field_key.in_(["diretoria", "area"])
+            )
+        )
+        out: dict[str, dict[str, str]] = {"diretoria": {}, "area": {}}
+        for cfg in res.scalars().all():
+            opts = cfg.options or {}
+            items = opts.get("items") if isinstance(opts, dict) else []
+            if isinstance(items, list):
+                for i in items:
+                    if isinstance(i, dict) and i.get("value"):
+                        out.setdefault(cfg.field_key, {})[str(i["value"])] = str(i.get("label") or i["value"])
+        return out
+
+    _LEGACY_FIELD_TYPES = {"textarea": "text_long", "boolean": "checkbox"}
+
+    @classmethod
+    def _norm_field_type(cls, t: Optional[str]) -> str:
+        raw = (t or "text").strip().lower()
+        return cls._LEGACY_FIELD_TYPES.get(raw, raw)
+
+    @classmethod
+    def _resolve_field_value(cls, field, raw, person_name: dict) -> Optional[str]:
+        """Valor de exibição de um campo da solicitação (espelha o displayValue do front):
+        select/user/multi_select/data/booleano resolvidos; vazio → None (campo omitido)."""
+        if raw is None or raw == "" or raw == [] or raw == {}:
+            return None
+        ftype = cls._norm_field_type(field.field_type)
+
+        def _options_label(v) -> str:
+            opts = field.options or {}
+            items = opts.get("items") if isinstance(opts, dict) else None
+            if isinstance(items, list):
+                for it in items:
+                    if isinstance(it, dict) and str(it.get("value")) == str(v):
+                        return str(it.get("label") or v)
+            return str(v)
+
+        if ftype in ("select", "radio"):
+            return _options_label(raw)
+        if ftype == "multi_select":
+            if isinstance(raw, list):
+                parts = [_options_label(v) for v in raw if v not in (None, "")]
+                return ", ".join(parts) or None
+            return _options_label(raw)
+        if ftype in ("user", "current_user"):
+            try:
+                return person_name.get(uuid.UUID(str(raw)), str(raw))
+            except (ValueError, AttributeError, TypeError):
+                return str(raw)
+        if ftype in ("checkbox",):
+            return "Sim" if raw in (True, "true", "1", 1) else "Não"
+        if ftype in ("date", "current_date"):
+            s = str(raw)[:10]
+            parts = s.split("-")
+            return f"{parts[2]}/{parts[1]}/{parts[0]}" if len(parts) == 3 else s
+        if ftype in ("datetime", "current_datetime"):
+            return str(raw).replace("T", " ")
+        if isinstance(raw, dict):
+            named = raw.get("filename") or raw.get("name") or raw.get("label")
+            return str(named) if named else None
+        if isinstance(raw, list):
+            def _item_label(v):
+                if isinstance(v, dict):
+                    return v.get("filename") or v.get("name") or v.get("label")
+                return v
+            parts = [str(lbl) for v in raw if (lbl := _item_label(v)) not in (None, "")]
+            return ", ".join(parts) or None
+        return str(raw)
+
+    @staticmethod
+    async def build_preview(
+        db: AsyncSession,
+        diretoria: Optional[str] = None,
+        area: Optional[str] = None,
+    ) -> dict:
+        now = datetime.utcnow()
+        labels = await StatusReportService._label_maps(db)
+        diretoria_label = labels["diretoria"].get(diretoria, diretoria) if diretoria else None
+        area_label = labels["area"].get(area, area) if area else None
+
+        meta = {
+            "diretoria": diretoria,
+            "area": area,
+            "diretoria_label": diretoria_label,
+            "area_label": area_label,
+            "generated_at": StatusReportService._iso(now),
+        }
+        empty = {
+            "meta": meta,
+            "kpis": {"total": 0, "concluido": 0, "planejado": 0, "sem_data": 0, "avg_progress_pct": None},
+            "projects": [],
+            "plano": {"d30": "", "d60": "", "d90": ""},
+        }
+
+        roots_filter = [ProjectTask.planning_kind.in_(["projeto", "programa"])]
+        if diretoria:
+            roots_filter.append(ProjectTask.diretoria == diretoria)
+        if area:
+            roots_filter.append(ProjectTask.area == area)
+        roots_res = await db.execute(
+            select(ProjectTask).options(selectinload(ProjectTask.status)).where(*roots_filter)
+        )
+        roots = list(roots_res.scalars().all())
+        if not roots:
+            return empty
+
+        container_ids = {r.project_id for r in roots}
+        tasks_res = await db.execute(
+            select(ProjectTask)
+            .where(ProjectTask.project_id.in_(container_ids))
+            .options(selectinload(ProjectTask.status))
+        )
+        all_tasks = list(tasks_res.scalars().all())
+        by_id = {t.id: t for t in all_tasks}
+        children: dict = {}
+        for t in all_tasks:
+            if t.parent_task_id:
+                children.setdefault(t.parent_task_id, []).append(t.id)
+
+        # Nome do kanban (funnel) por id — para evidenciar onde estão os cards em aberto.
+        frows = await db.execute(
+            select(ProjectFunnel.id, ProjectFunnel.name).where(ProjectFunnel.project_id.in_(container_ids))
+        )
+        funnel_name_by_id = {fid: name for fid, name in frows.all()}
+
+        def _is_final_stage(t) -> bool:
+            """Card finalizado: concluído OU na etapa final do kanban atual."""
+            return t.completed_at is not None or (t.status is not None and bool(t.status.is_final))
+
+        # ── Campos personalizados da solicitação ("item pai") ──
+        # As definições do formulário (seções/campos) vêm do tipo de demanda da ORIGEM
+        # (origin_task_id) — onde a solicitação foi preenchida. O card raiz (projeto/programa)
+        # herda só os valores e usa um tipo sem formulário. Fallback: tipo do próprio root.
+        origin_ids = {r.origin_task_id for r in roots if r.origin_task_id}
+        origin_type_by_id: dict = {}
+        if origin_ids:
+            ot = await db.execute(
+                select(ProjectTask.id, ProjectTask.demand_type_id).where(ProjectTask.id.in_(origin_ids))
+            )
+            origin_type_by_id = {tid: dt for tid, dt in ot.all()}
+
+        def _solicitation_source(r):
+            """(demand_type_id, task_id) de onde vêm o formulário e os valores da solicitação."""
+            otype = origin_type_by_id.get(r.origin_task_id) if r.origin_task_id else None
+            if otype:
+                return otype, r.origin_task_id
+            return r.demand_type_id, r.id
+
+        form_type_ids: set = set()
+        value_task_ids: set = set()
+        for r in roots:
+            dt, tid = _solicitation_source(r)
+            if dt:
+                form_type_ids.add(dt)
+            if tid:
+                value_task_ids.add(tid)
+
+        # Seções + campos ativos dos tipos de formulário (eager-load de fields).
+        sections_by_type: dict = {}
+        if form_type_ids:
+            sec_res = await db.execute(
+                select(ProjectDemandFormSection)
+                .where(
+                    ProjectDemandFormSection.demand_type_id.in_(form_type_ids),
+                    ProjectDemandFormSection.is_active == True,  # noqa: E712
+                )
+                .options(selectinload(ProjectDemandFormSection.fields))
+                .order_by(ProjectDemandFormSection.order.asc(), ProjectDemandFormSection.created_at.asc())
+            )
+            for sec in sec_res.scalars().all():
+                sections_by_type.setdefault(sec.demand_type_id, []).append(sec)
+
+        # Respostas do formulário (a "solicitação") por task de origem.
+        values_by_task: dict = {}
+        if value_task_ids:
+            sub_res = await db.execute(
+                select(ProjectDemandFormSubmission.task_id, ProjectDemandFormSubmission.values)
+                .where(ProjectDemandFormSubmission.task_id.in_(value_task_ids))
+            )
+            values_by_task = {tid: (vals or {}) for tid, vals in sub_res.all()}
+
+        # Nomes dos responsáveis (assigned_to = person_id) + pessoas referenciadas em campos
+        # do tipo 'user' na solicitação.
+        person_ids = {t.assigned_to for t in all_tasks if t.assigned_to}
+        user_keys_by_type = {
+            dt: [f.field_key for s in secs for f in s.fields
+                 if StatusReportService._norm_field_type(f.field_type) in ("user", "current_user")]
+            for dt, secs in sections_by_type.items()
+        }
+        for r in roots:
+            dt, tid = _solicitation_source(r)
+            vals = values_by_task.get(tid, {})
+            for k in user_keys_by_type.get(dt, []):
+                raw = vals.get(k)
+                if not raw:
+                    continue
+                for v in (raw if isinstance(raw, list) else [raw]):
+                    try:
+                        person_ids.add(uuid.UUID(str(v)))
+                    except (ValueError, AttributeError, TypeError):
+                        pass
+        person_name: dict = {}
+        if person_ids:
+            prows = await db.execute(
+                select(Person.id, Person.full_name).where(Person.id.in_(person_ids))
+            )
+            person_name = {pid: name for pid, name in prows.all()}
+
+        # Dependências → detecção de bloqueio (predecessora incompleta).
+        dep_rows = await db.execute(
+            select(ProjectTaskDependency.predecessor_id, ProjectTaskDependency.successor_id)
+            .where(ProjectTaskDependency.project_id.in_(container_ids))
+        )
+        preds_of: dict = {}
+        for p, s in dep_rows.all():
+            preds_of.setdefault(s, []).append(p)
+
+        def is_blocked(t) -> bool:
+            if t.completed_at is not None:
+                return False
+            return any(
+                (by_id.get(p) is not None and by_id[p].completed_at is None)
+                for p in preds_of.get(t.id, [])
+            )
+
+        projects: list = []
+        for root in roots:
+            sub_ids = PoPortfolioService._subtree(root.id, children)
+            sub = [by_id[i] for i in sub_ids]
+            subtree_total = len(sub)
+            subtree_completed = sum(1 for t in sub if _is_final_stage(t))
+
+            # Progresso considerando TODA a árvore (inclui o card raiz e os pais), ponderado por
+            # horas: um card só conta 100% quando finalizado (etapa final OU concluído). Assim um
+            # card pai/raiz parado numa etapa não-final impede o projeto de chegar a 100%.
+            done_w = tot_w = 0.0
+            open_stages: list = []
+            for t in sub:
+                w = float(t.estimated_hours) if t.estimated_hours and float(t.estimated_hours) > 0 else 1.0
+                final = _is_final_stage(t)
+                pct = 100 if final else (t.percent_complete or 0)
+                done_w += (pct / 100.0) * w
+                tot_w += w
+                if not final:
+                    open_stages.append({
+                        "title": t.title,
+                        "kanban": funnel_name_by_id.get(t.status.funnel_id) if t.status else None,
+                        "stage": t.status.name if t.status else None,
+                        "is_root": t.id == root.id,
+                    })
+            progress_pct = round(100 * done_w / tot_w) if tot_w else 0
+            # Garante que nunca exibe 100% enquanto houver card em aberto (arredondamento).
+            if open_stages and progress_pct >= 100:
+                progress_pct = 99
+
+            overdue_tasks = [
+                t for t in sub
+                if t.completed_at is None and (
+                    t.sla_state == "breached" or (t.due_date is not None and t.due_date < now)
+                )
+            ]
+            breached_count = sum(1 for t in sub if t.completed_at is None and t.sla_state == "breached")
+            blocked = [t for t in sub if is_blocked(t)]
+            no_due_date = root.due_date is None
+
+            expected_progress_pct = None
+            if root.start_date and root.due_date and root.due_date > root.start_date:
+                span = (root.due_date - root.start_date).total_seconds()
+                elapsed = (now - root.start_date).total_seconds()
+                expected_progress_pct = max(0, min(100, round(100 * elapsed / span)))
+
+            if overdue_tasks or breached_count > 0 or (
+                expected_progress_pct is not None
+                and progress_pct < expected_progress_pct - StatusReportService.PROGRESS_LAG_TOLERANCE
+            ):
+                health = "vermelho"
+            elif blocked:
+                health = "amarelo"
+            else:
+                health = "verde"
+
+            # Próximo marco: menor due_date futuro entre incompletas da subárvore.
+            upcoming = [t.due_date for t in sub if t.completed_at is None and t.due_date is not None and t.due_date >= now]
+            next_due_date = min(upcoming) if upcoming else None
+
+            # Entregas realizadas: tarefas concluídas da subárvore (exclui a própria raiz).
+            entregas = sorted(
+                (t for t in sub if t.id != root.id and t.completed_at is not None),
+                key=lambda t: t.completed_at,
+                reverse=True,
+            )
+            entregas_realizadas = [
+                {
+                    "title": t.title,
+                    "responsavel": person_name.get(t.assigned_to),
+                    "completed_at": StatusReportService._iso(t.completed_at),
+                }
+                for t in entregas
+            ]
+
+            # Próximas atividades: incompletas com prazo, ordenadas por prazo asc.
+            proximas = sorted(
+                (t for t in sub if t.id != root.id and t.completed_at is None and t.due_date is not None),
+                key=lambda t: t.due_date,
+            )
+            proximas_atividades = [
+                {
+                    "title": t.title,
+                    "responsavel": person_name.get(t.assigned_to),
+                    "previsao": StatusReportService._iso(t.due_date),
+                    "status": t.status.name if t.status else None,
+                }
+                for t in proximas
+            ]
+
+            # Cronograma hierárquico (cascata pai→filho): DFS preorder a partir da raiz, com
+            # `level` de profundidade para indentar (Feature → US → US.x). Irmãos ordenados por
+            # data planejada (início/prazo), depois ordem do quadro e título.
+            def _sib_key(t):
+                d = t.start_date or t.due_date
+                return (d is None, d or datetime.max, t.order or 0, t.title or "")
+            cronograma: list = []
+
+            def _walk(parent_id, level):
+                kids = sorted(
+                    (by_id[k] for k in children.get(parent_id, []) if k in by_id),
+                    key=_sib_key,
+                )
+                for t in kids:
+                    final = _is_final_stage(t)
+                    cronograma.append({
+                        "title": t.title,
+                        "level": level,
+                        "status": t.status.name if t.status else None,
+                        "kanban": funnel_name_by_id.get(t.status.funnel_id) if t.status else None,
+                        "open": not final,
+                        "percent": 100 if final else (t.percent_complete or 0),
+                        "planned_date": StatusReportService._iso(t.due_date or t.start_date),
+                        "completed_at": StatusReportService._iso(t.completed_at),
+                        "responsavel": person_name.get(t.assigned_to),
+                    })
+                    _walk(t.id, level + 1)
+
+            _walk(root.id, 0)
+
+            # Riscos auto-derivados (ponto + impacto sugeridos; ação fica para a narrativa).
+            riscos: list = []
+            if overdue_tasks:
+                riscos.append({"ponto": f"{len(overdue_tasks)} atividade(s) atrasada(s)", "impacto": "Alto", "acao": ""})
+            if breached_count:
+                riscos.append({"ponto": f"{breached_count} SLA estourado(s)", "impacto": "Alto", "acao": ""})
+            if blocked:
+                riscos.append({"ponto": f"{len(blocked)} atividade(s) bloqueada(s) por dependência", "impacto": "Médio", "acao": ""})
+            if no_due_date:
+                riscos.append({"ponto": "Projeto sem prazo definido", "impacto": "Médio", "acao": ""})
+
+            # Campos personalizados da solicitação (apenas preenchidos), agrupados por seção,
+            # com rótulos/valores já resolvidos. Formulário + valores vêm da origem.
+            src_type, src_task = _solicitation_source(root)
+            root_values = values_by_task.get(src_task, {})
+            custom_sections: list = []
+            for sec in sections_by_type.get(src_type, []):
+                rows = []
+                for f in sec.fields:
+                    if not f.is_active:
+                        continue
+                    val = StatusReportService._resolve_field_value(f, root_values.get(f.field_key), person_name)
+                    if val:
+                        rows.append({
+                            "label": f.label,
+                            "field_type": StatusReportService._norm_field_type(f.field_type),
+                            "value": val,
+                        })
+                if rows:
+                    custom_sections.append({"title": sec.title, "fields": rows})
+
+            projects.append({
+                "task_id": str(root.id),
+                "project_id": str(root.project_id),
+                "title": root.title,
+                "description": root.description,
+                "planning_kind": root.planning_kind or "projeto",
+                "fase": root.status.name if root.status else None,
+                "health": health,
+                "progress_pct": progress_pct,
+                "expected_progress_pct": expected_progress_pct,
+                "start_date": StatusReportService._iso(root.start_date),
+                "due_date": StatusReportService._iso(root.due_date),
+                "next_due_date": StatusReportService._iso(next_due_date),
+                "responsavel": person_name.get(root.assigned_to),
+                "subtree_total": subtree_total,
+                "subtree_completed": subtree_completed,
+                "no_due_date": no_due_date,
+                "entregas_realizadas": entregas_realizadas,
+                "proximas_atividades": proximas_atividades,
+                "cronograma": cronograma,
+                "open_stages": open_stages,
+                "riscos": riscos,
+                "custom_sections": custom_sections,
+                # Narrativa editável (preenchida no editor).
+                "objetivo": "",
+                "resumo_executivo": "",
+                "decisoes": [],
+            })
+
+        def _is_done(p) -> bool:
+            return p["progress_pct"] >= 100 or (p["subtree_total"] > 0 and p["subtree_completed"] == p["subtree_total"])
+
+        total = len(projects)
+        concluido = sum(1 for p in projects if _is_done(p))
+        planejado = sum(1 for p in projects if p["progress_pct"] == 0)
+        sem_data = sum(1 for p in projects if p["no_due_date"])
+        avg_progress = round(sum(p["progress_pct"] for p in projects) / total) if total else None
+
+        return {
+            "meta": meta,
+            "kpis": {
+                "total": total,
+                "concluido": concluido,
+                "planejado": planejado,
+                "sem_data": sem_data,
+                "avg_progress_pct": avg_progress,
+            },
+            "projects": projects,
+            "plano": {"d30": "", "d60": "", "d90": ""},
+        }
+
+    @staticmethod
+    async def create(db: AsyncSession, data, user_id: Optional[uuid.UUID]) -> ProjectStatusReport:
+        report = ProjectStatusReport(
+            diretoria=data.diretoria,
+            area=data.area,
+            diretoria_label=data.diretoria_label,
+            area_label=data.area_label,
+            title=data.title or "Status Report",
+            snapshot=data.snapshot or {},
+            kpis=data.kpis or {},
+            generated_by=user_id,
+        )
+        db.add(report)
+        await db.commit()
+        await db.refresh(report)
+        return report
+
+    @staticmethod
+    async def list(
+        db: AsyncSession,
+        diretoria: Optional[str] = None,
+        area: Optional[str] = None,
+    ) -> list[ProjectStatusReport]:
+        """Série histórica (mais recente primeiro), filtrável por recorte."""
+        stmt = select(ProjectStatusReport)
+        if diretoria:
+            stmt = stmt.where(ProjectStatusReport.diretoria == diretoria)
+        if area:
+            stmt = stmt.where(ProjectStatusReport.area == area)
+        stmt = stmt.order_by(ProjectStatusReport.generated_at.desc())
+        res = await db.execute(stmt)
+        return list(res.scalars().all())
+
+    @staticmethod
+    async def get(db: AsyncSession, report_id: uuid.UUID) -> ProjectStatusReport:
+        res = await db.execute(
+            select(ProjectStatusReport).where(ProjectStatusReport.id == report_id)
+        )
+        report = res.scalar_one_or_none()
+        if not report:
+            raise HTTPException(status_code=404, detail="Status Report não encontrado.")
+        return report

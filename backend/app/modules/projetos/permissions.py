@@ -16,5 +16,7 @@ PERMISSIONS: list[tuple[str, str, str | None]] = [
     ("projetos.task.update_own", "Atualizar próprias tarefas", "Atualiza status e dados das próprias tarefas."),
     ("projetos.comment.manage", "Gerenciar comentários", "Cria comentários nas tarefas."),
     ("projetos.automation.manage", "Gerenciar automações", "Cria e mantém automações por etapa do kanban."),
+    ("projetos.priority.manage", "Gerenciar priorização", "Edita critérios, pesos, rubricas, pilares, confiança e quadrantes da matriz."),
+    ("projetos.priority.score", "Pontuar demandas", "Atribui scores de impacto/esforço às demandas na triagem."),
 ]
 

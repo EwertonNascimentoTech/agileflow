@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react"
-import { AlertTriangle, CalendarOff, Users, ShieldAlert, UserMinus } from "lucide-react"
+import { AlertTriangle, CalendarOff, Users, ShieldAlert, UserMinus, Cake } from "lucide-react"
 import { KpiCard } from "@/components/KpiCard"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { teamopsApi, type DashboardKpis, type AlertsResponse } from "@/api/teamops"
+
+const MONTH_LABEL = new Date().toLocaleDateString("pt-BR", { month: "long" })
 
 export default function TeamopsDashboardPage() {
   const [kpis, setKpis] = useState<DashboardKpis | null>(null)
@@ -34,9 +36,9 @@ export default function TeamopsDashboardPage() {
         </p>
       </header>
 
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
         {loading || !kpis ? (
-          Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-28" />)
+          Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-28" />)
         ) : (
           <>
             <KpiCard label="Pessoas ativas" value={kpis.active_persons} icon={Users} />
@@ -63,6 +65,14 @@ export default function TeamopsDashboardPage() {
               value={kpis.areas_without_po}
               icon={AlertTriangle}
               deltaTone={kpis.areas_without_po > 0 ? "down" : "up"}
+            />
+            <KpiCard
+              label="Aniversariantes no mês"
+              value={kpis.birthdays_this_month.length}
+              icon={Cake}
+              deltaTone={
+                kpis.birthdays_this_month.some((p) => p.is_today) ? "up" : "neutral"
+              }
             />
           </>
         )}
@@ -126,6 +136,46 @@ export default function TeamopsDashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Cake className="h-5 w-5 text-pink-500" />
+            Aniversariantes do mês
+          </CardTitle>
+          <CardDescription className="capitalize">{MONTH_LABEL}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <Skeleton className="h-24" />
+          ) : !kpis || kpis.birthdays_this_month.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Nenhum aniversariante neste mês. 🎂
+            </p>
+          ) : (
+            <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {kpis.birthdays_this_month.map((p) => (
+                <li
+                  key={p.id}
+                  className={`flex items-center justify-between gap-2 rounded-md border p-3 text-sm ${
+                    p.is_today ? "border-pink-300 bg-pink-50" : ""
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pink-100 text-xs font-semibold text-pink-700">
+                      {String(p.day).padStart(2, "0")}
+                    </span>
+                    <span className="font-medium">{p.full_name}</span>
+                  </div>
+                  {p.is_today && (
+                    <Badge className="bg-pink-500 hover:bg-pink-500">Hoje 🎉</Badge>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

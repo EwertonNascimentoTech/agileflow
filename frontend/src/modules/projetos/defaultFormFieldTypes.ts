@@ -15,12 +15,14 @@ export const DEFAULT_FIELD_TYPE_CATALOG: DefaultFieldTypeOption[] = [
   { value: "user", label: "Usuário", description: "Seleção de pessoa do time." },
   { value: "select", label: "Seleção única", description: "Lista de opções cadastradas." },
   { value: "url", label: "URL", description: "Link (https://…)." },
+  { value: "file", label: "Anexo", description: "Upload de um ou mais arquivos." },
 ]
 
 /** Tipos permitidos por campo (respeitam o que o card persiste no banco). */
 export const ALLOWED_TYPES_BY_KEY: Record<DefaultFormFieldKey, string[]> = {
   title: ["text", "text_long"],
   description: ["text", "text_long", "url"],
+  anexos: ["file"],
   assigned_to: ["user"],
   diretoria: ["select"],
   area: ["select"],
@@ -31,6 +33,7 @@ export const ALLOWED_TYPES_BY_KEY: Record<DefaultFormFieldKey, string[]> = {
 export const DEFAULT_TYPE_BY_KEY: Record<DefaultFormFieldKey, string> = {
   title: "text",
   description: "text_long",
+  anexos: "file",
   assigned_to: "user",
   diretoria: "select",
   area: "select",

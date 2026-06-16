@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, type Dispatch, type SetStateAction } from "react"
 import type { ProjectTask } from "@/api/projetos"
-import { isProductOwnerPosition, type TeamMember } from "@/api/teamops"
+import { isProductOwnerPosition, type Person } from "@/api/teamops"
 import type { User } from "@/types"
 
 export const FILTERS_KEY = "projetos.board.filters"
@@ -8,21 +8,20 @@ export const FILTERS_KEY = "projetos.board.filters"
 export type BoardFilters = {
   q?: string
   assignees?: string[]
-  types?: string[]
-  slas?: string[]
-  diretorias?: string[]
-  areas?: string[]
   productOwners?: string[]
+  /** IDs dos cards raiz (planning_kind projeto/programa) selecionados no filtro. */
+  planningCards?: string[]
+  areas?: string[]
 }
 
 export type BoardFilterState = {
   q: string
   assignees: string[]
-  types: string[]
-  slas: string[]
-  diretorias: string[]
-  areas: string[]
   productOwners: string[]
+  /** null = sem filtro de projeto/programa; Set = card selecionado + descendentes. */
+  planningScopeIds: Set<string> | null
+  areas: string[]
+  groupedChildIds: Set<string>
 }
 
 export function loadFilters(): BoardFilters {
@@ -33,35 +32,52 @@ export function loadFilters(): BoardFilters {
   }
 }
 
+/** Card selecionado + toda a subárvore de filhos (itens de programa, subtarefas, etc.). */
+export function buildPlanningScopeIds(tasks: ProjectTask[], rootIds: string[]): Set<string> {
+  const kids = new Map<string, string[]>()
+  for (const t of tasks) {
+    if (!t.parent_task_id) continue
+    const list = kids.get(t.parent_task_id) ?? []
+    list.push(t.id)
+    kids.set(t.parent_task_id, list)
+  }
+  const scope = new Set<string>()
+  const walk = (id: string) => {
+    if (scope.has(id)) return
+    scope.add(id)
+    for (const kid of kids.get(id) ?? []) walk(kid)
+  }
+  for (const id of rootIds) walk(id)
+  return scope
+}
+
 export function taskMatches(t: ProjectTask, f: BoardFilterState): boolean {
   const q = f.q.trim().toLowerCase()
   if (q && !t.title.toLowerCase().includes(q)) return false
   if (f.assignees.length && !f.assignees.includes(t.assigned_to ?? "__none__")) return false
   if (f.productOwners.length && !f.productOwners.includes(t.assigned_to ?? "__none__")) return false
-  if (f.types.length && !(t.demand_type_id ? f.types.includes(t.demand_type_id) : false)) return false
-  if (f.slas.length && !f.slas.includes(t.sla_state)) return false
-  if (f.diretorias.length && !(t.diretoria ? f.diretorias.includes(t.diretoria) : false)) return false
+  if (f.planningScopeIds && !f.planningScopeIds.has(t.id)) return false
   if (f.areas.length && !(t.area ? f.areas.includes(t.area) : false)) return false
+  // Esconde itens-filhos agrupados no mesmo kanban — exceto quando há escopo de projeto/programa.
+  if (!f.planningScopeIds && f.groupedChildIds.has(t.id)) return false
   return true
 }
 
-export function membersToUsers(members: TeamMember[]): User[] {
-  return members.map((m) => ({ id: m.id, full_name: m.full_name, email: m.email })) as User[]
+export function personsToUsers(persons: Person[]): User[] {
+  return persons.map((p) => ({ id: p.id, full_name: p.full_name, email: p.email ?? "" })) as User[]
 }
 
-export function productOwnerMembers(members: TeamMember[]): TeamMember[] {
-  return members.filter((m) => isProductOwnerPosition(m.position_slug, m.position_name))
+export function productOwnerPersons(persons: Person[]): Person[] {
+  return persons.filter((p) => isProductOwnerPosition(p.position?.slug, p.position?.name))
 }
 
-/** Filtros do quadro/cronograma persistidos no localStorage (compartilhados entre visões). */
-export function usePersistedTaskFilters() {
+/** Filtros do quadro/lista/calendário persistidos no localStorage. */
+export function usePersistedTaskFilters(groupedChildIds: Set<string>, tasks: ProjectTask[]) {
   const [searchQuery, setSearchQuery] = useState(() => loadFilters().q ?? "")
   const [assignees, setAssignees] = useState<string[]>(() => loadFilters().assignees ?? [])
-  const [types, setTypes] = useState<string[]>(() => loadFilters().types ?? [])
-  const [slas, setSlas] = useState<string[]>(() => loadFilters().slas ?? [])
-  const [diretorias, setDiretorias] = useState<string[]>(() => loadFilters().diretorias ?? [])
-  const [areas, setAreas] = useState<string[]>(() => loadFilters().areas ?? [])
   const [productOwners, setProductOwners] = useState<string[]>(() => loadFilters().productOwners ?? [])
+  const [planningCards, setPlanningCards] = useState<string[]>(() => loadFilters().planningCards ?? [])
+  const [areas, setAreas] = useState<string[]>(() => loadFilters().areas ?? [])
 
   useEffect(() => {
     try {
@@ -70,47 +86,45 @@ export function usePersistedTaskFilters() {
         JSON.stringify({
           q: searchQuery,
           assignees,
-          types,
-          slas,
-          diretorias,
-          areas,
           productOwners,
+          planningCards,
+          areas,
         }),
       )
     } catch { /* ignore */ }
-  }, [searchQuery, assignees, types, slas, diretorias, areas, productOwners])
+  }, [searchQuery, assignees, productOwners, planningCards, areas])
+
+  const planningScopeIds = planningCards.length > 0
+    ? buildPlanningScopeIds(tasks, planningCards)
+    : null
 
   const filterState: BoardFilterState = {
     q: searchQuery,
     assignees,
-    types,
-    slas,
-    diretorias,
-    areas,
     productOwners,
+    planningScopeIds,
+    areas,
+    groupedChildIds,
   }
+
   const hasFilters = !!(
     searchQuery.trim()
     || assignees.length
-    || types.length
-    || slas.length
-    || diretorias.length
-    || areas.length
     || productOwners.length
+    || planningCards.length
+    || areas.length
   )
 
   function clearFilters() {
     setSearchQuery("")
     setAssignees([])
-    setTypes([])
-    setSlas([])
-    setDiretorias([])
-    setAreas([])
     setProductOwners([])
+    setPlanningCards([])
+    setAreas([])
   }
 
   function toggleMulti(
-    setter: React.Dispatch<React.SetStateAction<string[]>>,
+    setter: Dispatch<SetStateAction<string[]>>,
     current: string[],
     val: string,
   ) {
@@ -122,16 +136,12 @@ export function usePersistedTaskFilters() {
     setSearchQuery,
     assignees,
     setAssignees,
-    types,
-    setTypes,
-    slas,
-    setSlas,
-    diretorias,
-    setDiretorias,
-    areas,
-    setAreas,
     productOwners,
     setProductOwners,
+    planningCards,
+    setPlanningCards,
+    areas,
+    setAreas,
     filterState,
     hasFilters,
     clearFilters,

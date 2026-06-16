@@ -2,11 +2,11 @@ import uuid
 from typing import List
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.modules.super_admin.models import Role, RolePermission, UserRole
+from app.modules.super_admin.models import Role, RolePermission, Tenant, UserRole
 from app.core.security import require_super_admin, get_current_user
 from app.modules.super_admin.schemas import (
     PlanCreate, PlanUpdate, PlanResponse,
@@ -53,6 +53,37 @@ async def _attach_role_name(db: AsyncSession, user) -> None:
             perms = sorted(r[0] for r in rows.all())
     user.role_name = name
     user.permissions = perms
+    user.position_slug = await _resolve_position_slug(db, user)
+
+
+async def _resolve_position_slug(db: AsyncSession, user) -> str | None:
+    """Slug do cargo (TeamOps) da pessoa vinculada a este usuário, ex: 'coordenador'.
+    team_persons/team_positions são tabelas do schema do tenant — consultamos qualificando
+    o schema (sem mexer no search_path do pool). Retorna None se não houver vínculo."""
+    if not user.tenant_id:
+        return None
+    schema = (
+        await db.execute(select(Tenant.schema_name).where(Tenant.id == user.tenant_id))
+    ).scalar_one_or_none()
+    if not schema:
+        return None
+    # Tenant sem o módulo TeamOps não tem as tabelas — to_regclass devolve NULL sem lançar
+    # erro (evita abortar a transação asyncpg do request).
+    exists = (
+        await db.execute(text("SELECT to_regclass(:t)"), {"t": f'"{schema}".team_persons'})
+    ).scalar_one_or_none()
+    if exists is None:
+        return None
+    return (
+        await db.execute(
+            text(
+                f'SELECT pos.slug FROM "{schema}".team_persons p '
+                f'JOIN "{schema}".team_positions pos ON pos.id = p.position_id '
+                "WHERE p.user_id = :uid LIMIT 1"
+            ),
+            {"uid": str(user.id)},
+        )
+    ).scalar_one_or_none()
 
 
 @auth_router.post("/login", response_model=TokenResponse)

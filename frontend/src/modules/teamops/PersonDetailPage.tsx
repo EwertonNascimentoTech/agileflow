@@ -155,10 +155,7 @@ export default function PersonDetailPage() {
               <Field label="PO vinculado" value={person.po_person?.full_name} />
               <Field label="Referência técnica" value={person.tech_reference_person?.full_name} />
               <Field label="Superior imediato" value={person.manager_person?.full_name} />
-              <Field label="Telefone" value={person.phone} />
-              <Field label="WhatsApp" value={person.whatsapp} />
-              <Field label="Data de nascimento" value={formatDateBr(person.birth_date)} />
-              <Field label="Data de entrada" value={formatDateBr(person.start_date)} />
+              <Field label="Data de entrada" value={person.start_date ?? null} />
             </CardContent>
           </Card>
         </TabsContent>
@@ -285,13 +282,6 @@ export default function PersonDetailPage() {
       )}
     </div>
   )
-}
-
-function formatDateBr(iso: string | null | undefined): string | null {
-  if (!iso) return null
-  const [y, m, d] = iso.split("T")[0].split("-")
-  if (!y || !m || !d) return iso
-  return `${d}/${m}/${y}`
 }
 
 function Field({ label, value }: { label: string; value?: string | null }) {

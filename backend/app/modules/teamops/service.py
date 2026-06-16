@@ -24,12 +24,14 @@ from app.modules.super_admin.models import (
     UserRole,
 )
 
+from app.modules.teamops.person_status_sync import PersonStatusSync
 from app.modules.teamops.models import (
     Absence,
     AbsenceStatus,
     AbsenceType,
     Area,
     AreaStatus,
+    Holiday,
     Person,
     PersonStack,
     PersonStatus,
@@ -37,6 +39,9 @@ from app.modules.teamops.models import (
     Stack,
     StackCategory,
     StackLevel,
+    WorkCalendar,
+    team_person_areas,
+    team_person_pos,
 )
 
 # Permissões da role de sistema "Executor" (acesso operacional para quem executa tarefas).
@@ -52,6 +57,37 @@ EXECUTOR_PERMISSIONS = [
     "teamops.absence.view_own",
     "teamops.absence.request",
 ]
+
+# Cargos Product Owner: gerencia os kanbans de Processos (sem configurações) e, no
+# módulo de Pessoas, só pode solicitar ausências e ver as próprias solicitações.
+# O acesso fino aos kanbans (ex.: "Triagem" somente leitura) é configurado por
+# kanban em Processos → Configurações → Kanbans (access_control por função).
+PO_POSITION_SLUGS = {"po", "product_owner"}
+PO_PERMISSIONS = [
+    # Processos: gerenciar cards nos kanbans.
+    "projetos.project.view",
+    "projetos.task.view",
+    "projetos.task.manage",
+    "projetos.comment.manage",
+    # Pessoas: apenas as próprias ausências.
+    "teamops.absence.view_own",
+    "teamops.absence.request",
+]
+
+# Permissões que liberam telas/APIs de configuração — PO nunca pode receber.
+CONFIG_MANAGE_PERMISSIONS = frozenset({
+    "teamops.config.manage",
+    "projetos.project.manage",
+    "projetos.status.manage",
+    "projetos.demand_type.manage",
+    "projetos.form.manage",
+    "projetos.automation.manage",
+    "projetos.priority.manage",
+    "atendimento.config.manage",
+    "crm.config.manage",
+    "estoque.config.manage",
+    "pdv.config.manage",
+})
 from app.modules.teamops.schemas import (
     AbsenceCalendarDay,
     AbsenceCalendarResponse,
@@ -68,7 +104,9 @@ from app.modules.teamops.schemas import (
     CompetencyMapPerson,
     CompetencyMapResponse,
     DashboardKpis,
-    OrgNode,
+    HolidayCreate,
+    OrgAreaMember,
+    OrgAreaNode,
     OrgTreeResponse,
     PersonCreate,
     PersonStackCreate,
@@ -81,6 +119,7 @@ from app.modules.teamops.schemas import (
     StackCategoryUpdate,
     StackCreate,
     StackUpdate,
+    WorkCalendarUpdate,
 )
 
 
@@ -149,11 +188,7 @@ class PositionService:
     @staticmethod
     async def delete(db: AsyncSession, position_id: uuid.UUID) -> None:
         item = await PositionService.get(db, position_id)
-        if item.is_system:
-            raise HTTPException(
-                status_code=400,
-                detail="Cargos do sistema não podem ser excluídos. Você pode renomeá-los ou desativá-los.",
-            )
+        # Única restrição: cargo com pessoas vinculadas não pode ser excluído.
         in_use = await db.execute(
             select(func.count(Person.id)).where(Person.position_id == position_id)
         )
@@ -174,19 +209,39 @@ class PositionService:
             role = (await db.execute(select(Role).where(Role.id == position.role_id))).scalar_one_or_none()
             if role:
                 return role
+        role_name = f"Cargo · {position.name}"
+        # Religa a um role já existente de mesmo nome (vínculo role_id pode ter se perdido
+        # em re-seed/reset). Evita violar a unique (tenant_id, name) ao recriar.
+        existing = (await db.execute(
+            select(Role).where(Role.tenant_id == tenant_id, Role.name == role_name)
+        )).scalar_one_or_none()
+        if existing:
+            position.role_id = existing.id
+            await db.flush()
+            return existing
         role = Role(
             tenant_id=tenant_id,
-            name=f"Cargo · {position.name}",
+            name=role_name,
             description=f"Permissões do cargo {position.name} (gerenciadas no TeamOps).",
             is_system=True,
         )
         db.add(role)
         await db.flush()
-        for code in EXECUTOR_PERMISSIONS:
+        default_codes = PO_PERMISSIONS if position.slug in PO_POSITION_SLUGS else EXECUTOR_PERMISSIONS
+        for code in default_codes:
             db.add(RolePermission(role_id=role.id, permission_code=code))
         position.role_id = role.id
         await db.flush()
         return role
+
+    @staticmethod
+    async def ensure_role(db: AsyncSession, position_id: uuid.UUID, tenant_id: uuid.UUID) -> uuid.UUID:
+        """Garante que o cargo tenha um role (public.roles) e devolve seu id. Usado pelo
+        escopo de kanban por cargo, onde o access_control do funil é chaveado por role_id."""
+        pos = await PositionService.get(db, position_id)
+        role = await PositionService._get_or_create_role(db, pos, tenant_id)
+        await db.commit()
+        return role.id
 
     @staticmethod
     async def get_permissions(db: AsyncSession, position_id: uuid.UUID) -> list[str]:
@@ -206,6 +261,8 @@ class PositionService:
         role = await PositionService._get_or_create_role(db, pos, tenant_id)
         valid = {c for (c,) in (await db.execute(select(ModulePermission.code))).all()}
         clean = [c for c in dict.fromkeys(codes) if c in valid]
+        if pos.slug in PO_POSITION_SLUGS:
+            clean = [c for c in clean if c not in CONFIG_MANAGE_PERMISSIONS]
         await db.execute(sa_delete(RolePermission).where(RolePermission.role_id == role.id))
         for c in clean:
             db.add(RolePermission(role_id=role.id, permission_code=c))
@@ -424,16 +481,57 @@ class AbsenceTypeService:
 # ─────────────────────────────────────────────
 
 
+# Cargos que exercem os papéis de área. Fonte única: a Pessoa + seu Cargo + sua Área.
+TECH_REFERENCE_POSITION_SLUGS = {"tech_reference"}
+
+# Hierarquia de cargo (menor = mais sênior), usada no organograma.
+# Detecção por palavra-chave no nome/slug do cargo — robusta para cargos customizados
+# (ex.: "Gerente Executivo", "Coord. de Arq.", "Referência Técnica").
+def _cargo_rank(slug: Optional[str], name: Optional[str] = None) -> int:
+    s = f"{slug or ''} {name or ''}".lower()
+    if "gerente" in s or "diretor" in s or "diretoria" in s or "gestor" in s:
+        return 0  # Gerência / Diretoria
+    if "coord" in s:
+        return 1  # Coordenação
+    if "product owner" in s or "product_owner" in s or "scrum" in s or re.search(r"\bpo\b", s):
+        return 2  # Product Owner
+    if ("refer" in s and "cnic" in s) or "arquiteto" in s or "architect" in s or "tech" in s:
+        return 3  # Referência Técnica / Arquitetura
+    if "estagi" in s or "intern" in s or "trainee" in s:
+        return 5  # Estágio
+    return 4  # Equipe / operacional
+
+
 class AreaService:
     @staticmethod
     def _eager_options():
-        return (
-            selectinload(Area.parent_area),
-            selectinload(Area.po_person),
-            selectinload(Area.tech_reference_person),
-            selectinload(Area.coordinator_person),
-            selectinload(Area.manager_person),
+        return (selectinload(Area.parent_area),)
+
+    @staticmethod
+    async def role_people(
+        db: AsyncSession,
+    ) -> tuple[dict[uuid.UUID, list[uuid.UUID]], dict[uuid.UUID, list[uuid.UUID]]]:
+        """Deriva os papéis de cada área a partir das pessoas alocadas nela, pelo cargo.
+
+        Retorna (po_por_area, ref_tecnica_por_area), cada um mapeando area_id -> [person_id].
+        Substitui as antigas FKs po_person_id/tech_reference_person_id da Area (fonte
+        de verdade duplicada com a ficha da pessoa).
+        """
+        rows = await db.execute(
+            select(team_person_areas.c.person_id, team_person_areas.c.area_id, Position.slug)
+            .select_from(team_person_areas)
+            .join(Person, Person.id == team_person_areas.c.person_id)
+            .join(Position, Person.position_id == Position.id)
+            .where(Person.status != PersonStatus.DESLIGADO)
         )
+        po_map: dict[uuid.UUID, list[uuid.UUID]] = {}
+        tech_map: dict[uuid.UUID, list[uuid.UUID]] = {}
+        for person_id, area_id, slug in rows.all():
+            if slug in PO_POSITION_SLUGS:
+                po_map.setdefault(area_id, []).append(person_id)
+            if slug in TECH_REFERENCE_POSITION_SLUGS:
+                tech_map.setdefault(area_id, []).append(person_id)
+        return po_map, tech_map
 
     @staticmethod
     async def _enrich_counts(db: AsyncSession, areas: list[Area]) -> None:
@@ -441,9 +539,8 @@ class AreaService:
         if not areas:
             return
         person_counts = await db.execute(
-            select(Person.area_id, func.count(Person.id))
-            .where(Person.area_id.isnot(None))
-            .group_by(Person.area_id)
+            select(team_person_areas.c.area_id, func.count(team_person_areas.c.person_id))
+            .group_by(team_person_areas.c.area_id)
         )
         p_map = {row[0]: row[1] for row in person_counts.all()}
         subarea_counts = await db.execute(
@@ -460,7 +557,7 @@ class AreaService:
     async def list(db: AsyncSession, active_only: bool = False) -> list[Area]:
         q = select(Area).options(*AreaService._eager_options())
         if active_only:
-            q = q.where(Area.is_active == True)  # noqa: E712
+            q = q.where(Area.status == AreaStatus.ATIVA)
         q = q.order_by(Area.name.asc())
         result = await db.execute(q)
         areas = list(result.scalars().all())
@@ -515,6 +612,7 @@ class AreaService:
     async def create(db: AsyncSession, data: AreaCreate) -> Area:
         await AreaService._validate_parent(db, data.parent_area_id, self_id=None)
         item = Area(**data.model_dump())
+        item.is_active = item.status == AreaStatus.ATIVA
         db.add(item)
         try:
             await db.commit()
@@ -531,6 +629,8 @@ class AreaService:
             await AreaService._validate_parent(db, payload["parent_area_id"], self_id=area_id)
         for key, value in payload.items():
             setattr(item, key, value)
+        if "status" in payload:
+            item.is_active = item.status == AreaStatus.ATIVA
         item.updated_at = datetime.utcnow()
         try:
             await db.commit()
@@ -562,14 +662,18 @@ class PersonService:
     ) -> list[Person]:
         q = select(Person).options(
             selectinload(Person.position),
-            selectinload(Person.area),
-            selectinload(Person.po_person).selectinload(Person.position),
+            selectinload(Person.areas),
+            selectinload(Person.pos).selectinload(Person.position),
             selectinload(Person.tech_reference_person).selectinload(Person.position),
             selectinload(Person.manager_person).selectinload(Person.position),
         )
         filters = []
         if area_id:
-            filters.append(Person.area_id == area_id)
+            filters.append(
+                Person.id.in_(
+                    select(team_person_areas.c.person_id).where(team_person_areas.c.area_id == area_id)
+                )
+            )
         if position_id:
             filters.append(Person.position_id == position_id)
         if status:
@@ -582,6 +686,13 @@ class PersonService:
         q = q.order_by(Person.full_name.asc())
         result = await db.execute(q)
         items = list(result.scalars().all())
+        if items:
+            changed = await PersonStatusSync.sync_many(
+                db, [p.id for p in items], commit=True,
+            )
+            if changed:
+                for p in items:
+                    await db.refresh(p)
         await PersonService._enrich_access(db, items)
         return items
 
@@ -591,8 +702,8 @@ class PersonService:
             select(Person)
             .options(
                 selectinload(Person.position),
-                selectinload(Person.area),
-                selectinload(Person.po_person).selectinload(Person.position),
+                selectinload(Person.areas),
+                selectinload(Person.pos).selectinload(Person.position),
                 selectinload(Person.tech_reference_person).selectinload(Person.position),
                 selectinload(Person.manager_person).selectinload(Person.position),
             )
@@ -601,20 +712,51 @@ class PersonService:
         person = result.scalar_one_or_none()
         if not person:
             raise HTTPException(status_code=404, detail="Pessoa não encontrada.")
+        if await PersonStatusSync.sync_one(db, person_id, commit=True):
+            await db.refresh(person)
         await PersonService._enrich_access(db, [person])
         return person
 
     @staticmethod
+    def _reject_manual_absence_status(payload: dict) -> None:
+        if payload.get("status") in (PersonStatus.FERIAS, PersonStatus.AFASTADO):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Status 'Em férias' e 'Afastado' são definidos pelas ausências. "
+                    "Cadastre em TeamOps → Ausências."
+                ),
+            )
+
+    @staticmethod
     async def _validate_refs(db: AsyncSession, payload: dict) -> None:
-        if payload.get("area_id"):
-            await AreaService.get(db, payload["area_id"])
         if payload.get("position_id"):
             await PositionService.get(db, payload["position_id"])
-        for fld in ("po_person_id", "tech_reference_person_id", "manager_person_id"):
+        for area_id in payload.get("area_ids") or []:
+            await AreaService.get(db, area_id)
+        for person_ref in payload.get("po_person_ids") or []:
+            exists = await db.execute(select(Person.id).where(Person.id == person_ref))
+            if exists.scalar_one_or_none() is None:
+                raise HTTPException(status_code=400, detail="PO vinculado inválido.")
+        for fld in ("tech_reference_person_id", "manager_person_id"):
             if payload.get(fld):
                 exists = await db.execute(select(Person).where(Person.id == payload[fld]))
                 if exists.scalar_one_or_none() is None:
                     raise HTTPException(status_code=400, detail=f"Referência inválida em {fld}.")
+
+    @staticmethod
+    async def _resolve_people(db: AsyncSession, ids: list[uuid.UUID]) -> list[Person]:
+        if not ids:
+            return []
+        rows = await db.execute(select(Person).where(Person.id.in_(ids)))
+        return list(rows.scalars().all())
+
+    @staticmethod
+    async def _resolve_areas(db: AsyncSession, ids: list[uuid.UUID]) -> list[Area]:
+        if not ids:
+            return []
+        rows = await db.execute(select(Area).where(Area.id.in_(ids)))
+        return list(rows.scalars().all())
 
     @staticmethod
     async def create(db: AsyncSession, data: PersonCreate, tenant_id: Optional[uuid.UUID] = None) -> Person:
@@ -623,8 +765,13 @@ class PersonService:
         password = payload.pop("password", None)
         payload.pop("reset_password", None)
         payload["email"] = payload["email"].lower()
+        PersonService._reject_manual_absence_status(payload)
         await PersonService._validate_refs(db, payload)
+        area_ids = payload.pop("area_ids", []) or []
+        po_person_ids = payload.pop("po_person_ids", []) or []
         item = Person(**payload)
+        item.areas = await PersonService._resolve_areas(db, area_ids)
+        item.pos = [p for p in await PersonService._resolve_people(db, po_person_ids)]
         db.add(item)
         try:
             await db.flush()  # garante item.id e dispara unique de e-mail da pessoa
@@ -649,11 +796,20 @@ class PersonService:
         reset_password = payload.pop("reset_password", None)
         if "email" in payload and payload["email"]:
             payload["email"] = payload["email"].lower()
+        PersonService._reject_manual_absence_status(payload)
         await PersonService._validate_refs(db, payload)
         # impede auto-referência
-        for fld in ("po_person_id", "tech_reference_person_id", "manager_person_id"):
+        for fld in ("tech_reference_person_id", "manager_person_id"):
             if payload.get(fld) and payload[fld] == person_id:
                 raise HTTPException(status_code=400, detail="Pessoa não pode referenciar a si mesma.")
+        area_ids = payload.pop("area_ids", None)
+        po_person_ids = payload.pop("po_person_ids", None)
+        if area_ids is not None:
+            item.areas = await PersonService._resolve_areas(db, area_ids)
+        if po_person_ids is not None:
+            if person_id in po_person_ids:
+                raise HTTPException(status_code=400, detail="Pessoa não pode ser PO de si mesma.")
+            item.pos = await PersonService._resolve_people(db, po_person_ids)
         for key, value in payload.items():
             setattr(item, key, value)
         item.updated_at = datetime.utcnow()
@@ -692,27 +848,6 @@ class PersonService:
             raise HTTPException(status_code=403, detail=f"Limite de {p.max_users} usuários do plano atingido.")
 
     @staticmethod
-    async def _get_executor_role_id(db: AsyncSession, tenant_id: Optional[uuid.UUID]) -> uuid.UUID:
-        if not tenant_id:
-            raise HTTPException(status_code=400, detail="Tenant não identificado para criar o acesso.")
-        res = await db.execute(select(Role).where(Role.tenant_id == tenant_id, Role.name == "Executor"))
-        role = res.scalar_one_or_none()
-        if role:
-            return role.id
-        role = Role(
-            tenant_id=tenant_id,
-            name="Executor",
-            description="Acesso operacional a Projetos (provisionado pelo TeamOps).",
-            is_system=True,
-        )
-        db.add(role)
-        await db.flush()
-        for code in EXECUTOR_PERMISSIONS:
-            db.add(RolePermission(role_id=role.id, permission_code=code))
-        await db.flush()
-        return role.id
-
-    @staticmethod
     async def _provision_user(
         db: AsyncSession,
         person: Person,
@@ -723,7 +858,7 @@ class PersonService:
     ) -> None:
         """Cria/vincula/ajusta o login (public.users) conforme o nível de acesso.
         - none: desativa e desvincula o login (não apaga o User, preserva históricos).
-        - com acesso (com_acesso/executor/gestor): company_user com a role do CARGO
+        - com_acesso: company_user com a role do CARGO
           (matriz de permissões por cargo). Ninguém vira company_admin por aqui.
         access_level None = não muda o acesso (usado só para reset de senha)."""
         user: Optional[User] = None
@@ -806,8 +941,8 @@ class PersonService:
                 p.user_active = None
                 p.user_email = None
             else:
-                # Acesso é regido pela role do cargo; "gestor" legado (company_admin) também conta.
-                p.access_level = "gestor" if u.role == UserRole.COMPANY_ADMIN else "com_acesso"
+                # Acesso é binário; o que a pessoa pode fazer vem da role do cargo.
+                p.access_level = "com_acesso"
                 p.user_active = u.is_active
                 p.user_email = u.email
 
@@ -840,7 +975,7 @@ class PersonService:
                 email=u.email,
                 position_name=p.position.name if p.position else None,
                 position_slug=p.position.slug if p.position else None,
-                access_level="gestor" if u.role == UserRole.COMPANY_ADMIN else "com_acesso",
+                access_level="com_acesso",
             ))
         return members
 
@@ -964,7 +1099,7 @@ class AbsenceService:
         if end_to:
             filters.append(Absence.start_date <= end_to)
         if area_id:
-            person_q = select(Person.id).where(Person.area_id == area_id)
+            person_q = select(team_person_areas.c.person_id).where(team_person_areas.c.area_id == area_id)
             filters.append(Absence.person_id.in_(person_q))
         if filters:
             q = q.where(and_(*filters))
@@ -1004,6 +1139,8 @@ class AbsenceService:
             approved_at=datetime.utcnow() if initial_status == AbsenceStatus.APROVADA else None,
         )
         db.add(item)
+        await db.flush()
+        await PersonStatusSync.sync_one(db, data.person_id, commit=False)
         await db.commit()
         return await AbsenceService.get(db, item.id)
 
@@ -1022,13 +1159,17 @@ class AbsenceService:
         for key, value in payload.items():
             setattr(item, key, value)
         item.updated_at = datetime.utcnow()
+        await PersonStatusSync.sync_one(db, item.person_id, commit=False)
         await db.commit()
         return await AbsenceService.get(db, item.id)
 
     @staticmethod
     async def delete(db: AsyncSession, absence_id: uuid.UUID) -> None:
         item = await AbsenceService.get(db, absence_id)
+        person_id = item.person_id
         await db.delete(item)
+        await db.flush()
+        await PersonStatusSync.sync_one(db, person_id, commit=False)
         await db.commit()
 
     @staticmethod
@@ -1047,6 +1188,7 @@ class AbsenceService:
         item.approved_at = datetime.utcnow()
         item.decision_notes = data.decision_notes
         item.updated_at = datetime.utcnow()
+        await PersonStatusSync.sync_one(db, item.person_id, commit=False)
         await db.commit()
         return await AbsenceService.get(db, item.id)
 
@@ -1086,49 +1228,85 @@ class AbsenceService:
 
 class OrgService:
     @staticmethod
-    async def tree(db: AsyncSession) -> OrgTreeResponse:
-        result = await db.execute(
-            select(Person)
-            .options(
-                selectinload(Person.area),
-                selectinload(Person.position),
-            )
-            .where(Person.status != PersonStatus.DESLIGADO)
-            .order_by(Person.full_name.asc())
-        )
-        persons = list(result.scalars().all())
+    async def area_tree(db: AsyncSession) -> OrgTreeResponse:
+        """Organograma = árvore de ÁREAS (parent_area_id). Cada pessoa aparece em uma
+        caixa; se estiver alocada em área pai e filha, fica só na ancestral."""
+        areas_q = await db.execute(select(Area).order_by(Area.name.asc()))
+        areas = list(areas_q.scalars().all())
 
-        nodes: dict[uuid.UUID, OrgNode] = {}
-        for p in persons:
-            position_mini = None
-            if p.position:
-                position_mini = {
-                    "id": p.position.id,
-                    "slug": p.position.slug,
-                    "name": p.position.name,
-                    "is_system": p.position.is_system,
-                }
-            nodes[p.id] = OrgNode(
-                person={"id": p.id, "full_name": p.full_name, "position": position_mini},
-                area_id=p.area_id,
-                area_name=p.area.name if p.area else None,
+        # Pessoas por área (via N:N) com cargo, para escolher o responsável.
+        rows = await db.execute(
+            select(
+                team_person_areas.c.area_id,
+                Person.id,
+                Person.full_name,
+                Position.slug,
+                Position.name,
+                Person.employment_type,
+            )
+            .select_from(team_person_areas)
+            .join(Person, Person.id == team_person_areas.c.person_id)
+            .join(Position, Person.position_id == Position.id)
+            .where(
+                Person.status != PersonStatus.DESLIGADO,
+                Person.visible_in_org_chart.is_(True),
+            )
+        )
+        by_area: dict[uuid.UUID, list[tuple]] = {}
+        for area_id, pid, full_name, slug, pos_name, emp_type in rows.all():
+            by_area.setdefault(area_id, []).append((pid, full_name, slug, pos_name, emp_type))
+
+        parent_by_id: dict[uuid.UUID, uuid.UUID | None] = {
+            a.id: a.parent_area_id for a in areas
+        }
+
+        def _ancestor_ids(area_id: uuid.UUID) -> set[uuid.UUID]:
+            """Áreas ancestrais (pai, avô, …) para deduplicar pessoas no diagrama."""
+            out: set[uuid.UUID] = set()
+            parent = parent_by_id.get(area_id)
+            while parent:
+                out.add(parent)
+                parent = parent_by_id.get(parent)
+            return out
+
+        def _person_ids_in_areas(area_ids: set[uuid.UUID]) -> set[uuid.UUID]:
+            ids: set[uuid.UUID] = set()
+            for aid in area_ids:
+                for pid, *_ in by_area.get(aid, []):
+                    ids.add(pid)
+            return ids
+
+        nodes: dict[uuid.UUID, OrgAreaNode] = {}
+        for a in areas:
+            people = by_area.get(a.id, [])
+            # Se a pessoa também está numa área ancestral, aparece só lá (ex.: gerente no pai, não no filho).
+            skip_ids = _person_ids_in_areas(_ancestor_ids(a.id))
+            members: list[OrgAreaMember] = []
+            for pid, full_name, slug, pos_name, emp_type in people:
+                if pid in skip_ids:
+                    continue
+                rank = _cargo_rank(slug, pos_name)
+                members.append(OrgAreaMember(
+                    person_id=pid, name=full_name, position=pos_name, rank=rank,
+                    employment_type=emp_type,
+                ))
+            members.sort(key=lambda m: (m.rank, m.name))
+            nodes[a.id] = OrgAreaNode(
+                area_id=a.id,
+                area_name=a.name,
+                members=members,
+                person_count=len(members),
                 children=[],
             )
 
-        roots: list[OrgNode] = []
-        orphans: list[OrgNode] = []
-        for p in persons:
-            node = nodes[p.id]
-            parent_id = p.manager_person_id or p.po_person_id
-            if parent_id and parent_id in nodes:
-                nodes[parent_id].children.append(node)
+        roots: list[OrgAreaNode] = []
+        for a in areas:
+            node = nodes[a.id]
+            if a.parent_area_id and a.parent_area_id in nodes:
+                nodes[a.parent_area_id].children.append(node)
             else:
-                slug = p.position.slug if p.position else ""
-                if slug in ("gerente", "coordenador"):
-                    roots.append(node)
-                else:
-                    orphans.append(node)
-        return OrgTreeResponse(roots=roots, orphans=orphans)
+                roots.append(node)
+        return OrgTreeResponse(roots=roots)
 
 
 # ─────────────────────────────────────────────
@@ -1205,20 +1383,25 @@ class AlertsService:
         today = date.today()
         horizon_end = today + timedelta(days=60)
 
-        # 1) Áreas sem PO
+        # Papéis de área derivados das pessoas (fonte única): area_id -> [person_id]
+        po_by_area, tech_by_area = await AreaService.role_people(db)
+
+        # 1) Áreas sem PO (nenhuma pessoa com cargo de PO alocada na área)
         areas_q = await db.execute(
-            select(Area).where(Area.status == AreaStatus.ATIVA, Area.po_person_id.is_(None))
+            select(Area).where(Area.status == AreaStatus.ATIVA)
         )
-        for area in areas_q.scalars().all():
-            items.append(
-                AlertItem(
-                    code="area_without_po",
-                    severity="medium",
-                    title=f"Área '{area.name}' sem PO titular",
-                    description="Defina um PO responsável para garantir o fluxo de priorização.",
-                    related_area_ids=[area.id],
+        active_areas = list(areas_q.scalars().all())
+        for area in active_areas:
+            if not po_by_area.get(area.id):
+                items.append(
+                    AlertItem(
+                        code="area_without_po",
+                        severity="medium",
+                        title=f"Área '{area.name}' sem PO titular",
+                        description="Aloque uma pessoa com cargo de Product Owner nesta área para garantir o fluxo de priorização.",
+                        related_area_ids=[area.id],
+                    )
                 )
-            )
 
         # 2) Stacks críticas com 0 ou 1 pessoa
         comp_for_dashboard = await CompetencyMapService.build(db)
@@ -1251,31 +1434,34 @@ class AlertsService:
         for a in approved_list:
             by_person.setdefault(a.person_id, []).append(a)
 
-        areas_active = await db.execute(
-            select(Area).where(Area.status == AreaStatus.ATIVA)
-        )
-        for area in areas_active.scalars().all():
-            if not area.po_person_id or not area.tech_reference_person_id:
+        for area in active_areas:
+            po_ids = po_by_area.get(area.id, [])
+            tech_ids = tech_by_area.get(area.id, [])
+            if not po_ids or not tech_ids:
                 continue
-            po_abs = by_person.get(area.po_person_id, [])
-            tech_abs = by_person.get(area.tech_reference_person_id, [])
-            for pa in po_abs:
-                for ta in tech_abs:
-                    overlap_start = max(pa.start_date, ta.start_date)
-                    overlap_end = min(pa.end_date, ta.end_date)
-                    if overlap_start <= overlap_end:
-                        items.append(
-                            AlertItem(
-                                code="po_and_tech_ref_absent",
-                                severity="high",
-                                title=f"Área '{area.name}': PO e Referência Técnica ausentes simultaneamente",
-                                description=(
-                                    f"Sobreposição de {overlap_start.isoformat()} a {overlap_end.isoformat()}."
-                                ),
-                                related_area_ids=[area.id],
-                                related_person_ids=[area.po_person_id, area.tech_reference_person_id],
-                            )
-                        )
+            reported: set[tuple[uuid.UUID, uuid.UUID]] = set()
+            for po_id in po_ids:
+                for tech_id in tech_ids:
+                    if po_id == tech_id:
+                        continue
+                    for pa in by_person.get(po_id, []):
+                        for ta in by_person.get(tech_id, []):
+                            overlap_start = max(pa.start_date, ta.start_date)
+                            overlap_end = min(pa.end_date, ta.end_date)
+                            if overlap_start <= overlap_end and (po_id, tech_id) not in reported:
+                                reported.add((po_id, tech_id))
+                                items.append(
+                                    AlertItem(
+                                        code="po_and_tech_ref_absent",
+                                        severity="high",
+                                        title=f"Área '{area.name}': PO e Referência Técnica ausentes simultaneamente",
+                                        description=(
+                                            f"Sobreposição de {overlap_start.isoformat()} a {overlap_end.isoformat()}."
+                                        ),
+                                        related_area_ids=[area.id],
+                                        related_person_ids=[po_id, tech_id],
+                                    )
+                                )
 
         # 4) Mesma stack crítica: 2+ ausências sobrepostas
         ps_q = await db.execute(
@@ -1344,15 +1530,16 @@ class DashboardService:
             1 for e in comp.entries if e.stack.is_critical and e.person_count <= 1
         )
 
-        areas_no_po = await db.execute(
-            select(func.count(Area.id)).where(
-                Area.status == AreaStatus.ATIVA, Area.po_person_id.is_(None)
-            )
-        )
+        po_by_area, _ = await AreaService.role_people(db)
+        active_area_ids = (await db.execute(
+            select(Area.id).where(Area.status == AreaStatus.ATIVA)
+        )).all()
+        areas_without_po_count = sum(1 for (aid,) in active_area_ids if not po_by_area.get(aid))
 
         by_area = await db.execute(
-            select(Area.name, func.count(Person.id))
-            .join(Person, Person.area_id == Area.id, isouter=True)
+            select(Area.name, func.count(team_person_areas.c.person_id))
+            .select_from(Area)
+            .join(team_person_areas, team_person_areas.c.area_id == Area.id, isouter=True)
             .group_by(Area.name)
             .order_by(Area.name.asc())
         )
@@ -1368,12 +1555,89 @@ class DashboardService:
         )
         by_role_list = [{"role": row[0] or "Sem cargo", "count": row[1]} for row in by_role.all()]
 
+        # Aniversariantes do mês — pessoas ativas com nascimento no mês corrente,
+        # ordenadas pelo dia. `is_today` destaca quem faz aniversário hoje.
+        bdays = await db.execute(
+            select(Person.id, Person.full_name, Person.birth_date)
+            .where(
+                Person.status == PersonStatus.ATIVO,
+                Person.birth_date.is_not(None),
+                func.extract("month", Person.birth_date) == today.month,
+            )
+            .order_by(func.extract("day", Person.birth_date).asc())
+        )
+        birthdays_list = [
+            {
+                "id": str(row[0]),
+                "full_name": row[1],
+                "birth_date": row[2].isoformat(),
+                "day": row[2].day,
+                "is_today": row[2].day == today.day,
+            }
+            for row in bdays.all()
+        ]
+
         return DashboardKpis(
             active_persons=active.scalar() or 0,
             on_vacation_today=on_vac.scalar() or 0,
             pending_approvals=pending.scalar() or 0,
             critical_stacks_without_backup=critical_without_backup,
-            areas_without_po=areas_no_po.scalar() or 0,
+            areas_without_po=areas_without_po_count,
             persons_by_area=by_area_list,
             persons_by_role=by_role_list,
+            birthdays_this_month=birthdays_list,
         )
+
+
+class WorkCalendarService:
+    """Calendário corporativo (linha única por tenant) + feriados. Base do motor de cronograma."""
+
+    @staticmethod
+    async def get(db: AsyncSession) -> WorkCalendar:
+        """Retorna o calendário singleton, criando-o com o padrão se ainda não existir."""
+        row = (await db.execute(select(WorkCalendar).limit(1))).scalar_one_or_none()
+        if row is None:
+            row = WorkCalendar()
+            db.add(row)
+            await db.commit()
+            await db.refresh(row)
+        return row
+
+    @staticmethod
+    async def update(db: AsyncSession, data: WorkCalendarUpdate) -> WorkCalendar:
+        row = await WorkCalendarService.get(db)
+        row.day_start = data.day_start
+        row.day_end = data.day_end
+        row.lunch_start = data.lunch_start
+        row.lunch_end = data.lunch_end
+        row.work_days = sorted(set(int(x) for x in data.work_days))
+        row.timezone = data.timezone
+        row.updated_at = datetime.utcnow()
+        await db.commit()
+        await db.refresh(row)
+        return row
+
+    @staticmethod
+    async def list_holidays(db: AsyncSession) -> list[Holiday]:
+        rows = await db.execute(select(Holiday).order_by(Holiday.day))
+        return list(rows.scalars().all())
+
+    @staticmethod
+    async def create_holiday(db: AsyncSession, data: HolidayCreate) -> Holiday:
+        item = Holiday(day=data.day, name=data.name.strip()[:140], is_recurring=data.is_recurring)
+        db.add(item)
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            raise HTTPException(status_code=400, detail="Já existe um feriado nesta data.")
+        await db.refresh(item)
+        return item
+
+    @staticmethod
+    async def delete_holiday(db: AsyncSession, holiday_id: uuid.UUID) -> None:
+        row = (await db.execute(select(Holiday).where(Holiday.id == holiday_id))).scalar_one_or_none()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Feriado não encontrado.")
+        await db.delete(row)
+        await db.commit()

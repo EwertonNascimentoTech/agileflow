@@ -1,16 +1,16 @@
 """Schemas Pydantic do módulo TeamOps."""
 
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Literal, Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
-# Nível de acesso de uma Pessoa do time:
+# Nível de acesso de uma Pessoa do time (binário):
 #  none       -> só ficha de capacidade (sem login)
 #  com_acesso -> company_user com a role do CARGO (matriz de permissões por cargo)
-#  executor/gestor -> valores legados, tratados como "com_acesso"
-AccessLevel = Literal["none", "com_acesso", "executor", "gestor"]
+# O que a pessoa PODE fazer vem da matriz de permissões do cargo, não deste campo.
+AccessLevel = Literal["none", "com_acesso"]
 
 
 class PositionPermissionsUpdate(BaseModel):
@@ -188,12 +188,8 @@ class AreaCreate(BaseModel):
     description: Optional[str] = None
     parent_area_id: Optional[uuid.UUID] = None
     area_type: AreaType = AreaType.NEGOCIO
-    po_person_id: Optional[uuid.UUID] = None
-    tech_reference_person_id: Optional[uuid.UUID] = None
-    coordinator_person_id: Optional[uuid.UUID] = None
-    manager_person_id: Optional[uuid.UUID] = None
+    # `status` é a fonte única de "ativa?". `is_active` é derivado dele no service.
     status: AreaStatus = AreaStatus.ATIVA
-    is_active: bool = True
 
 
 class AreaUpdate(BaseModel):
@@ -201,12 +197,7 @@ class AreaUpdate(BaseModel):
     description: Optional[str] = None
     parent_area_id: Optional[uuid.UUID] = None
     area_type: Optional[AreaType] = None
-    po_person_id: Optional[uuid.UUID] = None
-    tech_reference_person_id: Optional[uuid.UUID] = None
-    coordinator_person_id: Optional[uuid.UUID] = None
-    manager_person_id: Optional[uuid.UUID] = None
     status: Optional[AreaStatus] = None
-    is_active: Optional[bool] = None
 
 
 class PositionMini(BaseModel):
@@ -239,19 +230,11 @@ class AreaResponse(BaseModel):
     description: Optional[str]
     parent_area_id: Optional[uuid.UUID]
     area_type: AreaType
-    po_person_id: Optional[uuid.UUID]
-    tech_reference_person_id: Optional[uuid.UUID]
-    coordinator_person_id: Optional[uuid.UUID]
-    manager_person_id: Optional[uuid.UUID]
     status: AreaStatus
     is_active: bool
     created_at: datetime
     updated_at: datetime
     parent_area: Optional[AreaRef] = None
-    po_person: Optional[PersonMini] = None
-    tech_reference_person: Optional[PersonMini] = None
-    coordinator_person: Optional[PersonMini] = None
-    manager_person: Optional[PersonMini] = None
     person_count: int = 0
     subarea_count: int = 0
 
@@ -270,8 +253,8 @@ class PersonCreate(BaseModel):
     whatsapp: Optional[str] = Field(None, max_length=30)
     birth_date: Optional[date] = None
     position_id: uuid.UUID
-    area_id: Optional[uuid.UUID] = None
-    po_person_id: Optional[uuid.UUID] = None
+    area_ids: list[uuid.UUID] = []
+    po_person_ids: list[uuid.UUID] = []
     tech_reference_person_id: Optional[uuid.UUID] = None
     manager_person_id: Optional[uuid.UUID] = None
     employment_type: EmploymentType = EmploymentType.CLT
@@ -279,6 +262,7 @@ class PersonCreate(BaseModel):
     weekly_hours: float = Field(40.0, ge=0, le=168)
     start_date: Optional[date] = None
     status: PersonStatus = PersonStatus.ATIVO
+    visible_in_org_chart: bool = True
     notes: Optional[str] = None
     # Acesso ao sistema (provisiona/vincula o login). Senha exigida ao criar o login.
     access_level: AccessLevel = "none"
@@ -292,8 +276,8 @@ class PersonUpdate(BaseModel):
     whatsapp: Optional[str] = Field(None, max_length=30)
     birth_date: Optional[date] = None
     position_id: Optional[uuid.UUID] = None
-    area_id: Optional[uuid.UUID] = None
-    po_person_id: Optional[uuid.UUID] = None
+    area_ids: Optional[list[uuid.UUID]] = None
+    po_person_ids: Optional[list[uuid.UUID]] = None
     tech_reference_person_id: Optional[uuid.UUID] = None
     manager_person_id: Optional[uuid.UUID] = None
     employment_type: Optional[EmploymentType] = None
@@ -301,6 +285,7 @@ class PersonUpdate(BaseModel):
     weekly_hours: Optional[float] = Field(None, ge=0, le=168)
     start_date: Optional[date] = None
     status: Optional[PersonStatus] = None
+    visible_in_org_chart: Optional[bool] = None
     notes: Optional[str] = None
     # Acesso ao sistema. access_level muda o vínculo; password define senha ao provisionar;
     # reset_password redefine a senha de um login já vinculado.
@@ -325,8 +310,8 @@ class PersonResponse(BaseModel):
     whatsapp: Optional[str]
     birth_date: Optional[date]
     position_id: uuid.UUID
-    area_id: Optional[uuid.UUID]
-    po_person_id: Optional[uuid.UUID]
+    area_ids: list[uuid.UUID] = []
+    po_person_ids: list[uuid.UUID] = []
     tech_reference_person_id: Optional[uuid.UUID]
     manager_person_id: Optional[uuid.UUID]
     employment_type: EmploymentType
@@ -334,12 +319,13 @@ class PersonResponse(BaseModel):
     weekly_hours: float
     start_date: Optional[date]
     status: PersonStatus
+    visible_in_org_chart: bool = True
     notes: Optional[str]
     created_at: datetime
     updated_at: datetime
     position: Optional[PositionMini] = None
-    area: Optional[AreaMini] = None
-    po_person: Optional[PersonMini] = None
+    areas: list[AreaMini] = []
+    pos: list[PersonMini] = []
     tech_reference_person: Optional[PersonMini] = None
     manager_person: Optional[PersonMini] = None
     # Acesso ao sistema (derivado do usuário vinculado).
@@ -359,7 +345,7 @@ class TeamMemberResponse(BaseModel):
     email: str
     position_name: Optional[str] = None
     position_slug: Optional[str] = None
-    access_level: AccessLevel = "executor"
+    access_level: AccessLevel = "com_acesso"
 
 
 # ─────────────────────────────────────────────
@@ -469,19 +455,29 @@ class AbsenceResponse(BaseModel):
 # ─────────────────────────────────────────────
 
 
-class OrgNode(BaseModel):
-    person: PersonMini
-    area_id: Optional[uuid.UUID] = None
-    area_name: Optional[str] = None
-    children: list["OrgNode"] = []
+class OrgAreaMember(BaseModel):
+    person_id: uuid.UUID
+    name: str
+    position: str
+    rank: int
+    employment_type: EmploymentType = EmploymentType.CLT
 
 
-OrgNode.model_rebuild()
+class OrgAreaNode(BaseModel):
+    """Nó do organograma = uma ÁREA com todas as pessoas alocadas (uma caixa por pessoa
+    no diagrama) e sub-áreas (parent_area_id)."""
+    area_id: uuid.UUID
+    area_name: str
+    members: list[OrgAreaMember] = []
+    person_count: int = 0
+    children: list["OrgAreaNode"] = []
+
+
+OrgAreaNode.model_rebuild()
 
 
 class OrgTreeResponse(BaseModel):
-    roots: list[OrgNode] = []
-    orphans: list[OrgNode] = []
+    roots: list[OrgAreaNode] = []
 
 
 class CompetencyMapPerson(BaseModel):
@@ -527,6 +523,7 @@ class DashboardKpis(BaseModel):
     areas_without_po: int
     persons_by_area: list[dict] = []
     persons_by_role: list[dict] = []
+    birthdays_this_month: list[dict] = []
 
 
 class AbsenceCalendarDay(BaseModel):
@@ -538,3 +535,58 @@ class AbsenceCalendarDay(BaseModel):
 class AbsenceCalendarResponse(BaseModel):
     month: str  # "YYYY-MM"
     days: list[AbsenceCalendarDay] = []
+
+
+# ─────────────────────────────────────────────
+# Calendário de trabalho + feriados
+# ─────────────────────────────────────────────
+
+
+class WorkCalendarResponse(BaseModel):
+    id: uuid.UUID
+    day_start: time
+    day_end: time
+    lunch_start: Optional[time] = None
+    lunch_end: Optional[time] = None
+    work_days: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4])
+    timezone: str
+    hours_per_day: float
+
+    model_config = {"from_attributes": True}
+
+
+class WorkCalendarUpdate(BaseModel):
+    day_start: time
+    day_end: time
+    lunch_start: Optional[time] = None
+    lunch_end: Optional[time] = None
+    work_days: list[int] = Field(..., min_length=1)
+    timezone: str = Field("America/Maceio", max_length=64)
+
+    @model_validator(mode="after")
+    def _validate(self):
+        if self.day_end <= self.day_start:
+            raise ValueError("O fim do expediente deve ser depois do início.")
+        if (self.lunch_start is None) != (self.lunch_end is None):
+            raise ValueError("Informe início e fim do almoço, ou nenhum.")
+        if self.lunch_start and self.lunch_end:
+            if not (self.day_start <= self.lunch_start < self.lunch_end <= self.day_end):
+                raise ValueError("O almoço deve estar dentro do expediente.")
+        if any(d < 0 or d > 6 for d in self.work_days):
+            raise ValueError("Dias úteis devem estar entre 0 (seg) e 6 (dom).")
+        return self
+
+
+class HolidayCreate(BaseModel):
+    day: date
+    name: str = Field(..., min_length=1, max_length=140)
+    is_recurring: bool = False
+
+
+class HolidayResponse(BaseModel):
+    id: uuid.UUID
+    day: date
+    name: str
+    is_recurring: bool
+
+    model_config = {"from_attributes": True}

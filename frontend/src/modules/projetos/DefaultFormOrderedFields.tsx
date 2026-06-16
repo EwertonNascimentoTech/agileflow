@@ -1,6 +1,7 @@
 import type { DefaultFormFieldKey, ProjectDefaultFormField, ProjectStatusDefaultFormLink } from "@/api/projetos"
 import type { User } from "@/types"
 import { DefaultFormFieldControl } from "@/modules/projetos/DefaultFormFieldControl"
+import { DefaultFormAttachmentControl } from "@/modules/projetos/DefaultFormAttachmentControl"
 import { groupDefaultFormFieldsIntoRows } from "@/modules/projetos/defaultFormLayout"
 import type { DefaultFormValues } from "@/modules/projetos/defaultFormUtils"
 import { isDefaultFieldReadOnly } from "@/modules/projetos/defaultFormVisibility"
@@ -42,6 +43,18 @@ export function DefaultFormOrderedFields({
   }
 
   function renderField(cfg: ProjectDefaultFormField) {
+    if (cfg.field_key === "anexos") {
+      return (
+        <DefaultFormAttachmentControl
+          key={cfg.field_key}
+          field={cfg}
+          value={values.anexos}
+          onChange={(files) => onChange({ anexos: files })}
+          disabled={isDefaultFieldReadOnly(cfg, defaultFormLinks)}
+          error={errors.anexos}
+        />
+      )
+    }
     return (
       <DefaultFormFieldControl
         key={cfg.field_key}

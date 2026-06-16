@@ -25,6 +25,7 @@ import { DefaultFormSelectOptionsEditor } from "@/modules/projetos/config/Defaul
 const FIELD_HINTS: Record<DefaultFormFieldKey, string> = {
   title: "Nome principal da demanda (sempre visível e obrigatório).",
   description: "Detalhes da demanda — o tipo define como o usuário preenche.",
+  anexos: "Permite anexar um ou mais arquivos à demanda.",
   assigned_to: "Pessoa responsável (sempre seleção de usuário).",
   diretoria: "Lista suspensa — cadastre as diretorias disponíveis abaixo.",
   area: "Lista suspensa — cadastre as áreas disponíveis abaixo.",

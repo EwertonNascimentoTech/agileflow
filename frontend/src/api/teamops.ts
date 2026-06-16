@@ -213,16 +213,24 @@ export interface Absence {
   approver_person: PersonMini | null
 }
 
-export interface OrgNode {
-  person: PersonMini
-  area_id: string | null
-  area_name: string | null
-  children: OrgNode[]
+export interface OrgAreaMember {
+  person_id: string
+  name: string
+  position: string
+  rank: number
+  employment_type: EmploymentType
+}
+
+export interface OrgAreaNode {
+  area_id: string
+  area_name: string
+  members: OrgAreaMember[]
+  person_count: number
+  children: OrgAreaNode[]
 }
 
 export interface OrgTree {
-  roots: OrgNode[]
-  orphans: OrgNode[]
+  roots: OrgAreaNode[]
 }
 
 export interface CompetencyMapPerson {
@@ -268,6 +276,15 @@ export interface DashboardKpis {
   areas_without_po: number
   persons_by_area: Array<{ area: string; count: number }>
   persons_by_role: Array<{ role: string; count: number }>
+  birthdays_this_month: BirthdayPerson[]
+}
+
+export interface BirthdayPerson {
+  id: string
+  full_name: string
+  birth_date: string // "YYYY-MM-DD"
+  day: number
+  is_today: boolean
 }
 
 export interface AbsenceCalendarDay {
@@ -281,12 +298,49 @@ export interface AbsenceCalendar {
   days: AbsenceCalendarDay[]
 }
 
+// ── Calendário de trabalho + feriados (base do cronograma) ──────────────────
+export interface WorkCalendar {
+  id: string
+  day_start: string       // "HH:MM:SS"
+  day_end: string
+  lunch_start: string | null
+  lunch_end: string | null
+  work_days: number[]     // 0=seg … 6=dom
+  timezone: string
+  hours_per_day: number
+}
+
+export interface WorkCalendarInput {
+  day_start: string
+  day_end: string
+  lunch_start: string | null
+  lunch_end: string | null
+  work_days: number[]
+  timezone: string
+}
+
+export interface Holiday {
+  id: string
+  day: string             // "YYYY-MM-DD"
+  name: string
+  is_recurring: boolean
+}
+
 export const teamopsApi = {
   // Dashboard / Alerts
   getDashboard: () => api.get<DashboardKpis>("/teamops/dashboard").then((r) => r.data),
   getAlerts: () => api.get<AlertsResponse>("/teamops/alerts").then((r) => r.data),
   getOrgTree: () => api.get<OrgTree>("/teamops/org/tree").then((r) => r.data),
   getCompetencyMap: () => api.get<CompetencyMap>("/teamops/competency-map").then((r) => r.data),
+
+  // Calendário de trabalho + feriados
+  getWorkCalendar: () => api.get<WorkCalendar>("/teamops/work-calendar").then((r) => r.data),
+  updateWorkCalendar: (data: WorkCalendarInput) =>
+    api.put<WorkCalendar>("/teamops/work-calendar", data).then((r) => r.data),
+  listHolidays: () => api.get<Holiday[]>("/teamops/holidays").then((r) => r.data),
+  createHoliday: (data: { day: string; name: string; is_recurring?: boolean }) =>
+    api.post<Holiday>("/teamops/holidays", data).then((r) => r.data),
+  deleteHoliday: (id: string) => api.delete<void>(`/teamops/holidays/${id}`).then((r) => r.data),
 
   // Areas
   listAreas: (activeOnly = false) =>
@@ -318,6 +372,9 @@ export const teamopsApi = {
     api.get<string[]>(`/teamops/positions/${positionId}/permissions`).then((r) => r.data),
   setPositionPermissions: (positionId: string, codes: string[]) =>
     api.put<string[]>(`/teamops/positions/${positionId}/permissions`, { codes }).then((r) => r.data),
+  // Garante o role do cargo e devolve o role_id (chave do access_control dos kanbans).
+  ensurePositionRole: (positionId: string) =>
+    api.post<{ role_id: string }>(`/teamops/positions/${positionId}/access-role`).then((r) => r.data.role_id),
 
   // Stack Categories
   listStackCategories: (activeOnly = false) =>
@@ -425,12 +482,23 @@ export const EMPLOYMENT_TYPE_LABELS: Record<EmploymentType, string> = {
   terceiro: "Terceiro",
 }
 
+// Cor da bolinha que identifica o vínculo no organograma.
+export const EMPLOYMENT_TYPE_DOT: Record<EmploymentType, string> = {
+  clt: "bg-emerald-500",
+  pj: "bg-sky-500",
+  estagio: "bg-amber-500",
+  terceiro: "bg-violet-500",
+}
+
 export const PERSON_STATUS_LABELS: Record<PersonStatus, string> = {
   ativo: "Ativo",
   afastado: "Afastado",
   ferias: "Em férias",
   desligado: "Desligado",
 }
+
+/** Status editáveis manualmente na ficha. Férias e afastado vêm das Ausências. */
+export const MANUAL_PERSON_STATUSES: PersonStatus[] = ["ativo", "desligado"]
 
 export const STACK_LEVEL_LABELS: Record<StackLevel, string> = {
   basico: "Básico",

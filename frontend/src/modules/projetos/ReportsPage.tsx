@@ -1,14 +1,19 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react"
-import { AlertTriangle, BarChart3, CheckCircle2, Clock, Layers, TrendingUp } from "lucide-react"
+import { AlertTriangle, BarChart3, CheckCircle2, Clock, Filter, Layers, TrendingUp, X } from "lucide-react"
 
-import { companyApi } from "@/api/company"
-import { projetosApi, type ProjectReports } from "@/api/projetos"
+import { teamopsApi } from "@/api/teamops"
+import { projetosApi, type ProjectDefaultFormField, type ProjectReports } from "@/api/projetos"
 import type { User } from "@/types"
+import { parseDefaultFieldOptions } from "@/modules/projetos/defaultFormOptions"
 import { KpiCard } from "@/components/KpiCard"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyState } from "@/components/EmptyState"
+
+const ALL = "__all__" // sentinela: sem filtro (Radix proíbe value="")
 
 function BarRow({
   label,
@@ -49,29 +54,80 @@ function monthLabel(ym: string): string {
 export default function ReportsPage() {
   const [data, setData] = useState<ProjectReports | null>(null)
   const [users, setUsers] = useState<User[]>([])
+  const [defaultFields, setDefaultFields] = useState<ProjectDefaultFormField[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
 
+  // Filtros (PO = responsável/Pessoa, diretoria e área são campos do card).
+  const [po, setPo] = useState<string>(ALL)
+  const [diretoria, setDiretoria] = useState<string>(ALL)
+  const [area, setArea] = useState<string>(ALL)
+
+  // Opções auxiliares carregadas uma vez.
   useEffect(() => {
     let active = true
     Promise.all([
-      projetosApi.getReports(),
-      companyApi.listUsers({ active_only: true }).catch(() => [] as User[]),
-    ])
-      .then(([r, u]) => {
-        if (!active) return
-        setData(r)
-        setUsers(u)
-      })
-      .finally(() => active && setLoading(false))
+      teamopsApi.listPersons().catch(() => []),
+      projetosApi.getDefaultFormFields().catch(() => [] as ProjectDefaultFormField[]),
+    ]).then(([ps, fields]) => {
+      if (!active) return
+      // by_assignee.user_id agora é person_id (responsável = Pessoa).
+      setUsers(ps.map((p) => ({ id: p.id, full_name: p.full_name })) as unknown as User[])
+      setDefaultFields(fields)
+    })
     return () => {
       active = false
     }
   }, [])
 
+  // Recarrega os relatórios sempre que um filtro muda.
+  useEffect(() => {
+    let active = true
+    setRefreshing(true)
+    projetosApi
+      .getReports({
+        po: po === ALL ? null : po,
+        diretoria: diretoria === ALL ? null : diretoria,
+        area: area === ALL ? null : area,
+      })
+      .then((r) => {
+        if (active) setData(r)
+      })
+      .finally(() => {
+        if (active) {
+          setLoading(false)
+          setRefreshing(false)
+        }
+      })
+    return () => {
+      active = false
+    }
+  }, [po, diretoria, area])
+
   const userName = useMemo(() => {
     const m = new Map(users.map((u) => [u.id, u.full_name]))
     return (id: string | null) => (id ? m.get(id) ?? "Usuário removido" : "Não atribuído")
   }, [users])
+
+  // value → label das opções de diretoria/área (do formulário padrão), com fallback no valor cru.
+  const labelMaps = useMemo(() => {
+    const build = (key: string) => {
+      const field = defaultFields.find((f) => f.field_key === key)
+      const map = new Map<string, string>()
+      if (field) parseDefaultFieldOptions(field).forEach((o) => map.set(o.value, o.label))
+      return map
+    }
+    return { diretoria: build("diretoria"), area: build("area") }
+  }, [defaultFields])
+
+  const diretoriaOptions = data?.available_diretorias ?? []
+  const areaOptions = data?.available_areas ?? []
+  const hasFilters = po !== ALL || diretoria !== ALL || area !== ALL
+  function clearFilters() {
+    setPo(ALL)
+    setDiretoria(ALL)
+    setArea(ALL)
+  }
 
   const stageGroups = useMemo(() => {
     if (!data) return [] as { funnel: string; rows: ProjectReports["by_stage"]; max: number }[]
@@ -95,9 +151,63 @@ export default function ReportsPage() {
     [data],
   )
 
+  const header = (
+    <div>
+      <h2 className="text-lg font-bold">Relatórios</h2>
+      <p className="text-sm text-muted-foreground">
+        Visão consolidada do board: distribuição por etapa, carga do time, tipos, SLA e throughput.
+      </p>
+    </div>
+  )
+
+  const filtersBar = (
+    <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-muted/30 p-3">
+      <div className="flex h-9 items-center gap-1.5 text-sm font-medium text-muted-foreground">
+        <Filter className="h-4 w-4" /> Filtros
+      </div>
+      <div className="min-w-[180px] flex-1 sm:max-w-[220px]">
+        <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">PO / Responsável</label>
+        <Select value={po} onValueChange={setPo}>
+          <SelectTrigger><SelectValue placeholder="Todos" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Todos os POs</SelectItem>
+            {users.map((u) => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="min-w-[180px] flex-1 sm:max-w-[220px]">
+        <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Diretoria</label>
+        <Select value={diretoria} onValueChange={setDiretoria}>
+          <SelectTrigger><SelectValue placeholder="Todas" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Todas as diretorias</SelectItem>
+            {diretoriaOptions.map((v) => <SelectItem key={v} value={v}>{labelMaps.diretoria.get(v) ?? v}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="min-w-[180px] flex-1 sm:max-w-[220px]">
+        <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Área</label>
+        <Select value={area} onValueChange={setArea}>
+          <SelectTrigger><SelectValue placeholder="Todas" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Todas as áreas</SelectItem>
+            {areaOptions.map((v) => <SelectItem key={v} value={v}>{labelMaps.area.get(v) ?? v}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      {hasFilters && (
+        <Button variant="ghost" size="sm" className="h-9 gap-1" onClick={clearFilters}>
+          <X className="h-3.5 w-3.5" /> Limpar
+        </Button>
+      )}
+    </div>
+  )
+
   if (loading) {
     return (
-      <div className="space-y-6 p-1">
+      <div className="w-full space-y-6 p-1">
+        {header}
+        {filtersBar}
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
           {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-28" />)}
         </div>
@@ -108,24 +218,39 @@ export default function ReportsPage() {
 
   if (!data) {
     return (
-      <EmptyState
-        icon={BarChart3}
-        title="Sem dados para relatórios"
-        description="Crie cards no board para visualizar as métricas."
-      />
+      <div className="w-full space-y-6 p-1">
+        {header}
+        {filtersBar}
+        <EmptyState
+          icon={BarChart3}
+          title="Sem dados para relatórios"
+          description="Crie cards no board para visualizar as métricas."
+        />
+      </div>
     )
   }
 
   const sla = data.sla
+  const isEmpty = data.total_active === 0 && data.total_completed === 0
+
+  if (isEmpty) {
+    return (
+      <div className="w-full space-y-6 p-1">
+        {header}
+        {filtersBar}
+        <EmptyState
+          icon={BarChart3}
+          title={hasFilters ? "Nenhum card para os filtros selecionados" : "Sem dados para relatórios"}
+          description={hasFilters ? "Ajuste ou limpe os filtros para ver as métricas." : "Crie cards no board para visualizar as métricas."}
+        />
+      </div>
+    )
+  }
 
   return (
-    <div className="w-full space-y-6 p-1">
-      <div>
-        <h2 className="text-lg font-bold">Relatórios</h2>
-        <p className="text-sm text-muted-foreground">
-          Visão consolidada do board: distribuição por etapa, carga do time, tipos, SLA e throughput.
-        </p>
-      </div>
+    <div className="w-full space-y-6 p-1" style={{ opacity: refreshing ? 0.6 : 1, transition: "opacity .15s" }}>
+      {header}
+      {filtersBar}
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
         <KpiCard label="Cards ativos" value={data.total_active} icon={Layers} />
