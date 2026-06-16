@@ -59,7 +59,7 @@ function colorForUser(id: string | null | undefined): string {
 
 // Filtros do board persistidos entre navegações (limpos só pelo botão "Limpar").
 const FILTERS_KEY = "projetos.board.filters"
-type BoardFilters = { q?: string; assignees?: string[]; types?: string[]; slas?: string[]; showItems?: boolean }
+type BoardFilters = { q?: string; assignees?: string[] }
 function loadFilters(): BoardFilters {
   try {
     return JSON.parse(localStorage.getItem(FILTERS_KEY) || "{}") as BoardFilters
@@ -68,18 +68,15 @@ function loadFilters(): BoardFilters {
   }
 }
 
-type BoardFilterState = { q: string; assignees: string[]; types: string[]; slas: string[]; showItems: boolean; groupedChildIds: Set<string> }
+type BoardFilterState = { q: string; assignees: string[]; groupedChildIds: Set<string> }
 
 // Filtro compartilhado pelas visões (board, lista, calendário).
 function taskMatches(t: ProjectTask, f: BoardFilterState): boolean {
   const q = f.q.trim().toLowerCase()
   if (q && !t.title.toLowerCase().includes(q)) return false
   if (f.assignees.length && !f.assignees.includes(t.assigned_to ?? "__none__")) return false
-  if (f.types.length && !(t.demand_type_id ? f.types.includes(t.demand_type_id) : false)) return false
-  if (f.slas.length && !f.slas.includes(t.sla_state)) return false
-  // Esconde itens-filhos APENAS enquanto agrupados sob o pai no MESMO kanban (ex.: itens de um
-  // Programa no planejamento). Ao ir para o desenvolvimento (outro funil), o item reaparece.
-  if (!f.showItems && f.groupedChildIds.has(t.id)) return false
+  // Esconde itens-filhos agrupados sob o pai no mesmo kanban (ex.: itens de programa).
+  if (f.groupedChildIds.has(t.id)) return false
   return true
 }
 
@@ -544,9 +541,6 @@ export default function ProjectBoardPage() {
   const [pendingCreateStatusId, setPendingCreateStatusId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState<string>(() => loadFilters().q ?? "")
   const [assignees, setAssignees] = useState<string[]>(() => loadFilters().assignees ?? [])
-  const [types, setTypes] = useState<string[]>(() => loadFilters().types ?? [])
-  const [slas, setSlas] = useState<string[]>(() => loadFilters().slas ?? [])
-  const [showItems, setShowItems] = useState<boolean>(() => loadFilters().showItems ?? false)
   const [view, setView] = useState<BoardView>(() => resolveViewFromPath(location.pathname))
   const [openMenu, setOpenMenu] = useState<string | null>(null)
 
@@ -557,16 +551,13 @@ export default function ProjectBoardPage() {
   // Persiste os filtros (continuam ao trocar de página; só o botão "Limpar" zera).
   useEffect(() => {
     try {
-      localStorage.setItem(FILTERS_KEY, JSON.stringify({ q: searchQuery, assignees, types, slas, showItems }))
+      localStorage.setItem(FILTERS_KEY, JSON.stringify({ q: searchQuery, assignees }))
     } catch { /* ignore */ }
-  }, [searchQuery, assignees, types, slas, showItems])
+  }, [searchQuery, assignees])
 
   function clearFilters() {
     setSearchQuery("")
     setAssignees([])
-    setTypes([])
-    setSlas([])
-    setShowItems(false)
   }
   const [createSectionLinks, setCreateSectionLinks] = useState<ProjectStatusSectionLink[]>([])
   const [createFieldErrors, setCreateFieldErrors] = useState<Record<string, string>>({})
@@ -1100,9 +1091,9 @@ export default function ProjectBoardPage() {
   const selectedFunnel = funnels.find((f) => f.id === selectedFunnelId) ?? null
   // Nível de acesso da função do usuário a ESTE kanban. "view"/"none" → board read-only.
   const canManageFunnel = funnelAccessLevel(selectedFunnel?.access_control, user) === "manage"
-  const filterState: BoardFilterState = { q: searchQuery, assignees, types, slas, showItems, groupedChildIds }
+  const filterState: BoardFilterState = { q: searchQuery, assignees, groupedChildIds }
   const funnelTasks = tasks.filter((t) => taskMatches(t, filterState))
-  const hasFilters = !!(searchQuery.trim() || assignees.length || types.length || slas.length || showItems)
+  const hasFilters = !!(searchQuery.trim() || assignees.length)
 
   return (
     <div className="afx flex h-full min-h-0 w-full min-w-0 flex-col gap-4 overflow-hidden">
@@ -1147,40 +1138,6 @@ export default function ProjectBoardPage() {
               </div>
             )
           })}
-        </FilterDropdown>
-
-        <FilterDropdown label="Tipo" open={openMenu === "type"} onToggle={() => setOpenMenu(openMenu === "type" ? null : "type")} selectedCount={types.length}>
-          <div className="dd-head">Tipo de demanda</div>
-          {demandTypes.map((t) => {
-            const checked = types.includes(t.id)
-            return (
-              <div key={t.id} className="dd-item" onClick={() => toggleMulti(setTypes, types, t.id)}>
-                <span className={`check ${checked ? "checked" : ""}`}>{checked && <Check size={11} />}</span>
-                <span>{t.name}</span>
-              </div>
-            )
-          })}
-        </FilterDropdown>
-
-        <FilterDropdown label="SLA" open={openMenu === "sla"} onToggle={() => setOpenMenu(openMenu === "sla" ? null : "sla")} selectedCount={slas.length}>
-          <div className="dd-head">SLA</div>
-          {[{ id: "ok", label: "No prazo" }, { id: "warning", label: "Em alerta" }, { id: "breached", label: "Atrasado" }, { id: "none", label: "Sem SLA" }].map((o) => {
-            const checked = slas.includes(o.id)
-            return (
-              <div key={o.id} className="dd-item" onClick={() => toggleMulti(setSlas, slas, o.id)}>
-                <span className={`check ${checked ? "checked" : ""}`}>{checked && <Check size={11} />}</span>
-                <span>{o.label}</span>
-              </div>
-            )
-          })}
-        </FilterDropdown>
-
-        <FilterDropdown label="Hierarquia" open={openMenu === "hier"} onToggle={() => setOpenMenu(openMenu === "hier" ? null : "hier")} selectedCount={showItems ? 1 : 0}>
-          <div className="dd-head">Itens de programa / subtarefas</div>
-          <div className="dd-item" onClick={() => setShowItems((v) => !v)}>
-            <span className={`check ${showItems ? "checked" : ""}`}>{showItems && <Check size={11} />}</span>
-            <span>Mostrar itens no quadro</span>
-          </div>
         </FilterDropdown>
 
         {hasFilters && (<button className="btn ghost" onClick={clearFilters}><X size={14} /> Limpar</button>)}
