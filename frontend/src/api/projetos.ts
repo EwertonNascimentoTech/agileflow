@@ -116,6 +116,22 @@ export interface ProjectTaskWithContext extends ProjectTask {
   demand_type: ProjectDemandTypeMini | null
 }
 
+export interface ProjectMyRequest extends ProjectTaskWithContext {
+  children: ProjectTaskWithContext[]
+  stages: ProjectMyRequestStage[]
+  origin_request_id: string | null
+}
+
+export interface ProjectMyRequestStage {
+  label: string
+  funnel_id: string
+  funnel_order: number
+  task: ProjectTaskWithContext | null
+  is_complete: boolean
+  is_current: boolean
+  is_pending: boolean
+}
+
 export interface ProjectTaskComment {
   id: string
   task_id: string
@@ -779,7 +795,7 @@ export const projetosApi = {
     api.delete<void>(`/projetos/config/demand-types/${demandTypeId}/sections/${sectionId}/fields/${fieldId}`).then((r) => r.data),
 
   listMyRequests: () =>
-    api.get<ProjectTaskWithContext[]>(`/projetos/me/requests`).then((r) => r.data),
+    api.get<ProjectMyRequest[]>(`/projetos/me/requests`).then((r) => r.data),
   listAllTasks: (projectId?: string) =>
     api.get<ProjectTaskWithContext[]>(`/projetos/tasks`, { params: projectId ? { project_id: projectId } : undefined }).then((r) => r.data),
 

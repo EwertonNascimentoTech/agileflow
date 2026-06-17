@@ -1,15 +1,25 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Loader2 } from "lucide-react"
 
-import { projetosApi, type ProjectDemandFormField, type ProjectDemandFormSection, type ProjectDemandType, type ProjectStatus, type ProjectStatusSectionLink, type ProjectTask } from "@/api/projetos"
+import {
+  projetosApi,
+  type ProjectDemandFormField,
+  type ProjectDemandFormSection,
+  type ProjectDemandType,
+  type ProjectStatus,
+  type ProjectStatusDefaultFormLink,
+  type ProjectStatusSectionLink,
+  type ProjectTask,
+} from "@/api/projetos"
 import type { User } from "@/types"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 import { applyAutoFillCurrentFields } from "@/modules/projetos/FormFieldRenderer"
 import { DemandFormSectionsPanel } from "@/modules/projetos/DemandFormSectionsPanel"
+import { DefaultFormOrderedFields } from "@/modules/projetos/DefaultFormOrderedFields"
+import { isDefaultFieldShown } from "@/modules/projetos/defaultFormVisibility"
+import { type DefaultFormValues, validateDefaultFormValues } from "@/modules/projetos/defaultFormUtils"
+import { useDefaultFormConfig } from "@/modules/projetos/useDefaultFormConfig"
 import { formatMissingFieldsMessage, resolveFieldMode, resolveSectionMode, validateRequiredFields } from "@/modules/projetos/validation"
 import { toast } from "@/lib/toast"
 
@@ -18,6 +28,19 @@ function getApiError(err: unknown): string {
   const d = e.response?.data?.detail
   if (typeof d === "string") return d
   return "Não foi possível criar a solicitação."
+}
+
+function emptyDefaultValues(): DefaultFormValues {
+  return {
+    title: "",
+    description: "",
+    assigned_to: null,
+    diretoria: null,
+    area: null,
+    start_date: "",
+    due_date: "",
+    anexos: null,
+  }
 }
 
 export function CreateDemandDialog({
@@ -37,8 +60,10 @@ export function CreateDemandDialog({
   users: User[]
   onCreated: (task: ProjectTask) => void
 }) {
-  const [title, setTitle] = useState("")
-  const [description, setDescription] = useState("")
+  const { fields: defaultFormFields } = useDefaultFormConfig()
+  const [defaultValues, setDefaultValues] = useState<DefaultFormValues>(emptyDefaultValues())
+  const [defaultFormLinks, setDefaultFormLinks] = useState<ProjectStatusDefaultFormLink[]>([])
+  const [defaultFieldErrors, setDefaultFieldErrors] = useState<Partial<Record<keyof DefaultFormValues, string>>>({})
   const [formSections, setFormSections] = useState<ProjectDemandFormSection[]>([])
   const [fieldsBySection, setFieldsBySection] = useState<Record<string, ProjectDemandFormField[]>>({})
   const [statuses, setStatuses] = useState<ProjectStatus[]>([])
@@ -50,12 +75,17 @@ export function CreateDemandDialog({
   const targetStatusId =
     targetStatusIdProp ?? (statuses.find((s) => s.is_initial) ?? statuses[0])?.id ?? null
 
+  const visibleDefaultFields = useMemo(
+    () => defaultFormFields.filter((f) => isDefaultFieldShown(f, defaultFormLinks)),
+    [defaultFormFields, defaultFormLinks],
+  )
+
   useEffect(() => {
     if (!open) return
-    setTitle("")
-    setDescription("")
+    setDefaultValues(emptyDefaultValues())
     setFormValues({})
     setFieldErrors({})
+    setDefaultFieldErrors({})
   }, [open, demandType.id])
 
   useEffect(() => {
@@ -102,8 +132,24 @@ export function CreateDemandDialog({
       .catch(() => setSectionLinks([]))
   }, [open, projectId, targetStatusId])
 
+  useEffect(() => {
+    if (!open || !targetStatusId) {
+      setDefaultFormLinks([])
+      return
+    }
+    projetosApi.listStatusDefaultFormLinks(projectId, targetStatusId)
+      .then(setDefaultFormLinks)
+      .catch(() => setDefaultFormLinks([]))
+  }, [open, projectId, targetStatusId])
+
   async function handleSubmit() {
-    if (!title.trim() || !targetStatusId) return
+    if (!targetStatusId) return
+
+    const { errors: defErrors, missingLabels: defMissing } = validateDefaultFormValues(
+      defaultFormFields,
+      defaultValues,
+      defaultFormLinks,
+    )
     const { errors, missingLabels } = validateRequiredFields({
       statusId: targetStatusId,
       formSections,
@@ -111,21 +157,35 @@ export function CreateDemandDialog({
       sectionLinks,
       formValues,
     })
-    if (missingLabels.length > 0) {
+    const allMissing = [...defMissing, ...missingLabels]
+    if (allMissing.length > 0) {
+      setDefaultFieldErrors(defErrors)
       setFieldErrors(errors)
-      toast.error(formatMissingFieldsMessage(missingLabels))
+      toast.error(formatMissingFieldsMessage(allMissing))
       return
     }
+
+    const title = defaultValues.title.trim()
+    if (title.length < 2) {
+      toast.error("Informe um título com ao menos 2 caracteres.")
+      return
+    }
+
+    setDefaultFieldErrors({})
     setFieldErrors({})
     setSaving(true)
     try {
       const created = await projetosApi.createTask(projectId, {
         demand_type_id: demandType.id,
-        title: title.trim().slice(0, 200),
-        description: description.trim() || null,
+        title: title.slice(0, 200),
+        description: defaultValues.description.trim() || null,
         status_id: targetStatusId,
-        assigned_to: null,
-        due_date: null,
+        assigned_to: defaultValues.assigned_to || null,
+        diretoria: defaultValues.diretoria || null,
+        area: defaultValues.area || null,
+        start_date: defaultValues.start_date || null,
+        due_date: defaultValues.due_date || null,
+        anexos: defaultValues.anexos ?? null,
         form_values: formValues,
       })
       onCreated(created)
@@ -137,6 +197,8 @@ export function CreateDemandDialog({
     }
   }
 
+  const canSubmit = defaultValues.title.trim().length >= 2 && !!targetStatusId
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-6xl max-h-[90vh] overflow-y-auto">
@@ -144,24 +206,16 @@ export function CreateDemandDialog({
           <DialogTitle>Nova Solicitação — {demandType.name}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label>Título</Label>
-            <Input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Ex: Ajustar fluxo de aprovação"
-              autoFocus
+          {visibleDefaultFields.length > 0 && (
+            <DefaultFormOrderedFields
+              fields={defaultFormFields}
+              values={defaultValues}
+              onChange={(patch) => setDefaultValues((prev) => ({ ...prev, ...patch }))}
+              users={users}
+              errors={defaultFieldErrors}
+              defaultFormLinks={defaultFormLinks}
             />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Descrição</Label>
-            <Textarea
-              rows={3}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Detalhes adicionais (opcional)"
-            />
-          </div>
+          )}
 
           {formSections.length > 0 && targetStatusId && (
             <DemandFormSectionsPanel
@@ -187,7 +241,7 @@ export function CreateDemandDialog({
         </div>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button type="button" onClick={() => void handleSubmit()} disabled={saving || !title.trim() || !targetStatusId}>
+          <Button type="button" onClick={() => void handleSubmit()} disabled={saving || !canSubmit}>
             {saving && <Loader2 size={13} className="animate-spin mr-1.5" />}
             Criar Solicitação
           </Button>

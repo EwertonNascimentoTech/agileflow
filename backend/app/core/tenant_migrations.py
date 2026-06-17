@@ -2701,6 +2701,16 @@ async def _step_064_projetos_task_anexos(conn: AsyncConnection, schema: str) -> 
         await conn.execute(text(f"ALTER TABLE {schema}.project_tasks ADD COLUMN anexos JSONB"))
 
 
+async def _step_065_projetos_move_out_permissions(conn: AsyncConnection, schema: str) -> None:
+    """Permissão de saída por função: move_out_role_ids em project_status_configs."""
+    if not await _table_exists(conn, schema, "project_status_configs"):
+        return
+    if not await _column_exists(conn, schema, "project_status_configs", "move_out_role_ids"):
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.project_status_configs ADD COLUMN move_out_role_ids JSONB"
+        ))
+
+
 # Lista ordenada de steps. Adicionar novos no final.
 STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("001_funnels", _step_001_funnels),
@@ -2767,6 +2777,7 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("062_projetos_priority_history", _step_062_projetos_priority_history),
     ("063_projetos_status_reports", _step_063_projetos_status_reports),
     ("064_projetos_task_anexos", _step_064_projetos_task_anexos),
+    ("065_projetos_move_out_permissions", _step_065_projetos_move_out_permissions),
 ]
 
 

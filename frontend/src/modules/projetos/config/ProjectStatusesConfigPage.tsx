@@ -81,6 +81,25 @@ export default function ProjectStatusesConfigPage() {
     [funnels, selectedFunnelId]
   )
 
+  /** Tipos de destino da conversão: vinculados a outros kanbans (não ao funil atual). */
+  const conversionTargetTypes = useMemo(() => {
+    const fromOtherFunnels = demandTypes.filter(
+      (dt) => dt.is_active && dt.funnel_id && dt.funnel_id !== selectedFunnelId,
+    )
+    const selectedIds = new Set(
+      statuses.map((s) => s.creates_demand_type_id).filter((id): id is string => !!id),
+    )
+    const extras = demandTypes.filter(
+      (dt) => dt.is_active && selectedIds.has(dt.id) && !fromOtherFunnels.some((t) => t.id === dt.id),
+    )
+    return [...fromOtherFunnels, ...extras]
+  }, [demandTypes, selectedFunnelId, statuses])
+
+  const stagesWithConversion = useMemo(
+    () => statuses.filter((s) => s.creates_demand_type_id),
+    [statuses],
+  )
+
   function toggleCollapsed(statusId: string) {
     setCollapsedStatusIds((prev) => {
       const next = new Set(prev)
@@ -344,6 +363,12 @@ export default function ProjectStatusesConfigPage() {
       creates_demand_type_id: demandTypeId,
     })
     setStatuses((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+  }
+
+  async function handleCopyConversionFrom(status: ProjectStatus, sourceStatusId: string) {
+    const source = statuses.find((s) => s.id === sourceStatusId)
+    if (!source?.creates_demand_type_id) return
+    await handleSetCreatesType(status, source.creates_demand_type_id)
   }
 
   async function handleSetMovesToFunnel(status: ProjectStatus, funnelId: string | null) {
@@ -706,26 +731,58 @@ export default function ProjectStatusesConfigPage() {
                 </div>
                 {!isCollapsed && (
                 <>
-                <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-2">
-                  <Label className="text-xs whitespace-nowrap text-muted-foreground">
-                    Ao entrar nesta etapa, gerar card do tipo
-                  </Label>
-                  <Select
-                    value={status.creates_demand_type_id ?? "__none__"}
-                    onValueChange={(v) => void handleSetCreatesType(status, v === "__none__" ? null : v)}
-                  >
-                    <SelectTrigger className="h-8 text-xs max-w-xs">
-                      <SelectValue placeholder="Não converte" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">Não converte</SelectItem>
-                      {demandTypes.map((dt) => (
-                        <SelectItem key={dt.id} value={dt.id}>{dt.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {status.creates_demand_type_id && (
-                    <Badge variant="info" className="text-[10px]">conversão automática</Badge>
+                <div className="mt-2 space-y-2 rounded-md border bg-muted/30 p-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Label className="text-xs whitespace-nowrap text-muted-foreground">
+                      Ao entrar nesta etapa, gerar card do tipo
+                    </Label>
+                    <Select
+                      value={status.creates_demand_type_id ?? "__none__"}
+                      onValueChange={(v) => void handleSetCreatesType(status, v === "__none__" ? null : v)}
+                    >
+                      <SelectTrigger className="h-8 text-xs max-w-xs">
+                        <SelectValue placeholder="Não converte" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">Não converte</SelectItem>
+                        {conversionTargetTypes.map((dt) => (
+                          <SelectItem key={dt.id} value={dt.id}>
+                            {dt.name}
+                            {dt.funnel?.name ? ` (${dt.funnel.name})` : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {status.creates_demand_type_id && (
+                      <Badge variant="info" className="text-[10px]">conversão automática</Badge>
+                    )}
+                    {stagesWithConversion.filter((s) => s.id !== status.id).length > 0 && (
+                      <>
+                        <Label className="text-xs whitespace-nowrap text-muted-foreground">Replicar de</Label>
+                        <Select onValueChange={(v) => void handleCopyConversionFrom(status, v)}>
+                          <SelectTrigger className="h-8 text-xs max-w-[11rem]">
+                            <SelectValue placeholder="Outra etapa…" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {stagesWithConversion
+                              .filter((s) => s.id !== status.id)
+                              .map((s) => {
+                                const typeName = demandTypes.find((dt) => dt.id === s.creates_demand_type_id)?.name ?? "?"
+                                return (
+                                  <SelectItem key={s.id} value={s.id}>
+                                    {s.name} → {typeName}
+                                  </SelectItem>
+                                )
+                              })}
+                          </SelectContent>
+                        </Select>
+                      </>
+                    )}
+                  </div>
+                  {status.is_final && (
+                    <p className="text-[11px] text-muted-foreground">
+                      Etapas finais também podem disparar a criação de Projeto/Programa ao mover o card para esta raia.
+                    </p>
                   )}
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-2">

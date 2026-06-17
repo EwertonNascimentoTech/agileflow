@@ -73,6 +73,7 @@ from app.modules.projetos.schemas import (
     ProjectTaskUpdate,
     ProjectTaskReorder,
     ProjectTaskWithContextResponse,
+    ProjectMyRequestResponse,
     ProjectUpdate,
     ProjectUploadResponse,
     ProjectUploadUrlResponse,
@@ -576,10 +577,10 @@ async def delete_funnel(
     await ProjectFunnelService.delete(ctx.db, project_id, funnel_id)
 
 
-@router.get("/me/requests", response_model=list[ProjectTaskWithContextResponse])
+@router.get("/me/requests", response_model=list[ProjectMyRequestResponse])
 async def list_my_requests(ctx: ModuleContext = Depends(_ctx)):
     basic = await _is_basic_user(ctx)
-    return await ProjectTaskService.list_for_user(
+    return await ProjectTaskService.list_my_requests(
         ctx.db, _ensure_uuid(ctx.user.id), basic_only_available=basic
     )
 

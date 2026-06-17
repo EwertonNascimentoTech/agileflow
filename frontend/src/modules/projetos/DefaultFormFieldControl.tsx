@@ -19,6 +19,7 @@ export function DefaultFormFieldControl({
   disabled = false,
   titleClassName,
   error,
+  required,
 }: {
   field: ProjectDefaultFormField
   value: string | null
@@ -27,7 +28,9 @@ export function DefaultFormFieldControl({
   disabled?: boolean
   titleClassName?: string
   error?: string
+  required?: boolean
 }) {
+  const isRequired = required ?? field.is_required
   const type = normalizeFieldType(normalizeDefaultFieldType(field.field_key, field.field_type))
   const key = field.field_key as DefaultFormFieldKey
 
@@ -145,7 +148,7 @@ export function DefaultFormFieldControl({
     <div className="space-y-1.5">
       <Label>
         {field.label}
-        {field.is_required && <span className="text-destructive ml-0.5">*</span>}
+        {isRequired && <span className="text-destructive ml-0.5">*</span>}
       </Label>
       {control}
       {error && <p className="text-[11px] text-destructive">{error}</p>}

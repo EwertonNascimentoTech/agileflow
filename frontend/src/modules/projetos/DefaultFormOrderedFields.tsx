@@ -4,7 +4,7 @@ import { DefaultFormFieldControl } from "@/modules/projetos/DefaultFormFieldCont
 import { DefaultFormAttachmentControl } from "@/modules/projetos/DefaultFormAttachmentControl"
 import { groupDefaultFormFieldsIntoRows } from "@/modules/projetos/defaultFormLayout"
 import type { DefaultFormValues } from "@/modules/projetos/defaultFormUtils"
-import { isDefaultFieldReadOnly } from "@/modules/projetos/defaultFormVisibility"
+import { isDefaultFieldReadOnly, isDefaultFieldRequired } from "@/modules/projetos/defaultFormVisibility"
 
 export function DefaultFormOrderedFields({
   fields,
@@ -65,6 +65,7 @@ export function DefaultFormOrderedFields({
         disabled={(cfg.field_key === "assigned_to" && disableAssignee) || isDefaultFieldReadOnly(cfg, defaultFormLinks)}
         titleClassName={cfg.field_key === "title" ? titleClassName : undefined}
         error={errors[cfg.field_key]}
+        required={isDefaultFieldRequired(cfg, defaultFormLinks)}
       />
     )
   }

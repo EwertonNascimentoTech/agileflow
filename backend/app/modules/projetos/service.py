@@ -72,6 +72,7 @@ from app.modules.projetos.schemas import (
     ProjectTaskCommentCreate,
     ProjectTaskCreate,
     ProjectTaskUpdate,
+    ProjectTaskWithContextResponse,
     ProjectUpdate,
 )
 from sqlalchemy import text as _sa_text
@@ -548,6 +549,62 @@ class ProjectDefaultFormService:
                 detail=f"Campos obrigatórios não preenchidos: {', '.join(missing)}",
             )
 
+    @staticmethod
+    async def validate_task_data_for_status(
+        db: AsyncSession,
+        status_id: uuid.UUID,
+        *,
+        title: Optional[str] = None,
+        description: Optional[str] = None,
+        assigned_to: Optional[uuid.UUID] = None,
+        diretoria: Optional[str] = None,
+        area: Optional[str] = None,
+        start_date=None,
+        due_date=None,
+        anexos=None,
+        existing: Optional[ProjectTask] = None,
+    ) -> None:
+        """Valida campos padrão obrigatórios conforme vínculos da etapa (status)."""
+        fields = await ProjectDefaultFormService.list(db)
+        links_result = await db.execute(
+            select(ProjectStatusDefaultFormLink).where(
+                ProjectStatusDefaultFormLink.status_id == status_id,
+            )
+        )
+        links = {link.field_key: link.mode for link in links_result.scalars().all()}
+        merged = {
+            "title": title if title is not None else (existing.title if existing else None),
+            "description": description if description is not None else (existing.description if existing else None),
+            "assigned_to": assigned_to if assigned_to is not None else (existing.assigned_to if existing else None),
+            "diretoria": diretoria if diretoria is not None else (existing.diretoria if existing else None),
+            "area": area if area is not None else (existing.area if existing else None),
+            "start_date": start_date if start_date is not None else (existing.start_date if existing else None),
+            "due_date": due_date if due_date is not None else (existing.due_date if existing else None),
+            "anexos": anexos if anexos is not None else (existing.anexos if existing else None),
+        }
+        missing: list[str] = []
+        for cfg in fields:
+            mode = links.get(cfg.field_key)
+            if mode == "hidden":
+                continue
+            if mode is None:
+                if not cfg.is_visible:
+                    continue
+                is_required = cfg.is_required
+            elif mode == "visible":
+                continue
+            elif mode == "required":
+                is_required = True
+            else:
+                is_required = cfg.is_required
+            if is_required and ProjectDefaultFormService._value_empty(cfg.field_key, merged.get(cfg.field_key)):
+                missing.append(cfg.label)
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Campos obrigatórios não preenchidos: {', '.join(missing)}",
+            )
+
 
 class ProjectDemandFormSectionService:
     @staticmethod
@@ -781,6 +838,8 @@ class ProjectStatusService:
         payload = data.model_dump()
         if "move_in_role_ids" in payload:
             payload["move_in_role_ids"] = ProjectStatusService._normalize_role_ids(payload["move_in_role_ids"])
+        if "move_out_role_ids" in payload:
+            payload["move_out_role_ids"] = ProjectStatusService._normalize_role_ids(payload["move_out_role_ids"])
         item = ProjectStatusConfig(project_id=project_id, **payload)
         db.add(item)
         try:
@@ -815,6 +874,8 @@ class ProjectStatusService:
         payload = data.model_dump(exclude_unset=True)
         if "move_in_role_ids" in payload:
             payload["move_in_role_ids"] = ProjectStatusService._normalize_role_ids(payload["move_in_role_ids"])
+        if "move_out_role_ids" in payload:
+            payload["move_out_role_ids"] = ProjectStatusService._normalize_role_ids(payload["move_out_role_ids"])
         if "updates_origin_status_id" in payload and payload["updates_origin_status_id"]:
             origin_status_res = await db.execute(
                 select(ProjectStatusConfig).where(
@@ -1286,6 +1347,27 @@ class ProjectDemandFormSubmissionService:
 
 class ProjectTaskService:
     @staticmethod
+    async def _is_forward_status_move(
+        db: AsyncSession,
+        from_status_id: uuid.UUID,
+        to_status_id: uuid.UUID,
+    ) -> bool:
+        """True quando o card avança no fluxo (mesmo kanban: order maior; entre kanbans: order do funil)."""
+        if from_status_id == to_status_id:
+            return False
+        from_st = await db.get(ProjectStatusConfig, from_status_id)
+        to_st = await db.get(ProjectStatusConfig, to_status_id)
+        if not from_st or not to_st:
+            return True
+        if from_st.funnel_id == to_st.funnel_id:
+            return to_st.order > from_st.order
+        from_f = await db.get(ProjectFunnel, from_st.funnel_id)
+        to_f = await db.get(ProjectFunnel, to_st.funnel_id)
+        if from_f and to_f:
+            return to_f.order > from_f.order
+        return True
+
+    @staticmethod
     async def _validate_form_values_for_status(
         db: AsyncSession,
         demand_type_id: Optional[uuid.UUID],
@@ -1531,22 +1613,48 @@ class ProjectTaskService:
         return "none"
 
     @staticmethod
+    def _role_allowed_for_move_list(
+        current_user: Optional[User],
+        role_ids: list,
+    ) -> bool:
+        if current_user is None:
+            return True
+        if current_user.role in (UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN):
+            return True
+        if not role_ids:
+            return True
+        if not current_user.role_id:
+            return True
+        return str(current_user.role_id) in {str(x) for x in role_ids}
+
+    @staticmethod
     def _check_move_permission(status_obj: Optional[ProjectStatusConfig], current_user: Optional[User]) -> None:
-        """Bloqueia a movimentação do card para a etapa se a função do usuário não for permitida.
-        Sem current_user (ações internas) ou sem restrição na etapa = liberado.
-        super_admin e company_admin sempre podem."""
+        """Bloqueia se a função do usuário não pode mover o card PARA esta etapa (destino)."""
         if status_obj is None or current_user is None:
             return
         allowed = status_obj.move_in_role_ids or []
         if not allowed:
             return
-        if current_user.role in (UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN):
-            return
-        if current_user.role_id and str(current_user.role_id) in {str(x) for x in allowed}:
+        if ProjectTaskService._role_allowed_for_move_list(current_user, allowed):
             return
         raise HTTPException(
             status_code=403,
             detail="Sua função não tem permissão para mover o card para esta etapa.",
+        )
+
+    @staticmethod
+    def _check_move_out_permission(status_obj: Optional[ProjectStatusConfig], current_user: Optional[User]) -> None:
+        """Bloqueia se a função do usuário não pode mover cards que ESTÃO nesta etapa (origem)."""
+        if status_obj is None or current_user is None:
+            return
+        allowed = status_obj.move_out_role_ids or []
+        if not allowed:
+            return
+        if ProjectTaskService._role_allowed_for_move_list(current_user, allowed):
+            return
+        raise HTTPException(
+            status_code=403,
+            detail="Sua função não tem permissão para mover cards desta etapa.",
         )
 
     @staticmethod
@@ -1567,17 +1675,45 @@ class ProjectTaskService:
         return ProjectFunnelService.access_level(row.scalar_one_or_none(), current_user.role_id)
 
     @staticmethod
+    async def _person_id_for_user(db: AsyncSession, user_id: uuid.UUID) -> Optional[uuid.UUID]:
+        from app.modules.teamops.models import Person
+        res = await db.execute(select(Person.id).where(Person.user_id == user_id))
+        return res.scalar_one_or_none()
+
+    @staticmethod
+    async def _is_task_assignee(
+        db: AsyncSession,
+        current_user: Optional[User],
+        task: Optional[ProjectTask],
+    ) -> bool:
+        if not current_user or not task or not task.assigned_to:
+            return False
+        person_id = await ProjectTaskService._person_id_for_user(db, current_user.id)
+        return person_id is not None and task.assigned_to == person_id
+
+    @staticmethod
     async def _check_funnel_writable(
-        db: AsyncSession, funnel_id: Optional[uuid.UUID], current_user: Optional[User]
+        db: AsyncSession,
+        funnel_id: Optional[uuid.UUID],
+        current_user: Optional[User],
+        *,
+        task: Optional[ProjectTask] = None,
     ) -> None:
-        """Bloqueia escrita (criar/mover/editar/excluir cards) num kanban onde a função
-        do usuário é "view" (somente visualizar) ou "none" (sem acesso)."""
+        """Bloqueia escrita num kanban view/none — exceto o responsável (assignee) do card."""
         level = await ProjectTaskService._funnel_access(db, funnel_id, current_user)
-        if level != "manage":
+        if level == "manage":
+            return
+        if level == "none":
             raise HTTPException(
                 status_code=403,
-                detail="Você só pode visualizar este kanban — sem permissão para gerenciar os cards.",
+                detail="Você não tem acesso a este kanban.",
             )
+        if task and await ProjectTaskService._is_task_assignee(db, current_user, task):
+            return
+        raise HTTPException(
+            status_code=403,
+            detail="Você só pode visualizar este kanban — sem permissão para gerenciar os cards.",
+        )
 
     @staticmethod
     async def _funnel_id_of_status(db: AsyncSession, status_id: Optional[uuid.UUID]) -> Optional[uuid.UUID]:
@@ -1867,6 +2003,282 @@ class ProjectTaskService:
         return list(result.scalars().all())
 
     @staticmethod
+    async def _load_project_funnels(db: AsyncSession, project_id: uuid.UUID) -> list[ProjectFunnel]:
+        res = await db.execute(
+            select(ProjectFunnel)
+            .where(
+                ProjectFunnel.project_id == project_id,
+                ProjectFunnel.is_active == True,  # noqa: E712
+            )
+            .order_by(ProjectFunnel.order.asc(), ProjectFunnel.name.asc())
+        )
+        return list(res.scalars().all())
+
+    @staticmethod
+    async def _collect_request_chain_roots(
+        db: AsyncSession,
+        origin: ProjectTask,
+        extra: Optional[list[ProjectTask]] = None,
+    ) -> list[ProjectTask]:
+        """Solicitação + cards raiz convertidos (origin_task_id) em cadeia."""
+        task_opts = (
+            selectinload(ProjectTask.project),
+            selectinload(ProjectTask.status).selectinload(ProjectStatusConfig.funnel),
+            selectinload(ProjectTask.demand_type),
+        )
+        chain: list[ProjectTask] = [origin]
+        seen = {origin.id}
+        frontier = [origin.id]
+        if extra:
+            for t in extra:
+                if t.id not in seen:
+                    seen.add(t.id)
+                    chain.append(t)
+                    frontier.append(t.id)
+        while frontier:
+            rows = list(
+                (
+                    await db.execute(
+                        select(ProjectTask)
+                        .where(
+                            ProjectTask.origin_task_id.in_(frontier),
+                            ProjectTask.parent_task_id.is_(None),
+                        )
+                        .options(*task_opts)
+                    )
+                ).scalars().all()
+            )
+            next_frontier: list[uuid.UUID] = []
+            for task in rows:
+                if task.id not in seen:
+                    seen.add(task.id)
+                    chain.append(task)
+                    next_frontier.append(task.id)
+            frontier = next_frontier
+        return chain
+
+    @staticmethod
+    def _map_tasks_to_funnels(tasks: list[ProjectTask]) -> dict[uuid.UUID, ProjectTask]:
+        by_funnel: dict[uuid.UUID, ProjectTask] = {}
+        for task in sorted(tasks, key=lambda row: row.updated_at):
+            if task.status and task.status.funnel_id:
+                by_funnel[task.status.funnel_id] = task
+        return by_funnel
+
+    @staticmethod
+    def _build_funnel_stages(
+        funnels: list[ProjectFunnel],
+        chain_tasks: list[ProjectTask],
+        primary: ProjectTask,
+        origin: ProjectTask,
+        has_conversion: bool,
+    ) -> list[dict]:
+        funnel_tasks = ProjectTaskService._map_tasks_to_funnels(chain_tasks)
+        primary_funnel_id = primary.status.funnel_id if primary.status else None
+        primary_order = next((f.order for f in funnels if f.id == primary_funnel_id), 0)
+
+        stages: list[dict] = []
+        for funnel in funnels:
+            task = funnel_tasks.get(funnel.id)
+            superseded = bool(task and task.id == origin.id and has_conversion)
+            is_current = funnel.id == primary_funnel_id
+            if task:
+                task_complete = ProjectTaskService._stage_is_complete(task, superseded=superseded)
+            else:
+                task_complete = False
+            is_complete = funnel.order < primary_order or task_complete
+            is_pending = not task and funnel.order > primary_order
+
+            stage_task = None
+            if task:
+                stage_task = ProjectTaskWithContextResponse.model_validate(task).model_dump()
+
+            stages.append({
+                "label": funnel.name,
+                "funnel_id": funnel.id,
+                "funnel_order": funnel.order,
+                "task": stage_task,
+                "is_complete": is_complete,
+                "is_current": is_current,
+                "is_pending": is_pending,
+            })
+
+        if not any(s["is_current"] for s in stages) and stages:
+            for stage in stages:
+                if stage["task"] and not stage["is_complete"]:
+                    stage["is_current"] = True
+                    break
+            else:
+                stages[-1]["is_current"] = True
+
+        return stages
+
+    @staticmethod
+    def _my_request_stage_label(task: ProjectTask) -> str:
+        if task.planning_kind == "programa":
+            return "Programa"
+        if task.planning_kind == "projeto":
+            return "Projeto"
+        if task.demand_type:
+            name = task.demand_type.name.lower()
+            if "programa" in name:
+                return "Programa"
+            if "solicit" in name or "prospect" in name:
+                return "Solicitação"
+            return task.demand_type.name
+        return "Solicitação"
+
+    @staticmethod
+    def _pick_converted_primary(converted: list[ProjectTask]) -> ProjectTask:
+        for kind in ("programa", "projeto"):
+            for task in converted:
+                if task.planning_kind == kind:
+                    return task
+        return converted[0]
+
+    @staticmethod
+    def _stage_is_complete(task: ProjectTask, *, superseded: bool = False) -> bool:
+        if superseded:
+            return True
+        if task.completed_at:
+            return True
+        status = task.status
+        if status and getattr(status, "is_final", False):
+            return True
+        return False
+
+    @staticmethod
+    async def list_my_requests(
+        db: AsyncSession,
+        user_id: uuid.UUID,
+        basic_only_available: bool = False,
+    ) -> list[dict]:
+        """Solicitações raiz criadas pelo usuário, mesclando conversões (programa/projeto)
+        e filhos vinculados para acompanhamento unificado."""
+        root_q = (
+            select(ProjectTask)
+            .where(
+                ProjectTask.created_by == user_id,
+                ProjectTask.parent_task_id.is_(None),
+            )
+            .options(
+                selectinload(ProjectTask.project),
+                selectinload(ProjectTask.status).selectinload(ProjectStatusConfig.funnel),
+                selectinload(ProjectTask.demand_type),
+            )
+        )
+        if basic_only_available:
+            root_q = root_q.outerjoin(
+                ProjectDemandType, ProjectDemandType.id == ProjectTask.demand_type_id
+            ).where(
+                or_(
+                    ProjectTask.demand_type_id.is_(None),
+                    ProjectDemandType.available_for_basic.is_(True),
+                )
+            )
+        root_q = root_q.order_by(ProjectTask.created_at.desc())
+        roots = list((await db.execute(root_q)).scalars().all())
+        if not roots:
+            return []
+
+        origin_ids = [r.id for r in roots]
+        converted_q = (
+            select(ProjectTask)
+            .where(
+                ProjectTask.origin_task_id.in_(origin_ids),
+                ProjectTask.parent_task_id.is_(None),
+            )
+            .options(
+                selectinload(ProjectTask.project),
+                selectinload(ProjectTask.status).selectinload(ProjectStatusConfig.funnel),
+                selectinload(ProjectTask.demand_type),
+            )
+            .order_by(ProjectTask.created_at.asc())
+        )
+        converted_roots = list((await db.execute(converted_q)).scalars().all())
+
+        root_by_id = {r.id: r for r in roots}
+        for conv in converted_roots:
+            root_by_id[conv.id] = conv
+
+        converted_ids: set[uuid.UUID] = set()
+        converted_by_origin: dict[uuid.UUID, list[ProjectTask]] = {}
+        for conv in converted_roots:
+            if conv.origin_task_id and conv.origin_task_id in origin_ids:
+                converted_ids.add(conv.id)
+                converted_by_origin.setdefault(conv.origin_task_id, []).append(conv)
+
+        for root in roots:
+            if root.origin_task_id and root.origin_task_id in origin_ids:
+                converted_ids.add(root.id)
+                bucket = converted_by_origin.setdefault(root.origin_task_id, [])
+                if root.id not in {t.id for t in bucket}:
+                    bucket.append(root)
+
+        visible_roots = [r for r in roots if r.id not in converted_ids]
+
+        primary_ids = [r.id for r in visible_roots]
+        for origin_id, converted in converted_by_origin.items():
+            primary_ids.append(ProjectTaskService._pick_converted_primary(converted).id)
+
+        child_q = (
+            select(ProjectTask)
+            .where(ProjectTask.parent_task_id.in_(primary_ids))
+            .options(
+                selectinload(ProjectTask.project),
+                selectinload(ProjectTask.status).selectinload(ProjectStatusConfig.funnel),
+                selectinload(ProjectTask.demand_type),
+            )
+            .order_by(ProjectTask.order.asc(), ProjectTask.created_at.asc())
+        )
+        children = list((await db.execute(child_q)).scalars().all())
+        by_parent: dict[uuid.UUID, list[ProjectTask]] = {}
+        for child in children:
+            if child.parent_task_id:
+                by_parent.setdefault(child.parent_task_id, []).append(child)
+
+        funnels_by_project: dict[uuid.UUID, list[ProjectFunnel]] = {}
+        project_ids = {r.project_id for r in visible_roots}
+        for pid in project_ids:
+            funnels_by_project[pid] = await ProjectTaskService._load_project_funnels(db, pid)
+
+        out: list[dict] = []
+        for origin in visible_roots:
+            converted = converted_by_origin.get(origin.id, [])
+            primary = (
+                ProjectTaskService._pick_converted_primary(converted)
+                if converted
+                else origin
+            )
+
+            chain_tasks = await ProjectTaskService._collect_request_chain_roots(
+                db, origin, extra=converted
+            )
+            funnels = funnels_by_project.get(origin.project_id, [])
+            stages = ProjectTaskService._build_funnel_stages(
+                funnels,
+                chain_tasks,
+                primary,
+                origin,
+                has_conversion=bool(converted),
+            )
+
+            primary_data = ProjectTaskWithContextResponse.model_validate(primary).model_dump()
+            child_rows = by_parent.get(primary.id, [])
+            out.append({
+                **primary_data,
+                "children": [
+                    ProjectTaskWithContextResponse.model_validate(c).model_dump()
+                    for c in child_rows
+                ],
+                "stages": stages,
+                "origin_request_id": origin.id if primary.id != origin.id else None,
+            })
+
+        out.sort(key=lambda row: row["created_at"], reverse=True)
+        return out
+
+    @staticmethod
     async def list_all(
         db: AsyncSession,
         project_id: Optional[uuid.UUID] = None,
@@ -1946,8 +2358,9 @@ class ProjectTaskService:
             status_id=payload.get("status_id"),
             form_values=form_values,
         )
-        await ProjectDefaultFormService.validate_task_data(
+        await ProjectDefaultFormService.validate_task_data_for_status(
             db,
+            payload["status_id"],
             title=payload.get("title"),
             description=payload.get("description"),
             assigned_to=payload.get("assigned_to"),
@@ -2042,7 +2455,9 @@ class ProjectTaskService:
         # qualquer edição de cards já existentes neste kanban.
         if current_user is not None:
             source_funnel_id = await ProjectTaskService._funnel_id_of_status(db, task.status_id)
-            await ProjectTaskService._check_funnel_writable(db, source_funnel_id, current_user)
+            await ProjectTaskService._check_funnel_writable(
+                db, source_funnel_id, current_user, task=task,
+            )
         payload = data.model_dump(exclude_unset=True)
         if "due_date" in payload:
             payload["due_date"] = _to_naive_utc(payload.get("due_date"))
@@ -2077,24 +2492,33 @@ class ProjectTaskService:
         if submission_obj:
             current_values = submission_obj.values or {}
         merged_values = current_values if form_values is None else {**current_values, **form_values}
-        await ProjectTaskService._validate_form_values_for_status(
-            db,
-            demand_type_id=target_demand_type_id,
-            status_id=target_status_id,
-            form_values=merged_values,
+        status_will_change = "status_id" in payload and payload["status_id"] != task.status_id
+        is_forward = (
+            await ProjectTaskService._is_forward_status_move(db, task.status_id, target_status_id)
+            if status_will_change
+            else False
         )
-        await ProjectDefaultFormService.validate_task_data(
-            db,
-            title=payload.get("title"),
-            description=payload.get("description"),
-            assigned_to=payload.get("assigned_to"),
-            diretoria=payload.get("diretoria"),
-            area=payload.get("area"),
-            start_date=payload.get("start_date"),
-            due_date=payload.get("due_date"),
-            anexos=payload.get("anexos"),
-            existing=task,
-        )
+        # Obrigatoriedade por etapa: só ao avançar de raia (não ao voltar nem ao salvar sem mover).
+        if status_will_change and is_forward:
+            await ProjectTaskService._validate_form_values_for_status(
+                db,
+                demand_type_id=target_demand_type_id,
+                status_id=task.status_id,
+                form_values=merged_values,
+            )
+            await ProjectDefaultFormService.validate_task_data_for_status(
+                db,
+                task.status_id,
+                title=payload.get("title"),
+                description=payload.get("description"),
+                assigned_to=payload.get("assigned_to"),
+                diretoria=payload.get("diretoria"),
+                area=payload.get("area"),
+                start_date=payload.get("start_date"),
+                due_date=payload.get("due_date"),
+                anexos=payload.get("anexos"),
+                existing=task,
+            )
         for key in ("diretoria", "area"):
             if payload.get(key) == "":
                 payload[key] = None
@@ -2111,16 +2535,25 @@ class ProjectTaskService:
                 raise HTTPException(status_code=400, detail="Coluna inválida para este projeto.")
             # Permissão de movimentação: só funções autorizadas movem o card para esta etapa.
             if payload["status_id"] != task.status_id:
+                source_status_row = await db.execute(
+                    select(ProjectStatusConfig).where(
+                        ProjectStatusConfig.id == task.status_id,
+                        ProjectStatusConfig.project_id == project_id,
+                    )
+                )
+                source_status = source_status_row.scalar_one_or_none()
+                ProjectTaskService._check_move_out_permission(source_status, current_user)
                 ProjectTaskService._check_move_permission(target_status, current_user)
                 # E o kanban de destino não pode ser "somente visualizar"/"sem acesso".
-                await ProjectTaskService._check_funnel_writable(db, target_status.funnel_id, current_user)
+                await ProjectTaskService._check_funnel_writable(
+                    db, target_status.funnel_id, current_user, task=task,
+                )
 
         # O card mudou de etapa? (calculado antes do setattr)
         status_changed = bool(payload.get("status_id")) and payload["status_id"] != task.status_id
 
-        # Cronograma: se a etapa de ORIGEM exige preenchimento, bloqueia a saída
-        # sem início+prazo.
-        if status_changed:
+        # Cronograma / priorização: gates só ao avançar de etapa.
+        if status_changed and is_forward:
             await ProjectTaskService._enforce_schedule_gate(db, task, payload)
             await ProjectTaskService._enforce_priority_gate(db, task)
 
@@ -2590,7 +3023,9 @@ class ProjectTaskService:
         task = await ProjectTaskService.get(db, project_id, task_id)
         if current_user is not None:
             funnel_id = await ProjectTaskService._funnel_id_of_status(db, task.status_id)
-            await ProjectTaskService._check_funnel_writable(db, funnel_id, current_user)
+            await ProjectTaskService._check_funnel_writable(
+                db, funnel_id, current_user, task=task,
+            )
         # Não permite excluir um item que tenha filhos abaixo (amarração para baixo) —
         # evita órfãos (o FK parent_task_id é SET NULL). Exclua os filhos primeiro.
         child_check = await db.execute(

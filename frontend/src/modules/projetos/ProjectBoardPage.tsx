@@ -1227,7 +1227,7 @@ export default function ProjectBoardPage() {
   const funnelTasks = tasks.filter((t) => taskMatches(t, filterState))
 
   return (
-    <div className="afx flex h-full min-h-0 w-full min-w-0 flex-col gap-4 overflow-hidden">
+    <div className="afx kanban-page-root flex min-h-0 w-full min-w-0 flex-col gap-4 overflow-hidden">
       {openMenu && <div style={{ position: "fixed", inset: 0, zIndex: 20 }} onClick={() => setOpenMenu(null)} />}
 
       <ViewTabs
@@ -1365,7 +1365,8 @@ export default function ProjectBoardPage() {
       </div>
 
       {view === "board" && (
-        statuses.length === 0 ? (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {statuses.length === 0 ? (
           <div className="empty-state">
             <div className="icon-wrap"><KanbanSquare size={24} /></div>
             <h3>Sem colunas</h3>
@@ -1373,7 +1374,8 @@ export default function ProjectBoardPage() {
           </div>
         ) : (
           <DndContext sensors={boardSensors} onDragStart={onBoardDragStart} onDragEnd={onBoardDragEnd}>
-            <div className="board scrollbar-thin" style={{ flex: 1, minHeight: 0, overflowX: "auto" }}>
+            <div className="kanban-board-shell">
+            <div className="board board-viewport-height scrollbar-thin">
               {statuses.map((status) => {
                 const columnTasks = funnelTasks
                   .filter((t) => t.status_id === status.id)
@@ -1392,8 +1394,10 @@ export default function ProjectBoardPage() {
                 <Plus size={14} /> Nova coluna
               </button>
             </div>
+            </div>
           </DndContext>
-        )
+        )}
+        </div>
       )}
 
       {view === "list" && (

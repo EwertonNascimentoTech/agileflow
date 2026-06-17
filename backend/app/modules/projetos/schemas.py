@@ -288,6 +288,7 @@ class ProjectStatusCreate(BaseModel):
     moves_to_funnel_id: Optional[uuid.UUID] = None
     updates_origin_status_id: Optional[uuid.UUID] = None
     move_in_role_ids: Optional[list[uuid.UUID]] = None
+    move_out_role_ids: Optional[list[uuid.UUID]] = None
     sla_hours: Optional[int] = Field(None, ge=1)
     sla_warning_pct: int = Field(80, ge=1, le=100)
     priority_mode: PriorityMode = "edit"
@@ -308,6 +309,7 @@ class ProjectStatusUpdate(BaseModel):
     moves_to_funnel_id: Optional[uuid.UUID] = None
     updates_origin_status_id: Optional[uuid.UUID] = None
     move_in_role_ids: Optional[list[uuid.UUID]] = None
+    move_out_role_ids: Optional[list[uuid.UUID]] = None
     sla_hours: Optional[int] = Field(None, ge=1)
     sla_warning_pct: Optional[int] = Field(None, ge=1, le=100)
     priority_mode: Optional[PriorityMode] = None
@@ -335,6 +337,7 @@ class ProjectStatusResponse(BaseModel):
     moves_to_funnel_id: Optional[uuid.UUID] = None
     updates_origin_status_id: Optional[uuid.UUID] = None
     move_in_role_ids: Optional[list[uuid.UUID]] = None
+    move_out_role_ids: Optional[list[uuid.UUID]] = None
     sla_hours: Optional[int] = None
     sla_warning_pct: int = 80
     priority_mode: PriorityMode = "edit"
@@ -641,6 +644,30 @@ class ProjectTaskWithContextResponse(ProjectTaskResponse):
     project: ProjectRefMini
     status: ProjectStatusMini
     demand_type: Optional[ProjectDemandTypeMini] = None
+
+    model_config = {"from_attributes": True}
+
+
+class ProjectMyRequestStage(BaseModel):
+    """Etapa do fluxo por kanban (funil) para o reporte de andamento."""
+
+    label: str
+    funnel_id: uuid.UUID
+    funnel_order: int = 0
+    task: Optional[ProjectTaskWithContextResponse] = None
+    is_complete: bool = False
+    is_current: bool = False
+    is_pending: bool = False
+
+    model_config = {"from_attributes": True}
+
+
+class ProjectMyRequestResponse(ProjectTaskWithContextResponse):
+    """Solicitação raiz (criada pelo usuário) com itens/filhos vinculados para acompanhamento."""
+
+    children: list[ProjectTaskWithContextResponse] = Field(default_factory=list)
+    stages: list[ProjectMyRequestStage] = Field(default_factory=list)
+    origin_request_id: Optional[uuid.UUID] = None
 
     model_config = {"from_attributes": True}
 

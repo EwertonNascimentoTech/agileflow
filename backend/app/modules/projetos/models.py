@@ -122,6 +122,9 @@ class ProjectStatusConfig(TenantBase):
     # Funções (roles do tenant) autorizadas a mover um card PARA esta etapa.
     # NULL/vazio = sem restrição. company_admin/super_admin sempre podem.
     move_in_role_ids: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    # Funções autorizadas a mover cards que ESTÃO nesta etapa (origem).
+    # NULL/vazio = sem restrição. company_admin/super_admin sempre podem.
+    move_out_role_ids: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     # SLA: limite de horas que um card pode ficar nesta etapa. NULL = sem SLA.
     sla_hours: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     # Percentual do limite a partir do qual o card entra em "alerta" (default 80%).
