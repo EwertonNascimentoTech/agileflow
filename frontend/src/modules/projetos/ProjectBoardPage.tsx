@@ -13,8 +13,23 @@ import {
 } from "@dnd-kit/core"
 import { CSS } from "@dnd-kit/utilities"
 
-import { teamopsApi, isProductOwnerPosition, type Person } from "@/api/teamops"
-import { projetosApi, type Project, type ProjectCardField, type ProjectDemandFormField, type ProjectDemandFormSection, type ProjectDemandType, type ProjectFunnel, type ProjectStatus, type ProjectStatusSectionLink, type ProjectTask, type PriorityQuadrant, type QuadrantCode } from "@/api/projetos"
+import { teamopsApi, type Person } from "@/api/teamops"
+import { projetosApi, type Project, type ProjectCardField, type ProjectDefaultFormField, type ProjectDemandFormField, type ProjectDemandFormSection, type ProjectDemandType, type ProjectFunnel, type ProjectStatus, type ProjectStatusSectionLink, type ProjectTask, type PriorityQuadrant, type QuadrantCode } from "@/api/projetos"
+import {
+  formatCardCustomFieldValue,
+  groupFilterValuesByLabel,
+  groupedFilterChecked,
+  toggleGroupedFilterSelection,
+} from "@/modules/projetos/cardFieldDisplay"
+import { parseDefaultFieldOptions } from "@/modules/projetos/defaultFormOptions"
+import { defaultSelectOptions } from "@/modules/projetos/defaultFormUtils"
+import { normalizeFieldType, parseFieldOptions } from "@/modules/projetos/FormFieldRenderer"
+import {
+  productOwnerPersons,
+  taskMatches,
+  usePersistedTaskFilters,
+  type BoardFilterState,
+} from "@/modules/projetos/projectTaskFilters"
 import { useAuth } from "@/contexts/AuthContext"
 import type { User } from "@/types"
 import { Button } from "@/components/ui/button"
@@ -57,27 +72,15 @@ function colorForUser(id: string | null | undefined): string {
   return palette[Math.abs(hash) % palette.length]
 }
 
-// Filtros do board persistidos entre navegações (limpos só pelo botão "Limpar").
-const FILTERS_KEY = "projetos.board.filters"
-type BoardFilters = { q?: string; assignees?: string[] }
-function loadFilters(): BoardFilters {
-  try {
-    return JSON.parse(localStorage.getItem(FILTERS_KEY) || "{}") as BoardFilters
-  } catch {
-    return {}
+const REQUESTER_FIELD_KEY = "requisitante"
+
+function resolveRequesterField(meta: Map<string, ProjectDemandFormField>): ProjectDemandFormField | null {
+  const direct = meta.get(REQUESTER_FIELD_KEY)
+  if (direct) return direct
+  for (const field of meta.values()) {
+    if (field.label.trim().toLowerCase() === "requisitante") return field
   }
-}
-
-type BoardFilterState = { q: string; assignees: string[]; groupedChildIds: Set<string> }
-
-// Filtro compartilhado pelas visões (board, lista, calendário).
-function taskMatches(t: ProjectTask, f: BoardFilterState): boolean {
-  const q = f.q.trim().toLowerCase()
-  if (q && !t.title.toLowerCase().includes(q)) return false
-  if (f.assignees.length && !f.assignees.includes(t.assigned_to ?? "__none__")) return false
-  // Esconde itens-filhos agrupados sob o pai no mesmo kanban (ex.: itens de programa).
-  if (f.groupedChildIds.has(t.id)) return false
-  return true
+  return null
 }
 
 function SlaChip({ state }: { state: ProjectTask["sla_state"] }) {
@@ -479,17 +482,19 @@ function FilterDropdown({
   open,
   onToggle,
   selectedCount,
+  align = "start",
   children,
 }: {
   label: string
   open: boolean
   onToggle: () => void
   selectedCount: number
+  align?: "start" | "end"
   children: React.ReactNode
 }) {
   return (
-    <div className="relative">
-      <button className={`filter-btn ${selectedCount ? "active" : ""}`} onClick={onToggle}>
+    <div className={`relative${align === "end" ? " filter-dropdown-end" : ""}`}>
+      <button type="button" className={`filter-btn ${selectedCount ? "active" : ""}`} onClick={onToggle}>
         <span>{label}</span>
         {selectedCount > 0 && <span className="filter-count">{selectedCount}</span>}
         <ChevronDown size={12} />
@@ -539,26 +544,11 @@ export default function ProjectBoardPage() {
   const [newTaskTitle, setNewTaskTitle] = useState("")
   const [newTaskDescription, setNewTaskDescription] = useState("")
   const [pendingCreateStatusId, setPendingCreateStatusId] = useState<string | null>(null)
-  const [searchQuery, setSearchQuery] = useState<string>(() => loadFilters().q ?? "")
-  const [assignees, setAssignees] = useState<string[]>(() => loadFilters().assignees ?? [])
+  const [defaultFormFields, setDefaultFormFields] = useState<ProjectDefaultFormField[]>([])
+  const [formValuesByTask, setFormValuesByTask] = useState<Record<string, Record<string, unknown>>>({})
+  const [formFieldMeta, setFormFieldMeta] = useState<Map<string, ProjectDemandFormField>>(new Map())
   const [view, setView] = useState<BoardView>(() => resolveViewFromPath(location.pathname))
   const [openMenu, setOpenMenu] = useState<string | null>(null)
-
-  function toggleMulti(setter: React.Dispatch<React.SetStateAction<string[]>>, current: string[], val: string) {
-    setter(current.includes(val) ? current.filter((x) => x !== val) : [...current, val])
-  }
-
-  // Persiste os filtros (continuam ao trocar de página; só o botão "Limpar" zera).
-  useEffect(() => {
-    try {
-      localStorage.setItem(FILTERS_KEY, JSON.stringify({ q: searchQuery, assignees }))
-    } catch { /* ignore */ }
-  }, [searchQuery, assignees])
-
-  function clearFilters() {
-    setSearchQuery("")
-    setAssignees([])
-  }
   const [createSectionLinks, setCreateSectionLinks] = useState<ProjectStatusSectionLink[]>([])
   const [createFieldErrors, setCreateFieldErrors] = useState<Record<string, string>>({})
   const [conversionPrompt, setConversionPrompt] = useState<{
@@ -665,6 +655,109 @@ export default function ProjectBoardPage() {
     return (id: string | null | undefined) => (id ? byId.get(id) ?? null : null)
   }, [persons])
 
+  const {
+    searchQuery,
+    setSearchQuery,
+    assignees,
+    setAssignees,
+    productOwners,
+    setProductOwners,
+    requisitantes,
+    setRequisitantes,
+    diretorias,
+    setDiretorias,
+    planningCards,
+    setPlanningCards,
+    areas,
+    setAreas,
+    planningScopeIds,
+    hasFilters,
+    clearFilters,
+    toggleMulti,
+  } = usePersistedTaskFilters(groupedChildIds, tasks)
+
+  const dimLabelMaps = useMemo(() => {
+    const build = (key: "diretoria" | "area") => {
+      const field = defaultFormFields.find((f) => f.field_key === key)
+      const map = new Map<string, string>()
+      if (field) parseDefaultFieldOptions(field).forEach((o) => map.set(o.value, o.label))
+      return map
+    }
+    return { diretoria: build("diretoria"), area: build("area") }
+  }, [defaultFormFields])
+
+  const availDiretorias = useMemo(() => {
+    const fromForm = defaultSelectOptions(defaultFormFields, "diretoria").map((o) => o.value)
+    const fromTasks = [...new Set(tasks.map((t) => t.diretoria).filter(Boolean))] as string[]
+    return [...new Set([...fromForm, ...fromTasks])].sort((a, b) =>
+      (dimLabelMaps.diretoria.get(a) ?? a).localeCompare(dimLabelMaps.diretoria.get(b) ?? b, "pt-BR"),
+    )
+  }, [defaultFormFields, tasks, dimLabelMaps])
+
+  const availAreas = useMemo(() => {
+    const fromForm = defaultSelectOptions(defaultFormFields, "area").map((o) => o.value)
+    const fromTasks = [...new Set(tasks.map((t) => t.area).filter(Boolean))] as string[]
+    return [...new Set([...fromForm, ...fromTasks])].sort((a, b) =>
+      (dimLabelMaps.area.get(a) ?? a).localeCompare(dimLabelMaps.area.get(b) ?? b, "pt-BR"),
+    )
+  }, [defaultFormFields, tasks, dimLabelMaps])
+
+  const requesterField = useMemo(() => resolveRequesterField(formFieldMeta), [formFieldMeta])
+  const requesterFieldKey = requesterField?.field_key ?? REQUESTER_FIELD_KEY
+
+  const requesterLabel = useMemo(() => {
+    return (value: string) => {
+      if (value === "__none__") return "Sem requisitante"
+      return formatCardCustomFieldValue(
+        requesterField ?? undefined,
+        value,
+        (id) => resolveAssignee(id)?.full_name ?? null,
+      ) ?? value
+    }
+  }, [requesterField, resolveAssignee])
+
+  const availRequisitantes = useMemo(() => {
+    const fromForm = requesterField && normalizeFieldType(requesterField.field_type) === "select"
+      ? parseFieldOptions(requesterField).map((o) => o.value)
+      : []
+    const fromTasks = [...new Set(
+      Object.values(formValuesByTask)
+        .map((values) => values[requesterFieldKey])
+        .flatMap((raw) => {
+          if (raw === null || raw === undefined || raw === "") return []
+          if (Array.isArray(raw)) return raw.filter((x): x is string => typeof x === "string" && x.trim() !== "")
+          return [String(raw)]
+        }),
+    )]
+    return [...new Set([...fromForm, ...fromTasks])].sort((a, b) =>
+      requesterLabel(a).localeCompare(requesterLabel(b), "pt-BR"),
+    )
+  }, [formValuesByTask, requesterField, requesterFieldKey, requesterLabel])
+
+  const requisitanteOptionGroups = useMemo(
+    () => groupFilterValuesByLabel(availRequisitantes, requesterLabel),
+    [availRequisitantes, requesterLabel],
+  )
+
+  const planningCardOptions = useMemo(
+    () => tasks
+      .filter((t) => t.planning_kind === "projeto" || t.planning_kind === "programa")
+      .sort((a, b) => a.title.localeCompare(b.title, "pt-BR")),
+    [tasks],
+  )
+
+  const assigneeOptions = useMemo(() => {
+    const ids = new Set<string>()
+    for (const t of tasks) ids.add(t.assigned_to ?? "__none__")
+    return [...ids]
+      .map((id) => {
+        if (id === "__none__") return { id, full_name: "Sem responsável" }
+        const u = resolveAssignee(id)
+        return { id, full_name: u?.full_name ?? id }
+      })
+      .sort((a, b) => a.full_name.localeCompare(b.full_name, "pt-BR"))
+  }, [tasks, resolveAssignee])
+
   const cardCtx = useMemo<CardCtx>(() => ({
     fields: visibleCardFields, demandTypeName, parentName, quadrantInfo, childrenProgress, childrenDates, users, resolveAssignee,
   }), [visibleCardFields, demandTypeName, parentName, quadrantInfo, childrenProgress, childrenDates, users, resolveAssignee])
@@ -683,18 +776,16 @@ export default function ProjectBoardPage() {
       teamopsApi.listPersons().catch(() => [] as Person[]),
       projetosApi.listDemandTypes(true).catch(() => [] as ProjectDemandType[]),
       projetosApi.listPriorityQuadrants().catch(() => [] as PriorityQuadrant[]),
+      projetosApi.getDefaultFormFields().catch(() => [] as ProjectDefaultFormField[]),
     ])
-      .then(([ps, persons, dts, qd]) => {
+      .then(([ps, personsList, dts, qd, df]) => {
         setProjects(ps)
-        setPersons(persons)
-        setUsers(persons.map(personToUser))
-        setPoUsers(
-          persons
-            .filter((p) => isProductOwnerPosition(p.position?.slug, p.position?.name))
-            .map(personToUser),
-        )
+        setPersons(personsList)
+        setUsers(personsList.map(personToUser))
+        setPoUsers(productOwnerPersons(personsList).map(personToUser))
         setDemandTypes(dts)
         setQuadrants(qd)
+        setDefaultFormFields(df)
         if (!projectId && ps[0]) {
           navigate(`/app/modules/projetos/${ps[0].id}/board`, { replace: true })
         }
@@ -723,10 +814,12 @@ export default function ProjectBoardPage() {
     Promise.all([
       projetosApi.listFunnels(projectId, true),
       projetosApi.listTasks(projectId),
-    ]).then(([fs, ts]) => {
+      projetosApi.getProjectFormValues(projectId).catch(() => ({})),
+    ]).then(([fs, ts, formVals]) => {
       const orderedFunnels = [...fs].sort((a, b) => a.order - b.order)
       setFunnels(orderedFunnels)
       setTasks(ts)
+      setFormValuesByTask(formVals)
       const fromQuery =
         funnelFromQuery && orderedFunnels.some((f) => f.id === funnelFromQuery)
           ? funnelFromQuery
@@ -753,6 +846,33 @@ export default function ProjectBoardPage() {
       .then(setCardFields)
       .catch(() => setCardFields([]))
   }, [selectedFunnelId])
+
+  useEffect(() => {
+    if (!selectedFunnelId) {
+      setFormFieldMeta(new Map())
+      return
+    }
+    const typeIds = demandTypes
+      .filter((t) => t.is_active && (t.funnel_id === selectedFunnelId || !t.funnel_id))
+      .map((t) => t.id)
+    if (typeIds.length === 0) {
+      setFormFieldMeta(new Map())
+      return
+    }
+    Promise.all(typeIds.map(async (demandTypeId) => {
+      const sections = await projetosApi.listDemandSections(demandTypeId, true).catch(() => [])
+      const fieldGroups = await Promise.all(
+        sections.map((s) => projetosApi.listDemandFields(demandTypeId, s.id, true).catch(() => [])),
+      )
+      return fieldGroups.flat()
+    })).then((groups) => {
+      const map = new Map<string, ProjectDemandFormField>()
+      for (const field of groups.flat()) {
+        if (!map.has(field.field_key)) map.set(field.field_key, field)
+      }
+      setFormFieldMeta(map)
+    })
+  }, [selectedFunnelId, demandTypes])
 
   // Deep-link: abrir um card vindo de "Trabalho relacionado" (?task=<id>).
   useEffect(() => {
@@ -1091,9 +1211,20 @@ export default function ProjectBoardPage() {
   const selectedFunnel = funnels.find((f) => f.id === selectedFunnelId) ?? null
   // Nível de acesso da função do usuário a ESTE kanban. "view"/"none" → board read-only.
   const canManageFunnel = funnelAccessLevel(selectedFunnel?.access_control, user) === "manage"
-  const filterState: BoardFilterState = { q: searchQuery, assignees, groupedChildIds }
+  const filterState: BoardFilterState = {
+    q: searchQuery,
+    assignees,
+    productOwners,
+    requisitantes,
+    requesterFieldKey,
+    formValuesByTask,
+    resolveRequisitanteLabel: requesterLabel,
+    diretorias,
+    areas,
+    planningScopeIds,
+    groupedChildIds,
+  }
   const funnelTasks = tasks.filter((t) => taskMatches(t, filterState))
-  const hasFilters = !!(searchQuery.trim() || assignees.length)
 
   return (
     <div className="afx flex h-full min-h-0 w-full min-w-0 flex-col gap-4 overflow-hidden">
@@ -1129,12 +1260,99 @@ export default function ProjectBoardPage() {
 
         <FilterDropdown label="Responsável" open={openMenu === "assignee"} onToggle={() => setOpenMenu(openMenu === "assignee" ? null : "assignee")} selectedCount={assignees.length}>
           <div className="dd-head">Filtrar por responsável</div>
-          {[{ id: "__none__", full_name: "Sem responsável" }, ...users].map((m) => {
+          {assigneeOptions.length === 0 ? (
+            <div className="dd-item" style={{ opacity: 0.6, pointerEvents: "none" }}>Nenhum responsável nos cards</div>
+          ) : assigneeOptions.map((m) => {
             const checked = assignees.includes(m.id)
             return (
               <div key={m.id} className="dd-item" onClick={() => toggleMulti(setAssignees, assignees, m.id)}>
                 <span className={`check ${checked ? "checked" : ""}`}>{checked && <Check size={11} />}</span>
                 <span>{m.full_name}</span>
+              </div>
+            )
+          })}
+        </FilterDropdown>
+
+        <FilterDropdown label="Product Owner" open={openMenu === "po"} onToggle={() => setOpenMenu(openMenu === "po" ? null : "po")} selectedCount={productOwners.length}>
+          <div className="dd-head">Filtrar por Product Owner</div>
+          {[{ id: "__none__", full_name: "Sem PO" }, ...poUsers].map((m) => {
+            const checked = productOwners.includes(m.id)
+            return (
+              <div key={m.id} className="dd-item" onClick={() => toggleMulti(setProductOwners, productOwners, m.id)}>
+                <span className={`check ${checked ? "checked" : ""}`}>{checked && <Check size={11} />}</span>
+                <span>{m.full_name}</span>
+              </div>
+            )
+          })}
+          {poUsers.length === 0 && <div className="dd-item" style={{ opacity: 0.6 }}>Nenhum PO cadastrado no TeamOps</div>}
+        </FilterDropdown>
+
+        <FilterDropdown label="Requisitante" open={openMenu === "requisitante"} onToggle={() => setOpenMenu(openMenu === "requisitante" ? null : "requisitante")} selectedCount={requisitantes.length}>
+          <div className="dd-head">Filtrar por requisitante</div>
+          {[
+            { label: "Sem requisitante", values: ["__none__"] as string[] },
+            ...requisitanteOptionGroups,
+          ].map((opt) => (
+            <div
+              key={opt.label}
+              className="dd-item"
+              onClick={() => setRequisitantes((prev) => toggleGroupedFilterSelection(prev, opt.values))}
+            >
+              <span className={`check ${groupedFilterChecked(requisitantes, opt.values) ? "checked" : ""}`}>
+                {groupedFilterChecked(requisitantes, opt.values) && <Check size={11} />}
+              </span>
+              <span>{opt.label}</span>
+            </div>
+          ))}
+        </FilterDropdown>
+
+        <FilterDropdown label="Diretoria" open={openMenu === "diretoria"} onToggle={() => setOpenMenu(openMenu === "diretoria" ? null : "diretoria")} selectedCount={diretorias.length} align="end">
+          <div className="dd-head">Filtrar por diretoria</div>
+          {[
+            { label: "Sem diretoria", values: ["__none__"] as string[] },
+            ...groupFilterValuesByLabel(availDiretorias, (v) => dimLabelMaps.diretoria.get(v) ?? v),
+          ].map((opt) => (
+            <div
+              key={opt.label}
+              className="dd-item"
+              onClick={() => setDiretorias((prev) => toggleGroupedFilterSelection(prev, opt.values))}
+            >
+              <span className={`check ${groupedFilterChecked(diretorias, opt.values) ? "checked" : ""}`}>
+                {groupedFilterChecked(diretorias, opt.values) && <Check size={11} />}
+              </span>
+              <span>{opt.label}</span>
+            </div>
+          ))}
+        </FilterDropdown>
+
+        <FilterDropdown label="Área" open={openMenu === "area"} onToggle={() => setOpenMenu(openMenu === "area" ? null : "area")} selectedCount={areas.length} align="end">
+          <div className="dd-head">Filtrar por área</div>
+          {[
+            { label: "Sem área", values: ["__none__"] as string[] },
+            ...availAreas.map((v) => ({ label: dimLabelMaps.area.get(v) ?? v, values: [v] })),
+          ].map((opt) => (
+            <div key={opt.label} className="dd-item" onClick={() => toggleMulti(setAreas, areas, opt.values[0])}>
+              <span className={`check ${areas.includes(opt.values[0]) ? "checked" : ""}`}>
+                {areas.includes(opt.values[0]) && <Check size={11} />}
+              </span>
+              <span>{opt.label}</span>
+            </div>
+          ))}
+        </FilterDropdown>
+
+        <FilterDropdown label="Projeto / Programa" open={openMenu === "planning"} onToggle={() => setOpenMenu(openMenu === "planning" ? null : "planning")} selectedCount={planningCards.length}>
+          <div className="dd-head">Projetos e programas criados</div>
+          {planningCardOptions.length === 0 ? (
+            <div className="dd-item" style={{ opacity: 0.6, pointerEvents: "none" }}>Nenhum projeto ou programa</div>
+          ) : planningCardOptions.map((c) => {
+            const checked = planningCards.includes(c.id)
+            return (
+              <div key={c.id} className="dd-item" onClick={() => toggleMulti(setPlanningCards, planningCards, c.id)}>
+                <span className={`check ${checked ? "checked" : ""}`}>{checked && <Check size={11} />}</span>
+                <span className="chip muted" style={{ fontSize: 9 }}>
+                  {c.planning_kind === "programa" ? "Programa" : "Projeto"}
+                </span>
+                <span style={{ flex: 1 }}>{c.title}</span>
               </div>
             )
           })}

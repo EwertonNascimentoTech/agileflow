@@ -274,6 +274,7 @@
 
 /* ─────────── Dropdown menus ─────────── */
 .afx .relative { position: relative; }
+.afx .filter-dropdown-end .dd-menu { left: auto; right: 0; }
 .afx .dd-menu {
   position: absolute; top: calc(100% + 4px); left: 0; min-width: 220px; background: var(--af-card);
   border: 1px solid var(--af-border); border-radius: var(--af-radius-md); box-shadow: var(--af-shadow-md);
