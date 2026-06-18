@@ -3463,9 +3463,29 @@ class ProjectAutomationRunner:
         cfg = rule.action_config or {}
 
         if rule.action == ProjectAutomationAction.ASSIGN_USER:
-            user_id = cfg.get("user_id")
-            if user_id:
-                task.assigned_to = uuid.UUID(str(user_id))
+            # source="field" → atribui o responsável a partir do valor de um campo do
+            # formulário (ex.: "requisitante"); senão usa o usuário fixo configurado.
+            if cfg.get("source") == "field":
+                field_key = cfg.get("field_key")
+                if field_key:
+                    sub_res = await db.execute(
+                        select(ProjectDemandFormSubmission).where(
+                            ProjectDemandFormSubmission.task_id == task.id
+                        )
+                    )
+                    submission = sub_res.scalar_one_or_none()
+                    raw = (submission.values or {}).get(field_key) if submission else None
+                    if isinstance(raw, list):
+                        raw = raw[0] if raw else None
+                    resolved = await ProjectAutomationRunner._resolve_person_id(db, raw)
+                    if resolved is not None:
+                        task.assigned_to = resolved
+            else:
+                user_id = cfg.get("user_id")
+                if user_id:
+                    resolved = await ProjectAutomationRunner._resolve_person_id(db, user_id)
+                    if resolved is not None:
+                        task.assigned_to = resolved
 
         elif rule.action == ProjectAutomationAction.CREATE_SUBTASK:
             title = cfg.get("title") or f"Atividade: {rule.name}"
@@ -3497,6 +3517,39 @@ class ProjectAutomationRunner:
         elif rule.action == ProjectAutomationAction.ADD_COMMENT:
             content = cfg.get("content") or f"[automação] {rule.name}"
             db.add(ProjectTaskComment(task_id=task.id, author_id=None, content=content))
+
+    @staticmethod
+    async def _resolve_person_id(db: AsyncSession, raw) -> Optional[uuid.UUID]:
+        """Resolve o valor de um campo (requisitante etc.) para um person_id (responsável).
+
+        O valor pode vir como person_id, user_id (legado) ou nome — campos do tipo
+        `current_user`/`user` ora guardam id, ora guardam o nome do usuário."""
+        if raw is None:
+            return None
+        from app.modules.teamops.models import Person
+
+        s = str(raw).strip()
+        if not s:
+            return None
+
+        try:
+            as_uuid = uuid.UUID(s)
+        except (ValueError, TypeError):
+            as_uuid = None
+        if as_uuid is not None:
+            by_pid = await db.execute(select(Person.id).where(Person.id == as_uuid))
+            if by_pid.scalar_one_or_none():
+                return as_uuid
+            by_uid = await db.execute(select(Person.id).where(Person.user_id == as_uuid))
+            pid = by_uid.scalar_one_or_none()
+            if pid:
+                return pid
+            return as_uuid
+
+        by_name = await db.execute(
+            select(Person.id).where(func.lower(Person.full_name) == s.lower())
+        )
+        return by_name.scalar_one_or_none()
 
 
 class ProjectSlaService:

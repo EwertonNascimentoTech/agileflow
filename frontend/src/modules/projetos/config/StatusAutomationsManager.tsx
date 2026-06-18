@@ -45,6 +45,7 @@ export function StatusAutomationsManager({
   function describe(rule: ProjectAutomationRule): string {
     const cfg = rule.action_config ?? {}
     if (rule.action === "assign_user") {
+      if (cfg.source === "field") return `→ campo "${(cfg.field_key as string) ?? ""}"`
       const u = users.find((x) => x.id === cfg.user_id)
       return u ? `→ ${u.full_name}` : ""
     }
@@ -124,6 +125,8 @@ function AutomationDialog({
   const [error, setError] = useState<string | null>(null)
   // configs por ação
   const [userId, setUserId] = useState<string>(NONE)
+  const [assignSource, setAssignSource] = useState<"user" | "field">("user")
+  const [fieldKey, setFieldKey] = useState("requisitante")
   const [subtaskTitle, setSubtaskTitle] = useState("")
   const [assignToParent, setAssignToParent] = useState(true)
   const [notifyTarget, setNotifyTarget] = useState<"assignee" | "user">("assignee")
@@ -131,7 +134,11 @@ function AutomationDialog({
   const [commentContent, setCommentContent] = useState("")
 
   function buildConfig(): Record<string, unknown> {
-    if (action === "assign_user") return { user_id: userId === NONE ? null : userId }
+    if (action === "assign_user") {
+      return assignSource === "field"
+        ? { source: "field", field_key: fieldKey.trim() }
+        : { source: "user", user_id: userId === NONE ? null : userId }
+    }
     if (action === "create_subtask") return { title: subtaskTitle, assign_to_parent_assignee: assignToParent }
     if (action === "notify") return { target: notifyTarget, user_id: notifyTarget === "user" ? (userId === NONE ? null : userId) : null, message: message || null }
     if (action === "add_comment") return { content: commentContent }
@@ -143,7 +150,8 @@ function AutomationDialog({
     setSaving(true)
     setError(null)
     try {
-      if (action === "assign_user" && userId === NONE) { setError("Selecione o responsável."); setSaving(false); return }
+      if (action === "assign_user" && assignSource === "user" && userId === NONE) { setError("Selecione o responsável."); setSaving(false); return }
+      if (action === "assign_user" && assignSource === "field" && !fieldKey.trim()) { setError("Informe a chave do campo (ex: requisitante)."); setSaving(false); return }
       await projetosApi.createStatusAutomation(projectId, statusId, {
         name: name.trim() || ACTION_LABELS[action],
         action,
@@ -179,16 +187,38 @@ function AutomationDialog({
           </div>
 
           {action === "assign_user" && (
-            <div>
-              <Label>Responsável *</Label>
-              <Select value={userId} onValueChange={setUserId}>
-                <SelectTrigger><SelectValue placeholder="Selecione…" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NONE}>—</SelectItem>
-                  {users.map((u) => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
+            <>
+              <div>
+                <Label>Origem do responsável *</Label>
+                <Select value={assignSource} onValueChange={(v) => setAssignSource(v as "user" | "field")}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="user">Usuário fixo</SelectItem>
+                    <SelectItem value="field">Campo do formulário (ex: requisitante)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {assignSource === "user" ? (
+                <div>
+                  <Label>Responsável *</Label>
+                  <Select value={userId} onValueChange={setUserId}>
+                    <SelectTrigger><SelectValue placeholder="Selecione…" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NONE}>—</SelectItem>
+                      {users.map((u) => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : (
+                <div>
+                  <Label>Campo do formulário *</Label>
+                  <Input value={fieldKey} onChange={(e) => setFieldKey(e.target.value)} placeholder="requisitante" />
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Chave do campo cujo valor será atribuído como responsável ao entrar na etapa. Ex.: <code>requisitante</code>.
+                  </p>
+                </div>
+              )}
+            </>
           )}
 
           {action === "create_subtask" && (
