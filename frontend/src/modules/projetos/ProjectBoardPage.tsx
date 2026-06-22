@@ -17,6 +17,7 @@ import { teamopsApi, type Person } from "@/api/teamops"
 import { projetosApi, type Project, type ProjectCardField, type ProjectDefaultFormField, type ProjectDemandFormField, type ProjectDemandFormSection, type ProjectDemandType, type ProjectFunnel, type ProjectStatus, type ProjectStatusSectionLink, type ProjectTask, type PriorityQuadrant, type QuadrantCode } from "@/api/projetos"
 import {
   formatCardCustomFieldValue,
+  formatDiretoriaAreaLabel,
   groupFilterValuesByLabel,
   groupedFilterChecked,
   toggleGroupedFilterSelection,
@@ -89,6 +90,9 @@ function SlaChip({ state }: { state: ProjectTask["sla_state"] }) {
   return null
 }
 
+const CARD_FIELD_FULL_WIDTH = new Set(["title", "description", "children_progress"])
+const CARD_CUSTOM_PREFIX = "form:"
+
 // ─────────── Task card (layout configurável) ───────────
 type CardCtx = {
   fields: ProjectCardField[]
@@ -100,6 +104,9 @@ type CardCtx = {
   users: User[]
   /** assigned_to é person_id; fallback por user_id legado. */
   resolveAssignee: (id: string | null | undefined) => User | null
+  formValuesByTask: Record<string, Record<string, unknown>>
+  formFieldMeta: Map<string, ProjectDemandFormField>
+  defaultFormFields: ProjectDefaultFormField[]
 }
 
 function BoardCard({
@@ -168,10 +175,14 @@ function BoardCard({
           </div>
         ) : null
       }
-      case "diretoria":
-        return task.diretoria ? <span className="chip muted">{task.diretoria}</span> : null
-      case "area":
-        return task.area ? <span className="chip muted">{task.area}</span> : null
+      case "diretoria": {
+        const text = formatDiretoriaAreaLabel(ctx.defaultFormFields, "diretoria", task.diretoria)
+        return text ? <span className="chip muted">{text}</span> : null
+      }
+      case "area": {
+        const text = formatDiretoriaAreaLabel(ctx.defaultFormFields, "area", task.area)
+        return text ? <span className="chip muted">{text}</span> : null
+      }
       case "due_date":
         return task.due_date ? (
           <span className={`due-pill ${isOverdue ? "overdue" : ""}`}>
@@ -183,20 +194,36 @@ function BoardCard({
         return (
           <span
             className="assignee-avatar"
-            style={{ background: colorForUser(assignee?.id ?? null), width: 22, height: 22, fontSize: 9, marginLeft: "auto" }}
+            style={{ background: colorForUser(assignee?.id ?? null), width: 22, height: 22, fontSize: 9 }}
             title={assignee?.full_name ?? "Sem responsável"}
           >
             {assignee ? initialsOf(assignee.full_name) : "?"}
           </span>
         )
-      default:
-        return null
+      default: {
+        if (!key.startsWith(CARD_CUSTOM_PREFIX)) return null
+        const fieldKey = key.slice(CARD_CUSTOM_PREFIX.length)
+        const raw = ctx.formValuesByTask[task.id]?.[fieldKey]
+        const meta = ctx.formFieldMeta.get(fieldKey)
+        const text = formatCardCustomFieldValue(
+          meta,
+          raw,
+          (id) => ctx.resolveAssignee(id)?.full_name ?? null,
+        )
+        return text ? <span className="chip muted">{text}</span> : null
+      }
     }
   }
 
-  const rendered = ctx.fields
-    .map((f) => ({ key: f.field_key, node: renderField(f.field_key, f.label) }))
-    .filter((x) => x.node !== null)
+  const rendered = ctx.fields.flatMap((f) => {
+    const node = renderField(f.field_key, f.label)
+    if (!node) return []
+    return [{
+      key: f.field_key,
+      node,
+      fullWidth: CARD_FIELD_FULL_WIDTH.has(f.field_key),
+    }]
+  })
 
   // Indicador de Programa/agrupador: sempre visível quando o card tem itens-filhos.
   const childAgg = ctx.childrenProgress(task.id)
@@ -228,9 +255,13 @@ function BoardCard({
         </div>
       )}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
-        {rendered.length === 0
-          ? <h4 className="title" style={{ width: "100%" }}>{task.title}</h4>
-          : rendered.map((x) => <Fragment key={x.key}>{x.node}</Fragment>)}
+        {rendered.length > 0
+          ? rendered.map((x) => (
+            <Fragment key={x.key}>
+              {x.fullWidth ? <div style={{ width: "100%" }}>{x.node}</div> : x.node}
+            </Fragment>
+          ))
+          : <h4 className="title" style={{ width: "100%" }}>{task.title}</h4>}
       </div>
     </article>
   )
@@ -759,8 +790,30 @@ export default function ProjectBoardPage() {
   }, [tasks, resolveAssignee])
 
   const cardCtx = useMemo<CardCtx>(() => ({
-    fields: visibleCardFields, demandTypeName, parentName, quadrantInfo, childrenProgress, childrenDates, users, resolveAssignee,
-  }), [visibleCardFields, demandTypeName, parentName, quadrantInfo, childrenProgress, childrenDates, users, resolveAssignee])
+    fields: visibleCardFields,
+    demandTypeName,
+    parentName,
+    quadrantInfo,
+    childrenProgress,
+    childrenDates,
+    users,
+    resolveAssignee,
+    formValuesByTask,
+    formFieldMeta,
+    defaultFormFields,
+  }), [
+    visibleCardFields,
+    demandTypeName,
+    parentName,
+    quadrantInfo,
+    childrenProgress,
+    childrenDates,
+    users,
+    resolveAssignee,
+    formValuesByTask,
+    formFieldMeta,
+    defaultFormFields,
+  ])
   const userRoleName = (user?.role_name ?? "").trim().toLowerCase()
   const isBasicUser =
     user?.role === "company_user" &&
