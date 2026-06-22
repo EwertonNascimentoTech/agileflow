@@ -123,10 +123,35 @@ export default function GanttPage() {
   // Diff inteligente (atual × baseline): alertas + destaque das barras.
   const nameById = useMemo(() => new Map(users.map((u) => [u.id, u.full_name])), [users])
   const statusNameById = useMemo(() => new Map(statuses.map((s) => [s.id, s.name])), [statuses])
-  const baselineDiff = useMemo(
-    () => (compareBaseline ? computeBaselineDiff(tasks, dependencies, nameById, statusNameById, compareBaseline) : null),
-    [compareBaseline, tasks, dependencies, nameById, statusNameById],
-  )
+  const baselineDiff = useMemo(() => {
+    if (!compareBaseline) return null
+    // `tasks` é o container inteiro (vários projetos-raiz). Restringe à subárvore do projeto-raiz
+    // do baseline, senão tarefas de OUTROS projetos viram falsas "inseridas".
+    const childrenMap = new Map<string, string[]>()
+    for (const t of tasks) {
+      if (!t.parent_task_id) continue
+      const arr = childrenMap.get(t.parent_task_id) ?? []
+      arr.push(t.id)
+      childrenMap.set(t.parent_task_id, arr)
+    }
+    const sub = new Set<string>()
+    const stack = [compareBaseline.root_task_id]
+    while (stack.length) {
+      const id = stack.pop()!
+      if (sub.has(id)) continue
+      sub.add(id)
+      for (const c of childrenMap.get(id) ?? []) stack.push(c)
+    }
+    const subTasks = tasks.filter((t) => sub.has(t.id))
+    const subDeps = dependencies.filter((d) => sub.has(d.predecessor_id) && sub.has(d.successor_id))
+    return computeBaselineDiff(subTasks, subDeps, nameById, statusNameById, compareBaseline)
+  }, [compareBaseline, tasks, dependencies, nameById, statusNameById])
+
+  // Ao ativar uma comparação, abre o painel de alterações automaticamente (a análise fica
+  // visível na hora, mesmo que o desvio nas barras seja sutil).
+  useEffect(() => {
+    if (compareBaseline) setAlertsOpen(true)
+  }, [compareBaseline])
 
   useEffect(() => {
     async function load() {

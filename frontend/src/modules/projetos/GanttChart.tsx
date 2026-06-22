@@ -664,7 +664,7 @@ export function GanttChart({
                   <div
                     key={"bl" + r.task.id}
                     className="gx-bar-baseline"
-                    style={{ left: bg.left + 1, top: idx * ROW_H + (ROW_H + BAR_H) / 2 + 2, width: Math.max(bg.width - 2, 6), height: 7 }}
+                    style={{ left: bg.left + 1, top: idx * ROW_H + (ROW_H + BAR_H) / 2 + 2, width: Math.max(bg.width - 2, 6), height: 9 }}
                     title={`Baseline: ${fmtShortIso(bg.sIso)} → ${fmtShortIso(bg.eIso)}${deltaTxt}`}
                   />
                 )

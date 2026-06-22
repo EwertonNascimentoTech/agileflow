@@ -618,7 +618,7 @@
 .afx .gx-barside { position: absolute; display: flex; align-items: center; gap: 6px; pointer-events: none; }
 
 /* baseline ghost bar (comparação cronograma atual × linha de base) */
-.afx .gx-bar-baseline { position: absolute; border-radius: 4px; opacity: .7; pointer-events: none; z-index: 0; background: repeating-linear-gradient(45deg, #b6bcc6, #b6bcc6 3px, #cdd2da 3px, #cdd2da 6px); }
+.afx .gx-bar-baseline { position: absolute; border-radius: 3px; opacity: .85; pointer-events: none; z-index: 0; border: 1px solid #9aa3b2; background: repeating-linear-gradient(45deg, #b6bcc6, #b6bcc6 3px, #cdd2da 3px, #cdd2da 6px); }
 
 /* destaque das tarefas que mudaram vs o baseline (outline não conflita com as sombras) */
 .afx .gx-bar--changed { outline: 2px solid var(--af-warning); outline-offset: 1px; }
