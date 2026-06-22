@@ -326,10 +326,18 @@
   position: absolute; top: calc(100% + 4px); left: 0; min-width: 220px; background: var(--af-card);
   border: 1px solid var(--af-border); border-radius: var(--af-radius-md); box-shadow: var(--af-shadow-md);
   padding: 4px; z-index: 30;
+  max-height: min(340px, calc(100vh - 160px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
+.afx .dd-menu-wide { min-width: min(420px, calc(100vw - 32px)); max-width: min(480px, calc(100vw - 32px)); }
 .afx .dd-item {
-  display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-radius: var(--af-radius-sm);
+  display: flex; align-items: flex-start; gap: 8px; padding: 7px 9px; border-radius: var(--af-radius-sm);
   font-size: 13px; cursor: pointer; color: var(--af-fg);
+}
+.afx .dd-item > span:last-child,
+.afx .dd-item > .dd-item-label {
+  flex: 1; min-width: 0; line-height: 1.35; word-break: break-word;
 }
 .afx .dd-item:hover { background: var(--af-muted); }
 .afx .dd-item .check {
@@ -338,8 +346,10 @@
 }
 .afx .dd-item .check.checked { background: var(--af-primary); border-color: var(--af-primary); color: white; }
 .afx .dd-head {
-  padding: 6px 10px 2px; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em;
-  color: var(--af-muted-fg); font-weight: 600;
+  position: sticky; top: 0; z-index: 1;
+  padding: 6px 10px 4px; margin: -4px -4px 2px; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--af-muted-fg); font-weight: 600; background: var(--af-card);
+  border-bottom: 1px solid var(--af-border);
 }
 
 /* ─────────── List view ─────────── */

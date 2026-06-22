@@ -92,6 +92,8 @@ import BasicNewRequestPage from "@/modules/projetos/basic/BasicNewRequestPage"
 import BasicMyRequestsPage from "@/modules/projetos/basic/BasicMyRequestsPage"
 import GanttPage from "@/modules/projetos/GanttPage"
 import ProjectScheduleConfigPage from "@/modules/projetos/config/ProjectScheduleConfigPage"
+import ProjectAgentsConfigPage from "@/modules/projetos/config/ProjectAgentsConfigPage"
+import ProjectAgentLogsConfigPage from "@/modules/projetos/config/ProjectAgentLogsConfigPage"
 import ProjectPriorityMatrixPage from "@/modules/projetos/ProjectPriorityMatrixPage"
 import PMODashboardPage from "@/modules/projetos/PMODashboardPage"
 import StatusReportEditorPage from "@/modules/projetos/StatusReportEditorPage"
@@ -216,6 +218,7 @@ export default function App() {
                     <Route path="relatorios" element={<PMODashboardPage initialTab="relatorios" />} />
                     <Route path="matriz" element={<ProjectPriorityMatrixPage />} />
                     <Route path="painel-po" element={<PMODashboardPage />} />
+                    <Route path="po-sync" element={<PMODashboardPage initialTab="po-sync" />} />
                     <Route path="status-reports" element={<PMODashboardPage initialTab="status-reports" />} />
                     <Route path="status-reports/new" element={<StatusReportEditorPage />} />
                     <Route path="status-reports/:id" element={<StatusReportViewPage />} />
@@ -235,6 +238,8 @@ export default function App() {
                       <Route path="config/funnels" element={<ProjectFunnelsConfigPage />} />
                       <Route path="config/statuses" element={<ProjectStatusesConfigPage />} />
                       <Route path="config/cronograma" element={<ProjectScheduleConfigPage />} />
+                      <Route path="config/agentes" element={<ProjectAgentsConfigPage />} />
+                      <Route path="config/agentes/logs" element={<ProjectAgentLogsConfigPage />} />
                       <Route path="config/priorizacao" element={<ProjectPriorityConfigPage />} />
                       <Route path="config/layout-card" element={<ProjectCardLayoutConfigPage />} />
                     </Route>

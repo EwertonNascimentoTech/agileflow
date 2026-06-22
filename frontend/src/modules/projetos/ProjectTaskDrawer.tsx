@@ -22,6 +22,8 @@ import { useDefaultFormConfig } from "@/modules/projetos/useDefaultFormConfig"
 import { getRowBreak, groupIntoRows } from "@/modules/projetos/layout"
 import { formatMissingFieldsMessage, validateRequiredFields } from "@/modules/projetos/validation"
 import { ProjectPriorityWidget } from "@/modules/projetos/priority/ProjectPriorityWidget"
+import { CommentBody, CommentComposer, commentHasContent } from "@/modules/projetos/CommentComposer"
+import { useAuth } from "@/contexts/AuthContext"
 import { toast } from "@/lib/toast"
 
 const NO_ASSIGNEE = "__none__"
@@ -39,6 +41,7 @@ export function ProjectTaskDrawer({
   projectId,
   task,
   isBasicUser,
+  canEditTask = true,
   onSaved,
   onDeleted,
 }: {
@@ -47,10 +50,14 @@ export function ProjectTaskDrawer({
   projectId: string
   task: ProjectTask | null
   isBasicUser: boolean
+  /** false = somente leitura (funil view sem permissão na etapa). */
+  canEditTask?: boolean
   onSaved: (task: ProjectTask) => void
   onDeleted: (taskId: string) => void
 }) {
+  const readOnly = isBasicUser || !canEditTask
   const navigate = useNavigate()
+  const { user: authUser } = useAuth()
   const [users, setUsers] = useState<User[]>([])
   const [comments, setComments] = useState<ProjectTaskComment[]>([])
   const [selectedDemandTypeId, setSelectedDemandTypeId] = useState("")
@@ -193,7 +200,7 @@ export function ProjectTaskDrawer({
   })
 
   async function handleSelectAssignee(uid: string | null) {
-    if (!task || isBasicUser) return
+    if (!task || readOnly) return
     const prev = assignedTo
     setAssignedTo(uid ?? NO_ASSIGNEE)
     setAssigneeMenuOpen(false)
@@ -291,7 +298,7 @@ export function ProjectTaskDrawer({
             </div>
           </div>
         </div>
-        {onRemove && !isBasicUser && (
+        {onRemove && !readOnly && (
           <Button
             type="button"
             variant="ghost"
@@ -589,7 +596,7 @@ export function ProjectTaskDrawer({
   }
 
   async function handleComment() {
-    if (!task || !newComment.trim()) return
+    if (!task || !commentHasContent(newComment)) return
     setSendingComment(true)
     try {
       const created = await projetosApi.createTaskComment(projectId, task.id, newComment.trim())
@@ -618,7 +625,7 @@ export function ProjectTaskDrawer({
             >
               <CalendarRange size={15} />
             </button>
-            {!isBasicUser && (
+            {!readOnly && (
               <button className="icon-btn" title="Excluir" onClick={handleDelete} disabled={removing}>
                 {removing ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
               </button>
@@ -651,6 +658,7 @@ export function ProjectTaskDrawer({
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     rows={2}
+                    readOnly={readOnly}
                     className="min-h-0 resize-none border-0 px-0 text-lg font-bold shadow-none focus-visible:ring-0"
                     placeholder={defaultFieldsByKey.get("title")?.label ?? "Título do card"}
                   />
@@ -658,13 +666,14 @@ export function ProjectTaskDrawer({
                   <Input
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
+                    readOnly={readOnly}
                     className="h-auto border-0 px-0 text-lg font-bold shadow-none focus-visible:ring-0"
                     placeholder={defaultFieldsByKey.get("title")?.label ?? "Título do card"}
                   />
                 )
               )}
               <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                {defaultFieldsByKey.get("assigned_to") && isDefaultFieldShown(defaultFieldsByKey.get("assigned_to")!, defaultFormLinks) && (isBasicUser ? (
+                {defaultFieldsByKey.get("assigned_to") && isDefaultFieldShown(defaultFieldsByKey.get("assigned_to")!, defaultFormLinks) && (readOnly ? (
                   <span className="inline-flex items-center gap-1.5">
                     <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
                       {assignedUser ? initials(assignedUser.full_name) : "?"}
@@ -738,7 +747,7 @@ export function ProjectTaskDrawer({
                   <span>·</span>
                 )}
 
-                {currentStatus && (isBasicUser ? (
+                {currentStatus && (readOnly ? (
                   <span className="inline-flex items-center gap-1.5">
                     <span
                       className="flex h-5 w-5 items-center justify-center rounded-full"
@@ -848,7 +857,7 @@ export function ProjectTaskDrawer({
                             values={defaultValues}
                             onChange={onDefaultPatch}
                             users={users}
-                            disabled={isBasicUser}
+                            disabled={readOnly}
                           />
                         )
                       }
@@ -863,7 +872,7 @@ export function ProjectTaskDrawer({
                               values={defaultValues}
                               onChange={onDefaultPatch}
                               users={users}
-                              disabled={isBasicUser}
+                              disabled={readOnly}
                             />
                           ))}
                         </div>
@@ -877,7 +886,7 @@ export function ProjectTaskDrawer({
                         values={defaultValues}
                         onChange={onDefaultPatch}
                         users={users}
-                        disabled={isBasicUser}
+                        disabled={readOnly}
                       />
                     )}
                     {showAnexos && (
@@ -888,7 +897,7 @@ export function ProjectTaskDrawer({
                         values={defaultValues}
                         onChange={onDefaultPatch}
                         users={users}
-                        disabled={isBasicUser}
+                        disabled={readOnly}
                       />
                     )}
                   </div>
@@ -975,7 +984,7 @@ export function ProjectTaskDrawer({
                     Trabalho relacionado
                   </p>
                 </div>
-                {!isBasicUser && (
+                {!readOnly && (
                   <div className="relative">
                     <Button type="button" variant="outline" size="icon" className="h-7 w-7" onClick={() => setLinkMenuOpen((o) => !o)} title="Adicionar vínculo">
                       <Plus size={14} />
@@ -1033,7 +1042,7 @@ export function ProjectTaskDrawer({
                         return (
                           <div key={c.id} className="space-y-1">
                             {relationRow(c, () => void handleUnlinkChild(c))}
-                            {!isBasicUser && samePlanningFunnel && (
+                            {!readOnly && samePlanningFunnel && (
                               <button
                                 type="button"
                                 onClick={() => void handleSendChildToDev(c)}
@@ -1064,7 +1073,7 @@ export function ProjectTaskDrawer({
               </div>
             </div>
 
-            {!isBasicUser && task && (
+            {!readOnly && task && (
               <ProjectPriorityWidget taskId={task.id} mode={currentStatus?.priority_mode ?? "edit"} />
             )}
 
@@ -1075,44 +1084,52 @@ export function ProjectTaskDrawer({
                   Comentários
                 </p>
               </div>
-              <div className="max-h-44 overflow-y-auto space-y-2 rounded-md border p-2">
+              <div className="max-h-56 overflow-y-auto space-y-2 rounded-md border p-2">
                 {comments.length === 0 ? (
                   <p className="text-xs text-muted-foreground">Nenhum comentário ainda.</p>
                 ) : comments.map((c) => (
-                  <div key={c.id} className="rounded bg-muted/40 p-2">
-                    <p className="text-sm">{c.content}</p>
-                    <p className="text-[11px] text-muted-foreground mt-1">
-                      {new Date(c.created_at).toLocaleString("pt-BR")}
-                    </p>
+                  <div key={c.id} className="flex gap-2 rounded bg-muted/40 p-2">
+                    <span
+                      className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary"
+                      title={c.author_name ?? "Sistema"}
+                    >
+                      {c.author_name ? initials(c.author_name) : "•"}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <CommentBody content={c.content} />
+                      <p className="text-[11px] text-muted-foreground mt-1">
+                        <span className="font-medium text-foreground">{c.author_name ?? "Sistema"}</span>
+                        {" · "}
+                        {new Date(c.created_at).toLocaleString("pt-BR")}
+                      </p>
+                    </div>
                   </div>
                 ))}
               </div>
-              <div className="flex gap-2">
-                <Input
-                  value={newComment}
-                  onChange={(e) => setNewComment(e.target.value)}
-                  placeholder="Adicionar comentário..."
-                />
-                <Button type="button" onClick={handleComment} disabled={sendingComment || !newComment.trim()}>
-                  {sendingComment && <Loader2 size={13} className="animate-spin mr-1.5" />}
-                  Enviar
-                </Button>
-              </div>
+              <CommentComposer
+                value={newComment}
+                onChange={setNewComment}
+                onSubmit={handleComment}
+                submitting={sendingComment}
+                authorName={authUser?.full_name ?? authUser?.email ?? "Você"}
+              />
             </div>
           </div>
           </div>
 
           <div className="modal-foot">
-            {!isBasicUser && (
+            {!readOnly && (
               <button className="btn danger" onClick={handleDelete} disabled={removing}>
                 {removing ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />} Excluir
               </button>
             )}
             <span className="spacer" />
             <button className="btn" onClick={() => onOpenChange(false)}>Fechar</button>
-            <button className="btn primary" onClick={handleSave} disabled={saving || !title.trim()}>
-              {saving && <Loader2 size={13} className="animate-spin" />} Salvar
-            </button>
+            {!readOnly && (
+              <button className="btn primary" onClick={handleSave} disabled={saving || !title.trim()}>
+                {saving && <Loader2 size={13} className="animate-spin" />} Salvar
+              </button>
+            )}
           </div>
         </div>
       </div>

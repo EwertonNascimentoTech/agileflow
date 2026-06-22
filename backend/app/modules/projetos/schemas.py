@@ -296,6 +296,7 @@ class ProjectStatusCreate(BaseModel):
     cascade_children_on_move: bool = False
     children_to_funnel_id: Optional[uuid.UUID] = None
     grandchildren_to_funnel_id: Optional[uuid.UUID] = None
+    locks_schedule: bool = False
 
 
 class ProjectStatusUpdate(BaseModel):
@@ -317,6 +318,7 @@ class ProjectStatusUpdate(BaseModel):
     cascade_children_on_move: Optional[bool] = None
     children_to_funnel_id: Optional[uuid.UUID] = None
     grandchildren_to_funnel_id: Optional[uuid.UUID] = None
+    locks_schedule: Optional[bool] = None
 
 
 class ProjectStatusReorder(BaseModel):
@@ -345,6 +347,7 @@ class ProjectStatusResponse(BaseModel):
     cascade_children_on_move: bool = False
     children_to_funnel_id: Optional[uuid.UUID] = None
     grandchildren_to_funnel_id: Optional[uuid.UUID] = None
+    locks_schedule: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -449,6 +452,9 @@ class ProjectTaskResponse(BaseModel):
     completed_at: Optional[datetime]
     status_entered_at: Optional[datetime] = None
     sla_state: str = "none"
+    # Controle de baseline (só relevante no card-raiz de planejamento).
+    schedule_committed_at: Optional[datetime] = None
+    schedule_revision_open: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -488,6 +494,38 @@ class CriticalPathItem(BaseModel):
     free_float_hours: float
     late_start: datetime
     late_finish: datetime
+
+
+# ── Controle de baseline / travamento do cronograma ──
+class ScheduleBaselineCreateIn(BaseModel):
+    root_task_id: uuid.UUID
+    justification: str = Field(..., min_length=3, max_length=2000)
+
+
+class ScheduleRevisionCloseIn(BaseModel):
+    root_task_id: uuid.UUID
+
+
+class ScheduleBaselineResponse(BaseModel):
+    id: uuid.UUID
+    project_id: uuid.UUID
+    root_task_id: uuid.UUID
+    version: int
+    justification: str
+    snapshot: dict
+    created_by: Optional[uuid.UUID] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ScheduleLockState(BaseModel):
+    root_task_id: uuid.UUID
+    state: Literal["open", "locked", "revision"]
+    committed_at: Optional[datetime] = None
+    revision_open: bool = False
+    baseline_count: int = 0
+    latest_version: Optional[int] = None
 
 
 class WorkloadCell(BaseModel):
@@ -680,6 +718,7 @@ class ProjectTaskCommentResponse(BaseModel):
     id: uuid.UUID
     task_id: uuid.UUID
     author_id: Optional[uuid.UUID]
+    author_name: Optional[str] = None
     content: str
     created_at: datetime
 
@@ -821,6 +860,99 @@ class ProjectScheduleBindingResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ─────────────────────────────────────────────
+# Agentes IDCortex por etapa
+# ─────────────────────────────────────────────
+
+
+class ProjectStageAgentBindingCreate(BaseModel):
+    project_id: uuid.UUID
+    funnel_id: uuid.UUID
+    status_id: uuid.UUID
+    name: str = Field(..., min_length=1, max_length=140)
+    agent_kind: str = Field("ask", pattern=r"^(ask|classify_and_advance)$")
+    agent_id: str = Field(..., min_length=1, max_length=120)
+    usuario: str = Field(..., min_length=3, max_length=255)
+    prompt_template: str = Field(..., min_length=1)
+    gateway_url: Optional[str] = Field(None, max_length=500)
+    gateway_client_id: str = Field(..., min_length=1, max_length=255)
+    gateway_client_secret: str = Field(..., min_length=1, max_length=255)
+    continue_thread: bool = False
+    add_comment_on_success: bool = True
+    is_active: bool = True
+
+
+class ProjectStageAgentBindingUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=140)
+    agent_kind: Optional[str] = Field(None, pattern=r"^(ask|classify_and_advance)$")
+    agent_id: Optional[str] = Field(None, min_length=1, max_length=120)
+    usuario: Optional[str] = Field(None, min_length=3, max_length=255)
+    prompt_template: Optional[str] = Field(None, min_length=1)
+    gateway_url: Optional[str] = Field(None, max_length=500)
+    gateway_client_id: Optional[str] = Field(None, max_length=255)
+    gateway_client_secret: Optional[str] = Field(None, max_length=255)
+    continue_thread: Optional[bool] = None
+    add_comment_on_success: Optional[bool] = None
+    is_active: Optional[bool] = None
+
+
+class ProjectStageAgentBindingResponse(BaseModel):
+    id: uuid.UUID
+    project_id: uuid.UUID
+    funnel_id: uuid.UUID
+    status_id: uuid.UUID
+    name: str
+    agent_kind: str
+    agent_id: str
+    usuario: str
+    prompt_template: str
+    gateway_url: Optional[str]
+    gateway_client_id: Optional[str]
+    has_gateway_client_secret: bool = False
+    continue_thread: bool
+    add_comment_on_success: bool
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProjectAgentExecutionResponse(BaseModel):
+    id: uuid.UUID
+    task_id: uuid.UUID
+    binding_id: uuid.UUID
+    status: str
+    thread_id: Optional[str]
+    answer_message: Optional[str]
+    error_message: Optional[str]
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ProjectAgentExecutionLogItem(BaseModel):
+    id: uuid.UUID
+    task_id: uuid.UUID
+    task_title: str
+    binding_id: uuid.UUID
+    agent_name: str
+    agent_kind: str
+    status_name: str
+    status: str
+    thread_id: Optional[str]
+    answer_message: Optional[str]
+    error_message: Optional[str]
+    request_payload: Optional[dict] = None
+    response_payload: Optional[dict] = None
+    created_at: datetime
+
+
+class ProjectAgentExecutionLogPage(BaseModel):
+    items: list[ProjectAgentExecutionLogItem]
+    total: int
+    limit: int
+    offset: int
 
 
 # ─────────────────────────────────────────────

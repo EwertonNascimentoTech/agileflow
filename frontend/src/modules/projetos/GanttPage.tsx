@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import {
-  BarChart3, Calendar, CalendarCheck, Check, ChevronDown, Clock, Folder, GitBranch, Link2, Loader2, Plus, Users, X,
+  BarChart3, Calendar, CalendarCheck, Check, ChevronDown, Clock, Folder, GitBranch, History, Link2, Loader2, Lock, Plus, Unlock, Users, X,
 } from "lucide-react"
 
 const DEP_LABELS: Record<DependencyType, string> = {
@@ -13,13 +13,23 @@ import {
   projetosApi,
   type AssigneeAbsenceItem, type CriticalPathItem, type DependencyType, type Project, type ProjectDemandType, type ProjectFunnel, type ProjectScheduleBinding,
   type ProjectStatus, type ProjectTask, type ProjectTaskDependency,
+  type ScheduleBaseline, type ScheduleLockState,
 } from "@/api/projetos"
 import type { User } from "@/types"
 import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyState } from "@/components/EmptyState"
 import { GanttChart } from "@/modules/projetos/GanttChart"
 import { WorkloadView } from "@/modules/projetos/WorkloadView"
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
+import { Badge } from "@/components/ui/badge"
 import { toast } from "@/lib/toast"
+
+function errDetail(err: unknown, fallback: string): string {
+  const e = err as { response?: { data?: { detail?: unknown } } }
+  return typeof e.response?.data?.detail === "string" ? e.response.data.detail : fallback
+}
 
 const DOW = ["DOM", "SEG", "TER", "QUA", "QUI", "SEX", "SÁB"]
 const MON = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"]
@@ -102,6 +112,14 @@ export default function GanttPage() {
   const [criticalById, setCriticalById] = useState<Map<string, CriticalPathItem>>(new Map())
   const [calendar, setCalendar] = useState<WorkCalendar | null>(null)
   const [absencesByUser, setAbsencesByUser] = useState<Record<string, AssigneeAbsenceItem[]>>({})
+  // Controle de baseline / travamento do cronograma.
+  const [lockState, setLockState] = useState<ScheduleLockState | null>(null)
+  const [baselineDialog, setBaselineDialog] = useState(false)
+  const [justification, setJustification] = useState("")
+  const [savingBaseline, setSavingBaseline] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [baselines, setBaselines] = useState<ScheduleBaseline[]>([])
+  const locked = lockState?.state === "locked"
 
   useEffect(() => {
     async function load() {
@@ -160,6 +178,12 @@ export default function GanttPage() {
     // Mudança de datas/horas pode empurrar sucessoras no servidor (auto-scheduling) —
     // nesse caso re-buscamos para refletir a cascata.
     const cascades = "start_date" in patch || "due_date" in patch || "estimated_hours" in patch
+    // Trava de cronograma: bloqueia só alterações de cronograma (datas/horas). Título,
+    // descrição, responsável seguem editáveis mesmo travado.
+    if (locked && cascades) {
+      toast.error("Cronograma travado. Salve um baseline com justificativa para liberar a edição.")
+      return
+    }
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)))
     try {
       await projetosApi.updateTask(projectId, id, patch)
@@ -174,6 +198,7 @@ export default function GanttPage() {
   // Reordenação por arrasto no Gantt hierárquico (muda `order` entre irmãos do mesmo nível).
   async function handleReorder(items: Array<{ id: string; order: number }>) {
     if (!projectId || items.length === 0) return
+    if (locked) { toast.error("Cronograma travado. Salve um baseline com justificativa para liberar a edição."); return }
     const orderById = new Map(items.map((i) => [i.id, i.order]))
     setTasks((prev) => prev.map((t) => (orderById.has(t.id) ? { ...t, order: orderById.get(t.id)! } : t)))
     try {
@@ -189,6 +214,7 @@ export default function GanttPage() {
 
   async function createDependency(predecessorId: string, successorId: string, depType: DependencyType = "FS", lagHours = 0) {
     if (!projectId) return
+    if (locked) { toast.error("Cronograma travado. Salve um baseline com justificativa para liberar a edição."); return }
     try {
       await projetosApi.createDependency(projectId, {
         predecessor_id: predecessorId, successor_id: successorId, dep_type: depType, lag_hours: lagHours,
@@ -202,6 +228,7 @@ export default function GanttPage() {
 
   async function deleteDependency(depId: string) {
     if (!projectId) return
+    if (locked) { toast.error("Cronograma travado. Salve um baseline com justificativa para liberar a edição."); return }
     try {
       await projetosApi.deleteDependency(projectId, depId)
       // Remover dependência pode liberar a sucessora — recarrega datas e dependências.
@@ -226,6 +253,7 @@ export default function GanttPage() {
 
   async function addStage(parentId: string) {
     if (!projectId) return
+    if (locked) { toast.error("Cronograma travado. Salve um baseline com justificativa para liberar a edição."); return }
     try {
       const stage = await projetosApi.createScheduleStage(projectId, parentId, { title: "Nova etapa" })
       setTasks((prev) => [...prev, stage])
@@ -260,6 +288,58 @@ export default function GanttPage() {
       .catch(() => { if (!cancelled) setCriticalById(new Map()) })
     return () => { cancelled = true }
   }, [projectId, rootTaskId, tasks, dependencies])
+
+  // Estado do controle de baseline (open | locked | revision) do projeto-raiz selecionado.
+  useEffect(() => {
+    if (!projectId || !rootTaskId) { setLockState(null); return }
+    let cancelled = false
+    projetosApi.getScheduleLock(projectId, rootTaskId)
+      .then((s) => { if (!cancelled) setLockState(s) })
+      .catch(() => { if (!cancelled) setLockState(null) })
+    return () => { cancelled = true }
+  }, [projectId, rootTaskId])
+
+  async function reloadLock() {
+    if (!projectId || !rootTaskId) return
+    try { setLockState(await projetosApi.getScheduleLock(projectId, rootTaskId)) } catch { /* mantém estado atual */ }
+  }
+
+  async function doSaveBaseline() {
+    if (!projectId || !rootTaskId || justification.trim().length < 3) return
+    setSavingBaseline(true)
+    try {
+      await projetosApi.saveBaseline(projectId, { root_task_id: rootTaskId, justification: justification.trim() })
+      setBaselineDialog(false)
+      setJustification("")
+      await reloadLock()
+      toast.success("Baseline salvo. Revisão aberta — edições liberadas.")
+    } catch (err) {
+      toast.error(errDetail(err, "Não foi possível salvar o baseline."))
+    } finally {
+      setSavingBaseline(false)
+    }
+  }
+
+  async function doCloseRevision() {
+    if (!projectId || !rootTaskId) return
+    try {
+      await projetosApi.closeScheduleRevision(projectId, rootTaskId)
+      await reloadLock()
+      toast.success("Revisão concluída. Cronograma re-travado.")
+    } catch (err) {
+      toast.error(errDetail(err, "Não foi possível concluir a revisão."))
+    }
+  }
+
+  async function openHistory() {
+    if (!projectId || !rootTaskId) return
+    try {
+      setBaselines(await projetosApi.listBaselines(projectId, rootTaskId))
+      setHistoryOpen(true)
+    } catch (err) {
+      toast.error(errDetail(err, "Não foi possível carregar o histórico de baselines."))
+    }
+  }
 
   // Ausências aprovadas dos responsáveis (risco "ausente no período"). Recarrega quando
   // as tarefas mudam, então cobre datas/responsável recém-setados e ausências cadastradas
@@ -543,6 +623,45 @@ export default function GanttPage() {
           </button>
         </div>
 
+        {view === "schedule" && lockState && lockState.state !== "open" && (
+          <div
+            style={{
+              display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", margin: "8px 0",
+              borderRadius: 8, border: "1px solid",
+              borderColor: locked ? "var(--af-destructive)" : "var(--af-warning)",
+              background: locked ? "#fdecec" : "#fff7e6",
+            }}
+          >
+            {locked
+              ? <Lock size={16} style={{ color: "var(--af-destructive)", flexShrink: 0 }} />
+              : <Unlock size={16} style={{ color: "var(--af-warning)", flexShrink: 0 }} />}
+            <div style={{ flex: 1, fontSize: 13, lineHeight: 1.4 }}>
+              {locked ? (
+                <><b>Cronograma travado</b> — o projeto entrou em desenvolvimento. Para alterar datas, horas, dependências ou ordem, salve um baseline com a justificativa.</>
+              ) : (
+                <><b>Revisão aberta</b> — edições do cronograma liberadas. Conclua a revisão para re-travar e registrar o compromisso.</>
+              )}
+              {lockState.baseline_count > 0 && (
+                <span style={{ color: "var(--af-muted-fg)" }}>
+                  {" · "}{lockState.baseline_count} baseline(s){lockState.latest_version ? `, atual v${lockState.latest_version}` : ""}
+                </span>
+              )}
+            </div>
+            {locked ? (
+              <Button size="sm" variant="destructive" onClick={() => { setJustification(""); setBaselineDialog(true) }}>
+                <Unlock size={14} /> Liberar alteração
+              </Button>
+            ) : (
+              <Button size="sm" onClick={() => void doCloseRevision()}>
+                <Lock size={14} /> Concluir revisão
+              </Button>
+            )}
+            <Button size="sm" variant="ghost" onClick={() => void openHistory()}>
+              <History size={14} /> Histórico
+            </Button>
+          </div>
+        )}
+
         {view === "resources" ? (
           <WorkloadView projectId={projectId} users={users} />
         ) : rootTask ? (
@@ -588,6 +707,66 @@ export default function GanttPage() {
             onSave={async (patch) => { await handleUpdate(editing.id, patch); setEditing(null) }}
           />
         )}
+
+        {/* Diálogo: salvar baseline + justificativa (abre a janela de revisão). */}
+        <Dialog open={baselineDialog} onOpenChange={(o) => { if (!savingBaseline) setBaselineDialog(o) }}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Liberar alteração do cronograma</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Será salvo um <b>baseline</b> com o cronograma atual (histórico imutável) e a janela de
+                revisão será aberta, liberando a edição. Ao concluir a revisão, o cronograma re-trava.
+              </p>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">Justificativa</label>
+                <Textarea
+                  rows={4}
+                  value={justification}
+                  onChange={(e) => setJustification(e.target.value)}
+                  placeholder="Ex.: Replanejamento por atraso de fornecedor / mudança de escopo aprovada…"
+                />
+                <p className="text-xs text-muted-foreground">Mínimo de 3 caracteres.</p>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setBaselineDialog(false)} disabled={savingBaseline}>Cancelar</Button>
+              <Button onClick={() => void doSaveBaseline()} disabled={savingBaseline || justification.trim().length < 3}>
+                {savingBaseline ? <Loader2 size={14} className="animate-spin" /> : <Unlock size={14} />} Salvar baseline e liberar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Diálogo: histórico de baselines (snapshots + justificativas). */}
+        <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+          <DialogContent className="sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Histórico de baselines do cronograma</DialogTitle>
+            </DialogHeader>
+            {baselines.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Nenhum baseline salvo ainda.</p>
+            ) : (
+              <div className="max-h-[60vh] space-y-3 overflow-y-auto">
+                {baselines.map((b) => (
+                  <div key={b.id} className="rounded-lg border p-3">
+                    <div className="flex items-center justify-between">
+                      <Badge variant="secondary">v{b.version}</Badge>
+                      <span className="text-xs text-muted-foreground">
+                        {new Date(b.created_at).toLocaleString("pt-BR")} · {b.snapshot?.tasks?.length ?? 0} itens
+                      </span>
+                    </div>
+                    <p className="mt-2 text-sm">{b.justification}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setHistoryOpen(false)}>Fechar</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     )
   }

@@ -387,6 +387,14 @@ export default function ProjectStatusesConfigPage() {
     setStatuses((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
   }
 
+  async function handleSetLocksSchedule(status: ProjectStatus, locks: boolean) {
+    if (!selectedProjectId || !selectedFunnelId) return
+    const updated = await projetosApi.updateStatus(selectedProjectId, selectedFunnelId, status.id, {
+      locks_schedule: locks,
+    })
+    setStatuses((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+  }
+
   async function handleSetChildrenToFunnel(status: ProjectStatus, funnelId: string | null) {
     if (!selectedProjectId || !selectedFunnelId) return
     // Sem envio de filhos não faz sentido manter o destino dos netos: zera junto.
@@ -817,6 +825,21 @@ export default function ProjectStatusesConfigPage() {
                       Levar filhos (etapas) junto
                     </label>
                   )}
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-2">
+                  <label
+                    className="flex items-center gap-2 text-xs text-muted-foreground"
+                    title="Quando o projeto-raiz entra nesta etapa, o cronograma é comprometido (entrada em desenvolvimento): alterações passam a exigir salvar um baseline + justificativa."
+                  >
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 cursor-pointer rounded border-input accent-primary"
+                      checked={status.locks_schedule}
+                      onChange={(e) => void handleSetLocksSchedule(status, e.target.checked)}
+                    />
+                    Trava o cronograma (entrada = desenvolvimento)
+                  </label>
+                  {status.locks_schedule && <Badge variant="warning" className="text-[10px]">congela baseline</Badge>}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <Label className="text-xs whitespace-nowrap text-muted-foreground">

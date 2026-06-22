@@ -32,6 +32,11 @@ class ProjectAutomationAction(str, enum.Enum):
     ADD_COMMENT = "add_comment"        # registra um comentário no histórico
 
 
+class ProjectStageAgentKind(str, enum.Enum):
+    ASK = "ask"                                    # pergunta livre ao gateway IDCortex
+    CLASSIFY_AND_ADVANCE = "classify_and_advance"  # classifica matriz Impacto×Esforço e avança o card
+
+
 class Project(TenantBase):
     __tablename__ = "project_projects"
 
@@ -134,6 +139,10 @@ class ProjectStatusConfig(TenantBase):
     priority_mode: Mapped[str] = mapped_column(String(10), nullable=False, default="edit")
     # OBRIG.: exige a demanda pontuada (Impacto × Esforço) para sair desta etapa.
     priority_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Controle de baseline: quando o card-raiz de planejamento entra nesta etapa, o cronograma
+    # do projeto é "comprometido" e passa a exigir baseline + justificativa para alterar
+    # (ver ScheduleBaselineService). Marca tipicamente a etapa "Em Desenvolvimento".
+    locks_schedule: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -199,6 +208,11 @@ class ProjectTask(TenantBase):
     # SLA: quando o card entrou na etapa atual + estado calculado pela rotina de SLA.
     status_entered_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     sla_state: Mapped[str] = mapped_column(String(12), nullable=False, default="none")  # none|ok|warning|breached
+    # Controle de baseline (só relevante no card-raiz de planejamento). Quando o projeto entra
+    # em desenvolvimento (etapa locks_schedule), grava-se schedule_committed_at e o cronograma
+    # passa a ser governado: edição só com baseline+justificativa (janela de revisão).
+    schedule_committed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    schedule_revision_open: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -265,6 +279,36 @@ class ProjectTaskDependency(TenantBase):
     lag_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # Folga/antecipação em horas úteis (aceita negativo = lead/antecipação).
     lag_hours: Mapped[Decimal] = mapped_column(Numeric(8, 2), nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ProjectScheduleBaseline(TenantBase):
+    """Linha de base (baseline) versionada do cronograma de um projeto-raiz. Cada registro é um
+    snapshot imutável do cronograma ANTES de uma alteração, com a justificativa que abriu a
+    janela de revisão. Forma o histórico de change-control do cronograma."""
+    __tablename__ = "project_schedule_baselines"
+    __table_args__ = (
+        UniqueConstraint("root_task_id", "version", name="uq_schedule_baseline_root_version"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("project_projects.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    root_task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("project_tasks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    justification: Mapped[str] = mapped_column(Text, nullable=False)
+    # {tasks: [{task_id,title,level,start_date,due_date,estimated_hours,percent_complete,status_name}],
+    #  dependencies: [{predecessor_id,successor_id,dep_type,lag_hours}]}
+    snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -514,6 +558,72 @@ class ProjectAutomationRule(TenantBase):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ProjectStageAgentBinding(TenantBase):
+    """Vínculo de um agente IDCortex a uma etapa (raia) do kanban.
+
+    Quando um card entra na etapa, o runner chama o gateway /gateway/ask com
+    o prompt configurado e registra a execução em project_agent_executions.
+    """
+
+    __tablename__ = "project_stage_agent_bindings"
+    __table_args__ = (UniqueConstraint("status_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("project_projects.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    funnel_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("project_funnels.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    status_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("project_status_configs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name: Mapped[str] = mapped_column(String(140), nullable=False)
+    agent_kind: Mapped[str] = mapped_column(String(40), nullable=False, default=ProjectStageAgentKind.ASK.value)
+    agent_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    usuario: Mapped[str] = mapped_column(String(255), nullable=False)
+    prompt_template: Mapped[str] = mapped_column(Text, nullable=False)
+    gateway_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    gateway_client_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    gateway_client_secret: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    continue_thread: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    add_comment_on_success: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ProjectAgentExecution(TenantBase):
+    """Log de execução de um agente vinculado a uma etapa."""
+
+    __tablename__ = "project_agent_executions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("project_tasks.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    binding_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("project_stage_agent_bindings.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    thread_id: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    request_payload: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    response_payload: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    answer_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class ProjectScheduleBinding(TenantBase):

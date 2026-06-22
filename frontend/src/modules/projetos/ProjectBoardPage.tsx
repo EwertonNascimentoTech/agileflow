@@ -27,6 +27,11 @@ import { defaultSelectOptions } from "@/modules/projetos/defaultFormUtils"
 import { normalizeFieldType, parseFieldOptions } from "@/modules/projetos/FormFieldRenderer"
 import {
   productOwnerPersons,
+  filterPlanningRootsByPo,
+  planningRootTasks,
+  buildEffectivePoByTaskId,
+  buildPoByOriginTaskId,
+  buildPoMatchByFormDimensions,
   taskMatches,
   usePersistedTaskFilters,
   type BoardFilterState,
@@ -46,6 +51,7 @@ import { formatMissingFieldsMessage, resolveFieldMode, resolveSectionMode, valid
 import { getRowBreak, groupIntoRows } from "@/modules/projetos/layout"
 import { toast } from "@/lib/toast"
 import { funnelAccessLevel } from "@/lib/permissions"
+import { canEditTaskOnBoard, canMoveTaskOnBoard } from "@/modules/projetos/taskMovePermissions"
 
 function personToUser(p: Person): User {
   return { id: p.id, full_name: p.full_name, email: p.email } as unknown as User
@@ -514,6 +520,7 @@ function FilterDropdown({
   onToggle,
   selectedCount,
   align = "start",
+  menuClassName,
   children,
 }: {
   label: string
@@ -521,6 +528,7 @@ function FilterDropdown({
   onToggle: () => void
   selectedCount: number
   align?: "start" | "end"
+  menuClassName?: string
   children: React.ReactNode
 }) {
   return (
@@ -530,7 +538,7 @@ function FilterDropdown({
         {selectedCount > 0 && <span className="filter-count">{selectedCount}</span>}
         <ChevronDown size={12} />
       </button>
-      {open && <div className="dd-menu">{children}</div>}
+      {open && <div className={`dd-menu${menuClassName ? ` ${menuClassName}` : ""}`}>{children}</div>}
     </div>
   )
 }
@@ -771,11 +779,32 @@ export default function ProjectBoardPage() {
   )
 
   const planningCardOptions = useMemo(
-    () => tasks
-      .filter((t) => t.planning_kind === "projeto" || t.planning_kind === "programa")
+    () => filterPlanningRootsByPo(planningRootTasks(tasks), productOwners)
       .sort((a, b) => a.title.localeCompare(b.title, "pt-BR")),
-    [tasks],
+    [tasks, productOwners],
   )
+
+  const effectivePoByTaskId = useMemo(() => buildEffectivePoByTaskId(tasks), [tasks])
+
+  const poByOriginTaskId = useMemo(() => buildPoByOriginTaskId(tasks), [tasks])
+
+  const matchPoIdsByForm = useMemo(
+    () => buildPoMatchByFormDimensions(
+      productOwnerPersons(persons),
+      defaultFormFields,
+    ),
+    [persons, defaultFormFields],
+  )
+
+  // Remove seleções de projeto/programa que não pertencem ao PO filtrado.
+  useEffect(() => {
+    if (productOwners.length === 0) return
+    const allowed = new Set(planningCardOptions.map((c) => c.id))
+    setPlanningCards((prev) => {
+      const next = prev.filter((id) => allowed.has(id))
+      return next.length === prev.length ? prev : next
+    })
+  }, [productOwners, planningCardOptions, setPlanningCards])
 
   const assigneeOptions = useMemo(() => {
     const ids = new Set<string>()
@@ -818,6 +847,20 @@ export default function ProjectBoardPage() {
   const isBasicUser =
     user?.role === "company_user" &&
     (userRoleName === "basic" || userRoleName === "")
+
+  function isUserAssignee(task: ProjectTask): boolean {
+    const authPersonId = persons.find((p) => p.user_id === user?.id)?.id
+    return Boolean(
+      task.assigned_to &&
+      (task.assigned_to === authPersonId || task.assigned_to === user?.id),
+    )
+  }
+
+  function funnelAccessForTask(task: ProjectTask) {
+    const status = statuses.find((s) => s.id === task.status_id)
+    const funnelId = status?.funnel_id ?? selectedFunnelId
+    return funnels.find((f) => f.id === funnelId)?.access_control
+  }
 
   useEffect(() => {
     setView(resolveViewFromPath(location.pathname))
@@ -1054,12 +1097,19 @@ export default function ProjectBoardPage() {
 
   async function handleMove(task: ProjectTask, toStatusId: string) {
     if (!projectId || task.status_id === toStatusId) return
-    if (!canManageFunnel) {
-      toast.error("Você só pode visualizar este kanban — sem permissão para mover cards.")
-      return
-    }
     const fromStatus = statuses.find((s) => s.id === task.status_id)
     const toStatus = statuses.find((s) => s.id === toStatusId)
+    const isAssignee = isUserAssignee(task)
+    if (!canMoveTaskOnBoard(
+      user,
+      fromStatus,
+      toStatus,
+      funnelAccessForTask(task),
+      isAssignee,
+    )) {
+      toast.error("Você não tem permissão para mover este card para essa etapa.")
+      return
+    }
     const isForward = !!(fromStatus && toStatus && toStatus.order > fromStatus.order)
     if (task.demand_type_id && isForward) {
       try {
@@ -1262,8 +1312,13 @@ export default function ProjectBoardPage() {
   }
 
   const selectedFunnel = funnels.find((f) => f.id === selectedFunnelId) ?? null
-  // Nível de acesso da função do usuário a ESTE kanban. "view"/"none" → board read-only.
   const canManageFunnel = funnelAccessLevel(selectedFunnel?.access_control, user) === "manage"
+  const selectedTaskStatus = selectedTask
+    ? statuses.find((s) => s.id === selectedTask.status_id)
+    : undefined
+  const canEditSelectedTask = selectedTask
+    ? canEditTaskOnBoard(user, selectedTaskStatus, funnelAccessForTask(selectedTask), isUserAssignee(selectedTask))
+    : false
   const filterState: BoardFilterState = {
     q: searchQuery,
     assignees,
@@ -1276,6 +1331,9 @@ export default function ProjectBoardPage() {
     areas,
     planningScopeIds,
     groupedChildIds,
+    effectivePoByTaskId,
+    poByOriginTaskId,
+    matchPoIdsByForm,
   }
   const funnelTasks = tasks.filter((t) => taskMatches(t, filterState))
 
@@ -1393,19 +1451,26 @@ export default function ProjectBoardPage() {
           ))}
         </FilterDropdown>
 
-        <FilterDropdown label="Projeto / Programa" open={openMenu === "planning"} onToggle={() => setOpenMenu(openMenu === "planning" ? null : "planning")} selectedCount={planningCards.length}>
+        <FilterDropdown label="Projeto / Programa" open={openMenu === "planning"} onToggle={() => setOpenMenu(openMenu === "planning" ? null : "planning")} selectedCount={planningCards.length} menuClassName="dd-menu-wide">
           <div className="dd-head">Projetos e programas criados</div>
+          {productOwners.length > 0 && (
+            <div className="dd-item" style={{ opacity: 0.75, pointerEvents: "none", fontSize: 12 }}>
+              Filtrado pelo Product Owner selecionado
+            </div>
+          )}
           {planningCardOptions.length === 0 ? (
-            <div className="dd-item" style={{ opacity: 0.6, pointerEvents: "none" }}>Nenhum projeto ou programa</div>
+            <div className="dd-item" style={{ opacity: 0.6, pointerEvents: "none" }}>
+              {productOwners.length > 0 ? "Nenhum projeto/programa deste PO" : "Nenhum projeto ou programa"}
+            </div>
           ) : planningCardOptions.map((c) => {
             const checked = planningCards.includes(c.id)
             return (
               <div key={c.id} className="dd-item" onClick={() => toggleMulti(setPlanningCards, planningCards, c.id)}>
                 <span className={`check ${checked ? "checked" : ""}`}>{checked && <Check size={11} />}</span>
-                <span className="chip muted" style={{ fontSize: 9 }}>
+                <span className="chip muted" style={{ fontSize: 9, flexShrink: 0 }}>
                   {c.planning_kind === "programa" ? "Programa" : "Projeto"}
                 </span>
-                <span style={{ flex: 1 }}>{c.title}</span>
+                <span className="dd-item-label">{c.title}</span>
               </div>
             )
           })}
@@ -1605,6 +1670,7 @@ export default function ProjectBoardPage() {
         projectId={projectId}
         task={selectedTask}
         isBasicUser={isBasicUser}
+        canEditTask={canEditSelectedTask}
         onSaved={(updated) => {
           setTasks((prev) => prev.map((t) => t.id === updated.id ? updated : t))
           void reloadTasks()

@@ -1,7 +1,8 @@
-import { LayoutGrid, BarChart3, FileText } from "lucide-react"
+import { LayoutGrid, BarChart3, FileText, Users } from "lucide-react"
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import PODashboardPage from "@/modules/projetos/PODashboardPage"
+import PoSyncPage from "@/modules/projetos/PoSyncPage"
 import ReportsPage from "@/modules/projetos/ReportsPage"
 import StatusReportsPage from "@/modules/projetos/StatusReportsPage"
 
@@ -10,7 +11,7 @@ import StatusReportsPage from "@/modules/projetos/StatusReportsPage"
  * Status Reports por recorte em abas, dando ao coordenador controle de todos os
  * POs/projetos numa única tela.
  */
-export default function PMODashboardPage({ initialTab = "portfolio" }: { initialTab?: "portfolio" | "relatorios" | "status-reports" }) {
+export default function PMODashboardPage({ initialTab = "portfolio" }: { initialTab?: "portfolio" | "po-sync" | "relatorios" | "status-reports" }) {
   return (
     <div className="w-full space-y-4">
       <div>
@@ -25,6 +26,9 @@ export default function PMODashboardPage({ initialTab = "portfolio" }: { initial
           <TabsTrigger value="portfolio" className="gap-1.5">
             <LayoutGrid className="h-4 w-4" /> Portfólio
           </TabsTrigger>
+          <TabsTrigger value="po-sync" className="gap-1.5">
+            <Users className="h-4 w-4" /> PO Sync
+          </TabsTrigger>
           <TabsTrigger value="relatorios" className="gap-1.5">
             <BarChart3 className="h-4 w-4" /> Relatórios
           </TabsTrigger>
@@ -35,6 +39,9 @@ export default function PMODashboardPage({ initialTab = "portfolio" }: { initial
 
         <TabsContent value="portfolio" className="mt-4">
           <PODashboardPage />
+        </TabsContent>
+        <TabsContent value="po-sync" className="mt-4">
+          <PoSyncPage />
         </TabsContent>
         <TabsContent value="relatorios" className="mt-4">
           <ReportsPage />

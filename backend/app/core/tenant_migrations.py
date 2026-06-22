@@ -2711,6 +2711,136 @@ async def _step_065_projetos_move_out_permissions(conn: AsyncConnection, schema:
         ))
 
 
+async def _step_066_projetos_stage_agents(conn: AsyncConnection, schema: str) -> None:
+    """Agentes IDCortex vinculados a etapas do kanban + log de execuções."""
+    if not await _table_exists(conn, schema, "project_status_configs"):
+        return
+    if not await _table_exists(conn, schema, "project_stage_agent_bindings"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_stage_agent_bindings (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                project_id UUID NOT NULL REFERENCES {schema}.project_projects(id) ON DELETE CASCADE,
+                funnel_id UUID NOT NULL REFERENCES {schema}.project_funnels(id) ON DELETE CASCADE,
+                status_id UUID NOT NULL REFERENCES {schema}.project_status_configs(id) ON DELETE CASCADE,
+                name VARCHAR(140) NOT NULL,
+                agent_id VARCHAR(120) NOT NULL,
+                usuario VARCHAR(255) NOT NULL,
+                prompt_template TEXT NOT NULL,
+                gateway_url VARCHAR(500),
+                gateway_client_id VARCHAR(255),
+                gateway_client_secret VARCHAR(255),
+                continue_thread BOOLEAN NOT NULL DEFAULT FALSE,
+                add_comment_on_success BOOLEAN NOT NULL DEFAULT TRUE,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMP NOT NULL DEFAULT now(),
+                updated_at TIMESTAMP NOT NULL DEFAULT now(),
+                UNIQUE(status_id)
+            )
+        """))
+    if not await _table_exists(conn, schema, "project_agent_executions"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_agent_executions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                task_id UUID NOT NULL REFERENCES {schema}.project_tasks(id) ON DELETE CASCADE,
+                binding_id UUID NOT NULL REFERENCES {schema}.project_stage_agent_bindings(id) ON DELETE CASCADE,
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                thread_id VARCHAR(120),
+                request_payload JSONB,
+                response_payload JSONB,
+                answer_message TEXT,
+                error_message TEXT,
+                created_at TIMESTAMP NOT NULL DEFAULT now()
+            )
+        """))
+
+
+async def _step_067_projetos_stage_agent_kind(conn: AsyncConnection, schema: str) -> None:
+    """Tipo de agente: ask | classify_and_advance."""
+    if not await _table_exists(conn, schema, "project_stage_agent_bindings"):
+        return
+    if not await _column_exists(conn, schema, "project_stage_agent_bindings", "agent_kind"):
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.project_stage_agent_bindings "
+            f"ADD COLUMN agent_kind VARCHAR(40) NOT NULL DEFAULT 'ask'"
+        ))
+
+
+async def _step_068_projetos_schedule_baselines(conn: AsyncConnection, schema: str) -> None:
+    """Controle de baseline/travamento do cronograma:
+      - project_status_configs.locks_schedule (etapa que congela o cronograma ao entrar).
+      - project_tasks.schedule_committed_at / schedule_revision_open (estado no card-raiz).
+      - tabela project_schedule_baselines (snapshots versionados + justificativa).
+      - default: marca etapas de desenvolvimento/homologação/prod como locks_schedule.
+      - backfill: trava projetos-raiz que já estão numa etapa locks_schedule."""
+    if not await _table_exists(conn, schema, "project_status_configs"):
+        return
+
+    if not await _column_exists(conn, schema, "project_status_configs", "locks_schedule"):
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.project_status_configs "
+            f"ADD COLUMN locks_schedule BOOLEAN NOT NULL DEFAULT FALSE"
+        ))
+    if not await _column_exists(conn, schema, "project_tasks", "schedule_committed_at"):
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.project_tasks ADD COLUMN schedule_committed_at TIMESTAMP"
+        ))
+    if not await _column_exists(conn, schema, "project_tasks", "schedule_revision_open"):
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.project_tasks "
+            f"ADD COLUMN schedule_revision_open BOOLEAN NOT NULL DEFAULT FALSE"
+        ))
+
+    if not await _table_exists(conn, schema, "project_schedule_baselines"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_schedule_baselines (
+                id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                project_id    UUID NOT NULL REFERENCES {schema}.project_projects(id) ON DELETE CASCADE,
+                root_task_id  UUID NOT NULL REFERENCES {schema}.project_tasks(id) ON DELETE CASCADE,
+                version       INTEGER NOT NULL DEFAULT 1,
+                justification TEXT NOT NULL,
+                snapshot      JSONB NOT NULL DEFAULT '{{}}',
+                created_by    UUID,
+                created_at    TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_schedule_baseline_root_version UNIQUE (root_task_id, version)
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_schedule_baselines_root "
+            f"ON {schema}.project_schedule_baselines(root_task_id)"
+        ))
+
+    # Default: etapas de execução congelam o cronograma (entrada = desenvolvimento em diante).
+    # Só aplica uma vez (enquanto nenhuma etapa estiver marcada), para não sobrescrever ajustes
+    # manuais do admin em execuções futuras do step.
+    already = await conn.execute(text(
+        f"SELECT 1 FROM {schema}.project_status_configs WHERE locks_schedule = TRUE LIMIT 1"
+    ))
+    if already.scalar() is None:
+        await conn.execute(text(f"""
+            UPDATE {schema}.project_status_configs
+               SET locks_schedule = TRUE
+             WHERE is_initial = FALSE
+               AND (
+                    name ILIKE '%desenvolv%' OR name ILIKE '%devops%' OR name ILIKE '%devsecops%'
+                 OR name ILIKE '%homolog%'   OR name ILIKE '%executar%'
+                 OR name ILIKE '%prod%'      OR name ILIKE '%hml%'
+               )
+        """))
+
+    # Backfill: projetos-raiz cujo status atual já trava → comprometer o cronograma agora.
+    if not await _table_exists(conn, schema, "project_tasks"):
+        return
+    await conn.execute(text(f"""
+        UPDATE {schema}.project_tasks t
+           SET schedule_committed_at = COALESCE(t.status_entered_at, now())
+          FROM {schema}.project_status_configs sc
+         WHERE t.status_id = sc.id
+           AND sc.locks_schedule = TRUE
+           AND t.planning_kind IN ('projeto', 'programa')
+           AND t.schedule_committed_at IS NULL
+    """))
+
+
 # Lista ordenada de steps. Adicionar novos no final.
 STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("001_funnels", _step_001_funnels),
@@ -2778,6 +2908,9 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("063_projetos_status_reports", _step_063_projetos_status_reports),
     ("064_projetos_task_anexos", _step_064_projetos_task_anexos),
     ("065_projetos_move_out_permissions", _step_065_projetos_move_out_permissions),
+    ("066_projetos_stage_agents", _step_066_projetos_stage_agents),
+    ("067_projetos_stage_agent_kind", _step_067_projetos_stage_agent_kind),
+    ("068_projetos_schedule_baselines", _step_068_projetos_schedule_baselines),
 ]
 
 

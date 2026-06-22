@@ -56,6 +56,11 @@ from app.modules.projetos.schemas import (
     ProjectResponse,
     ProjectScheduleBindingResponse,
     ProjectScheduleBindingsUpsert,
+    ProjectStageAgentBindingCreate,
+    ProjectStageAgentBindingResponse,
+    ProjectStageAgentBindingUpdate,
+    ProjectAgentExecutionResponse,
+    ProjectAgentExecutionLogPage,
     ProjectStatusCreate,
     ProjectStatusReorder,
     ProjectStatusResponse,
@@ -67,6 +72,10 @@ from app.modules.projetos.schemas import (
     ProjectTaskCommentCreate,
     ProjectTaskCommentResponse,
     ProjectTaskCreate,
+    ScheduleBaselineCreateIn,
+    ScheduleBaselineResponse,
+    ScheduleLockState,
+    ScheduleRevisionCloseIn,
     ScheduleStageCreate,
     TaskImportResult,
     ProjectTaskResponse,
@@ -92,6 +101,8 @@ from app.modules.projetos.schemas import (
 )
 from app.modules.projetos.service import (
     PoPortfolioService,
+    PoSyncService,
+    ScheduleBaselineService,
     PriorityConfigService,
     PriorityScoreService,
     ProjectAutomationService,
@@ -106,6 +117,7 @@ from app.modules.projetos.service import (
     ProjectMemberService,
     ProjectReportsService,
     ProjectScheduleBindingService,
+    ProjectStageAgentService,
     ProjectService,
     ProjectStatusService,
     ProjectTaskCommentService,
@@ -683,6 +695,19 @@ async def get_po_portfolio(
     return await PoPortfolioService.build(ctx.db, po_id, diretoria=diretoria, area=area)
 
 
+@router.get("/po-sync")
+async def get_po_sync(
+    diretoria: Optional[str] = Query(None, description="Recorta a análise pela diretoria."),
+    area: Optional[str] = Query(None, description="Recorta a análise pela área."),
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Análise de portfólio para a cerimônia **PO Sync**: lidera por PO e aplica as regras da
+    metodologia (fase pela situação real, % execução descontando "Não realizado", saúde de
+    prazo com média/mediana/outliers e lacunas de baseline). Read-only. Retorna dict rico
+    (sem response_model, como o preview do Status Report) para não filtrar campos aninhados."""
+    return await PoSyncService.build(ctx.db, diretoria=diretoria, area=area)
+
+
 @router.post("/status-reports/preview")
 async def preview_status_report(
     data: StatusReportPreviewIn,
@@ -980,6 +1005,59 @@ async def get_critical_path(
 
 
 # ─────────────────────────────────────────────
+# Baseline / travamento do cronograma
+# ─────────────────────────────────────────────
+
+
+@router.get("/projects/{project_id}/schedule-lock", response_model=ScheduleLockState)
+async def get_schedule_lock(
+    project_id: uuid.UUID,
+    root: uuid.UUID = Query(..., description="Card de planejamento (raiz do cronograma)"),
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Estado do controle de baseline do projeto: open | locked | revision."""
+    return await ScheduleBaselineService.lock_state(ctx.db, project_id, root)
+
+
+@router.get("/projects/{project_id}/baselines", response_model=list[ScheduleBaselineResponse])
+async def list_baselines(
+    project_id: uuid.UUID,
+    root: uuid.UUID = Query(..., description="Card de planejamento (raiz do cronograma)"),
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Histórico de baselines (snapshots versionados + justificativa), mais recente primeiro."""
+    return await ScheduleBaselineService.list_baselines(ctx.db, project_id, root)
+
+
+@router.post("/projects/{project_id}/baselines", response_model=ScheduleBaselineResponse, status_code=201)
+async def save_baseline(
+    project_id: uuid.UUID,
+    data: ScheduleBaselineCreateIn,
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Salva o baseline (snapshot atual + justificativa) e ABRE a janela de revisão,
+    liberando a edição do cronograma travado."""
+    if not await _has_permission(ctx, "projetos.task.manage"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sem permissão para editar o cronograma.")
+    return await ScheduleBaselineService.save_baseline(
+        ctx.db, project_id, data.root_task_id, data.justification, ctx.user.id
+    )
+
+
+@router.post("/projects/{project_id}/baselines/close-revision", response_model=ScheduleLockState)
+async def close_schedule_revision(
+    project_id: uuid.UUID,
+    data: ScheduleRevisionCloseIn,
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Conclui a revisão e RE-TRAVA o cronograma. Próxima alteração exige novo baseline."""
+    if not await _has_permission(ctx, "projetos.task.manage"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sem permissão para editar o cronograma.")
+    await ScheduleBaselineService.close_revision(ctx.db, project_id, data.root_task_id)
+    return await ScheduleBaselineService.lock_state(ctx.db, project_id, data.root_task_id)
+
+
+# ─────────────────────────────────────────────
 # Automações por etapa
 # ─────────────────────────────────────────────
 
@@ -1129,6 +1207,72 @@ async def delete_schedule_binding(
     _=Depends(_can_status_manage),
 ):
     await ProjectScheduleBindingService.delete(ctx.db, status_id)
+
+
+# ─────────────────────────────────────────────
+# Agentes IDCortex por etapa
+# ─────────────────────────────────────────────
+
+@router.get("/config/stage-agents", response_model=list[ProjectStageAgentBindingResponse])
+async def list_stage_agents(
+    project_id: Optional[uuid.UUID] = Query(None),
+    ctx: ModuleContext = Depends(_ctx),
+):
+    return await ProjectStageAgentService.list(ctx.db, project_id)
+
+
+@router.post("/config/stage-agents", response_model=ProjectStageAgentBindingResponse, status_code=201)
+async def create_stage_agent(
+    data: ProjectStageAgentBindingCreate,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_automation_manage),
+):
+    return await ProjectStageAgentService.create(ctx.db, data)
+
+
+@router.patch("/config/stage-agents/{binding_id}", response_model=ProjectStageAgentBindingResponse)
+async def update_stage_agent(
+    binding_id: uuid.UUID,
+    data: ProjectStageAgentBindingUpdate,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_automation_manage),
+):
+    return await ProjectStageAgentService.update(ctx.db, binding_id, data)
+
+
+@router.delete("/config/stage-agents/{binding_id}", status_code=204)
+async def delete_stage_agent(
+    binding_id: uuid.UUID,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_automation_manage),
+):
+    await ProjectStageAgentService.delete(ctx.db, binding_id)
+
+
+@router.get("/tasks/{task_id}/agent-executions", response_model=list[ProjectAgentExecutionResponse])
+async def list_task_agent_executions(
+    task_id: uuid.UUID,
+    ctx: ModuleContext = Depends(_ctx),
+):
+    return await ProjectStageAgentService.list_executions(ctx.db, task_id)
+
+
+@router.get("/config/agent-executions", response_model=ProjectAgentExecutionLogPage)
+async def list_agent_execution_logs(
+    status: Optional[str] = Query(None, pattern=r"^(pending|success|failed)$"),
+    binding_id: Optional[uuid.UUID] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_automation_manage),
+):
+    return await ProjectStageAgentService.list_execution_logs(
+        ctx.db,
+        status=status,
+        binding_id=binding_id,
+        limit=limit,
+        offset=offset,
+    )
 
 
 # ─────────────────────────────────────────────

@@ -77,5 +77,10 @@ class Settings(BaseSettings):
     MINIO_BUCKET_DEFAULT: str = "saas-storage"
     MINIO_SECURE: bool = False
 
+    # ── IDCortex Gateway (agentes por etapa do kanban) ──
+    IDCORTEX_GATEWAY_URL: str = "https://idcortex-dev.sistemafiea.com.br/gateway/ask"
+    IDCORTEX_CLIENT_ID: str = ""
+    IDCORTEX_CLIENT_SECRET: str = ""
+
 
 settings = Settings()

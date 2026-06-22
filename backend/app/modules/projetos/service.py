@@ -1,18 +1,23 @@
 from __future__ import annotations
 
+import json
 import math
+import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
 
+import httpx
 from fastapi import HTTPException, status
 from sqlalchemy import and_, delete as sa_delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import settings
 from app.modules.projetos.models import (
+    ProjectAgentExecution,
     ProjectAutomationAction,
     ProjectAutomationRule,
     ProjectCardField,
@@ -31,7 +36,9 @@ from app.modules.projetos.models import (
     ProjectPriorityScore,
     ProjectPriorityScoreHistory,
     ProjectPrioritySettings,
+    ProjectScheduleBaseline,
     ProjectScheduleBinding,
+    ProjectStageAgentBinding,
     ProjectStatusDefaultFormLink,
     ProjectStatusSectionLink,
     ProjectStatusConfig,
@@ -64,6 +71,9 @@ from app.modules.projetos.schemas import (
     PriorityScoreInput,
     PrioritySettingsUpdate,
     ProjectScheduleBindingItem,
+    ProjectStageAgentBindingCreate,
+    ProjectStageAgentBindingResponse,
+    ProjectStageAgentBindingUpdate,
     ScheduleStageCreate,
     TaskDependencyCreate,
     WorkloadCell,
@@ -1692,14 +1702,33 @@ class ProjectTaskService:
         return person_id is not None and task.assigned_to == person_id
 
     @staticmethod
+    def _role_can_work_in_status(
+        current_user: Optional[User],
+        status_obj: Optional[ProjectStatusConfig],
+    ) -> bool:
+        """Função autorizada a editar cards nesta etapa (move_in e/ou move_out configurados)."""
+        if not status_obj or not current_user:
+            return False
+        if current_user.role in (UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN):
+            return True
+        move_in = status_obj.move_in_role_ids or []
+        move_out = status_obj.move_out_role_ids or []
+        if not move_in and not move_out:
+            return False
+        in_ok = not move_in or ProjectTaskService._role_allowed_for_move_list(current_user, move_in)
+        out_ok = not move_out or ProjectTaskService._role_allowed_for_move_list(current_user, move_out)
+        return in_ok and out_ok
+
+    @staticmethod
     async def _check_funnel_writable(
         db: AsyncSession,
         funnel_id: Optional[uuid.UUID],
         current_user: Optional[User],
         *,
         task: Optional[ProjectTask] = None,
+        status_id: Optional[uuid.UUID] = None,
     ) -> None:
-        """Bloqueia escrita num kanban view/none — exceto o responsável (assignee) do card."""
+        """Bloqueia escrita num kanban view/none — exceto responsável ou função autorizada na etapa."""
         level = await ProjectTaskService._funnel_access(db, funnel_id, current_user)
         if level == "manage":
             return
@@ -1710,10 +1739,41 @@ class ProjectTaskService:
             )
         if task and await ProjectTaskService._is_task_assignee(db, current_user, task):
             return
+        sid = status_id or (task.status_id if task else None)
+        if sid:
+            status_obj = await db.get(ProjectStatusConfig, sid)
+            if status_obj and ProjectTaskService._role_can_work_in_status(current_user, status_obj):
+                return
         raise HTTPException(
             status_code=403,
             detail="Você só pode visualizar este kanban — sem permissão para gerenciar os cards.",
         )
+
+    @staticmethod
+    async def _check_funnel_access_for_move(
+        db: AsyncSession,
+        source_status: ProjectStatusConfig,
+        target_status: ProjectStatusConfig,
+        current_user: Optional[User],
+        task: Optional[ProjectTask],
+    ) -> None:
+        """Kanban 'view' ainda permite mover se move_out/move_in da etapa autorizam a função."""
+        if current_user is None:
+            return
+        for st in (source_status, target_status):
+            level = await ProjectTaskService._funnel_access(db, st.funnel_id, current_user)
+            if level == "none":
+                raise HTTPException(
+                    status_code=403,
+                    detail="Você não tem acesso a este kanban.",
+                )
+        if task and await ProjectTaskService._is_task_assignee(db, current_user, task):
+            return
+        src_level = await ProjectTaskService._funnel_access(db, source_status.funnel_id, current_user)
+        tgt_level = await ProjectTaskService._funnel_access(db, target_status.funnel_id, current_user)
+        if src_level == "manage" and tgt_level == "manage":
+            return
+        # view (parcial ou total): move_in/move_out já validados pelo chamador.
 
     @staticmethod
     async def _funnel_id_of_status(db: AsyncSession, status_id: Optional[uuid.UUID]) -> Optional[uuid.UUID]:
@@ -2392,6 +2452,8 @@ class ProjectTaskService:
         await ProjectAutomationRunner.run_on_enter(db, project_id, task, status_obj)
         await db.commit()
         await db.refresh(task)
+        if status_obj:
+            await ProjectAgentRunner.run_on_enter(db, project_id, task, status_obj)
         # Card novo com pai/origem herda a priorização da família, se houver.
         if task.parent_task_id or task.origin_task_id:
             await PriorityScoreService.sync_family(db, task.id)
@@ -2451,14 +2513,17 @@ class ProjectTaskService:
         current_user: Optional[User] = None,
     ) -> ProjectTask:
         task = await ProjectTaskService.get(db, project_id, task_id)
-        # Kanban "somente visualizar"/"sem acesso" para a função do usuário: bloqueia
-        # qualquer edição de cards já existentes neste kanban.
-        if current_user is not None:
+        payload_preview = data.model_dump(exclude_unset=True)
+        status_will_change_early = (
+            "status_id" in payload_preview and payload_preview["status_id"] != task.status_id
+        )
+        # Kanban "somente visualizar": bloqueia edição, exceto mudança de etapa (validada depois).
+        if current_user is not None and not status_will_change_early:
             source_funnel_id = await ProjectTaskService._funnel_id_of_status(db, task.status_id)
             await ProjectTaskService._check_funnel_writable(
                 db, source_funnel_id, current_user, task=task,
             )
-        payload = data.model_dump(exclude_unset=True)
+        payload = payload_preview
         if "due_date" in payload:
             payload["due_date"] = _to_naive_utc(payload.get("due_date"))
         if "start_date" in payload:
@@ -2544,9 +2609,8 @@ class ProjectTaskService:
                 source_status = source_status_row.scalar_one_or_none()
                 ProjectTaskService._check_move_out_permission(source_status, current_user)
                 ProjectTaskService._check_move_permission(target_status, current_user)
-                # E o kanban de destino não pode ser "somente visualizar"/"sem acesso".
-                await ProjectTaskService._check_funnel_writable(
-                    db, target_status.funnel_id, current_user, task=task,
+                await ProjectTaskService._check_funnel_access_for_move(
+                    db, source_status, target_status, current_user, task,
                 )
 
         # O card mudou de etapa? (calculado antes do setattr)
@@ -2558,6 +2622,10 @@ class ProjectTaskService:
             await ProjectTaskService._enforce_priority_gate(db, task)
 
         schedule_changed = any(k in payload for k in ("start_date", "due_date", "estimated_hours"))
+        # Trava de cronograma: se o projeto está comprometido (em desenvolvimento) e sem revisão
+        # aberta, alterar datas/horas é bloqueado (423). Progresso/etapa/metadados seguem livres.
+        if schedule_changed:
+            await ScheduleBaselineService.assert_editable(db, project_id, task.id)
         prev_hours = task.estimated_hours
         hours_changed = "estimated_hours" in payload and payload["estimated_hours"] != prev_hours
 
@@ -2579,6 +2647,14 @@ class ProjectTaskService:
             # Reinicia o relógio de SLA ao entrar numa nova etapa.
             task.status_entered_at = datetime.utcnow()
             task.sla_state = ProjectTaskService._sla_initial(status_obj)
+            # Controle de baseline: entrada do card-raiz de planejamento numa etapa que trava o
+            # cronograma compromete o baseline — a partir daqui, alterar exige baseline+justificativa.
+            if (
+                status_obj is not None and getattr(status_obj, "locks_schedule", False)
+                and task.planning_kind in ("programa", "projeto")
+                and task.schedule_committed_at is None
+            ):
+                task.schedule_committed_at = datetime.utcnow()
             # Automações da fase em que o card entrou (atribuir, subtarefa, notificar, comentar).
             await ProjectAutomationRunner.run_on_enter(db, project_id, task, status_obj)
             # Gatilho de conversão: se a fase de destino gera outro tipo de card.
@@ -2617,6 +2693,10 @@ class ProjectTaskService:
             await ProjectTaskService._reschedule_dependents(db, project_id, task.id)
         await db.commit()
         await db.refresh(task)
+        if status_changed:
+            final_status = await db.get(ProjectStatusConfig, task.status_id)
+            if final_status:
+                await ProjectAgentRunner.run_on_enter(db, project_id, task, final_status)
         # Propaga/herdar a priorização para a família — cobre vínculo de pai, conversão
         # (novo Projeto com origin_task_id) e subtarefas criadas por automação.
         await PriorityScoreService.sync_family(db, task.id)
@@ -2674,6 +2754,8 @@ class ProjectTaskService:
         etapa onde o tipo EFETIVO do pai (corrente de allowed_child_type_ids) ainda tem um
         nível-filho definido — evita criar níveis que não existem na hierarquia."""
         parent = await ProjectTaskService.get(db, project_id, parent_task_id)
+        # Criar etapa altera o cronograma → bloqueado se o projeto estiver travado.
+        await ScheduleBaselineService.assert_editable(db, project_id, parent.id)
         if not await ProjectTaskService._can_add_schedule_child(db, parent):
             raise HTTPException(
                 status_code=400,
@@ -2712,6 +2794,10 @@ class ProjectTaskService:
             )
         )
         current = {str(t.id): t for t in result.scalars().all()}
+        # Reordenar muda a sequência (e as datas) → bloqueado se o cronograma estiver travado.
+        first_task = next(iter(current.values()), None)
+        if first_task is not None:
+            await ScheduleBaselineService.assert_editable(db, project_id, first_task.id)
         for item in items:
             tid = str(item.get("id"))
             if tid in current and item.get("order") is not None:
@@ -3040,6 +3126,194 @@ class ProjectTaskService:
         await db.commit()
 
 
+class ScheduleBaselineService:
+    """Controle de baseline/travamento do cronograma (change-control).
+
+    Estados (derivados do card-raiz de planejamento):
+      - `open`     — schedule_committed_at IS NULL (antes do desenvolvimento): edição livre.
+      - `revision` — schedule_revision_open = True: janela de edição aberta.
+      - `locked`   — comprometido sem revisão aberta: edição de cronograma bloqueada.
+
+    A entrada do card-raiz numa etapa `locks_schedule` grava `schedule_committed_at` (em
+    ProjectTaskService.update). Para editar um cronograma travado é preciso salvar um baseline
+    (snapshot atual + justificativa), o que abre a revisão; concluir a revisão re-trava.
+    Read-mostly; só `save_baseline`/`close_revision` mutam estado."""
+
+    @staticmethod
+    def _state_of_root(root: ProjectTask) -> str:
+        if root.schedule_committed_at is None:
+            return "open"
+        if root.schedule_revision_open:
+            return "revision"
+        return "locked"
+
+    @staticmethod
+    async def _get_root(db: AsyncSession, project_id: uuid.UUID, root_id: uuid.UUID) -> ProjectTask:
+        res = await db.execute(
+            select(ProjectTask).where(
+                ProjectTask.id == root_id,
+                ProjectTask.project_id == project_id,
+            )
+        )
+        root = res.scalar_one_or_none()
+        if root is None or root.planning_kind not in ("projeto", "programa"):
+            raise HTTPException(status_code=404, detail="Projeto (card-raiz de planejamento) não encontrado.")
+        return root
+
+    @staticmethod
+    async def assert_editable(db: AsyncSession, project_id: uuid.UUID, task_id: uuid.UUID) -> None:
+        """Guard: bloqueia edição de cronograma quando o projeto está travado. Sobe até a raiz
+        de planejamento e checa o estado. `open`/`revision` liberam; `locked` levanta 423."""
+        root_id = await ProjectTaskService._planning_root_id(db, project_id, task_id)
+        root = await db.get(ProjectTask, root_id)
+        if root is None:
+            return
+        if ScheduleBaselineService._state_of_root(root) == "locked":
+            raise HTTPException(
+                status_code=423,
+                detail="Cronograma travado (projeto em desenvolvimento). Salve um baseline com "
+                       "justificativa para liberar a edição.",
+            )
+
+    @staticmethod
+    async def lock_state(db: AsyncSession, project_id: uuid.UUID, root_id: uuid.UUID) -> dict:
+        root = await ScheduleBaselineService._get_root(db, project_id, root_id)
+        agg = await db.execute(
+            select(func.count(), func.max(ProjectScheduleBaseline.version)).where(
+                ProjectScheduleBaseline.root_task_id == root_id
+            )
+        )
+        count, latest = agg.one()
+        return {
+            "root_task_id": str(root_id),
+            "state": ScheduleBaselineService._state_of_root(root),
+            "committed_at": root.schedule_committed_at.isoformat() if root.schedule_committed_at else None,
+            "revision_open": root.schedule_revision_open,
+            "baseline_count": count or 0,
+            "latest_version": latest,
+        }
+
+    @staticmethod
+    async def _build_snapshot(db: AsyncSession, project_id: uuid.UUID, root: ProjectTask) -> dict:
+        """Snapshot imutável do cronograma da subárvore do root: tarefas (datas/horas/%/etapa,
+        em DFS preorder com nível) + dependências internas."""
+        tasks_res = await db.execute(
+            select(ProjectTask)
+            .where(ProjectTask.project_id == project_id)
+            .options(selectinload(ProjectTask.status))
+        )
+        all_tasks = list(tasks_res.scalars().all())
+        by_id = {t.id: t for t in all_tasks}
+        children: dict = {}
+        for t in all_tasks:
+            if t.parent_task_id:
+                children.setdefault(t.parent_task_id, []).append(t.id)
+
+        snap_tasks: list = []
+        sub_ids: list = []
+
+        def walk(tid, level):
+            t = by_id.get(tid)
+            if t is None:
+                return
+            sub_ids.append(tid)
+            snap_tasks.append({
+                "task_id": str(t.id), "title": t.title, "level": level,
+                "start_date": t.start_date.isoformat() if t.start_date else None,
+                "due_date": t.due_date.isoformat() if t.due_date else None,
+                "estimated_hours": float(t.estimated_hours) if t.estimated_hours is not None else None,
+                "percent_complete": t.percent_complete or 0,
+                "status_name": t.status.name if t.status else None,
+            })
+            for c in sorted(children.get(tid, []), key=lambda k: (by_id[k].order or 0, by_id[k].title or "")):
+                walk(c, level + 1)
+
+        walk(root.id, 0)
+        sub_set = set(sub_ids)
+
+        deps_res = await db.execute(
+            select(ProjectTaskDependency).where(ProjectTaskDependency.project_id == project_id)
+        )
+        snap_deps = [
+            {
+                "predecessor_id": str(d.predecessor_id), "successor_id": str(d.successor_id),
+                "dep_type": d.dep_type, "lag_hours": float(d.lag_hours or 0),
+            }
+            for d in deps_res.scalars().all()
+            if d.predecessor_id in sub_set and d.successor_id in sub_set
+        ]
+        return {"tasks": snap_tasks, "dependencies": snap_deps}
+
+    @staticmethod
+    async def save_baseline(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        root_id: uuid.UUID,
+        justification: str,
+        user_id: Optional[uuid.UUID],
+    ) -> ProjectScheduleBaseline:
+        """Salva o baseline (snapshot atual + justificativa) e ABRE a janela de revisão.
+        Só é permitido quando o cronograma está `locked`."""
+        root = await ScheduleBaselineService._get_root(db, project_id, root_id)
+        state = ScheduleBaselineService._state_of_root(root)
+        if state == "open":
+            raise HTTPException(
+                status_code=400,
+                detail="O cronograma ainda não foi comprometido (projeto não entrou em desenvolvimento).",
+            )
+        if state == "revision":
+            raise HTTPException(
+                status_code=409,
+                detail="Já existe uma revisão aberta. Conclua a revisão atual antes de salvar um novo baseline.",
+            )
+        justification = (justification or "").strip()
+        if len(justification) < 3:
+            raise HTTPException(status_code=400, detail="Informe uma justificativa para a alteração do cronograma.")
+        snapshot = await ScheduleBaselineService._build_snapshot(db, project_id, root)
+        max_v = await db.execute(
+            select(func.max(ProjectScheduleBaseline.version)).where(
+                ProjectScheduleBaseline.root_task_id == root_id
+            )
+        )
+        version = (max_v.scalar() or 0) + 1
+        baseline = ProjectScheduleBaseline(
+            project_id=project_id, root_task_id=root_id, version=version,
+            justification=justification, snapshot=snapshot, created_by=user_id,
+        )
+        db.add(baseline)
+        root.schedule_revision_open = True
+        root.updated_at = datetime.utcnow()
+        await db.commit()
+        await db.refresh(baseline)
+        return baseline
+
+    @staticmethod
+    async def close_revision(db: AsyncSession, project_id: uuid.UUID, root_id: uuid.UUID) -> ProjectTask:
+        """Conclui a revisão e RE-TRAVA o cronograma. Próxima alteração exige novo baseline."""
+        root = await ScheduleBaselineService._get_root(db, project_id, root_id)
+        if not root.schedule_revision_open:
+            raise HTTPException(status_code=400, detail="Não há revisão aberta para concluir.")
+        root.schedule_revision_open = False
+        root.updated_at = datetime.utcnow()
+        await db.commit()
+        await db.refresh(root)
+        return root
+
+    @staticmethod
+    async def list_baselines(
+        db: AsyncSession, project_id: uuid.UUID, root_id: uuid.UUID
+    ) -> list[ProjectScheduleBaseline]:
+        res = await db.execute(
+            select(ProjectScheduleBaseline)
+            .where(
+                ProjectScheduleBaseline.project_id == project_id,
+                ProjectScheduleBaseline.root_task_id == root_id,
+            )
+            .order_by(ProjectScheduleBaseline.version.desc())
+        )
+        return list(res.scalars().all())
+
+
 class TaskDependencyService:
     """Dependências entre tarefas do cronograma (FS por ora). A criação valida ciclo no
     grafo de dependências e dispara o auto-scheduling das sucessoras."""
@@ -3106,6 +3380,8 @@ class TaskDependencyService:
             raise HTTPException(status_code=400, detail="Uma tarefa não pode depender de si mesma.")
         await TaskDependencyService._task_in_project(db, project_id, data.predecessor_id)
         await TaskDependencyService._task_in_project(db, project_id, data.successor_id)
+        # Criar dependência altera o cronograma → bloqueado se o projeto estiver travado.
+        await ScheduleBaselineService.assert_editable(db, project_id, data.successor_id)
         if await TaskDependencyService._would_cycle(db, project_id, data.predecessor_id, data.successor_id):
             raise HTTPException(status_code=400, detail="Esta dependência criaria um ciclo entre as tarefas.")
         dep = ProjectTaskDependency(
@@ -3140,6 +3416,8 @@ class TaskDependencyService:
         if dep is None:
             raise HTTPException(status_code=404, detail="Dependência não encontrada.")
         succ_id = dep.successor_id
+        # Remover dependência altera o cronograma → bloqueado se o projeto estiver travado.
+        await ScheduleBaselineService.assert_editable(db, project_id, succ_id)
         await db.delete(dep)
         await db.flush()
         # Remover a predecessora pode liberar a sucessora para mais cedo: recalcula a subárvore.
@@ -3274,6 +3552,17 @@ class TaskDependencyService:
 
 class ProjectTaskCommentService:
     @staticmethod
+    async def _attach_author_names(db: AsyncSession, comments: list[ProjectTaskComment]) -> None:
+        """Resolve o nome do autor (public.users) de cada comentário para exibição."""
+        ids = {c.author_id for c in comments if c.author_id}
+        names: dict = {}
+        if ids:
+            rows = await db.execute(select(User.id, User.full_name).where(User.id.in_(ids)))
+            names = {uid: fn for uid, fn in rows.all()}
+        for c in comments:
+            c.author_name = names.get(c.author_id) if c.author_id else None
+
+    @staticmethod
     async def list(db: AsyncSession, project_id: uuid.UUID, task_id: uuid.UUID) -> list[ProjectTaskComment]:
         await ProjectTaskService.get(db, project_id, task_id)
         result = await db.execute(
@@ -3281,7 +3570,9 @@ class ProjectTaskCommentService:
             .where(ProjectTaskComment.task_id == task_id)
             .order_by(ProjectTaskComment.created_at.asc())
         )
-        return list(result.scalars().all())
+        comments = list(result.scalars().all())
+        await ProjectTaskCommentService._attach_author_names(db, comments)
+        return comments
 
     @staticmethod
     async def create(
@@ -3296,6 +3587,7 @@ class ProjectTaskCommentService:
         db.add(comment)
         await db.commit()
         await db.refresh(comment)
+        await ProjectTaskCommentService._attach_author_names(db, [comment])
         return comment
 
 
@@ -3810,6 +4102,765 @@ class ProjectScheduleBindingService:
             sa_delete(ProjectScheduleBinding).where(ProjectScheduleBinding.status_id == status_id)
         )
         await db.commit()
+
+
+DEFAULT_AGENT_PROMPT = """Você recebeu um card do kanban para processar nesta etapa.
+
+Título: {{title}}
+Descrição: {{description}}
+
+Dados do formulário:
+{{form_values}}
+"""
+
+DEFAULT_CLASSIFY_PROMPT = """Você é um analista de priorização. Leia os dados completos da solicitação abaixo e classifique-a na matriz Impacto × Esforço.
+
+{{task_context}}
+
+{{priority_rubric}}
+
+Responda APENAS com um JSON válido (sem markdown, sem texto extra), neste formato exato:
+{
+  "pillar_codes": ["F1"],
+  "impact_scores": {
+    "aderencia_estrategica": 1,
+    "cliente": 1,
+    "financeiro": 1,
+    "eficiencia": 1,
+    "risco": 1,
+    "alcance": 1
+  },
+  "effort_scores": {
+    "documentacao": 1,
+    "areas": 1,
+    "maturidade": 1,
+    "complexidade": 1,
+    "integracoes": 1
+  },
+  "justificativa": "Breve explicação da classificação"
+}
+
+Regras:
+- Cada score deve ser inteiro de 1 a 5.
+- pillar_codes: liste um ou mais códigos de pilar estratégico (ex.: F1, I2, C3) que a demanda atende.
+- Use os códigos exatos listados na rubrica.
+"""
+
+
+class ProjectStageAgentService:
+    """CRUD dos vínculos de agentes IDCortex por etapa do kanban."""
+
+    @staticmethod
+    def _to_response(item: ProjectStageAgentBinding) -> ProjectStageAgentBindingResponse:
+        return ProjectStageAgentBindingResponse(
+            id=item.id,
+            project_id=item.project_id,
+            funnel_id=item.funnel_id,
+            status_id=item.status_id,
+            name=item.name,
+            agent_kind=item.agent_kind or "ask",
+            agent_id=item.agent_id,
+            usuario=item.usuario,
+            prompt_template=item.prompt_template,
+            gateway_url=item.gateway_url,
+            gateway_client_id=item.gateway_client_id,
+            has_gateway_client_secret=bool(item.gateway_client_secret),
+            continue_thread=item.continue_thread,
+            add_comment_on_success=item.add_comment_on_success,
+            is_active=item.is_active,
+            created_at=item.created_at,
+            updated_at=item.updated_at,
+        )
+
+    @staticmethod
+    async def _validate_status(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        funnel_id: uuid.UUID,
+        status_id: uuid.UUID,
+    ) -> ProjectStatusConfig:
+        row = await db.execute(
+            select(ProjectStatusConfig).where(
+                ProjectStatusConfig.id == status_id,
+                ProjectStatusConfig.project_id == project_id,
+            )
+        )
+        status_obj = row.scalar_one_or_none()
+        if not status_obj:
+            raise HTTPException(status_code=400, detail="Etapa inválida para este projeto.")
+        if status_obj.funnel_id != funnel_id:
+            raise HTTPException(status_code=400, detail="A etapa não pertence ao fluxo informado.")
+        return status_obj
+
+    @staticmethod
+    async def list(
+        db: AsyncSession,
+        project_id: Optional[uuid.UUID] = None,
+    ) -> list[ProjectStageAgentBindingResponse]:
+        q = select(ProjectStageAgentBinding).order_by(ProjectStageAgentBinding.created_at.asc())
+        if project_id is not None:
+            q = q.where(ProjectStageAgentBinding.project_id == project_id)
+        result = await db.execute(q)
+        return [ProjectStageAgentService._to_response(i) for i in result.scalars().all()]
+
+    @staticmethod
+    async def get(db: AsyncSession, binding_id: uuid.UUID) -> ProjectStageAgentBinding:
+        row = await db.execute(
+            select(ProjectStageAgentBinding).where(ProjectStageAgentBinding.id == binding_id)
+        )
+        item = row.scalar_one_or_none()
+        if not item:
+            raise HTTPException(status_code=404, detail="Vínculo de agente não encontrado.")
+        return item
+
+    @staticmethod
+    async def create(db: AsyncSession, data: ProjectStageAgentBindingCreate) -> ProjectStageAgentBindingResponse:
+        await ProjectStageAgentService._validate_status(
+            db, data.project_id, data.funnel_id, data.status_id,
+        )
+        dup = await db.execute(
+            select(ProjectStageAgentBinding).where(ProjectStageAgentBinding.status_id == data.status_id)
+        )
+        if dup.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Esta etapa já possui um agente vinculado.")
+        item = ProjectStageAgentBinding(**data.model_dump())
+        db.add(item)
+        await db.commit()
+        await db.refresh(item)
+        return ProjectStageAgentService._to_response(item)
+
+    @staticmethod
+    async def update(
+        db: AsyncSession,
+        binding_id: uuid.UUID,
+        data: ProjectStageAgentBindingUpdate,
+    ) -> ProjectStageAgentBindingResponse:
+        item = await ProjectStageAgentService.get(db, binding_id)
+        payload = data.model_dump(exclude_unset=True)
+        new_client_id = payload.get("gateway_client_id", item.gateway_client_id)
+        new_secret = payload.get("gateway_client_secret", item.gateway_client_secret)
+        if payload.get("gateway_client_id") is not None or payload.get("gateway_client_secret") is not None:
+            if not (new_client_id and str(new_client_id).strip()):
+                raise HTTPException(status_code=400, detail="X-Client-ID é obrigatório nas credenciais do gateway.")
+            if not (new_secret and str(new_secret).strip()):
+                raise HTTPException(status_code=400, detail="X-Client-Secret é obrigatório nas credenciais do gateway.")
+        for key, value in payload.items():
+            setattr(item, key, value)
+        item.updated_at = datetime.utcnow()
+        await db.commit()
+        await db.refresh(item)
+        return ProjectStageAgentService._to_response(item)
+
+    @staticmethod
+    async def delete(db: AsyncSession, binding_id: uuid.UUID) -> None:
+        item = await ProjectStageAgentService.get(db, binding_id)
+        await db.delete(item)
+        await db.commit()
+
+    @staticmethod
+    async def list_executions(
+        db: AsyncSession,
+        task_id: uuid.UUID,
+    ) -> list[ProjectAgentExecution]:
+        result = await db.execute(
+            select(ProjectAgentExecution)
+            .where(ProjectAgentExecution.task_id == task_id)
+            .order_by(ProjectAgentExecution.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    @staticmethod
+    async def list_execution_logs(
+        db: AsyncSession,
+        *,
+        status: Optional[str] = None,
+        binding_id: Optional[uuid.UUID] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict:
+        """Lista paginada de execuções com metadados do agente, card e etapa."""
+        limit = max(1, min(limit, 200))
+        offset = max(0, offset)
+
+        base = (
+            select(
+                ProjectAgentExecution,
+                ProjectStageAgentBinding.name.label("agent_name"),
+                ProjectStageAgentBinding.agent_kind.label("agent_kind"),
+                ProjectTask.title.label("task_title"),
+                ProjectStatusConfig.name.label("status_name"),
+            )
+            .join(
+                ProjectStageAgentBinding,
+                ProjectStageAgentBinding.id == ProjectAgentExecution.binding_id,
+            )
+            .join(ProjectTask, ProjectTask.id == ProjectAgentExecution.task_id)
+            .join(
+                ProjectStatusConfig,
+                ProjectStatusConfig.id == ProjectStageAgentBinding.status_id,
+            )
+        )
+        if status:
+            base = base.where(ProjectAgentExecution.status == status)
+        if binding_id:
+            base = base.where(ProjectAgentExecution.binding_id == binding_id)
+
+        count_q = select(func.count()).select_from(base.subquery())
+        total = (await db.execute(count_q)).scalar_one()
+
+        rows = await db.execute(
+            base.order_by(ProjectAgentExecution.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        items = [
+            {
+                "id": ex.id,
+                "task_id": ex.task_id,
+                "task_title": task_title or "—",
+                "binding_id": ex.binding_id,
+                "agent_name": agent_name,
+                "agent_kind": agent_kind or "ask",
+                "status_name": status_name or "—",
+                "status": ex.status,
+                "thread_id": ex.thread_id,
+                "answer_message": ex.answer_message,
+                "error_message": ex.error_message,
+                "request_payload": ex.request_payload,
+                "response_payload": ex.response_payload,
+                "created_at": ex.created_at,
+            }
+            for ex, agent_name, agent_kind, task_title, status_name in rows.all()
+        ]
+        return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
+class ProjectAgentRunner:
+    """Dispara agentes IDCortex quando um card entra numa etapa vinculada."""
+
+    @staticmethod
+    async def run_on_enter(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        task: ProjectTask,
+        status_obj: Optional[ProjectStatusConfig],
+    ) -> None:
+        if not status_obj:
+            return
+        result = await db.execute(
+            select(ProjectStageAgentBinding).where(
+                ProjectStageAgentBinding.status_id == status_obj.id,
+                ProjectStageAgentBinding.is_active == True,  # noqa: E712
+            )
+        )
+        binding = result.scalar_one_or_none()
+        if not binding:
+            return
+        try:
+            if binding.agent_kind == "classify_and_advance":
+                await ProjectAgentRunner._execute_classify_and_advance(
+                    db, project_id, task, binding, status_obj=status_obj,
+                )
+            else:
+                await ProjectAgentRunner._execute_ask(db, project_id, task, binding)
+        except Exception:  # noqa: BLE001 — falha do agente não invalida a movimentação
+            pass
+
+    @staticmethod
+    async def _build_prompt(db: AsyncSession, task: ProjectTask, template: str) -> str:
+        sub_res = await db.execute(
+            select(ProjectDemandFormSubmission).where(ProjectDemandFormSubmission.task_id == task.id)
+        )
+        submission = sub_res.scalar_one_or_none()
+        form_values = submission.values if submission else {}
+        tpl = template.strip() or DEFAULT_AGENT_PROMPT
+        replacements = {
+            "title": task.title or "",
+            "description": task.description or "",
+            "task_id": str(task.id),
+            "form_values": json.dumps(form_values, ensure_ascii=False, indent=2),
+        }
+        prompt = tpl
+        for key, val in replacements.items():
+            prompt = prompt.replace(f"{{{{{key}}}}}", val)
+        return prompt
+
+    @staticmethod
+    async def _resolve_thread_id(
+        db: AsyncSession,
+        task_id: uuid.UUID,
+        binding_id: uuid.UUID,
+    ) -> Optional[str]:
+        row = await db.execute(
+            select(ProjectAgentExecution)
+            .where(
+                ProjectAgentExecution.task_id == task_id,
+                ProjectAgentExecution.binding_id == binding_id,
+                ProjectAgentExecution.status == "success",
+                ProjectAgentExecution.thread_id.isnot(None),
+            )
+            .order_by(ProjectAgentExecution.created_at.desc())
+            .limit(1)
+        )
+        prev = row.scalar_one_or_none()
+        return prev.thread_id if prev else None
+
+    @staticmethod
+    def _format_gateway_error(exc: Exception, gateway_url: str) -> str:
+        msg = str(exc)
+        host = gateway_url.replace("https://", "").replace("http://", "").split("/")[0]
+        if "Name or service not known" in msg or "Errno -2" in msg or "nodename nor servname" in msg.lower():
+            return (
+                f"Não foi possível resolver o host do gateway ({host}). "
+                f"Este servidor não encontra esse endereço no DNS. "
+                f"Confirme a URL com o time IDCortex, cadastre o DNS ou use o IP correto em "
+                f"Configurações → Agentes → URL do gateway."
+            )
+        if "ConnectError" in type(exc).__name__ or "connection" in msg.lower():
+            return f"Falha ao conectar ao gateway ({gateway_url}): {msg[:500]}"
+        return msg[:2000]
+
+    @staticmethod
+    def _gateway_credentials(binding: ProjectStageAgentBinding) -> tuple[str, str, str]:
+        gateway_url = (binding.gateway_url or settings.IDCORTEX_GATEWAY_URL or "").strip()
+        client_id = (binding.gateway_client_id or settings.IDCORTEX_CLIENT_ID or "").strip()
+        client_secret = (binding.gateway_client_secret or settings.IDCORTEX_CLIENT_SECRET or "").strip()
+        return gateway_url, client_id, client_secret
+
+    @staticmethod
+    def _credentials_error_message(binding: ProjectStageAgentBinding) -> str:
+        gateway_url, client_id, client_secret = ProjectAgentRunner._gateway_credentials(binding)
+        missing: list[str] = []
+        if not gateway_url:
+            missing.append("URL do gateway (IDCORTEX_GATEWAY_URL ou na config do agente)")
+        if not client_id:
+            missing.append("X-Client-ID (IDCORTEX_CLIENT_ID ou gateway_client_id na config)")
+        if not client_secret:
+            missing.append("X-Client-Secret (IDCORTEX_CLIENT_SECRET ou gateway_client_secret na config)")
+        return "Credenciais IDCortex incompletas: " + "; ".join(missing)
+
+    @staticmethod
+    def _notify_agent_failure(
+        binding: ProjectStageAgentBinding,
+        task_id: uuid.UUID,
+        error_message: str,
+    ) -> ProjectTaskComment:
+        return ProjectTaskComment(
+            task_id=task_id,
+            author_id=None,
+            content=f"[agente: {binding.name}] Falha na execução\n{error_message}",
+        )
+
+    @staticmethod
+    async def _call_gateway(
+        binding: ProjectStageAgentBinding,
+        payload: dict,
+        thread_id: Optional[str],
+    ) -> tuple[int, dict, Optional[str]]:
+        gateway_url, client_id, client_secret = ProjectAgentRunner._gateway_credentials(binding)
+        if not gateway_url or not client_id or not client_secret:
+            raise ValueError(ProjectAgentRunner._credentials_error_message(binding))
+        body_payload = {**payload, "thread_id": thread_id}
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(
+                gateway_url,
+                json=body_payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Client-ID": client_id,
+                    "X-Client-Secret": client_secret,
+                },
+            )
+        body = resp.json() if resp.content else {}
+        if not isinstance(body, dict):
+            body = {"raw": str(body)}
+        answer = body.get("answer") if isinstance(body.get("answer"), dict) else None
+        answer_message = answer.get("message") if answer else None
+        return resp.status_code, body, answer_message
+
+    @staticmethod
+    def _extract_json_from_text(text: str) -> Optional[dict]:
+        if not text:
+            return None
+        raw = text.strip()
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else None
+        except json.JSONDecodeError:
+            pass
+        fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
+        if fenced:
+            try:
+                parsed = json.loads(fenced.group(1))
+                return parsed if isinstance(parsed, dict) else None
+            except json.JSONDecodeError:
+                pass
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start >= 0 and end > start:
+            try:
+                parsed = json.loads(raw[start : end + 1])
+                return parsed if isinstance(parsed, dict) else None
+            except json.JSONDecodeError:
+                pass
+        return None
+
+    @staticmethod
+    async def _build_rich_task_context(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        task: ProjectTask,
+    ) -> str:
+        lines: list[str] = []
+        project = await db.get(Project, project_id)
+        if project:
+            lines.append(f"Processo: {project.name}")
+
+        status = await db.get(ProjectStatusConfig, task.status_id)
+        if status:
+            funnel = await db.get(ProjectFunnel, status.funnel_id)
+            funnel_name = funnel.name if funnel else "—"
+            lines.append(f"Etapa atual: {status.name} (funil: {funnel_name})")
+
+        if task.demand_type_id:
+            dt = await db.get(ProjectDemandType, task.demand_type_id)
+            if dt:
+                lines.append(f"Tipo de demanda: {dt.name}")
+
+        lines.extend([
+            f"Título: {task.title or ''}",
+            f"Descrição: {task.description or ''}",
+            f"Diretoria: {task.diretoria or '—'}",
+            f"Área: {task.area or '—'}",
+            f"Início: {task.start_date.isoformat() if task.start_date else '—'}",
+            f"Prazo: {task.due_date.isoformat() if task.due_date else '—'}",
+            f"Horas estimadas: {task.estimated_hours if task.estimated_hours is not None else '—'}",
+        ])
+
+        sub_res = await db.execute(
+            select(ProjectDemandFormSubmission).where(ProjectDemandFormSubmission.task_id == task.id)
+        )
+        submission = sub_res.scalar_one_or_none()
+        form_values = submission.values if submission else {}
+
+        if task.demand_type_id and form_values:
+            fields_res = await db.execute(
+                select(ProjectDemandFormField, ProjectDemandFormSection)
+                .join(ProjectDemandFormSection, ProjectDemandFormSection.id == ProjectDemandFormField.section_id)
+                .where(ProjectDemandFormSection.demand_type_id == task.demand_type_id)
+                .order_by(ProjectDemandFormSection.order.asc(), ProjectDemandFormField.order.asc())
+            )
+            label_by_key = {f.field_key: f.label for f, _ in fields_res.all()}
+            lines.append("\nFormulário da demanda:")
+            for key, val in form_values.items():
+                label = label_by_key.get(key, key)
+                if isinstance(val, list):
+                    val = ", ".join(str(v) for v in val)
+                lines.append(f"  - {label}: {val}")
+        elif form_values:
+            lines.append("\nFormulário da demanda:")
+            lines.append(json.dumps(form_values, ensure_ascii=False, indent=2))
+
+        return "\n".join(lines)
+
+    @staticmethod
+    async def _build_priority_rubric(db: AsyncSession) -> str:
+        await PriorityConfigService.ensure_seeded(db)
+        impact_criteria, effort_criteria, pillars_map, _, settings = await PriorityScoreService._load_config(db)
+        lines = [
+            "Rubrica de priorização (Impacto × Esforço):",
+            f"Corte de impacto efetivo: {settings.impact_cut} | Corte de esforço: {settings.effort_cut}",
+            "\nCritérios de IMPACTO (nota 1-5 por código):",
+        ]
+        for c in sorted(impact_criteria, key=lambda x: x.order):
+            if not c.is_active:
+                continue
+            scale = c.scale or []
+            scale_txt = "; ".join(
+                f"{s.get('value')}={s.get('description', '')}" for s in scale if isinstance(s, dict)
+            )
+            lines.append(f"  - {c.code} ({c.label}, peso {c.weight}): {scale_txt}")
+        lines.append("\nCritérios de ESFORÇO (nota 1-5 por código):")
+        for c in sorted(effort_criteria, key=lambda x: x.order):
+            if not c.is_active:
+                continue
+            scale = c.scale or []
+            scale_txt = "; ".join(
+                f"{s.get('value')}={s.get('description', '')}" for s in scale if isinstance(s, dict)
+            )
+            lines.append(f"  - {c.code} ({c.label}, peso {c.weight}): {scale_txt}")
+        lines.append("\nPilares estratégicos (use os códigos em pillar_codes):")
+        for p in sorted(pillars_map.values(), key=lambda x: x.order):
+            if not p.is_active:
+                continue
+            lines.append(f"  - {p.code}: {p.label} ({p.perspective})")
+        return "\n".join(lines)
+
+    @staticmethod
+    async def _build_classify_prompt(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        task: ProjectTask,
+        template: str,
+    ) -> str:
+        task_context = await ProjectAgentRunner._build_rich_task_context(db, project_id, task)
+        priority_rubric = await ProjectAgentRunner._build_priority_rubric(db)
+        tpl = template.strip() or DEFAULT_CLASSIFY_PROMPT
+        return (
+            tpl.replace("{{task_context}}", task_context)
+            .replace("{{priority_rubric}}", priority_rubric)
+            .replace("{{title}}", task.title or "")
+            .replace("{{description}}", task.description or "")
+            .replace("{{task_id}}", str(task.id))
+        )
+
+    @staticmethod
+    async def _resolve_pillar_ids(db: AsyncSession, raw_codes) -> list[uuid.UUID]:
+        if not raw_codes:
+            raise ValueError("pillar_codes é obrigatório na resposta do agente.")
+        await PriorityConfigService.ensure_seeded(db)
+        pillars = {p.code.upper(): p.id for p in await PriorityConfigService.list_pillars(db) if p.is_active}
+        by_id = {str(p.id): p.id for p in await PriorityConfigService.list_pillars(db)}
+        out: list[uuid.UUID] = []
+        for item in raw_codes:
+            s = str(item).strip().upper()
+            if not s:
+                continue
+            if s in pillars:
+                out.append(pillars[s])
+                continue
+            try:
+                as_uuid = uuid.UUID(s)
+            except (ValueError, TypeError):
+                as_uuid = None
+            if as_uuid is not None and str(as_uuid) in by_id:
+                out.append(as_uuid)
+                continue
+            raise ValueError(f"Pilar estratégico inválido: {item}")
+        if not out:
+            raise ValueError("Nenhum pilar estratégico válido informado pelo agente.")
+        return out
+
+    @staticmethod
+    async def _parse_classify_response(db: AsyncSession, answer_text: str) -> PriorityScoreInput:
+        data = ProjectAgentRunner._extract_json_from_text(answer_text)
+        if not data:
+            raise ValueError("Resposta do agente não contém JSON válido para classificação.")
+        pillar_ids = await ProjectAgentRunner._resolve_pillar_ids(
+            db, data.get("pillar_codes") or data.get("pillar_ids") or [],
+        )
+        impact_scores = data.get("impact_scores") or {}
+        effort_scores = data.get("effort_scores") or {}
+        if not isinstance(impact_scores, dict) or not isinstance(effort_scores, dict):
+            raise ValueError("impact_scores e effort_scores devem ser objetos JSON.")
+        impact_clean = {str(k): int(v) for k, v in impact_scores.items()}
+        effort_clean = {str(k): int(v) for k, v in effort_scores.items()}
+        return PriorityScoreInput(
+            pillar_ids=pillar_ids,
+            impact_scores=impact_clean,
+            effort_scores=effort_clean,
+        )
+
+    @staticmethod
+    async def _next_status_in_funnel(
+        db: AsyncSession,
+        funnel_id: uuid.UUID,
+        current_order: int,
+    ) -> Optional[ProjectStatusConfig]:
+        row = await db.execute(
+            select(ProjectStatusConfig)
+            .where(
+                ProjectStatusConfig.funnel_id == funnel_id,
+                ProjectStatusConfig.is_active == True,  # noqa: E712
+                ProjectStatusConfig.order > current_order,
+            )
+            .order_by(ProjectStatusConfig.order.asc())
+            .limit(1)
+        )
+        return row.scalar_one_or_none()
+
+    @staticmethod
+    async def _execute_ask(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        task: ProjectTask,
+        binding: ProjectStageAgentBinding,
+    ) -> None:
+        gateway_url, client_id, client_secret = ProjectAgentRunner._gateway_credentials(binding)
+        if not gateway_url or not client_id or not client_secret:
+            err = ProjectAgentRunner._credentials_error_message(binding)
+            exec_row = ProjectAgentExecution(
+                task_id=task.id,
+                binding_id=binding.id,
+                status="failed",
+                error_message=err,
+            )
+            db.add(exec_row)
+            db.add(ProjectAgentRunner._notify_agent_failure(binding, task.id, err))
+            await db.commit()
+            return
+
+        prompt = await ProjectAgentRunner._build_prompt(db, task, binding.prompt_template)
+        thread_id = None
+        if binding.continue_thread:
+            thread_id = await ProjectAgentRunner._resolve_thread_id(db, task.id, binding.id)
+
+        payload = {
+            "usuario": binding.usuario,
+            "id_agente": binding.agent_id,
+            "mensagem": prompt,
+        }
+        exec_row = ProjectAgentExecution(
+            task_id=task.id,
+            binding_id=binding.id,
+            status="pending",
+            thread_id=thread_id,
+            request_payload={**payload, "thread_id": thread_id},
+        )
+        db.add(exec_row)
+        await db.flush()
+
+        try:
+            status_code, body, answer_message = await ProjectAgentRunner._call_gateway(
+                binding, payload, thread_id,
+            )
+            if status_code >= 400:
+                exec_row.status = "failed"
+                exec_row.response_payload = body
+                exec_row.error_message = f"Gateway retornou HTTP {status_code}"
+            else:
+                exec_row.status = "success"
+                exec_row.response_payload = body
+                exec_row.thread_id = body.get("thread_id")
+                exec_row.answer_message = answer_message
+                if binding.add_comment_on_success and exec_row.answer_message:
+                    db.add(ProjectTaskComment(
+                        task_id=task.id,
+                        author_id=None,
+                        content=f"[agente: {binding.name}]\n{exec_row.answer_message}",
+                    ))
+        except Exception as exc:  # noqa: BLE001
+            exec_row.status = "failed"
+            gw_url, _, _ = ProjectAgentRunner._gateway_credentials(binding)
+            exec_row.error_message = ProjectAgentRunner._format_gateway_error(exc, gw_url)
+            db.add(ProjectAgentRunner._notify_agent_failure(binding, task.id, exec_row.error_message))
+        await db.commit()
+
+    @staticmethod
+    async def _execute_classify_and_advance(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        task: ProjectTask,
+        binding: ProjectStageAgentBinding,
+        status_obj: Optional[ProjectStatusConfig] = None,
+    ) -> None:
+        current_status = status_obj or await db.get(ProjectStatusConfig, task.status_id)
+        if not current_status:
+            return
+
+        prompt = await ProjectAgentRunner._build_classify_prompt(
+            db, project_id, task, binding.prompt_template,
+        )
+        thread_id = None
+        if binding.continue_thread:
+            thread_id = await ProjectAgentRunner._resolve_thread_id(db, task.id, binding.id)
+
+        payload = {
+            "usuario": binding.usuario,
+            "id_agente": binding.agent_id,
+            "mensagem": prompt,
+        }
+        exec_row = ProjectAgentExecution(
+            task_id=task.id,
+            binding_id=binding.id,
+            status="pending",
+            thread_id=thread_id,
+            request_payload={**payload, "thread_id": thread_id},
+        )
+        db.add(exec_row)
+        await db.flush()
+
+        try:
+            status_code, body, answer_message = await ProjectAgentRunner._call_gateway(
+                binding, payload, thread_id,
+            )
+            exec_row.response_payload = body
+            exec_row.thread_id = body.get("thread_id")
+            exec_row.answer_message = answer_message
+
+            if status_code >= 400:
+                exec_row.status = "failed"
+                exec_row.error_message = f"Gateway retornou HTTP {status_code}"
+                db.add(ProjectAgentRunner._notify_agent_failure(binding, task.id, exec_row.error_message))
+                await db.commit()
+                return
+
+            if not answer_message:
+                exec_row.status = "failed"
+                exec_row.error_message = "Agente não retornou mensagem de resposta."
+                db.add(ProjectAgentRunner._notify_agent_failure(binding, task.id, exec_row.error_message))
+                await db.commit()
+                return
+
+            score_input = await ProjectAgentRunner._parse_classify_response(db, answer_message)
+            preview = await PriorityScoreService.preview(db, score_input)
+            exec_id = exec_row.id
+            await PriorityScoreService.score_task(db, task.id, score_input, user_id=None)
+            exec_row = await db.get(ProjectAgentExecution, exec_id)
+            if exec_row is None:
+                raise ValueError("Falha ao registrar execução do agente.")
+            await db.refresh(task)
+
+            next_status = await ProjectAgentRunner._next_status_in_funnel(
+                db, current_status.funnel_id, current_status.order,
+            )
+            advanced_to: Optional[str] = None
+            if next_status:
+                await ProjectTaskService.update(
+                    db,
+                    project_id,
+                    task.id,
+                    ProjectTaskUpdate(status_id=next_status.id),
+                    current_user=None,
+                )
+                advanced_to = next_status.name
+                exec_row = await db.get(ProjectAgentExecution, exec_id)
+
+            if exec_row is None:
+                raise ValueError("Registro de execução do agente não encontrado.")
+
+            exec_row.status = "success"
+            if binding.add_comment_on_success:
+                parsed = ProjectAgentRunner._extract_json_from_text(answer_message) or {}
+                justificativa = parsed.get("justificativa") or answer_message
+                quadrant = preview.get("quadrant_code", "—")
+                move_note = f"\n\nCard avançado para: {advanced_to}" if advanced_to else "\n\nNão há próxima etapa no funil."
+                db.add(ProjectTaskComment(
+                    task_id=task.id,
+                    author_id=None,
+                    content=(
+                        f"[agente: {binding.name}] Classificação automática\n"
+                        f"Quadrante: {quadrant} | Impacto efetivo: {preview.get('impacto_efetivo')} | "
+                        f"Esforço: {preview.get('esforco')}\n\n{justificativa}{move_note}"
+                    ),
+                ))
+            await db.commit()
+        except Exception as exc:  # noqa: BLE001
+            exec_row.status = "failed"
+            gw_url, _, _ = ProjectAgentRunner._gateway_credentials(binding)
+            exec_row.error_message = ProjectAgentRunner._format_gateway_error(exc, gw_url)
+            db.add(ProjectAgentRunner._notify_agent_failure(binding, task.id, exec_row.error_message))
+            await db.commit()
+
+    @staticmethod
+    async def _execute(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        task: ProjectTask,
+        binding: ProjectStageAgentBinding,
+    ) -> None:
+        """Legado — use _execute_ask ou _execute_classify_and_advance."""
+        await ProjectAgentRunner._execute_ask(db, project_id, task, binding)
 
 
 # ─────────────────────────────────────────────
@@ -5776,3 +6827,441 @@ class StatusReportService:
         if not report:
             raise HTTPException(status_code=404, detail="Status Report não encontrado.")
         return report
+
+
+class PoSyncService:
+    """Análise de portfólio no formato da cerimônia **PO Sync**: lidera por PO e aplica as
+    regras da metodologia que os serviços existentes NÃO cobrem:
+      - Fase derivada da situação REAL dos itens (Planejamento só vira Execução quando algum
+        item entrou em desenvolvimento/homologação/conclusão).
+      - % de execução descontando do denominador os itens "Não realizado" (Cancelado/Rejeitado).
+      - Projetos em Planejamento exibem execução "—" (não 0%).
+      - Saúde de prazo (Data Fim Real vs Planejada) com média, mediana e outliers — no nível
+        projeto E no nível item, sinalizando quando o baseline não permite comparação.
+      - Lacunas de baseline (sem datas comparáveis, datas inconsistentes, sem diretoria).
+    Reusa os helpers de subárvore/conclusão do PoPortfolioService e a resolução de rótulos
+    de diretoria/área do StatusReportService. Read-only (não persiste)."""
+
+    # Estágios que sinalizam execução iniciada (dev → homologação → produção). A conclusão é
+    # detectada por is_final/completed_at; "Não realizado" é detectado à parte.
+    _EXEC_PAT = re.compile(
+        r"desenvolv|devops|devsecops|homolog|executar|code\s*review|"
+        r"produ[çc]|\bprod\b|\bhml\b|pronto\s+para",
+        re.IGNORECASE,
+    )
+    # Estágios de despriorização consciente — itens aqui NÃO entram no denominador de execução.
+    _NAO_REALIZADO_PAT = re.compile(
+        r"cancel|rejeit|n[ãa]o\s*realiz|descontinu|desprioriz", re.IGNORECASE
+    )
+
+    @staticmethod
+    def _median(values: list[float]) -> Optional[float]:
+        if not values:
+            return None
+        s = sorted(values)
+        n = len(s)
+        mid = n // 2
+        return s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2.0
+
+    @classmethod
+    def _classify_stages(cls, status_configs: list) -> dict:
+        """status_id → bucket em {'planejamento','execucao','encerramento','nao_realizado'}.
+        Derivado da ordem do funil: dentro de cada funil, o 1º estágio que casa com o padrão de
+        execução marca a fronteira; antes dele (e não-final) é Planejamento, dele em diante é
+        Execução. is_final → Encerramento. Cancelado/Rejeitado → Não realizado."""
+        by_funnel: dict = {}
+        for sc in status_configs:
+            by_funnel.setdefault(sc.funnel_id, []).append(sc)
+        out: dict = {}
+        for _fid, stages in by_funnel.items():
+            stages.sort(key=lambda s: (s.order if s.order is not None else 0))
+            exec_start = None
+            for s in stages:
+                if s.is_final or cls._NAO_REALIZADO_PAT.search(s.name or ""):
+                    continue
+                if cls._EXEC_PAT.search(s.name or ""):
+                    exec_start = s.order if s.order is not None else 0
+                    break
+            for s in stages:
+                name = s.name or ""
+                order = s.order if s.order is not None else 0
+                if cls._NAO_REALIZADO_PAT.search(name):
+                    bucket = "nao_realizado"
+                elif s.is_final:
+                    bucket = "encerramento"
+                elif exec_start is not None and order >= exec_start:
+                    bucket = "execucao"
+                elif cls._EXEC_PAT.search(name):
+                    bucket = "execucao"
+                else:
+                    bucket = "planejamento"
+                out[s.id] = bucket
+        return out
+
+    @classmethod
+    def _exec_progress(cls, sub: list, excl_ids: set) -> int:
+        """Progresso ponderado por horas sobre a subárvore, EXCLUINDO itens 'Não realizado'.
+        Card finalizado (etapa final/concluído) = 100%; trava em 99 enquanto houver aberto."""
+        done_w = tot_w = 0.0
+        any_open = False
+        for t in sub:
+            if t.id in excl_ids:
+                continue
+            w = float(t.estimated_hours) if t.estimated_hours and float(t.estimated_hours) > 0 else 1.0
+            final = PoPortfolioService._is_final_stage(t)
+            done_w += (100 if final else (t.percent_complete or 0)) / 100.0 * w
+            tot_w += w
+            if not final:
+                any_open = True
+        p = round(100 * done_w / tot_w) if tot_w else 0
+        return 99 if (any_open and p >= 100) else p
+
+    @classmethod
+    async def build(
+        cls,
+        db: AsyncSession,
+        diretoria: Optional[str] = None,
+        area: Optional[str] = None,
+    ) -> dict:
+        now = datetime.utcnow()
+        iso = StatusReportService._iso
+        labels = await StatusReportService._label_maps(db)
+        dir_labels = labels.get("diretoria", {})
+        diretoria_label = dir_labels.get(diretoria, diretoria) if diretoria else None
+        area_label = labels.get("area", {}).get(area, area) if area else None
+
+        def dlabel(code: Optional[str]) -> Optional[str]:
+            return dir_labels.get(code, code) if code else None
+
+        meta = {
+            "generated_at": iso(now),
+            "diretoria": diretoria, "area": area,
+            "diretoria_label": diretoria_label, "area_label": area_label,
+        }
+
+        # Opções de filtro tenant-wide (estáveis nos selects).
+        opt_res = await db.execute(
+            select(ProjectTask.diretoria, ProjectTask.area).where(
+                ProjectTask.planning_kind.in_(["projeto", "programa"])
+            )
+        )
+        dset: set[str] = set()
+        aset: set[str] = set()
+        for d, a in opt_res.all():
+            if d:
+                dset.add(d)
+            if a:
+                aset.add(a)
+        available_diretorias = [{"value": v, "label": dlabel(v) or v} for v in sorted(dset)]
+        available_areas = [
+            {"value": v, "label": labels.get("area", {}).get(v, v)} for v in sorted(aset)
+        ]
+
+        empty = {
+            "meta": meta,
+            "capa": {"total_projetos": 0, "total_programas": 0, "total_pos": 0,
+                     "total_itens": 0, "total_concluidos": 0},
+            "panorama": {"fases": {"planejamento": 0, "execucao": 0, "encerramento": 0},
+                         "backlog_sem_execucao": 0, "avg_exec_pct": None},
+            "prazo": {"projetos": None, "itens": None, "sem_datas_comparaveis": 0},
+            "ranking_pos": [], "por_po": [], "por_diretoria": [],
+            "maiores_atrasos": [], "baseline_gaps": None, "proximos_passos": [],
+            "available_diretorias": available_diretorias, "available_areas": available_areas,
+        }
+
+        pos = await PoPortfolioService.list_pos(db)
+        po_name = {p["person_id"]: p["full_name"] for p in pos}
+        po_ids = list(po_name.keys())
+        if not po_ids:
+            return empty
+
+        roots_filter = [
+            ProjectTask.planning_kind.in_(["projeto", "programa"]),
+            ProjectTask.assigned_to.in_(po_ids),
+        ]
+        if diretoria:
+            roots_filter.append(ProjectTask.diretoria == diretoria)
+        if area:
+            roots_filter.append(ProjectTask.area == area)
+        roots_res = await db.execute(
+            select(ProjectTask).options(selectinload(ProjectTask.status)).where(*roots_filter)
+        )
+        roots = list(roots_res.scalars().all())
+        if not roots:
+            return empty
+
+        container_ids = {r.project_id for r in roots}
+        tasks_res = await db.execute(
+            select(ProjectTask)
+            .where(ProjectTask.project_id.in_(container_ids))
+            .options(selectinload(ProjectTask.status))
+        )
+        all_tasks = list(tasks_res.scalars().all())
+        by_id = {t.id: t for t in all_tasks}
+        children: dict = {}
+        for t in all_tasks:
+            if t.parent_task_id:
+                children.setdefault(t.parent_task_id, []).append(t.id)
+
+        # Classificação de estágios (fase macro por status).
+        sc_res = await db.execute(
+            select(ProjectStatusConfig).where(ProjectStatusConfig.project_id.in_(container_ids))
+        )
+        stage_bucket = cls._classify_stages(list(sc_res.scalars().all()))
+
+        # Diretoria de origem (solicitação) para herança quando a raiz não tem diretoria.
+        origin_ids = {r.origin_task_id for r in roots if r.origin_task_id}
+        origin_dir: dict = {}
+        if origin_ids:
+            ores = await db.execute(
+                select(ProjectTask.id, ProjectTask.diretoria).where(ProjectTask.id.in_(origin_ids))
+            )
+            origin_dir = {tid: d for tid, d in ores.all()}
+
+        def task_bucket(t) -> str:
+            if t.completed_at is not None:
+                return "encerramento"
+            if t.status is not None and bool(t.status.is_final):
+                return "encerramento"
+            return stage_bucket.get(t.status_id, "planejamento")
+
+        def resolve_diretoria(root, sub) -> Optional[str]:
+            if root.diretoria:
+                return root.diretoria
+            if root.origin_task_id and origin_dir.get(root.origin_task_id):
+                return origin_dir[root.origin_task_id]
+            counts: dict = {}
+            for t in sub:
+                if t.diretoria:
+                    counts[t.diretoria] = counts.get(t.diretoria, 0) + 1
+            if counts:
+                return max(counts.items(), key=lambda kv: kv[1])[0]
+            return None
+
+        items: list = []
+        item_delays: list = []          # atrasos no nível item (dias) para saúde de prazo
+        item_outliers: list = []        # candidatos a maiores atrasos (item)
+        for root in roots:
+            sub_ids = PoPortfolioService._subtree(root.id, children)
+            sub = [by_id[i] for i in sub_ids]
+            excl_ids = {t.id for t in sub if task_bucket(t) == "nao_realizado"}
+            eff = [t for t in sub if t.id not in excl_ids]      # itens "vivos"
+
+            # Fase do projeto pela situação REAL.
+            root_final = root.completed_at is not None or (root.status is not None and bool(root.status.is_final))
+            started = any(
+                (task_bucket(t) in ("execucao", "encerramento")) or t.completed_at is not None
+                or (t.percent_complete or 0) > 0
+                for t in eff
+            )
+            if root_final:
+                fase = "encerramento"
+            elif started:
+                fase = "execucao"
+            else:
+                fase = "planejamento"
+
+            non_root_eff = [t for t in eff if t.id != root.id]
+            backlog_montado = fase == "planejamento" and len(non_root_eff) > 0
+
+            exec_pct = None if fase == "planejamento" else cls._exec_progress(sub, excl_ids)
+            subtree_total = len(eff)
+            subtree_completed = sum(1 for t in eff if PoPortfolioService._is_final_stage(t))
+
+            overdue = any(
+                t.completed_at is None and (t.sla_state == "breached" or (t.due_date is not None and t.due_date < now))
+                for t in eff
+            )
+
+            # Saúde de prazo — nível PROJETO (raiz com prazo planejado e fim real).
+            comparable = root.due_date is not None and root.completed_at is not None
+            atraso_dias = None
+            prazo_status = "sem_baseline"
+            if comparable:
+                atraso_dias = (root.completed_at - root.due_date).days
+                prazo_status = "atrasado" if atraso_dias > 0 else "no_prazo"
+
+            # Saúde de prazo — nível ITEM (entregas concluídas com prazo, exceto a raiz).
+            for t in non_root_eff:
+                if t.due_date is not None and t.completed_at is not None:
+                    d = (t.completed_at - t.due_date).days
+                    item_delays.append(d)
+                    if d > 0:
+                        item_outliers.append({
+                            "title": t.title, "po": po_name.get(root.assigned_to),
+                            "projeto": root.title, "nivel": "item",
+                            "planejada": iso(t.due_date), "real": iso(t.completed_at),
+                            "atraso_dias": d,
+                        })
+
+            # Lacunas de baseline.
+            sem_datas_planejadas = root.start_date is None and root.due_date is None
+            baseline_inconsistente = False
+            if root.start_date and root.due_date and root.due_date < root.start_date:
+                baseline_inconsistente = True
+            if root.start_date and root.created_at and root.start_date.year < root.created_at.year:
+                baseline_inconsistente = True
+
+            dir_code = resolve_diretoria(root, sub)
+
+            items.append({
+                "task_id": str(root.id), "title": root.title,
+                "planning_kind": root.planning_kind or "projeto",
+                "po_id": str(root.assigned_to) if root.assigned_to else None,
+                "po": po_name.get(root.assigned_to),
+                "fase": fase,
+                "stage_name": root.status.name if root.status else None,
+                "exec_pct": exec_pct,
+                "health": "vermelho" if (overdue or prazo_status == "atrasado") else "verde",
+                "overdue": overdue,
+                "diretoria": dir_code, "diretoria_label": dlabel(dir_code),
+                "start_date": iso(root.start_date), "due_date": iso(root.due_date),
+                "completed_at": iso(root.completed_at),
+                "comparable": comparable, "prazo_status": prazo_status, "atraso_dias": atraso_dias,
+                "subtree_total": subtree_total, "subtree_completed": subtree_completed,
+                "backlog_montado": backlog_montado,
+                "sem_datas_planejadas": sem_datas_planejadas,
+                "baseline_inconsistente": baseline_inconsistente,
+                "sem_diretoria": dir_code is None,
+            })
+
+        # ── Capa ──
+        all_item_ids: set = set()
+        for root in roots:
+            all_item_ids.update(PoPortfolioService._subtree(root.id, children))
+        capa = {
+            "total_projetos": sum(1 for it in items if it["planning_kind"] == "projeto"),
+            "total_programas": sum(1 for it in items if it["planning_kind"] == "programa"),
+            "total_pos": len({it["po_id"] for it in items if it["po_id"]}),
+            "total_itens": len(all_item_ids),
+            "total_concluidos": sum(1 for it in items if it["fase"] == "encerramento"),
+        }
+
+        # ── Panorama (3 fases) ──
+        fases = {"planejamento": 0, "execucao": 0, "encerramento": 0}
+        for it in items:
+            fases[it["fase"]] += 1
+        exec_vals = [it["exec_pct"] for it in items if it["exec_pct"] is not None]
+        panorama = {
+            "fases": fases,
+            "backlog_sem_execucao": sum(1 for it in items if it["backlog_montado"]),
+            "avg_exec_pct": round(sum(exec_vals) / len(exec_vals), 1) if exec_vals else None,
+        }
+
+        # ── Saúde de prazo ──
+        def prazo_block(delays: list) -> Optional[dict]:
+            if not delays:
+                return {"avaliaveis": 0, "no_prazo": 0, "atrasados": 0,
+                        "atraso_medio": None, "atraso_mediana": None, "pct_atrasados": None}
+            atrasados = [d for d in delays if d > 0]
+            return {
+                "avaliaveis": len(delays),
+                "no_prazo": len(delays) - len(atrasados),
+                "atrasados": len(atrasados),
+                "atraso_medio": round(sum(atrasados) / len(atrasados), 1) if atrasados else 0,
+                "atraso_mediana": cls._median([float(d) for d in atrasados]) if atrasados else 0,
+                "pct_atrasados": round(100 * len(atrasados) / len(delays), 1),
+            }
+        proj_delays = [it["atraso_dias"] for it in items if it["comparable"]]
+        prazo = {
+            "projetos": prazo_block(proj_delays),
+            "itens": prazo_block(item_delays),
+            "sem_datas_comparaveis": sum(1 for it in items if not it["comparable"]),
+        }
+
+        # ── Agrupamento por PO ──
+        def po_kpis(group: list) -> dict:
+            ge = [g["exec_pct"] for g in group if g["exec_pct"] is not None]
+            return {
+                "total": len(group),
+                "planejamento": sum(1 for g in group if g["fase"] == "planejamento"),
+                "execucao": sum(1 for g in group if g["fase"] == "execucao"),
+                "encerramento": sum(1 for g in group if g["fase"] == "encerramento"),
+                "avg_exec_pct": round(sum(ge) / len(ge), 1) if ge else None,
+                "em_risco": sum(1 for g in group if g["health"] == "vermelho"),
+                "atrasados": sum(1 for g in group if g["prazo_status"] == "atrasado"),
+            }
+        by_po: dict = {}
+        for it in items:
+            by_po.setdefault((it["po_id"], it["po"]), []).append(it)
+        por_po = []
+        ranking_pos = []
+        for (pid, pname), group in by_po.items():
+            group_sorted = sorted(group, key=lambda g: (
+                {"execucao": 0, "planejamento": 1, "encerramento": 2}.get(g["fase"], 3),
+                -(g["exec_pct"] or -1), g["title"] or "",
+            ))
+            k = po_kpis(group)
+            por_po.append({"po_id": pid, "full_name": pname, "kpis": k, "projetos": group_sorted})
+            ranking_pos.append({"po_id": pid, "full_name": pname, **k})
+        por_po.sort(key=lambda x: -x["kpis"]["total"])
+        ranking_pos.sort(key=lambda x: -x["total"])
+
+        # ── Por Diretoria ──
+        by_dir: dict = {}
+        for it in items:
+            key = it["diretoria_label"] or "Sem diretoria"
+            by_dir.setdefault(key, []).append(it)
+        por_diretoria = []
+        for dname, group in by_dir.items():
+            ge = [g["exec_pct"] for g in group if g["exec_pct"] is not None]
+            por_diretoria.append({
+                "diretoria_label": dname, "total": len(group),
+                "planejamento": sum(1 for g in group if g["fase"] == "planejamento"),
+                "execucao": sum(1 for g in group if g["fase"] == "execucao"),
+                "encerramento": sum(1 for g in group if g["fase"] == "encerramento"),
+                "avg_exec_pct": round(sum(ge) / len(ge), 1) if ge else None,
+                "em_risco": sum(1 for g in group if g["health"] == "vermelho"),
+                "sem_baseline": dname == "Sem diretoria",
+            })
+        por_diretoria.sort(key=lambda x: (x["diretoria_label"] == "Sem diretoria", -x["total"]))
+
+        # ── Maiores atrasos (projeto + item), maiores primeiro ──
+        proj_outliers = [
+            {"title": it["title"], "po": it["po"], "projeto": it["title"], "nivel": "projeto",
+             "planejada": it["due_date"], "real": it["completed_at"], "atraso_dias": it["atraso_dias"]}
+            for it in items if it["prazo_status"] == "atrasado"
+        ]
+        maiores_atrasos = sorted(
+            proj_outliers + item_outliers, key=lambda x: -(x["atraso_dias"] or 0)
+        )[:12]
+
+        # ── Lacunas de baseline ──
+        baseline_gaps = {
+            "sem_datas_comparaveis": sum(1 for it in items if not it["comparable"]),
+            "sem_datas_planejadas": sum(1 for it in items if it["sem_datas_planejadas"]),
+            "baseline_inconsistente": sum(1 for it in items if it["baseline_inconsistente"]),
+            "sem_diretoria": sum(1 for it in items if it["sem_diretoria"]),
+            "total_projetos": len(items),
+        }
+
+        # ── Próximos passos (data-driven) ──
+        proximos_passos: list = []
+        if panorama["backlog_sem_execucao"]:
+            proximos_passos.append(
+                f"Destravar o planejamento: {panorama['backlog_sem_execucao']} projeto(s) com "
+                f"backlog montado e execução não iniciada — definir data de início e primeira sprint."
+            )
+        if baseline_gaps["sem_datas_comparaveis"]:
+            proximos_passos.append(
+                f"Sanear o baseline: {baseline_gaps['sem_datas_comparaveis']} projeto(s) sem datas "
+                f"comparáveis (planejada + real) — registrar prazos para tornar a saúde de prazo avaliável."
+            )
+        if baseline_gaps["sem_diretoria"]:
+            proximos_passos.append(
+                f"Mapear diretoria: {baseline_gaps['sem_diretoria']} projeto(s) sem diretoria — "
+                f"preencher o campo na solicitação para habilitar a visão por diretoria."
+            )
+        if prazo["projetos"] and prazo["projetos"]["atrasados"]:
+            proximos_passos.append(
+                f"Atacar atrasos: {prazo['projetos']['atrasados']} projeto(s) entregues fora do prazo — "
+                f"revisar os maiores outliers e replanejar."
+            )
+
+        return {
+            "meta": meta, "capa": capa, "panorama": panorama, "prazo": prazo,
+            "ranking_pos": ranking_pos, "por_po": por_po, "por_diretoria": por_diretoria,
+            "maiores_atrasos": maiores_atrasos, "baseline_gaps": baseline_gaps,
+            "proximos_passos": proximos_passos,
+            "available_diretorias": available_diretorias, "available_areas": available_areas,
+        }

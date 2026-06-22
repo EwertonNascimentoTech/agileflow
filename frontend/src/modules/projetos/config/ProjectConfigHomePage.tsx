@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom"
-import { ArrowRight, CalendarRange, ClipboardList, FileText, GitBranch, Grid2x2, KanbanSquare, LayoutGrid, ListChecks, Settings2 } from "lucide-react"
+import { ArrowRight, Bot, CalendarRange, ClipboardList, FileText, GitBranch, Grid2x2, KanbanSquare, LayoutGrid, ListChecks, ScrollText, Settings2 } from "lucide-react"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 
@@ -45,6 +45,18 @@ const sections = [
     icon: CalendarRange,
     title: "Cronograma",
     description: "Escolha em quais fluxos e etapas o cronograma deve ser preenchido (e quando exigir início/prazo).",
+  },
+  {
+    to: "/app/modules/projetos/config/agentes",
+    icon: Bot,
+    title: "Agentes",
+    description: "Vincule agentes IDCortex a etapas do kanban para executar tarefas quando o card entrar na raia.",
+  },
+  {
+    to: "/app/modules/projetos/config/agentes/logs",
+    icon: ScrollText,
+    title: "Logs de agentes",
+    description: "Histórico de execuções, erros e respostas dos agentes por card e etapa.",
   },
   {
     to: "/app/modules/projetos/config/priorizacao",

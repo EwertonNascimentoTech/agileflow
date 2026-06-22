@@ -47,6 +47,7 @@ export interface ProjectStatus {
   moves_to_funnel_id: string | null
   updates_origin_status_id: string | null
   move_in_role_ids: string[] | null
+  move_out_role_ids: string[] | null
   sla_hours: number | null
   sla_warning_pct: number
   priority_mode: PriorityMode
@@ -54,6 +55,7 @@ export interface ProjectStatus {
   cascade_children_on_move: boolean
   children_to_funnel_id: string | null
   grandchildren_to_funnel_id: string | null
+  locks_schedule: boolean
   created_at: string
   updated_at: string
 }
@@ -136,6 +138,7 @@ export interface ProjectTaskComment {
   id: string
   task_id: string
   author_id: string | null
+  author_name: string | null
   content: string
   created_at: string
 }
@@ -272,6 +275,80 @@ export interface ProjectScheduleBindingInput {
   is_active: boolean
 }
 
+export type ProjectStageAgentKind = "ask" | "classify_and_advance"
+
+export interface ProjectStageAgentBinding {
+  id: string
+  project_id: string
+  funnel_id: string
+  status_id: string
+  name: string
+  agent_kind: ProjectStageAgentKind
+  agent_id: string
+  usuario: string
+  prompt_template: string
+  gateway_url: string | null
+  gateway_client_id: string | null
+  has_gateway_client_secret: boolean
+  continue_thread: boolean
+  add_comment_on_success: boolean
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface ProjectStageAgentBindingInput {
+  project_id: string
+  funnel_id: string
+  status_id: string
+  name: string
+  agent_kind?: ProjectStageAgentKind
+  agent_id: string
+  usuario: string
+  prompt_template: string
+  gateway_url?: string | null
+  gateway_client_id: string
+  gateway_client_secret: string
+  continue_thread?: boolean
+  add_comment_on_success?: boolean
+  is_active?: boolean
+}
+
+export interface ProjectAgentExecution {
+  id: string
+  task_id: string
+  binding_id: string
+  status: string
+  thread_id: string | null
+  answer_message: string | null
+  error_message: string | null
+  created_at: string
+}
+
+export interface ProjectAgentExecutionLogItem {
+  id: string
+  task_id: string
+  task_title: string
+  binding_id: string
+  agent_name: string
+  agent_kind: ProjectStageAgentKind
+  status_name: string
+  status: string
+  thread_id: string | null
+  answer_message: string | null
+  error_message: string | null
+  request_payload: Record<string, unknown> | null
+  response_payload: Record<string, unknown> | null
+  created_at: string
+}
+
+export interface ProjectAgentExecutionLogPage {
+  items: ProjectAgentExecutionLogItem[]
+  total: number
+  limit: number
+  offset: number
+}
+
 export interface ProjectReports {
   total_active: number
   total_completed: number
@@ -348,6 +425,43 @@ export interface CriticalPathItem {
   free_float_hours: number
   late_start: string
   late_finish: string
+}
+
+// ── Controle de baseline / travamento do cronograma ──
+export type ScheduleLockStateKind = "open" | "locked" | "revision"
+
+export interface ScheduleLockState {
+  root_task_id: string
+  state: ScheduleLockStateKind
+  committed_at: string | null
+  revision_open: boolean
+  baseline_count: number
+  latest_version: number | null
+}
+
+export interface ScheduleBaselineSnapshotTask {
+  task_id: string
+  title: string
+  level: number
+  start_date: string | null
+  due_date: string | null
+  estimated_hours: number | null
+  percent_complete: number
+  status_name: string | null
+}
+
+export interface ScheduleBaseline {
+  id: string
+  project_id: string
+  root_task_id: string
+  version: number
+  justification: string
+  snapshot: {
+    tasks: ScheduleBaselineSnapshotTask[]
+    dependencies: Array<{ predecessor_id: string; successor_id: string; dep_type: string; lag_hours: number }>
+  }
+  created_by: string | null
+  created_at: string
 }
 
 export interface WorkloadCell {
@@ -690,6 +804,125 @@ export interface StatusReportResponse extends StatusReportListItem {
   snapshot: StatusReportSnapshot
 }
 
+// ── PO Sync (análise de portfólio para a cerimônia) ─────────────────────────────
+export type PoSyncFase = "planejamento" | "execucao" | "encerramento"
+
+export interface PoSyncOption {
+  value: string
+  label: string
+}
+
+export interface PoSyncProjeto {
+  task_id: string
+  title: string
+  planning_kind: string
+  po_id: string | null
+  po: string | null
+  fase: PoSyncFase
+  stage_name: string | null
+  exec_pct: number | null
+  health: "verde" | "vermelho"
+  overdue: boolean
+  diretoria: string | null
+  diretoria_label: string | null
+  start_date: string | null
+  due_date: string | null
+  completed_at: string | null
+  comparable: boolean
+  prazo_status: "no_prazo" | "atrasado" | "sem_baseline"
+  atraso_dias: number | null
+  subtree_total: number
+  subtree_completed: number
+  backlog_montado: boolean
+  sem_datas_planejadas: boolean
+  baseline_inconsistente: boolean
+  sem_diretoria: boolean
+}
+
+export interface PoSyncKpis {
+  total: number
+  planejamento: number
+  execucao: number
+  encerramento: number
+  avg_exec_pct: number | null
+  em_risco: number
+  atrasados: number
+}
+
+export interface PoSyncPrazoBlock {
+  avaliaveis: number
+  no_prazo: number
+  atrasados: number
+  atraso_medio: number | null
+  atraso_mediana: number | null
+  pct_atrasados: number | null
+}
+
+export interface PoSyncOutlier {
+  title: string
+  po: string | null
+  projeto: string
+  nivel: "projeto" | "item"
+  planejada: string | null
+  real: string | null
+  atraso_dias: number | null
+}
+
+export interface PoSyncResponse {
+  meta: {
+    generated_at: string | null
+    diretoria: string | null
+    area: string | null
+    diretoria_label: string | null
+    area_label: string | null
+  }
+  capa: {
+    total_projetos: number
+    total_programas: number
+    total_pos: number
+    total_itens: number
+    total_concluidos: number
+  }
+  panorama: {
+    fases: { planejamento: number; execucao: number; encerramento: number }
+    backlog_sem_execucao: number
+    avg_exec_pct: number | null
+  }
+  prazo: {
+    projetos: PoSyncPrazoBlock | null
+    itens: PoSyncPrazoBlock | null
+    sem_datas_comparaveis: number
+  }
+  ranking_pos: Array<{ po_id: string | null; full_name: string | null } & PoSyncKpis>
+  por_po: Array<{
+    po_id: string | null
+    full_name: string | null
+    kpis: PoSyncKpis
+    projetos: PoSyncProjeto[]
+  }>
+  por_diretoria: Array<{
+    diretoria_label: string
+    total: number
+    planejamento: number
+    execucao: number
+    encerramento: number
+    avg_exec_pct: number | null
+    em_risco: number
+    sem_baseline: boolean
+  }>
+  maiores_atrasos: PoSyncOutlier[]
+  baseline_gaps: {
+    sem_datas_comparaveis: number
+    sem_datas_planejadas: number
+    baseline_inconsistente: number
+    sem_diretoria: number
+    total_projetos: number
+  } | null
+  proximos_passos: string[]
+  available_diretorias: PoSyncOption[]
+  available_areas: PoSyncOption[]
+}
+
 // ── API client ────────────────────────────────────────────────────────────────
 
 export const projetosApi = {
@@ -896,6 +1129,7 @@ export const projetosApi = {
     cascade_children_on_move: boolean
     children_to_funnel_id: string | null
     grandchildren_to_funnel_id: string | null
+    locks_schedule: boolean
   }>) => api.patch<ProjectStatus>(`/projetos/projects/${projectId}/funnels/${funnelId}/statuses/${statusId}`, data).then((r) => r.data),
   reorderStatuses: (projectId: string, funnelId: string, items: Array<{ id: string; order: number }>) =>
     api.patch<ProjectStatus[]>(`/projetos/projects/${projectId}/funnels/${funnelId}/statuses/reorder`, { items }).then((r) => r.data),
@@ -973,6 +1207,16 @@ export const projetosApi = {
     api.get<CriticalPathItem[]>(`/projetos/projects/${projectId}/critical-path`, { params: { root: rootTaskId } }).then((r) => r.data),
   getAssigneeAbsences: (projectId: string) =>
     api.get<AssigneeAbsencesResponse>(`/projetos/projects/${projectId}/assignee-absences`).then((r) => r.data),
+
+  // Controle de baseline / travamento do cronograma.
+  getScheduleLock: (projectId: string, rootTaskId: string) =>
+    api.get<ScheduleLockState>(`/projetos/projects/${projectId}/schedule-lock`, { params: { root: rootTaskId } }).then((r) => r.data),
+  listBaselines: (projectId: string, rootTaskId: string) =>
+    api.get<ScheduleBaseline[]>(`/projetos/projects/${projectId}/baselines`, { params: { root: rootTaskId } }).then((r) => r.data),
+  saveBaseline: (projectId: string, data: { root_task_id: string; justification: string }) =>
+    api.post<ScheduleBaseline>(`/projetos/projects/${projectId}/baselines`, data).then((r) => r.data),
+  closeScheduleRevision: (projectId: string, rootTaskId: string) =>
+    api.post<ScheduleLockState>(`/projetos/projects/${projectId}/baselines/close-revision`, { root_task_id: rootTaskId }).then((r) => r.data),
 
   listPlanningNodes: (projectId: string) =>
     api.get<ProjectTask[]>(`/projetos/projects/${projectId}/planning-nodes`).then((r) => r.data),
@@ -1085,6 +1329,15 @@ export const projetosApi = {
   getStatusReport: (reportId: string) =>
     api.get<StatusReportResponse>(`/projetos/status-reports/${reportId}`).then((r) => r.data),
 
+  // Análise de portfólio para a cerimônia PO Sync (read-only, recortável por diretoria/área).
+  getPoSync: (params?: { diretoria?: string | null; area?: string | null }) =>
+    api.get<PoSyncResponse>(`/projetos/po-sync`, {
+      params: {
+        ...(params?.diretoria ? { diretoria: params.diretoria } : {}),
+        ...(params?.area ? { area: params.area } : {}),
+      },
+    }).then((r) => r.data),
+
   uploadFile: (file: File) => {
     const fd = new FormData()
     fd.append("file", file)
@@ -1112,6 +1365,26 @@ export const projetosApi = {
     api.put<ProjectScheduleBinding[]>(`/projetos/config/schedule-bindings`, { bindings }).then((r) => r.data),
   deleteScheduleBinding: (statusId: string) =>
     api.delete<void>(`/projetos/config/schedule-bindings/${statusId}`).then((r) => r.data),
+
+  listStageAgents: (projectId?: string) =>
+    api.get<ProjectStageAgentBinding[]>(`/projetos/config/stage-agents`, {
+      params: projectId ? { project_id: projectId } : undefined,
+    }).then((r) => r.data),
+  createStageAgent: (data: ProjectStageAgentBindingInput) =>
+    api.post<ProjectStageAgentBinding>(`/projetos/config/stage-agents`, data).then((r) => r.data),
+  updateStageAgent: (bindingId: string, data: Partial<Omit<ProjectStageAgentBindingInput, "project_id" | "funnel_id" | "status_id">>) =>
+    api.patch<ProjectStageAgentBinding>(`/projetos/config/stage-agents/${bindingId}`, data).then((r) => r.data),
+  deleteStageAgent: (bindingId: string) =>
+    api.delete<void>(`/projetos/config/stage-agents/${bindingId}`).then((r) => r.data),
+  listTaskAgentExecutions: (taskId: string) =>
+    api.get<ProjectAgentExecution[]>(`/projetos/tasks/${taskId}/agent-executions`).then((r) => r.data),
+  listAgentExecutionLogs: (params?: {
+    status?: "pending" | "success" | "failed"
+    binding_id?: string
+    limit?: number
+    offset?: number
+  }) =>
+    api.get<ProjectAgentExecutionLogPage>(`/projetos/config/agent-executions`, { params }).then((r) => r.data),
 
   listCardFields: (funnelId: string) =>
     api.get<ProjectCardField[]>(`/projetos/config/card-fields`, { params: { funnel_id: funnelId } }).then((r) => r.data),

@@ -1,7 +1,8 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from "react"
-import type { ProjectTask } from "@/api/projetos"
+import type { ProjectTask, ProjectDefaultFormField } from "@/api/projetos"
 import { isProductOwnerPosition, type Person } from "@/api/teamops"
 import type { User } from "@/types"
+import { defaultSelectLabel } from "@/modules/projetos/defaultFormUtils"
 import { requesterValuesMatchFilter } from "@/modules/projetos/cardFieldDisplay"
 
 export const FILTERS_KEY = "projetos.board.filters"
@@ -30,6 +31,12 @@ export type BoardFilterState = {
   planningScopeIds: Set<string> | null
   areas: string[]
   groupedChildIds: Set<string>
+  /** PO efetivo por card (herdado do projeto/programa ancestral). */
+  effectivePoByTaskId: Map<string, string | null>
+  /** Solicitação → PO do projeto/programa convertido (origin_task_id). */
+  poByOriginTaskId: Map<string, string>
+  /** POs cuja área TeamOps casa com diretoria/área do formulário padrão. */
+  matchPoIdsByForm: (diretoria: string | null, area: string | null) => string[]
 }
 
 export function loadFilters(): BoardFilters {
@@ -73,11 +80,122 @@ export function buildPlanningScopeIds(tasks: ProjectTask[], rootIds: string[]): 
   return scope
 }
 
+/**
+ * PO efetivo de cada card: o `assigned_to` do projeto/programa ancestral.
+ * Features, user stories etc. herdam do pai até achar um card `projeto`/`programa`.
+ */
+export function buildEffectivePoByTaskId(tasks: ProjectTask[]): Map<string, string | null> {
+  const byId = new Map(tasks.map((t) => [t.id, t]))
+  const cache = new Map<string, string | null>()
+
+  function resolve(taskId: string): string | null {
+    if (cache.has(taskId)) return cache.get(taskId)!
+    const task = byId.get(taskId)
+    if (!task) {
+      cache.set(taskId, null)
+      return null
+    }
+    if (task.planning_kind === "projeto" || task.planning_kind === "programa") {
+      const v = task.assigned_to ?? null
+      cache.set(taskId, v)
+      return v
+    }
+    if (task.parent_task_id) {
+      const v = resolve(task.parent_task_id)
+      cache.set(taskId, v)
+      return v
+    }
+    cache.set(taskId, null)
+    return null
+  }
+
+  for (const t of tasks) resolve(t.id)
+  return cache
+}
+
+/** PO do projeto/programa gerado na conversão (origin_task_id → assigned_to). */
+export function buildPoByOriginTaskId(tasks: ProjectTask[]): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const t of tasks) {
+    if (
+      (t.planning_kind === "projeto" || t.planning_kind === "programa")
+      && t.origin_task_id
+      && t.assigned_to
+    ) {
+      map.set(t.origin_task_id, t.assigned_to)
+    }
+  }
+  return map
+}
+
+function normalizeFormLabel(value: string): string {
+  return value.trim().toLowerCase().normalize("NFD").replace(/\p{M}/gu, "")
+}
+
+/** POs cujo nome de área TeamOps contém a diretoria/área do card (solicitações em Prospectar). */
+export function buildPoMatchByFormDimensions(
+  poPersons: Person[],
+  defaultFormFields: ProjectDefaultFormField[],
+): (diretoria: string | null, area: string | null) => string[] {
+  const poAreas = poPersons.map((p) => ({
+    id: p.id,
+    areaName: normalizeFormLabel(p.area?.name ?? ""),
+  }))
+
+  return (diretoria, area) => {
+    const dirLabel = diretoria
+      ? defaultSelectLabel(defaultFormFields, "diretoria", diretoria)
+      : null
+    const areaLabel = area
+      ? defaultSelectLabel(defaultFormFields, "area", area)
+      : null
+    const out: string[] = []
+    for (const po of poAreas) {
+      if (!po.areaName) continue
+      if (dirLabel && po.areaName.includes(normalizeFormLabel(dirLabel))) {
+        out.push(po.id)
+        continue
+      }
+      if (areaLabel && po.areaName.includes(normalizeFormLabel(areaLabel))) {
+        out.push(po.id)
+      }
+    }
+    return out
+  }
+}
+
+/** Todos os PO candidatos de um card (herança, conversão, diretoria/área). */
+export function poCandidateIdsForTask(
+  task: ProjectTask,
+  f: Pick<BoardFilterState, "effectivePoByTaskId" | "poByOriginTaskId" | "matchPoIdsByForm">,
+): string[] {
+  const ids = new Set<string>()
+  const inherited = f.effectivePoByTaskId.get(task.id)
+  if (inherited) ids.add(inherited)
+  const fromOrigin = f.poByOriginTaskId.get(task.id)
+  if (fromOrigin) ids.add(fromOrigin)
+  if (task.assigned_to && (task.planning_kind === "projeto" || task.planning_kind === "programa")) {
+    ids.add(task.assigned_to)
+  }
+  for (const pid of f.matchPoIdsByForm(task.diretoria, task.area)) ids.add(pid)
+  return [...ids]
+}
+
 export function taskMatches(t: ProjectTask, f: BoardFilterState): boolean {
   const q = f.q.trim().toLowerCase()
   if (q && !t.title.toLowerCase().includes(q)) return false
   if (f.assignees.length && !f.assignees.includes(t.assigned_to ?? "__none__")) return false
-  if (f.productOwners.length && !f.productOwners.includes(t.assigned_to ?? "__none__")) return false
+  if (f.productOwners.length) {
+    const candidates = poCandidateIdsForTask(t, f)
+    const matched = f.productOwners.some((po) => candidates.includes(po))
+    if (!matched) {
+      if (f.productOwners.includes("__none__") && candidates.length === 0) {
+        // sem PO identificado
+      } else {
+        return false
+      }
+    }
+  }
   if (f.requisitantes.length) {
     const vals = requesterValuesForTask(f.formValuesByTask, t.id, f.requesterFieldKey)
     if (!requesterValuesMatchFilter(vals, f.requisitantes, f.resolveRequisitanteLabel)) return false
@@ -96,6 +214,17 @@ export function personsToUsers(persons: Person[]): User[] {
 
 export function productOwnerPersons(persons: Person[]): Person[] {
   return persons.filter((p) => isProductOwnerPosition(p.position?.slug, p.position?.name))
+}
+
+/** Cards raiz (projeto/programa) para o filtro do quadro. */
+export function planningRootTasks(tasks: ProjectTask[]): ProjectTask[] {
+  return tasks.filter((t) => t.planning_kind === "projeto" || t.planning_kind === "programa")
+}
+
+/** Restringe projetos/programas ao PO selecionado (assigned_to do card raiz). */
+export function filterPlanningRootsByPo(roots: ProjectTask[], productOwnerIds: string[]): ProjectTask[] {
+  if (productOwnerIds.length === 0) return roots
+  return roots.filter((t) => productOwnerIds.includes(t.assigned_to ?? "__none__"))
 }
 
 /** Filtros do quadro/lista/calendário persistidos no localStorage. */
