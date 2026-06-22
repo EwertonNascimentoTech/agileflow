@@ -185,6 +185,8 @@ export function GanttChart({
   onDelete,
   onUpdateDates,
   onReorder,
+  baselineById,
+  markById,
 }: {
   rootId: string
   tasks: ProjectTask[]
@@ -202,6 +204,10 @@ export function GanttChart({
   onDelete?: (t: ProjectTask) => void
   onUpdateDates?: (t: ProjectTask, patch: { start_date?: string | null; due_date?: string | null }) => void
   onReorder?: (items: Array<{ id: string; order: number }>) => void
+  // Linha de base (baseline) para comparação: task_id → datas planejadas do snapshot selecionado.
+  baselineById?: Map<string, { start: string | null; due: string | null }>
+  // Destaque das tarefas que mudaram vs o baseline em comparação.
+  markById?: Map<string, "changed" | "inserted">
 }) {
   const [drag, setDrag] = useState<DragState | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
@@ -297,6 +303,10 @@ export function GanttChart({
       pushIfValid(r.task.start_date)
       pushIfValid(r.task.due_date)
     }
+    // Inclui as datas do baseline em comparação, para barras-fantasma fora da janela atual caberem.
+    if (baselineById) {
+      for (const b of baselineById.values()) { pushIfValid(b.start); pushIfValid(b.due) }
+    }
     if (dates.length === 0) {
       const today = startOfDay(new Date())
       const start = startOfDay(new Date(today.getTime() - 7 * DAY_MS))
@@ -318,7 +328,7 @@ export function GanttChart({
       cursor = new Date(monthEnd.getTime() + DAY_MS)
     }
     return { rangeStart: start, totalDays: days, months: ms }
-  }, [rows])
+  }, [rows, baselineById])
 
   const timelineWidth = totalDays * dayWidth
   const bodyH = rows.length * ROW_H
@@ -409,6 +419,29 @@ export function GanttChart({
     }
     return m
   }, [rows, rangeStart, dayWidth, dayFrac])
+
+  // Geometria das barras-fantasma do baseline (mesma fórmula da barra atual), por task_id.
+  // Inclui o delta (due atual − due baseline, em dias) para mostrar o desvio.
+  const baselineGeomById = useMemo(() => {
+    const m = new Map<string, { left: number; width: number; sIso: string; eIso: string; deltaDays: number | null }>()
+    if (!baselineById) return m
+    for (const r of rows) {
+      const b = baselineById.get(r.task.id)
+      if (!b) continue
+      const sIso = b.start ?? b.due
+      const eIso = b.due ?? b.start
+      if (!sIso || !eIso) continue
+      const s = dateFromIso(sIso), e = dateFromIso(eIso)
+      if (isNaN(s.getTime()) || isNaN(e.getTime())) continue
+      const left = (daysBetween(rangeStart, s) + dayFrac(sIso)) * dayWidth
+      const right = (daysBetween(rangeStart, e) + dayFrac(eIso)) * dayWidth
+      const width = Math.max(right - left, 6)
+      const curDue = r.task.due_date ?? r.task.start_date
+      const deltaDays = (curDue && b.due) ? daysBetween(startOfDay(dateFromIso(b.due)), startOfDay(dateFromIso(curDue))) : null
+      m.set(r.task.id, { left, width, sIso, eIso, deltaDays })
+    }
+    return m
+  }, [rows, baselineById, rangeStart, dayWidth, dayFrac])
 
   // Auto-scroll até "hoje" ao montar / mudar escala.
   useEffect(() => {
@@ -620,6 +653,23 @@ export function GanttChart({
                 </svg>
               )}
 
+              {/* Barras-fantasma do baseline (planejado), sob as barras atuais — comparação. */}
+              {baselineById && rows.map((r) => {
+                const bg = baselineGeomById.get(r.task.id)
+                if (!bg) return null
+                const idx = rowIndex.get(r.task.id) ?? 0
+                const dl = bg.deltaDays
+                const deltaTxt = dl === null ? "" : dl > 0 ? ` · +${dl}d` : dl < 0 ? ` · ${dl}d` : " · no prazo"
+                return (
+                  <div
+                    key={"bl" + r.task.id}
+                    className="gx-bar-baseline"
+                    style={{ left: bg.left + 1, top: idx * ROW_H + (ROW_H + BAR_H) / 2 + 2, width: Math.max(bg.width - 2, 6), height: 7 }}
+                    title={`Baseline: ${fmtShortIso(bg.sIso)} → ${fmtShortIso(bg.eIso)}${deltaTxt}`}
+                  />
+                )
+              })}
+
               {rows.map((r) => {
                 const node = r.task
                 const g = geomById.get(node.id)
@@ -629,9 +679,11 @@ export function GanttChart({
                 const st = statusForProgress(node, pct)
                 const crit = isCritical(node.id)
                 const CRIT = "#E11D48"
+                const mark = markById?.get(node.id)
+                const markCls = mark === "inserted" ? " gx-bar--inserted" : mark === "changed" ? " gx-bar--changed" : ""
                 if (r.hasKids) {
                   return (
-                    <div key={node.id} className={`gx-ebar${crit ? " crit" : ""}`} style={{ left: g.left, top: idx * ROW_H, width: g.width, height: ROW_H }}
+                    <div key={node.id} className={`gx-ebar${crit ? " crit" : ""}${markCls}`} style={{ left: g.left, top: idx * ROW_H, width: g.width, height: ROW_H }}
                       onClick={() => onOpenTask?.(node)} onPointerMove={(e) => showTip(e, node)} onPointerLeave={() => setTip(null)}>
                       <div className="track" />
                       <div className="efill" style={{ width: pct + "%", background: crit ? CRIT : st.color }} />
@@ -651,7 +703,7 @@ export function GanttChart({
                 return (
                   <div key={node.id}>
                     <div
-                      className={`gx-bar${drag?.taskId === node.id ? " dragging" : ""}`}
+                      className={`gx-bar${drag?.taskId === node.id ? " dragging" : ""}${markCls}`}
                       style={{ left: bl + 1, top, width: Math.max(bw - 2, 10), height: BAR_H, background: st.soft, boxShadow: crit ? `inset 0 0 0 1.5px ${st.color}33, 0 0 0 2px ${CRIT}` : `inset 0 0 0 1.5px ${st.color}33` }}
                       onPointerDown={draggable ? (e) => startDrag(e, node, "move") : undefined}
                       onPointerMove={draggable ? (e) => { moveDrag(e, node.id); showTip(e, node) } : (e) => showTip(e, node)}

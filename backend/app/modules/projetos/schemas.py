@@ -521,6 +521,7 @@ class ScheduleBaselineResponse(BaseModel):
 
 class ScheduleLockState(BaseModel):
     root_task_id: uuid.UUID
+    root_title: Optional[str] = None
     state: Literal["open", "locked", "revision"]
     committed_at: Optional[datetime] = None
     revision_open: bool = False

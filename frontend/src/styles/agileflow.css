@@ -617,6 +617,13 @@
 .afx .gx-bar .hnd.r { right: 0; }
 .afx .gx-barside { position: absolute; display: flex; align-items: center; gap: 6px; pointer-events: none; }
 
+/* baseline ghost bar (comparação cronograma atual × linha de base) */
+.afx .gx-bar-baseline { position: absolute; border-radius: 4px; opacity: .7; pointer-events: none; z-index: 0; background: repeating-linear-gradient(45deg, #b6bcc6, #b6bcc6 3px, #cdd2da 3px, #cdd2da 6px); }
+
+/* destaque das tarefas que mudaram vs o baseline (outline não conflita com as sombras) */
+.afx .gx-bar--changed { outline: 2px solid var(--af-warning); outline-offset: 1px; }
+.afx .gx-bar--inserted { outline: 2px solid var(--af-success); outline-offset: 1px; }
+
 /* epic summary bar */
 .afx .gx-ebar { position: absolute; pointer-events: auto; cursor: pointer; }
 .afx .gx-ebar .track { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%); height: 8px; border-radius: 4px; background: var(--af-muted-3); }

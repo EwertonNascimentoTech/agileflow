@@ -432,6 +432,7 @@ export type ScheduleLockStateKind = "open" | "locked" | "revision"
 
 export interface ScheduleLockState {
   root_task_id: string
+  root_title: string | null
   state: ScheduleLockStateKind
   committed_at: string | null
   revision_open: boolean
@@ -443,11 +444,14 @@ export interface ScheduleBaselineSnapshotTask {
   task_id: string
   title: string
   level: number
+  parent_task_id?: string | null
   start_date: string | null
   due_date: string | null
   estimated_hours: number | null
   percent_complete: number
   status_name: string | null
+  assigned_to?: string | null
+  assigned_to_name?: string | null
 }
 
 export interface ScheduleBaseline {
@@ -1211,6 +1215,10 @@ export const projetosApi = {
   // Controle de baseline / travamento do cronograma.
   getScheduleLock: (projectId: string, rootTaskId: string) =>
     api.get<ScheduleLockState>(`/projetos/projects/${projectId}/schedule-lock`, { params: { root: rootTaskId } }).then((r) => r.data),
+  getScheduleLocks: (projectId: string) =>
+    api.get<ScheduleLockState[]>(`/projetos/projects/${projectId}/schedule-locks`).then((r) => r.data),
+  getScheduleLockForTask: (projectId: string, taskId: string) =>
+    api.get<ScheduleLockState>(`/projetos/projects/${projectId}/schedule-lock-for-task`, { params: { task: taskId } }).then((r) => r.data),
   listBaselines: (projectId: string, rootTaskId: string) =>
     api.get<ScheduleBaseline[]>(`/projetos/projects/${projectId}/baselines`, { params: { root: rootTaskId } }).then((r) => r.data),
   saveBaseline: (projectId: string, data: { root_task_id: string; justification: string }) =>

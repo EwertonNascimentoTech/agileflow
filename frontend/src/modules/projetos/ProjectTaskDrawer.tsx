@@ -2,7 +2,8 @@ import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { ArrowUpRight, CalendarRange, Check, ChevronDown, FileText, Link as LinkIcon, Loader2, Pencil, Plus, Trash2, X } from "lucide-react"
 
-import { projetosApi, type PriorityMode, type ProjectDemandFormField, type ProjectDemandFormSection, type ProjectDemandType, type ProjectStatus, type ProjectStatusDefaultFormLink, type ProjectStatusSectionLink, type ProjectTask, type ProjectTaskComment, type ProjectUpload } from "@/api/projetos"
+import { projetosApi, type PriorityMode, type ProjectDemandFormField, type ProjectDemandFormSection, type ProjectDemandType, type ProjectStatus, type ProjectStatusDefaultFormLink, type ProjectStatusSectionLink, type ProjectTask, type ProjectTaskComment, type ProjectUpload, type ScheduleLockState } from "@/api/projetos"
+import { ScheduleLockBanner } from "@/modules/projetos/ScheduleLockBanner"
 import { Badge } from "@/components/ui/badge"
 import { teamopsApi } from "@/api/teamops"
 import type { User } from "@/types"
@@ -72,6 +73,7 @@ export function ProjectTaskDrawer({
   const [assignedTo, setAssignedTo] = useState<string>(NO_ASSIGNEE)
   const [startDate, setStartDate] = useState("")
   const [dueDate, setDueDate] = useState("")
+  const [scheduleLock, setScheduleLock] = useState<ScheduleLockState | null>(null)
   const [diretoria, setDiretoria] = useState<string | null>(null)
   const [area, setArea] = useState<string | null>(null)
   const [parentTaskId, setParentTaskId] = useState<string>(NO_ASSIGNEE)
@@ -146,8 +148,15 @@ export function ProjectTaskDrawer({
       setAllStatuses(sts)
       setStatusMap(Object.fromEntries(sts.map((s) => [s.id, { name: s.name, color: s.color, priority_mode: s.priority_mode }])))
     }).catch(() => { setAllStatuses([]); setStatusMap({}) })
+    // Estado da trava de cronograma da raiz a que esta tarefa pertence.
+    projetosApi.getScheduleLockForTask(projectId, task.id).then(setScheduleLock).catch(() => setScheduleLock(null))
     return () => clearTimeout(timer)
   }, [open, task, projectId, defaultFormFields])
+
+  async function reloadScheduleLock() {
+    if (!task) return
+    try { setScheduleLock(await projetosApi.getScheduleLockForTask(projectId, task.id)) } catch { /* mantém */ }
+  }
 
   useEffect(() => {
     if (!open || !projectId || !statusId) {
@@ -636,6 +645,14 @@ export function ProjectTaskDrawer({
 
           <div className="drawer-body">
           <div className="space-y-5">
+            {scheduleLock && task && (
+              <ScheduleLockBanner
+                projectId={projectId}
+                lock={scheduleLock}
+                onChanged={() => void reloadScheduleLock()}
+                compact
+              />
+            )}
             {/* Cabeçalho: tipo, estado, título e meta (estilo Azure DevOps) */}
             <div className="space-y-2 border-b border-border pb-3">
               <div className="flex flex-wrap items-center gap-2">

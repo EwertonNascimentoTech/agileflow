@@ -2621,7 +2621,13 @@ class ProjectTaskService:
             await ProjectTaskService._enforce_schedule_gate(db, task, payload)
             await ProjectTaskService._enforce_priority_gate(db, task)
 
-        schedule_changed = any(k in payload for k in ("start_date", "due_date", "estimated_hours"))
+        # "Mudou de fato" — compara com o valor atual. Assim um save de título/etc. que reenvia
+        # as mesmas datas (ex.: drawer) NÃO é tratado como alteração de cronograma.
+        schedule_changed = (
+            ("start_date" in payload and payload["start_date"] != task.start_date)
+            or ("due_date" in payload and payload["due_date"] != task.due_date)
+            or ("estimated_hours" in payload and payload["estimated_hours"] != task.estimated_hours)
+        )
         # Trava de cronograma: se o projeto está comprometido (em desenvolvimento) e sem revisão
         # aberta, alterar datas/horas é bloqueado (423). Progresso/etapa/metadados seguem livres.
         if schedule_changed:
@@ -3176,6 +3182,18 @@ class ScheduleBaselineService:
             )
 
     @staticmethod
+    def _state_payload(root: ProjectTask, count: int, latest: Optional[int]) -> dict:
+        return {
+            "root_task_id": str(root.id),
+            "root_title": root.title,
+            "state": ScheduleBaselineService._state_of_root(root),
+            "committed_at": root.schedule_committed_at.isoformat() if root.schedule_committed_at else None,
+            "revision_open": root.schedule_revision_open,
+            "baseline_count": count or 0,
+            "latest_version": latest,
+        }
+
+    @staticmethod
     async def lock_state(db: AsyncSession, project_id: uuid.UUID, root_id: uuid.UUID) -> dict:
         root = await ScheduleBaselineService._get_root(db, project_id, root_id)
         agg = await db.execute(
@@ -3184,14 +3202,48 @@ class ScheduleBaselineService:
             )
         )
         count, latest = agg.one()
-        return {
-            "root_task_id": str(root_id),
-            "state": ScheduleBaselineService._state_of_root(root),
-            "committed_at": root.schedule_committed_at.isoformat() if root.schedule_committed_at else None,
-            "revision_open": root.schedule_revision_open,
-            "baseline_count": count or 0,
-            "latest_version": latest,
-        }
+        return ScheduleBaselineService._state_payload(root, count, latest)
+
+    @staticmethod
+    async def lock_state_for_task(db: AsyncSession, project_id: uuid.UUID, task_id: uuid.UUID) -> dict:
+        """Estado da trava da raiz de planejamento à qual a tarefa pertence (resolve o root).
+        Se a tarefa não tem raiz de planejamento, devolve estado 'open' (sem trava)."""
+        root_id = await ProjectTaskService._planning_root_id(db, project_id, task_id)
+        root = await db.get(ProjectTask, root_id)
+        if root is None or root.planning_kind not in ("projeto", "programa"):
+            return {
+                "root_task_id": str(root_id), "root_title": root.title if root else None,
+                "state": "open", "committed_at": None, "revision_open": False,
+                "baseline_count": 0, "latest_version": None,
+            }
+        return await ScheduleBaselineService.lock_state(db, project_id, root_id)
+
+    @staticmethod
+    async def lock_states(db: AsyncSession, project_id: uuid.UUID) -> list[dict]:
+        """Estado da trava de TODAS as raízes de planejamento do projeto (para a visão completa
+        do cronograma). Uma query de contagem agregada — sem N+1."""
+        res = await db.execute(
+            select(ProjectTask).where(
+                ProjectTask.project_id == project_id,
+                ProjectTask.planning_kind.in_(["projeto", "programa"]),
+            )
+        )
+        roots = list(res.scalars().all())
+        if not roots:
+            return []
+        counts = await db.execute(
+            select(
+                ProjectScheduleBaseline.root_task_id, func.count(), func.max(ProjectScheduleBaseline.version)
+            )
+            .where(ProjectScheduleBaseline.root_task_id.in_([r.id for r in roots]))
+            .group_by(ProjectScheduleBaseline.root_task_id)
+        )
+        by_root = {rid: (c, mx) for rid, c, mx in counts.all()}
+        out = []
+        for r in roots:
+            c, mx = by_root.get(r.id, (0, None))
+            out.append(ScheduleBaselineService._state_payload(r, c, mx))
+        return out
 
     @staticmethod
     async def _build_snapshot(db: AsyncSession, project_id: uuid.UUID, root: ProjectTask) -> dict:
@@ -3209,6 +3261,15 @@ class ScheduleBaselineService:
             if t.parent_task_id:
                 children.setdefault(t.parent_task_id, []).append(t.id)
 
+        # Nomes dos responsáveis (assigned_to = Person.id) para o diff "troca de responsável".
+        person_ids = {t.assigned_to for t in all_tasks if t.assigned_to}
+        person_name: dict = {}
+        if person_ids:
+            prows = await db.execute(
+                select(Person.id, Person.full_name).where(Person.id.in_(person_ids))
+            )
+            person_name = {pid: name for pid, name in prows.all()}
+
         snap_tasks: list = []
         sub_ids: list = []
 
@@ -3219,11 +3280,14 @@ class ScheduleBaselineService:
             sub_ids.append(tid)
             snap_tasks.append({
                 "task_id": str(t.id), "title": t.title, "level": level,
+                "parent_task_id": str(t.parent_task_id) if t.parent_task_id else None,
                 "start_date": t.start_date.isoformat() if t.start_date else None,
                 "due_date": t.due_date.isoformat() if t.due_date else None,
                 "estimated_hours": float(t.estimated_hours) if t.estimated_hours is not None else None,
                 "percent_complete": t.percent_complete or 0,
                 "status_name": t.status.name if t.status else None,
+                "assigned_to": str(t.assigned_to) if t.assigned_to else None,
+                "assigned_to_name": person_name.get(t.assigned_to),
             })
             for c in sorted(children.get(tid, []), key=lambda k: (by_id[k].order or 0, by_id[k].title or "")):
                 walk(c, level + 1)

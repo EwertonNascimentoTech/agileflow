@@ -1019,6 +1019,25 @@ async def get_schedule_lock(
     return await ScheduleBaselineService.lock_state(ctx.db, project_id, root)
 
 
+@router.get("/projects/{project_id}/schedule-locks", response_model=list[ScheduleLockState])
+async def list_schedule_locks(
+    project_id: uuid.UUID,
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Estado da trava de TODAS as raízes de planejamento do projeto (visão completa do cronograma)."""
+    return await ScheduleBaselineService.lock_states(ctx.db, project_id)
+
+
+@router.get("/projects/{project_id}/schedule-lock-for-task", response_model=ScheduleLockState)
+async def get_schedule_lock_for_task(
+    project_id: uuid.UUID,
+    task: uuid.UUID = Query(..., description="Tarefa cujo cronograma (raiz) se quer consultar"),
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Estado da trava da raiz de planejamento à qual a tarefa pertence (resolve o root)."""
+    return await ScheduleBaselineService.lock_state_for_task(ctx.db, project_id, task)
+
+
 @router.get("/projects/{project_id}/baselines", response_model=list[ScheduleBaselineResponse])
 async def list_baselines(
     project_id: uuid.UUID,

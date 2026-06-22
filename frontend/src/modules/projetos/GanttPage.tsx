@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import {
-  BarChart3, Calendar, CalendarCheck, Check, ChevronDown, Clock, Folder, GitBranch, History, Link2, Loader2, Lock, Plus, Unlock, Users, X,
+  BarChart3, Calendar, CalendarCheck, Check, ChevronDown, Clock, Folder, GitBranch, Link2, Loader2, Plus, Users, X,
 } from "lucide-react"
 
 const DEP_LABELS: Record<DependencyType, string> = {
@@ -20,16 +20,10 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyState } from "@/components/EmptyState"
 import { GanttChart } from "@/modules/projetos/GanttChart"
 import { WorkloadView } from "@/modules/projetos/WorkloadView"
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
-import { Badge } from "@/components/ui/badge"
+import { ScheduleLockBanner } from "@/modules/projetos/ScheduleLockBanner"
+import { BaselineAlertsDialog } from "@/modules/projetos/BaselineAlertsDialog"
+import { computeBaselineDiff } from "@/modules/projetos/baselineDiff"
 import { toast } from "@/lib/toast"
-
-function errDetail(err: unknown, fallback: string): string {
-  const e = err as { response?: { data?: { detail?: unknown } } }
-  return typeof e.response?.data?.detail === "string" ? e.response.data.detail : fallback
-}
 
 const DOW = ["DOM", "SEG", "TER", "QUA", "QUI", "SEX", "SÁB"]
 const MON = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"]
@@ -113,13 +107,26 @@ export default function GanttPage() {
   const [calendar, setCalendar] = useState<WorkCalendar | null>(null)
   const [absencesByUser, setAbsencesByUser] = useState<Record<string, AssigneeAbsenceItem[]>>({})
   // Controle de baseline / travamento do cronograma.
-  const [lockState, setLockState] = useState<ScheduleLockState | null>(null)
-  const [baselineDialog, setBaselineDialog] = useState(false)
-  const [justification, setJustification] = useState("")
-  const [savingBaseline, setSavingBaseline] = useState(false)
-  const [historyOpen, setHistoryOpen] = useState(false)
-  const [baselines, setBaselines] = useState<ScheduleBaseline[]>([])
+  const [lockState, setLockState] = useState<ScheduleLockState | null>(null)   // raiz selecionada (modo escopado)
+  const [lockStates, setLockStates] = useState<ScheduleLockState[]>([])         // todas as raízes (cronograma completo)
+  const [compareBaseline, setCompareBaseline] = useState<ScheduleBaseline | null>(null) // baseline em comparação
   const locked = lockState?.state === "locked"
+
+  const [alertsOpen, setAlertsOpen] = useState(false)
+
+  // task_id → datas do baseline selecionado (para as barras-fantasma do GanttChart).
+  const baselineById = useMemo(() => {
+    if (!compareBaseline) return undefined
+    return new Map((compareBaseline.snapshot?.tasks ?? []).map((t) => [t.task_id, { start: t.start_date, due: t.due_date }]))
+  }, [compareBaseline])
+
+  // Diff inteligente (atual × baseline): alertas + destaque das barras.
+  const nameById = useMemo(() => new Map(users.map((u) => [u.id, u.full_name])), [users])
+  const statusNameById = useMemo(() => new Map(statuses.map((s) => [s.id, s.name])), [statuses])
+  const baselineDiff = useMemo(
+    () => (compareBaseline ? computeBaselineDiff(tasks, dependencies, nameById, statusNameById, compareBaseline) : null),
+    [compareBaseline, tasks, dependencies, nameById, statusNameById],
+  )
 
   useEffect(() => {
     async function load() {
@@ -291,6 +298,7 @@ export default function GanttPage() {
 
   // Estado do controle de baseline (open | locked | revision) do projeto-raiz selecionado.
   useEffect(() => {
+    setCompareBaseline(null) // troca de projeto/raiz limpa a comparação
     if (!projectId || !rootTaskId) { setLockState(null); return }
     let cancelled = false
     projetosApi.getScheduleLock(projectId, rootTaskId)
@@ -299,46 +307,38 @@ export default function GanttPage() {
     return () => { cancelled = true }
   }, [projectId, rootTaskId])
 
+  // Comparação vinda de fora (card / cronograma completo) via ?baseline=<id>: carrega e ativa.
+  useEffect(() => {
+    const baselineId = searchParams.get("baseline")
+    if (!projectId || !rootTaskId || !baselineId) return
+    let cancelled = false
+    projetosApi.listBaselines(projectId, rootTaskId)
+      .then((list) => {
+        const b = list.find((x) => x.id === baselineId)
+        if (!cancelled && b) setCompareBaseline(b)
+      })
+      .catch(() => { /* ignora */ })
+    return () => { cancelled = true }
+  }, [projectId, rootTaskId, searchParams])
+
   async function reloadLock() {
     if (!projectId || !rootTaskId) return
     try { setLockState(await projetosApi.getScheduleLock(projectId, rootTaskId)) } catch { /* mantém estado atual */ }
   }
 
-  async function doSaveBaseline() {
-    if (!projectId || !rootTaskId || justification.trim().length < 3) return
-    setSavingBaseline(true)
-    try {
-      await projetosApi.saveBaseline(projectId, { root_task_id: rootTaskId, justification: justification.trim() })
-      setBaselineDialog(false)
-      setJustification("")
-      await reloadLock()
-      toast.success("Baseline salvo. Revisão aberta — edições liberadas.")
-    } catch (err) {
-      toast.error(errDetail(err, "Não foi possível salvar o baseline."))
-    } finally {
-      setSavingBaseline(false)
-    }
-  }
+  // Travas de TODAS as raízes de planejamento (visão "cronograma completo", sem root selecionado).
+  useEffect(() => {
+    if (!projectId || rootParam) { setLockStates([]); return }
+    let cancelled = false
+    projetosApi.getScheduleLocks(projectId)
+      .then((s) => { if (!cancelled) setLockStates(s) })
+      .catch(() => { if (!cancelled) setLockStates([]) })
+    return () => { cancelled = true }
+  }, [projectId, rootParam, tasks])
 
-  async function doCloseRevision() {
-    if (!projectId || !rootTaskId) return
-    try {
-      await projetosApi.closeScheduleRevision(projectId, rootTaskId)
-      await reloadLock()
-      toast.success("Revisão concluída. Cronograma re-travado.")
-    } catch (err) {
-      toast.error(errDetail(err, "Não foi possível concluir a revisão."))
-    }
-  }
-
-  async function openHistory() {
-    if (!projectId || !rootTaskId) return
-    try {
-      setBaselines(await projetosApi.listBaselines(projectId, rootTaskId))
-      setHistoryOpen(true)
-    } catch (err) {
-      toast.error(errDetail(err, "Não foi possível carregar o histórico de baselines."))
-    }
+  async function reloadFullLocks() {
+    if (!projectId) return
+    try { setLockStates(await projetosApi.getScheduleLocks(projectId)) } catch { /* mantém estado atual */ }
   }
 
   // Ausências aprovadas dos responsáveis (risco "ausente no período"). Recarrega quando
@@ -623,43 +623,43 @@ export default function GanttPage() {
           </button>
         </div>
 
-        {view === "schedule" && lockState && lockState.state !== "open" && (
+        {view === "schedule" && lockState && (
+          <ScheduleLockBanner
+            projectId={projectId}
+            lock={lockState}
+            onChanged={() => void reloadLock()}
+            onCompareBaseline={(b) => setCompareBaseline(b)}
+          />
+        )}
+
+        {view === "schedule" && compareBaseline && (
           <div
             style={{
-              display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", margin: "8px 0",
-              borderRadius: 8, border: "1px solid",
-              borderColor: locked ? "var(--af-destructive)" : "var(--af-warning)",
-              background: locked ? "#fdecec" : "#fff7e6",
+              display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", margin: "8px 0",
+              borderRadius: 8, border: "1px solid #b6bcc6", background: "#f3f5f8", fontSize: 13,
             }}
           >
-            {locked
-              ? <Lock size={16} style={{ color: "var(--af-destructive)", flexShrink: 0 }} />
-              : <Unlock size={16} style={{ color: "var(--af-warning)", flexShrink: 0 }} />}
-            <div style={{ flex: 1, fontSize: 13, lineHeight: 1.4 }}>
-              {locked ? (
-                <><b>Cronograma travado</b> — o projeto entrou em desenvolvimento. Para alterar datas, horas, dependências ou ordem, salve um baseline com a justificativa.</>
-              ) : (
-                <><b>Revisão aberta</b> — edições do cronograma liberadas. Conclua a revisão para re-travar e registrar o compromisso.</>
-              )}
-              {lockState.baseline_count > 0 && (
-                <span style={{ color: "var(--af-muted-fg)" }}>
-                  {" · "}{lockState.baseline_count} baseline(s){lockState.latest_version ? `, atual v${lockState.latest_version}` : ""}
-                </span>
-              )}
-            </div>
-            {locked ? (
-              <Button size="sm" variant="destructive" onClick={() => { setJustification(""); setBaselineDialog(true) }}>
-                <Unlock size={14} /> Liberar alteração
-              </Button>
-            ) : (
-              <Button size="sm" onClick={() => void doCloseRevision()}>
-                <Lock size={14} /> Concluir revisão
-              </Button>
-            )}
-            <Button size="sm" variant="ghost" onClick={() => void openHistory()}>
-              <History size={14} /> Histórico
-            </Button>
+            <span
+              style={{ width: 22, height: 11, borderRadius: 3, flexShrink: 0, background: "repeating-linear-gradient(45deg,#b6bcc6,#b6bcc6 3px,#cdd2da 3px,#cdd2da 6px)" }}
+            />
+            <span style={{ flex: 1 }}>
+              Comparando com <b>baseline v{compareBaseline.version}</b> (salvo em {new Date(compareBaseline.created_at).toLocaleString("pt-BR")}).
+              As barras hachuradas são o cronograma planejado; passe o mouse para ver o desvio.
+            </span>
+            <button className="btn primary" onClick={() => setAlertsOpen(true)}>
+              Ver alterações{baselineDiff ? ` (${baselineDiff.total})` : ""}
+            </button>
+            <button className="btn ghost" onClick={() => setCompareBaseline(null)}>Limpar comparação</button>
           </div>
+        )}
+
+        {compareBaseline && (
+          <BaselineAlertsDialog
+            open={alertsOpen}
+            onOpenChange={setAlertsOpen}
+            diff={baselineDiff}
+            version={compareBaseline.version}
+          />
         )}
 
         {view === "resources" ? (
@@ -684,6 +684,8 @@ export default function GanttPage() {
               onDelete={(t) => void deleteStage(t)}
               onUpdateDates={(t, patch) => void handleUpdate(t.id, patch)}
               onReorder={(items) => void handleReorder(items)}
+              baselineById={baselineById}
+              markById={baselineDiff?.markById}
             />
           </>
         ) : (
@@ -707,66 +709,6 @@ export default function GanttPage() {
             onSave={async (patch) => { await handleUpdate(editing.id, patch); setEditing(null) }}
           />
         )}
-
-        {/* Diálogo: salvar baseline + justificativa (abre a janela de revisão). */}
-        <Dialog open={baselineDialog} onOpenChange={(o) => { if (!savingBaseline) setBaselineDialog(o) }}>
-          <DialogContent className="sm:max-w-lg">
-            <DialogHeader>
-              <DialogTitle>Liberar alteração do cronograma</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                Será salvo um <b>baseline</b> com o cronograma atual (histórico imutável) e a janela de
-                revisão será aberta, liberando a edição. Ao concluir a revisão, o cronograma re-trava.
-              </p>
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium">Justificativa</label>
-                <Textarea
-                  rows={4}
-                  value={justification}
-                  onChange={(e) => setJustification(e.target.value)}
-                  placeholder="Ex.: Replanejamento por atraso de fornecedor / mudança de escopo aprovada…"
-                />
-                <p className="text-xs text-muted-foreground">Mínimo de 3 caracteres.</p>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="ghost" onClick={() => setBaselineDialog(false)} disabled={savingBaseline}>Cancelar</Button>
-              <Button onClick={() => void doSaveBaseline()} disabled={savingBaseline || justification.trim().length < 3}>
-                {savingBaseline ? <Loader2 size={14} className="animate-spin" /> : <Unlock size={14} />} Salvar baseline e liberar
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Diálogo: histórico de baselines (snapshots + justificativas). */}
-        <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
-          <DialogContent className="sm:max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>Histórico de baselines do cronograma</DialogTitle>
-            </DialogHeader>
-            {baselines.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Nenhum baseline salvo ainda.</p>
-            ) : (
-              <div className="max-h-[60vh] space-y-3 overflow-y-auto">
-                {baselines.map((b) => (
-                  <div key={b.id} className="rounded-lg border p-3">
-                    <div className="flex items-center justify-between">
-                      <Badge variant="secondary">v{b.version}</Badge>
-                      <span className="text-xs text-muted-foreground">
-                        {new Date(b.created_at).toLocaleString("pt-BR")} · {b.snapshot?.tasks?.length ?? 0} itens
-                      </span>
-                    </div>
-                    <p className="mt-2 text-sm">{b.justification}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-            <DialogFooter>
-              <Button variant="ghost" onClick={() => setHistoryOpen(false)}>Fechar</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
       </div>
     )
   }
@@ -812,6 +754,16 @@ export default function GanttPage() {
           <button className={scale === "week" ? "on" : ""} onClick={() => setScale("week")}>Semana</button>
         </div>
       </div>
+
+      {lockStates.filter((l) => l.state !== "open").map((l) => (
+        <ScheduleLockBanner
+          key={l.root_task_id}
+          projectId={projectId}
+          lock={l}
+          showTitle
+          onChanged={() => void reloadFullLocks()}
+        />
+      ))}
 
       {isEmpty ? (
         <EmptyState
