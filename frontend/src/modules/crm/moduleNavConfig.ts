@@ -9,7 +9,7 @@ import {
   Package, Boxes, ArrowLeftRight, Layers, BadgeCheck,
   ShoppingCart, Wallet, ReceiptText,
   Network, Code2, CalendarOff,
-  CirclePlus, ClipboardList, Workflow,
+  CirclePlus, ClipboardList,
 } from "lucide-react"
 import type { ElementType } from "react"
 
@@ -57,7 +57,7 @@ export const moduleNavConfig: Record<string, ModuleNavItem[]> = {
   produtos: [
     { to: "/app/modules/produtos/dashboard", icon: BarChart3, label: "Dashboard", requiredAnyPermission: ["produtos.view"] },
     { to: "/app/modules/produtos/produtos", icon: Package, label: "Produtos", requiredAnyPermission: ["produtos.view"] },
-    { to: "/app/modules/produtos/processos", icon: Workflow, label: "Catálogo de Processos", requiredAnyPermission: ["produtos.view"] },
+    { to: "/app/modules/produtos/processos-portfolio", icon: Network, label: "Portfólio de Processos", requiredAnyPermission: ["produtos.view"] },
     { to: "/app/modules/produtos/indicadores", icon: BarChart3, label: "Indicadores", requiredAnyPermission: ["produtos.view"] },
     { to: "/app/modules/produtos/fornecedores", icon: Building2, label: "Fornecedores", requiredAnyPermission: ["produtos.view"] },
     { to: "/app/modules/produtos/config", icon: Settings2, label: "Configurações" },

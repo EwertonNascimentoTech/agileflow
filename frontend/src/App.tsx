@@ -115,7 +115,7 @@ import ProdutosLayout from "@/modules/produtos/ProdutosLayout"
 import ProdutosDashboardPage from "@/modules/produtos/DashboardPage"
 import ProdutosProductsPage from "@/modules/produtos/ProductsPage"
 import ProdutosProductDetailPage from "@/modules/produtos/ProductDetailPage"
-import ProdutosProcessosCatalogPage from "@/modules/produtos/ProcessosCatalogPage"
+import ProdutosProcessPortfolioPage from "@/modules/produtos/ProcessPortfolioPage"
 import ProdutosIndicadoresPage from "@/modules/produtos/IndicadoresPage"
 import ProdutosFornecedoresPage from "@/modules/produtos/FornecedoresPage"
 import ProdutosConfigPage from "@/modules/produtos/config/ProdutosConfigPage"
@@ -283,7 +283,7 @@ export default function App() {
                     <Route path="dashboard" element={<ProdutosDashboardPage />} />
                     <Route path="produtos" element={<ProdutosProductsPage />} />
                     <Route path="produtos/:id" element={<ProdutosProductDetailPage />} />
-                    <Route path="processos" element={<ProdutosProcessosCatalogPage />} />
+                    <Route path="processos-portfolio" element={<ProdutosProcessPortfolioPage />} />
                     <Route path="indicadores" element={<ProdutosIndicadoresPage />} />
                     <Route path="fornecedores" element={<ProdutosFornecedoresPage />} />
                     <Route element={<ModuleConfigGuard moduleSlug="produtos" />}>

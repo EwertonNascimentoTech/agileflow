@@ -9,6 +9,36 @@ export type ProcessoNivel = "macroprocesso" | "processo" | "subprocesso"
 export type Sustentacao = "interna" | "externa" | "hibrida"
 export type GroupBy = "produto" | "area" | "setor" | "portfolio"
 
+// ── Enums "Produtos Digitais" (spec TI corporativa) ──
+export type ProductStatus = "ideia" | "discovery" | "desenvolvimento" | "homologacao" | "producao" | "sustentacao" | "evolucao" | "suspenso" | "descontinuado"
+export type ProductCategoria = "sistema_interno" | "sistema_externo" | "saas" | "dashboard" | "api" | "integracao" | "automacao" | "aplicativo" | "bi" | "workflow" | "outro"
+export type ProductUnidade = "sesi" | "senai" | "iel" | "fiea" | "corporativo"
+export type ProductTipoDev = "interno" | "externo" | "hibrido"
+export type ProductModeloContratacao = "licenca" | "saas" | "fabrica" | "servico_continuado" | "projeto_pontual" | "interno" | "outro"
+export type ServicoSuporte = "interno" | "fornecedor" | "compartilhado" | "service_desk" | "devops" | "desenvolvimento" | "infraestrutura"
+export type ServicoStatus = "ativo" | "em_implantacao" | "suspenso" | "descontinuado"
+export type DocumentoTipo = "pdf" | "planilha" | "formulario" | "workflow" | "dashboard" | "registro" | "relatorio" | "certificado" | "termo" | "outro"
+export type ClassificacaoInformacao = "publica" | "interna" | "confidencial" | "restrita"
+export type ContratoStatus = "sem_contrato" | "em_formalizacao" | "vigente" | "a_vencer" | "vencido" | "em_renovacao" | "encerrado"
+export type ContratoTipoValor = "mensal" | "anual" | "global" | "sob_demanda"
+export type ReleaseTipo = "correcao" | "melhoria" | "nova_funcionalidade" | "seguranca" | "integracao" | "refatoracao" | "ajuste_tecnico"
+export type ReleaseStatus = "planejada" | "em_desenvolvimento" | "em_homologacao" | "publicada" | "cancelada" | "revertida"
+export type ReleaseImpacto = "baixo" | "medio" | "alto"
+export type ReleaseAmbiente = "dev" | "hml" | "prd"
+export type DocumentacaoTipo = "usuario" | "tecnica" | "api" | "implantacao" | "sustentacao" | "arquitetura" | "seguranca" | "operacional"
+export type DocumentacaoStatus = "nao_iniciada" | "em_elaboracao" | "publicada" | "necessita_atualizacao" | "obsoleta"
+export type SuporteTipo = "interna" | "fornecedor" | "compartilhada"
+export type IntegracaoTipo = "api" | "banco" | "arquivo" | "etl" | "webhook" | "manual" | "outro"
+export type AutenticacaoTipo = "active_directory" | "entra_id" | "login_local" | "sso" | "token" | "oauth" | "outro"
+export type RiscoIndisponibilidade = "baixo" | "medio" | "alto" | "critico"
+
+export interface AnexoItem {
+  object_name: string
+  filename: string
+  content_type?: string | null
+  size?: number | null
+}
+
 export interface AreaRefMini {
   id: string
   name: string
@@ -47,6 +77,12 @@ export interface Servico {
   name: string
   description: string | null
   ano_referencia: number
+  area_usuaria: string | null
+  processo_relacionado: string | null
+  disponibilidade: string | null
+  sla_atendimento: string | null
+  tipo_suporte: ServicoSuporte | null
+  status_servico: ServicoStatus | null
   is_active: boolean
   order: number
 }
@@ -55,6 +91,12 @@ export interface ServicoCreate {
   name: string
   description?: string
   ano_referencia?: number
+  area_usuaria?: string | null
+  processo_relacionado?: string | null
+  disponibilidade?: string | null
+  sla_atendimento?: string | null
+  tipo_suporte?: ServicoSuporte | null
+  status_servico?: ServicoStatus | null
 }
 
 export interface Documento {
@@ -67,6 +109,16 @@ export interface Documento {
   size: number | null
   category: string | null
   external_link: string | null
+  tipo_documento: DocumentoTipo | null
+  is_nato_digital: boolean
+  assinatura_digital: boolean
+  trilha_auditoria: boolean
+  local_armazenamento: string | null
+  prazo_retencao: string | null
+  classificacao: ClassificacaoInformacao | null
+  dados_pessoais: boolean
+  dados_sensiveis: boolean
+  observacoes: string | null
   is_active: boolean
   order: number
   created_at: string
@@ -81,7 +133,19 @@ export interface DocumentoCreate {
   size?: number
   category?: string
   external_link?: string
+  tipo_documento?: DocumentoTipo | null
+  is_nato_digital?: boolean
+  assinatura_digital?: boolean
+  trilha_auditoria?: boolean
+  local_armazenamento?: string | null
+  prazo_retencao?: string | null
+  classificacao?: ClassificacaoInformacao | null
+  dados_pessoais?: boolean
+  dados_sensiveis?: boolean
+  observacoes?: string | null
 }
+
+export type DocumentoUpdate = Partial<DocumentoCreate>
 
 export interface ProcessoCatalog {
   id: string
@@ -147,6 +211,17 @@ export interface Contrato {
   object_name: string | null
   filename: string | null
   external_link: string | null
+  numero: string | null
+  objeto_contratual: string | null
+  status_contrato: ContratoStatus | null
+  valor: number | null
+  tipo_valor: ContratoTipoValor | null
+  centro_custo: string | null
+  fiscal_person_id: string | null
+  fiscal_nome: string | null
+  sla_contratual: string | null
+  aditivos: AnexoItem[] | null
+  observacoes: string | null
   is_active: boolean
   dias_para_vencer: number | null
 }
@@ -168,19 +243,21 @@ export interface ContratoCreate {
   content_type?: string
   size?: number
   external_link?: string
+  numero?: string | null
+  objeto_contratual?: string | null
+  status_contrato?: ContratoStatus | null
+  valor?: number | null
+  tipo_valor?: ContratoTipoValor | null
+  centro_custo?: string | null
+  fiscal_person_id?: string | null
+  sla_contratual?: string | null
+  aditivos?: AnexoItem[] | null
+  observacoes?: string | null
 }
 
-export interface ContratoUpdate {
-  identificador?: string
+export type ContratoUpdate = Partial<Omit<ContratoCreate, "fornecedor_id" | "vigencia_inicio" | "vigencia_fim">> & {
   vigencia_inicio?: string
   vigencia_fim?: string
-  renovacao_automatica?: boolean
-  modelo_licenciamento?: string
-  gestor_person_id?: string
-  sustentacao_n1?: Sustentacao
-  sustentacao_n2?: Sustentacao
-  sustentacao_n3?: Sustentacao
-  alerta_dias?: number[]
 }
 
 export interface ProductListItem {
@@ -197,6 +274,20 @@ export interface ProductListItem {
   has_active_contract: boolean
   is_active: boolean
   created_at: string
+  sigla: string | null
+  categoria: ProductCategoria | null
+  unidade: ProductUnidade | null
+  status_produto: ProductStatus | null
+  tipo_desenvolvimento: ProductTipoDev | null
+  fornecedor_nome: string | null
+  contrato_status: ContratoStatus | null
+  contrato_vigencia_fim: string | null
+  contrato_a_vencer: boolean
+  ultima_release: string | null
+  doc_status: DocumentacaoStatus | null
+  has_documentation: boolean
+  tem_dados_pessoais: boolean
+  is_critico: boolean
 }
 
 export interface Product {
@@ -219,10 +310,34 @@ export interface Product {
   has_active_contract: boolean
   created_at: string
   updated_at: string
+  // campos novos "Produtos Digitais"
+  sigla: string | null
+  link_descricao: string | null
+  categoria: ProductCategoria | null
+  unidade: ProductUnidade | null
+  dono_negocio: PersonMini | null
+  publico_alvo: string | null
+  url_acesso: string | null
+  observacoes: string | null
+  status_produto: ProductStatus | null
+  tipo_desenvolvimento: ProductTipoDev | null
+  desenvolvido_por: string | null
+  fornecedor_cnpj: string | null
+  modelo_contratacao: ProductModeloContratacao | null
+  ambiente_tecnologico: string | null
+  tecnologias: string | null
+  link_repositorio: string | null
+  link_dev: string | null
+  link_hml: string | null
+  link_prd: string | null
   servicos: Servico[]
   documentos: Documento[]
   processos: ProdutoProcessoLink[]
   contratos: Contrato[]
+  releases: Release[]
+  documentations: Documentation[]
+  support: Support | null
+  security: SecurityIntegration | null
 }
 
 export interface ProductCreate {
@@ -238,6 +353,26 @@ export interface ProductCreate {
   responsavel_person_id?: string | null
   fornecedor_id?: string | null
   origin_task_id?: string
+  // campos novos
+  sigla?: string | null
+  link_descricao?: string | null
+  categoria?: ProductCategoria | null
+  unidade?: ProductUnidade | null
+  dono_negocio_person_id?: string | null
+  publico_alvo?: string | null
+  url_acesso?: string | null
+  observacoes?: string | null
+  status_produto?: ProductStatus | null
+  tipo_desenvolvimento?: ProductTipoDev | null
+  desenvolvido_por?: string | null
+  fornecedor_cnpj?: string | null
+  modelo_contratacao?: ProductModeloContratacao | null
+  ambiente_tecnologico?: string | null
+  tecnologias?: string | null
+  link_repositorio?: string | null
+  link_dev?: string | null
+  link_hml?: string | null
+  link_prd?: string | null
 }
 
 export type ProductUpdate = Partial<ProductCreate> & { is_active?: boolean }
@@ -275,7 +410,127 @@ export interface DashboardKpis {
   total_documentos: number
   total_processos_automatizados: number
   contratos_vencendo: number
+  by_status: Record<string, number>
+  em_desenvolvimento: number
+  em_producao: number
+  em_sustentacao: number
+  descontinuados: number
+  internos: number
+  externos: number
+  sem_contrato: number
+  contratos_a_vencer_90d: number
+  sem_documentacao: number
+  criticos: number
+  com_dados_pessoais: number
+  com_plano_contingencia: number
+  releases_publicadas_mes: number
 }
+
+// ── Release / Documentação / Sustentação / Segurança ──
+export interface Release {
+  id: string
+  versao: string
+  nome: string | null
+  data_release: string | null
+  ambiente: ReleaseAmbiente | null
+  tipo: ReleaseTipo | null
+  descricao_mudanca: string | null
+  impacto: ReleaseImpacto | null
+  responsavel_person_id: string | null
+  responsavel_nome: string | null
+  evidencia_link: string | null
+  evidencia_anexos: AnexoItem[] | null
+  changelog: string | null
+  tem_rollback: boolean
+  descricao_rollback: string | null
+  doc_atualizada: boolean
+  status: ReleaseStatus
+  created_at: string
+}
+
+export interface ReleaseCreate {
+  versao: string
+  nome?: string | null
+  data_release?: string | null
+  ambiente?: ReleaseAmbiente | null
+  tipo?: ReleaseTipo | null
+  descricao_mudanca?: string | null
+  impacto?: ReleaseImpacto | null
+  responsavel_person_id?: string | null
+  evidencia_link?: string | null
+  evidencia_anexos?: AnexoItem[] | null
+  changelog?: string | null
+  tem_rollback?: boolean
+  descricao_rollback?: string | null
+  doc_atualizada?: boolean
+  status?: ReleaseStatus
+}
+
+export type ReleaseUpdate = Partial<ReleaseCreate>
+
+export interface Documentation {
+  id: string
+  tipo: DocumentacaoTipo
+  titulo: string
+  conteudo_md: string | null
+  versao_relacionada: string | null
+  autor_person_id: string | null
+  autor_nome: string | null
+  status: DocumentacaoStatus
+  link_interno: string | null
+  anexos: AnexoItem[] | null
+  created_at: string
+  updated_at: string
+}
+
+export interface DocumentationCreate {
+  titulo: string
+  tipo?: DocumentacaoTipo | null
+  conteudo_md?: string | null
+  versao_relacionada?: string | null
+  autor_person_id?: string | null
+  status?: DocumentacaoStatus | null
+  link_interno?: string | null
+  anexos?: AnexoItem[] | null
+}
+
+export type DocumentationUpdate = Partial<DocumentationCreate>
+
+export interface Support {
+  id: string
+  tipo: SuporteTipo | null
+  canal_atendimento: string | null
+  sla_critico: string | null
+  sla_medio: string | null
+  sla_solicitacao: string | null
+  equipe_responsavel: string | null
+  horario_suporte: string | null
+  escalonamento: string | null
+  link_base_conhecimento: string | null
+  observacoes: string | null
+}
+
+export type SupportUpsert = Partial<Omit<Support, "id">>
+
+export interface SecurityIntegration {
+  id: string
+  possui_integracao: boolean | null
+  sistemas_integrados: string | null
+  tipo_integracao: IntegracaoTipo | null
+  dados_tratados: string | null
+  dados_pessoais: boolean | null
+  dados_sensiveis: boolean | null
+  classificacao: ClassificacaoInformacao | null
+  tipo_autenticacao: AutenticacaoTipo | null
+  perfis_acesso: string | null
+  logs_auditoria: boolean | null
+  backup: boolean | null
+  plano_contingencia: boolean | null
+  risco_indisponibilidade: RiscoIndisponibilidade | null
+  observacoes: string | null
+}
+
+export type SecurityUpsert = Partial<Omit<SecurityIntegration, "id">>
 
 export interface AlertaContrato {
   tipo: string
@@ -317,6 +572,134 @@ export interface ProcessoConsolidacaoNode {
   nivel: ProcessoNivel
   automatizados: number
   children: ProcessoConsolidacaoNode[]
+}
+
+// ── Portfólio de Processos (versionado) ──────
+
+export type ProcessNivel = "diretoria" | "macroprocesso" | "processo" | "subprocesso"
+export type ProcessVersionStatus = "rascunho" | "consolidada" | "arquivada"
+export type ProcessItemStatus = "proposto" | "ativo" | "em_revisao" | "descontinuado"
+export type ProcessCriticidade = "baixa" | "media" | "alta" | "critica"
+export type ProcessMaturidade = "inexistente" | "inicial" | "definido" | "gerenciado" | "otimizado"
+
+export interface Anexo {
+  object_name: string
+  filename: string
+  content_type?: string | null
+  size?: number | null
+}
+
+export interface ProcessPortfolio {
+  id: string
+  name: string
+  description: string | null
+  is_active: boolean
+  current_version_id: string | null
+  current_version: number | null
+  versions_count: number
+  created_at: string
+}
+
+export interface ProcessVersionSummary {
+  id: string
+  version: number
+  status: ProcessVersionStatus
+  justification: string | null
+  consolidated_at: string | null
+  created_at: string
+}
+
+export interface ProcessItem {
+  id: string
+  lineage_id: string
+  parent_id: string | null
+  nivel: ProcessNivel
+  codigo: string | null
+  name: string
+  description: string | null
+  diretoria: string | null
+  area: string | null
+  analista: string | null
+  dono: string | null
+  order: number
+  analista_person_id: string | null
+  analista_nome: string | null
+  dono_person_id: string | null
+  dono_nome: string | null
+  area_id: string | null
+  area_nome: string | null
+  vigencia_inicio: string | null
+  vigencia_fim: string | null
+  documentado: boolean
+  data_documentacao: string | null
+  doc_previsao_inicio: string | null
+  doc_previsao_fim: string | null
+  anexos: Anexo[] | null
+  status_item: ProcessItemStatus
+  criticidade: ProcessCriticidade | null
+  objetivo: string | null
+  nivel_maturidade: ProcessMaturidade | null
+  tipo_documento: string | null
+  versao_documento: string | null
+  proxima_revisao: string | null
+  link_externo: string | null
+  frequencia: string | null
+  entradas: string | null
+  saidas: string | null
+  children: ProcessItem[]
+}
+
+export interface ProcessVersionTree {
+  id: string
+  portfolio_id: string
+  version: number
+  status: ProcessVersionStatus
+  justification: string | null
+  consolidated_at: string | null
+  created_at: string
+  editable: boolean
+  items: ProcessItem[]
+}
+
+export interface ProcessItemInput {
+  nivel: ProcessNivel
+  codigo?: string | null
+  name: string
+  description?: string | null
+  diretoria?: string | null
+  area?: string | null
+  analista?: string | null
+  dono?: string | null
+  parent_id?: string | null
+  order?: number | null
+  analista_person_id?: string | null
+  dono_person_id?: string | null
+  area_id?: string | null
+  vigencia_inicio?: string | null
+  vigencia_fim?: string | null
+  documentado?: boolean
+  data_documentacao?: string | null
+  doc_previsao_inicio?: string | null
+  doc_previsao_fim?: string | null
+  anexos?: Anexo[] | null
+  status_item?: ProcessItemStatus
+  criticidade?: ProcessCriticidade | null
+  objetivo?: string | null
+  nivel_maturidade?: ProcessMaturidade | null
+  tipo_documento?: string | null
+  versao_documento?: string | null
+  proxima_revisao?: string | null
+  link_externo?: string | null
+  frequencia?: string | null
+  entradas?: string | null
+  saidas?: string | null
+}
+
+export interface ServiceProcessLink {
+  item_lineage_id: string
+  portfolio_id: string
+  name: string | null
+  codigo: string | null
 }
 
 // ── API ───────────────────────────────────────
@@ -425,6 +808,9 @@ export const produtosApi = {
   addDocumento: (productId: string, data: DocumentoCreate) =>
     api.post<Documento>(`/produtos/${productId}/documentos`, data).then((r) => r.data),
 
+  updateDocumento: (productId: string, docId: string, data: DocumentoUpdate) =>
+    api.patch<Documento>(`/produtos/${productId}/documentos/${docId}`, data).then((r) => r.data),
+
   deleteDocumento: (productId: string, docId: string) =>
     api.delete<void>(`/produtos/${productId}/documentos/${docId}`).then((r) => r.data),
 
@@ -445,4 +831,103 @@ export const produtosApi = {
 
   deleteContrato: (productId: string, contratoId: string) =>
     api.delete<void>(`/produtos/${productId}/contratos/${contratoId}`).then((r) => r.data),
+
+  // ── Releases ──
+  listReleases: (productId: string) =>
+    api.get<Release[]>(`/produtos/${productId}/releases`).then((r) => r.data),
+  addRelease: (productId: string, data: ReleaseCreate) =>
+    api.post<Release>(`/produtos/${productId}/releases`, data).then((r) => r.data),
+  updateRelease: (productId: string, releaseId: string, data: ReleaseUpdate) =>
+    api.patch<Release>(`/produtos/${productId}/releases/${releaseId}`, data).then((r) => r.data),
+  deleteRelease: (productId: string, releaseId: string) =>
+    api.delete<void>(`/produtos/${productId}/releases/${releaseId}`).then((r) => r.data),
+
+  // ── Documentação (Markdown) ──
+  getDocTemplate: () =>
+    api.get<{ conteudo_md: string }>("/produtos/documentation-template").then((r) => r.data.conteudo_md),
+  listDocumentations: (productId: string) =>
+    api.get<Documentation[]>(`/produtos/${productId}/documentations`).then((r) => r.data),
+  addDocumentation: (productId: string, data: DocumentationCreate) =>
+    api.post<Documentation>(`/produtos/${productId}/documentations`, data).then((r) => r.data),
+  updateDocumentation: (productId: string, docId: string, data: DocumentationUpdate) =>
+    api.patch<Documentation>(`/produtos/${productId}/documentations/${docId}`, data).then((r) => r.data),
+  deleteDocumentation: (productId: string, docId: string) =>
+    api.delete<void>(`/produtos/${productId}/documentations/${docId}`).then((r) => r.data),
+
+  // ── Sustentação / SLA ──
+  getSupport: (productId: string) =>
+    api.get<Support | null>(`/produtos/${productId}/support`).then((r) => r.data),
+  upsertSupport: (productId: string, data: SupportUpsert) =>
+    api.put<Support>(`/produtos/${productId}/support`, data).then((r) => r.data),
+
+  // ── Integrações / Segurança ──
+  getSecurity: (productId: string) =>
+    api.get<SecurityIntegration | null>(`/produtos/${productId}/security`).then((r) => r.data),
+  upsertSecurity: (productId: string, data: SecurityUpsert) =>
+    api.put<SecurityIntegration>(`/produtos/${productId}/security`, data).then((r) => r.data),
+
+  // ── Portfólio de Processos ──
+  listProcessPortfolios: () =>
+    api.get<ProcessPortfolio[]>("/produtos/process-portfolios").then((r) => r.data),
+
+  createProcessPortfolio: (data: { name: string; description?: string }) =>
+    api.post<ProcessPortfolio>("/produtos/process-portfolios", data).then((r) => r.data),
+
+  updateProcessPortfolio: (
+    portfolioId: string,
+    data: { name?: string; description?: string | null; is_active?: boolean },
+  ) => api.patch<ProcessPortfolio>(`/produtos/process-portfolios/${portfolioId}`, data).then((r) => r.data),
+
+  deleteProcessPortfolio: (portfolioId: string) =>
+    api.delete<void>(`/produtos/process-portfolios/${portfolioId}`).then((r) => r.data),
+
+  getCurrentPortfolioTree: (portfolioId: string) =>
+    api.get<ProcessVersionTree>(`/produtos/process-portfolios/${portfolioId}/current`).then((r) => r.data),
+
+  listPortfolioVersions: (portfolioId: string) =>
+    api.get<ProcessVersionSummary[]>(`/produtos/process-portfolios/${portfolioId}/versions`).then((r) => r.data),
+
+  createPortfolioVersion: (portfolioId: string, justification: string) =>
+    api
+      .post<ProcessVersionTree>(`/produtos/process-portfolios/${portfolioId}/versions`, { justification })
+      .then((r) => r.data),
+
+  getVersionTree: (versionId: string) =>
+    api.get<ProcessVersionTree>(`/produtos/process-portfolios/versions/${versionId}/tree`).then((r) => r.data),
+
+  consolidateVersion: (versionId: string) =>
+    api
+      .post<ProcessVersionTree>(`/produtos/process-portfolios/versions/${versionId}/consolidate`)
+      .then((r) => r.data),
+
+  createPortfolioItem: (versionId: string, data: ProcessItemInput) =>
+    api
+      .post<ProcessItem>(`/produtos/process-portfolios/versions/${versionId}/items`, data)
+      .then((r) => r.data),
+
+  updatePortfolioItem: (versionId: string, itemId: string, data: Partial<ProcessItemInput>) =>
+    api
+      .patch<ProcessItem>(`/produtos/process-portfolios/versions/${versionId}/items/${itemId}`, data)
+      .then((r) => r.data),
+
+  deletePortfolioItem: (versionId: string, itemId: string) =>
+    api
+      .delete<void>(`/produtos/process-portfolios/versions/${versionId}/items/${itemId}`)
+      .then((r) => r.data),
+
+  reorderPortfolioItems: (versionId: string, items: { id: string; order: number }[]) =>
+    api
+      .patch<ProcessVersionTree>(`/produtos/process-portfolios/versions/${versionId}/items/reorder`, { items })
+      .then((r) => r.data),
+
+  listServiceProcessLinks: (servicoId: string) =>
+    api.get<ServiceProcessLink[]>(`/produtos/servicos/${servicoId}/process-links`).then((r) => r.data),
+
+  setServiceProcessLinks: (servicoId: string, portfolioId: string, itemLineageIds: string[]) =>
+    api
+      .put<ServiceProcessLink[]>(`/produtos/servicos/${servicoId}/process-links`, {
+        portfolio_id: portfolioId,
+        item_lineage_ids: itemLineageIds,
+      })
+      .then((r) => r.data),
 }

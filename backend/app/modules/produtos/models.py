@@ -18,8 +18,10 @@ from sqlalchemy import (
     Enum as SAEnum,
     ForeignKey,
     Integer,
+    Numeric,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -66,6 +68,232 @@ class SustentacaoModelo(str, enum.Enum):
     INTERNA = "interna"
     EXTERNA = "externa"
     HIBRIDA = "hibrida"
+
+
+# ── Enums da spec "Produtos Digitais" (TI corporativa) ──
+
+class ProductStatus(str, enum.Enum):
+    IDEIA = "ideia"
+    DISCOVERY = "discovery"
+    DESENVOLVIMENTO = "desenvolvimento"
+    HOMOLOGACAO = "homologacao"
+    PRODUCAO = "producao"
+    SUSTENTACAO = "sustentacao"
+    EVOLUCAO = "evolucao"
+    SUSPENSO = "suspenso"
+    DESCONTINUADO = "descontinuado"
+
+
+class ProductCategoria(str, enum.Enum):
+    SISTEMA_INTERNO = "sistema_interno"
+    SISTEMA_EXTERNO = "sistema_externo"
+    SAAS = "saas"
+    DASHBOARD = "dashboard"
+    API = "api"
+    INTEGRACAO = "integracao"
+    AUTOMACAO = "automacao"
+    APLICATIVO = "aplicativo"
+    BI = "bi"
+    WORKFLOW = "workflow"
+    OUTRO = "outro"
+
+
+class ProductUnidade(str, enum.Enum):
+    SESI = "sesi"
+    SENAI = "senai"
+    IEL = "iel"
+    FIEA = "fiea"
+    CORPORATIVO = "corporativo"
+
+
+class ProductTipoDesenvolvimento(str, enum.Enum):
+    INTERNO = "interno"
+    EXTERNO = "externo"
+    HIBRIDO = "hibrido"
+
+
+class ProductModeloContratacao(str, enum.Enum):
+    LICENCA = "licenca"
+    SAAS = "saas"
+    FABRICA = "fabrica"
+    SERVICO_CONTINUADO = "servico_continuado"
+    PROJETO_PONTUAL = "projeto_pontual"
+    INTERNO = "interno"
+    OUTRO = "outro"
+
+
+class ServicoTipoSuporte(str, enum.Enum):
+    INTERNO = "interno"
+    FORNECEDOR = "fornecedor"
+    COMPARTILHADO = "compartilhado"
+    SERVICE_DESK = "service_desk"
+    DEVOPS = "devops"
+    DESENVOLVIMENTO = "desenvolvimento"
+    INFRAESTRUTURA = "infraestrutura"
+
+
+class ServicoStatus(str, enum.Enum):
+    ATIVO = "ativo"
+    EM_IMPLANTACAO = "em_implantacao"
+    SUSPENSO = "suspenso"
+    DESCONTINUADO = "descontinuado"
+
+
+class DocumentoTipo(str, enum.Enum):
+    PDF = "pdf"
+    PLANILHA = "planilha"
+    FORMULARIO = "formulario"
+    WORKFLOW = "workflow"
+    DASHBOARD = "dashboard"
+    REGISTRO = "registro"
+    RELATORIO = "relatorio"
+    CERTIFICADO = "certificado"
+    TERMO = "termo"
+    OUTRO = "outro"
+
+
+class ClassificacaoInformacao(str, enum.Enum):
+    PUBLICA = "publica"
+    INTERNA = "interna"
+    CONFIDENCIAL = "confidencial"
+    RESTRITA = "restrita"
+
+
+class ContratoStatus(str, enum.Enum):
+    SEM_CONTRATO = "sem_contrato"
+    EM_FORMALIZACAO = "em_formalizacao"
+    VIGENTE = "vigente"
+    A_VENCER = "a_vencer"
+    VENCIDO = "vencido"
+    EM_RENOVACAO = "em_renovacao"
+    ENCERRADO = "encerrado"
+
+
+class ContratoTipoValor(str, enum.Enum):
+    MENSAL = "mensal"
+    ANUAL = "anual"
+    GLOBAL = "global"
+    SOB_DEMANDA = "sob_demanda"
+
+
+class ReleaseTipo(str, enum.Enum):
+    CORRECAO = "correcao"
+    MELHORIA = "melhoria"
+    NOVA_FUNCIONALIDADE = "nova_funcionalidade"
+    SEGURANCA = "seguranca"
+    INTEGRACAO = "integracao"
+    REFATORACAO = "refatoracao"
+    AJUSTE_TECNICO = "ajuste_tecnico"
+
+
+class ReleaseStatus(str, enum.Enum):
+    PLANEJADA = "planejada"
+    EM_DESENVOLVIMENTO = "em_desenvolvimento"
+    EM_HOMOLOGACAO = "em_homologacao"
+    PUBLICADA = "publicada"
+    CANCELADA = "cancelada"
+    REVERTIDA = "revertida"
+
+
+class ReleaseImpacto(str, enum.Enum):
+    BAIXO = "baixo"
+    MEDIO = "medio"
+    ALTO = "alto"
+
+
+class ReleaseAmbiente(str, enum.Enum):
+    DEV = "dev"
+    HML = "hml"
+    PRD = "prd"
+
+
+class DocumentacaoTipo(str, enum.Enum):
+    USUARIO = "usuario"
+    TECNICA = "tecnica"
+    API = "api"
+    IMPLANTACAO = "implantacao"
+    SUSTENTACAO = "sustentacao"
+    ARQUITETURA = "arquitetura"
+    SEGURANCA = "seguranca"
+    OPERACIONAL = "operacional"
+
+
+class DocumentacaoStatus(str, enum.Enum):
+    NAO_INICIADA = "nao_iniciada"
+    EM_ELABORACAO = "em_elaboracao"
+    PUBLICADA = "publicada"
+    NECESSITA_ATUALIZACAO = "necessita_atualizacao"
+    OBSOLETA = "obsoleta"
+
+
+class SuporteTipo(str, enum.Enum):
+    INTERNA = "interna"
+    FORNECEDOR = "fornecedor"
+    COMPARTILHADA = "compartilhada"
+
+
+class IntegracaoTipo(str, enum.Enum):
+    API = "api"
+    BANCO = "banco"
+    ARQUIVO = "arquivo"
+    ETL = "etl"
+    WEBHOOK = "webhook"
+    MANUAL = "manual"
+    OUTRO = "outro"
+
+
+class AutenticacaoTipo(str, enum.Enum):
+    ACTIVE_DIRECTORY = "active_directory"
+    ENTRA_ID = "entra_id"
+    LOGIN_LOCAL = "login_local"
+    SSO = "sso"
+    TOKEN = "token"
+    OAUTH = "oauth"
+    OUTRO = "outro"
+
+
+class RiscoIndisponibilidade(str, enum.Enum):
+    BAIXO = "baixo"
+    MEDIO = "medio"
+    ALTO = "alto"
+    CRITICO = "critico"
+
+
+# ── Portfólio de Processos (versionado) ──────────
+
+class ProcessPortfolioVersionStatus(str, enum.Enum):
+    RASCUNHO = "rascunho"
+    CONSOLIDADA = "consolidada"
+    ARQUIVADA = "arquivada"
+
+
+class ProcessItemNivel(str, enum.Enum):
+    DIRETORIA = "diretoria"
+    MACROPROCESSO = "macroprocesso"
+    PROCESSO = "processo"
+    SUBPROCESSO = "subprocesso"
+
+
+class ProcessItemStatus(str, enum.Enum):
+    PROPOSTO = "proposto"
+    ATIVO = "ativo"
+    EM_REVISAO = "em_revisao"
+    DESCONTINUADO = "descontinuado"
+
+
+class ProcessItemCriticidade(str, enum.Enum):
+    BAIXA = "baixa"
+    MEDIA = "media"
+    ALTA = "alta"
+    CRITICA = "critica"
+
+
+class ProcessItemMaturidade(str, enum.Enum):
+    INEXISTENTE = "inexistente"
+    INICIAL = "inicial"
+    DEFINIDO = "definido"
+    GERENCIADO = "gerenciado"
+    OTIMIZADO = "otimizado"
 
 
 # ─────────────────────────────────────────────
@@ -128,6 +356,40 @@ class Product(TenantBase):
     )
     # Rastreabilidade ao projeto finalizado de origem (sem FK — desacopla de projetos).
     origin_task_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+
+    # ── Campos "Produtos Digitais" (TI corporativa) — todos opcionais (extensão) ──
+    sigla: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    link_descricao: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    categoria: Mapped[Optional[ProductCategoria]] = mapped_column(
+        SAEnum(ProductCategoria, native_enum=False, values_callable=_enum_values), nullable=True,
+    )
+    unidade: Mapped[Optional[ProductUnidade]] = mapped_column(
+        SAEnum(ProductUnidade, native_enum=False, values_callable=_enum_values), nullable=True,
+    )
+    dono_negocio_person_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("team_persons.id", ondelete="SET NULL"), nullable=True,
+    )
+    publico_alvo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    url_acesso: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    observacoes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status_produto: Mapped[Optional[ProductStatus]] = mapped_column(
+        SAEnum(ProductStatus, native_enum=False, values_callable=_enum_values), nullable=True,
+    )
+    tipo_desenvolvimento: Mapped[Optional[ProductTipoDesenvolvimento]] = mapped_column(
+        SAEnum(ProductTipoDesenvolvimento, native_enum=False, values_callable=_enum_values), nullable=True,
+    )
+    desenvolvido_por: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    fornecedor_cnpj: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    modelo_contratacao: Mapped[Optional[ProductModeloContratacao]] = mapped_column(
+        SAEnum(ProductModeloContratacao, native_enum=False, values_callable=_enum_values), nullable=True,
+    )
+    ambiente_tecnologico: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    tecnologias: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    link_repositorio: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    link_dev: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    link_hml: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    link_prd: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -137,7 +399,8 @@ class Product(TenantBase):
     inactivated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     area: Mapped[Optional["Area"]] = relationship("Area", lazy="selectin")
-    responsavel: Mapped[Optional["Person"]] = relationship("Person", lazy="selectin")
+    responsavel: Mapped[Optional["Person"]] = relationship("Person", foreign_keys=[responsavel_person_id], lazy="selectin")
+    dono_negocio: Mapped[Optional["Person"]] = relationship("Person", foreign_keys=[dono_negocio_person_id], lazy="selectin")
     fornecedor: Mapped[Optional["Fornecedor"]] = relationship("Fornecedor", lazy="selectin")
     servicos: Mapped[list["ProductServico"]] = relationship(
         back_populates="product", cascade="all, delete-orphan", order_by="ProductServico.order", lazy="selectin",
@@ -149,6 +412,18 @@ class Product(TenantBase):
         back_populates="product", cascade="all, delete-orphan", lazy="selectin",
     )
     contratos: Mapped[list["Contrato"]] = relationship(
+        back_populates="product", cascade="all, delete-orphan", lazy="selectin",
+    )
+    releases: Mapped[list["ProductRelease"]] = relationship(
+        back_populates="product", cascade="all, delete-orphan", lazy="selectin",
+    )
+    documentations: Mapped[list["ProductDocumentation"]] = relationship(
+        back_populates="product", cascade="all, delete-orphan", lazy="selectin",
+    )
+    supports: Mapped[list["ProductSupport"]] = relationship(
+        back_populates="product", cascade="all, delete-orphan", lazy="selectin",
+    )
+    security: Mapped[list["ProductSecurityIntegration"]] = relationship(
         back_populates="product", cascade="all, delete-orphan", lazy="selectin",
     )
 
@@ -163,6 +438,17 @@ class ProductServico(TenantBase):
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     ano_referencia: Mapped[int] = mapped_column(Integer, nullable=False)
+    # ── Extensão spec ──
+    area_usuaria: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    processo_relacionado: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    disponibilidade: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    sla_atendimento: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    tipo_suporte: Mapped[Optional[ServicoTipoSuporte]] = mapped_column(
+        SAEnum(ServicoTipoSuporte, native_enum=False, values_callable=_enum_values), nullable=True,
+    )
+    status_servico: Mapped[Optional[ServicoStatus]] = mapped_column(
+        SAEnum(ServicoStatus, native_enum=False, values_callable=_enum_values), nullable=True,
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
@@ -190,6 +476,21 @@ class ProductDocumento(TenantBase):
     size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     category: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
     external_link: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # ── Extensão spec (documento nato-digital) ──
+    tipo_documento: Mapped[Optional[DocumentoTipo]] = mapped_column(
+        SAEnum(DocumentoTipo, native_enum=False, values_callable=_enum_values), nullable=True,
+    )
+    is_nato_digital: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    assinatura_digital: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    trilha_auditoria: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    local_armazenamento: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    prazo_retencao: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    classificacao: Mapped[Optional[ClassificacaoInformacao]] = mapped_column(
+        SAEnum(ClassificacaoInformacao, native_enum=False, values_callable=_enum_values), nullable=True,
+    )
+    dados_pessoais: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    dados_sensiveis: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    observacoes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     uploaded_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
@@ -281,6 +582,24 @@ class Contrato(TenantBase):
     gestor_person_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("team_persons.id", ondelete="SET NULL"), nullable=True,
     )
+    # ── Extensão spec (contrato) ──
+    numero: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    objeto_contratual: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status_contrato: Mapped[Optional[ContratoStatus]] = mapped_column(
+        SAEnum(ContratoStatus, native_enum=False, values_callable=_enum_values), nullable=True,
+    )
+    valor: Mapped[Optional[float]] = mapped_column(Numeric(18, 2), nullable=True)
+    tipo_valor: Mapped[Optional[ContratoTipoValor]] = mapped_column(
+        SAEnum(ContratoTipoValor, native_enum=False, values_callable=_enum_values), nullable=True,
+    )
+    centro_custo: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    fiscal_person_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("team_persons.id", ondelete="SET NULL"), nullable=True,
+    )
+    sla_contratual: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Lista de aditivos: [{object_name, filename, content_type, size}, ...]
+    aditivos: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    observacoes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     sustentacao_n1: Mapped[SustentacaoModelo] = mapped_column(
         SAEnum(SustentacaoModelo, native_enum=False, values_callable=_enum_values), nullable=False, default=SustentacaoModelo.INTERNA,
     )
@@ -306,4 +625,328 @@ class Contrato(TenantBase):
 
     product: Mapped["Product"] = relationship(back_populates="contratos")
     fornecedor: Mapped["Fornecedor"] = relationship("Fornecedor", lazy="selectin")
-    gestor: Mapped[Optional["Person"]] = relationship("Person", lazy="selectin")
+    gestor: Mapped[Optional["Person"]] = relationship("Person", foreign_keys=[gestor_person_id], lazy="selectin")
+    fiscal: Mapped[Optional["Person"]] = relationship("Person", foreign_keys=[fiscal_person_id], lazy="selectin")
+
+
+# ─────────────────────────────────────────────
+# Produtos Digitais — entidades novas (Release / Documentação / Sustentação / Segurança)
+# ─────────────────────────────────────────────
+
+class ProductRelease(TenantBase):
+    __tablename__ = "product_releases"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    product_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    versao: Mapped[str] = mapped_column(String(60), nullable=False)
+    nome: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    data_release: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    ambiente: Mapped[Optional[ReleaseAmbiente]] = mapped_column(
+        SAEnum(ReleaseAmbiente, native_enum=False, values_callable=_enum_values), nullable=True,
+    )
+    tipo: Mapped[Optional[ReleaseTipo]] = mapped_column(
+        SAEnum(ReleaseTipo, native_enum=False, values_callable=_enum_values), nullable=True,
+    )
+    descricao_mudanca: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    impacto: Mapped[Optional[ReleaseImpacto]] = mapped_column(
+        SAEnum(ReleaseImpacto, native_enum=False, values_callable=_enum_values), nullable=True,
+    )
+    responsavel_person_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("team_persons.id", ondelete="SET NULL"), nullable=True,
+    )
+    evidencia_link: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Anexos de evidência de homologação: [{object_name, filename, content_type, size}, ...]
+    evidencia_anexos: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    changelog: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    tem_rollback: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    descricao_rollback: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    doc_atualizada: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status: Mapped[ReleaseStatus] = mapped_column(
+        SAEnum(ReleaseStatus, native_enum=False, values_callable=_enum_values),
+        nullable=False, default=ReleaseStatus.PLANEJADA,
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    product: Mapped["Product"] = relationship(back_populates="releases")
+    responsavel: Mapped[Optional["Person"]] = relationship("Person", lazy="selectin")
+
+
+class ProductDocumentation(TenantBase):
+    __tablename__ = "product_documentations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    product_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    tipo: Mapped[DocumentacaoTipo] = mapped_column(
+        SAEnum(DocumentacaoTipo, native_enum=False, values_callable=_enum_values),
+        nullable=False, default=DocumentacaoTipo.USUARIO,
+    )
+    titulo: Mapped[str] = mapped_column(String(200), nullable=False)
+    conteudo_md: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    versao_relacionada: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+    autor_person_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("team_persons.id", ondelete="SET NULL"), nullable=True,
+    )
+    status: Mapped[DocumentacaoStatus] = mapped_column(
+        SAEnum(DocumentacaoStatus, native_enum=False, values_callable=_enum_values),
+        nullable=False, default=DocumentacaoStatus.NAO_INICIADA,
+    )
+    link_interno: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Anexos complementares: [{object_name, filename, content_type, size}, ...]
+    anexos: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    product: Mapped["Product"] = relationship(back_populates="documentations")
+    autor: Mapped[Optional["Person"]] = relationship("Person", lazy="selectin")
+
+
+class ProductSupport(TenantBase):
+    __tablename__ = "product_supports"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    product_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    tipo: Mapped[Optional[SuporteTipo]] = mapped_column(
+        SAEnum(SuporteTipo, native_enum=False, values_callable=_enum_values), nullable=True,
+    )
+    canal_atendimento: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    sla_critico: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    sla_medio: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    sla_solicitacao: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    equipe_responsavel: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    horario_suporte: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    escalonamento: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    link_base_conhecimento: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    observacoes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    product: Mapped["Product"] = relationship(back_populates="supports")
+
+
+class ProductSecurityIntegration(TenantBase):
+    __tablename__ = "product_security_integrations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    product_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    possui_integracao: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    sistemas_integrados: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    tipo_integracao: Mapped[Optional[IntegracaoTipo]] = mapped_column(
+        SAEnum(IntegracaoTipo, native_enum=False, values_callable=_enum_values), nullable=True,
+    )
+    dados_tratados: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    dados_pessoais: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    dados_sensiveis: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    classificacao: Mapped[Optional[ClassificacaoInformacao]] = mapped_column(
+        SAEnum(ClassificacaoInformacao, native_enum=False, values_callable=_enum_values), nullable=True,
+    )
+    tipo_autenticacao: Mapped[Optional[AutenticacaoTipo]] = mapped_column(
+        SAEnum(AutenticacaoTipo, native_enum=False, values_callable=_enum_values), nullable=True,
+    )
+    perfis_acesso: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    logs_auditoria: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    backup: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    plano_contingencia: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    risco_indisponibilidade: Mapped[Optional[RiscoIndisponibilidade]] = mapped_column(
+        SAEnum(RiscoIndisponibilidade, native_enum=False, values_callable=_enum_values), nullable=True,
+    )
+    observacoes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    product: Mapped["Product"] = relationship(back_populates="security")
+
+
+# ─────────────────────────────────────────────
+# Portfólio de Processos (versionado)
+# ─────────────────────────────────────────────
+
+class ProcessPortfolio(TenantBase):
+    """Container lógico de um portfólio de processos. Cada portfólio tem uma série de versões;
+    `current_version_id` aponta para a versão consolidada vigente."""
+    __tablename__ = "process_portfolios"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    current_version_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("process_portfolio_versions.id", ondelete="SET NULL", use_alter=True,
+                   name="fk_portfolio_current_version"),
+        nullable=True,
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    inactivated_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    inactivated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    versions: Mapped[list["ProcessPortfolioVersion"]] = relationship(
+        back_populates="portfolio", cascade="all, delete-orphan",
+        order_by="ProcessPortfolioVersion.version", foreign_keys="ProcessPortfolioVersion.portfolio_id",
+    )
+    current_version: Mapped[Optional["ProcessPortfolioVersion"]] = relationship(
+        foreign_keys=[current_version_id], post_update=True, lazy="selectin",
+    )
+
+
+class ProcessPortfolioVersion(TenantBase):
+    """Versão de um portfólio de processos. Versão `consolidada` é imutável; edições só em `rascunho`.
+    Forma a série histórica — cada nova versão é deep-copy da consolidada anterior + justificativa."""
+    __tablename__ = "process_portfolio_versions"
+    __table_args__ = (
+        UniqueConstraint("portfolio_id", "version", name="uq_process_portfolio_version"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    portfolio_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("process_portfolios.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[ProcessPortfolioVersionStatus] = mapped_column(
+        SAEnum(ProcessPortfolioVersionStatus, native_enum=False, values_callable=_enum_values),
+        nullable=False, default=ProcessPortfolioVersionStatus.RASCUNHO,
+    )
+    justification: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    consolidated_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    consolidated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    portfolio: Mapped["ProcessPortfolio"] = relationship(
+        back_populates="versions", foreign_keys=[portfolio_id],
+    )
+    items: Mapped[list["ProcessPortfolioItem"]] = relationship(
+        back_populates="version", cascade="all, delete-orphan", order_by="ProcessPortfolioItem.order",
+    )
+
+
+class ProcessPortfolioItem(TenantBase):
+    """Nó da árvore (Diretoria→Macro→Processo→Sub) pertencente a UMA versão. `lineage_id` é a
+    identidade lógica estável copiada entre versões (base do diff e do vínculo com serviços)."""
+    __tablename__ = "process_portfolio_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("process_portfolio_versions.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    lineage_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, default=uuid.uuid4, index=True)
+    parent_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("process_portfolio_items.id", ondelete="CASCADE"), nullable=True, index=True,
+    )
+    nivel: Mapped[ProcessItemNivel] = mapped_column(
+        SAEnum(ProcessItemNivel, native_enum=False, values_callable=_enum_values), nullable=False,
+    )
+    codigo: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Diretoria demandante — atributo (texto livre) tipicamente do macroprocesso, não um nível da cascata.
+    diretoria: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    # Área — valor do formulário padrão de projetos (select), não TeamOps.
+    area: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    analista: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    dono: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+
+    # Governança / org (legado TeamOps — person_id)
+    analista_person_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("team_persons.id", ondelete="SET NULL"), nullable=True,
+    )
+    dono_person_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("team_persons.id", ondelete="SET NULL"), nullable=True,
+    )
+    area_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("team_areas.id", ondelete="SET NULL"), nullable=True,
+    )
+
+    # Vigência + documentação
+    vigencia_inicio: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    vigencia_fim: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    documentado: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    data_documentacao: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    doc_previsao_inicio: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    doc_previsao_fim: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    # Lista de anexos: [{object_name, filename, content_type, size}, ...]
+    anexos: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+
+    # Campos extras de controle
+    status_item: Mapped[ProcessItemStatus] = mapped_column(
+        SAEnum(ProcessItemStatus, native_enum=False, values_callable=_enum_values),
+        nullable=False, default=ProcessItemStatus.ATIVO,
+    )
+    criticidade: Mapped[Optional[ProcessItemCriticidade]] = mapped_column(
+        SAEnum(ProcessItemCriticidade, native_enum=False, values_callable=_enum_values), nullable=True,
+    )
+    objetivo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    nivel_maturidade: Mapped[Optional[ProcessItemMaturidade]] = mapped_column(
+        SAEnum(ProcessItemMaturidade, native_enum=False, values_callable=_enum_values), nullable=True,
+    )
+    tipo_documento: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    versao_documento: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    proxima_revisao: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    link_externo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    frequencia: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    entradas: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    saidas: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    version: Mapped["ProcessPortfolioVersion"] = relationship(back_populates="items")
+    analista_person: Mapped[Optional["Person"]] = relationship("Person", foreign_keys=[analista_person_id], lazy="selectin")
+    dono_person: Mapped[Optional["Person"]] = relationship("Person", foreign_keys=[dono_person_id], lazy="selectin")
+    team_area: Mapped[Optional["Area"]] = relationship("Area", foreign_keys=[area_id], lazy="selectin")
+    parent: Mapped[Optional["ProcessPortfolioItem"]] = relationship(
+        remote_side="ProcessPortfolioItem.id", back_populates="children",
+    )
+    children: Mapped[list["ProcessPortfolioItem"]] = relationship(
+        back_populates="parent", cascade="all, delete-orphan",
+        order_by="ProcessPortfolioItem.order", foreign_keys=[parent_id],
+    )
+
+
+class ProcessServiceLink(TenantBase):
+    """Vínculo serviço do produto ↔ sub-processo do portfólio. Aponta para o sub-processo lógico
+    (`item_lineage_id`) para sobreviver à criação de novas versões."""
+    __tablename__ = "process_portfolio_service_links"
+    __table_args__ = (
+        UniqueConstraint("servico_id", "item_lineage_id", name="uq_process_service_link"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    servico_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("product_servicos.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    portfolio_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("process_portfolios.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    item_lineage_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

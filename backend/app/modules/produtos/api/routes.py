@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import date
+from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 
@@ -10,10 +11,15 @@ from app.core.dependencies import ModuleContext, require_module, require_permiss
 from app.modules.produtos import schemas
 from app.modules.produtos.service import (
     AlertaService,
+    DocumentationService,
     FornecedorService,
     IndicadorService,
     ProcessoService,
+    ProcessPortfolioService,
     ProductService,
+    ReleaseService,
+    SecurityIntegrationService,
+    SupportService,
 )
 
 router = APIRouter(prefix="/produtos", tags=["Produtos"])
@@ -56,6 +62,12 @@ async def list_persons(ctx: ModuleContext = Depends(_ctx)):
 @router.get("/finalized-projects", response_model=list[schemas.FinalizedProjectItem])
 async def list_finalized_projects(ctx: ModuleContext = Depends(_ctx)):
     return await ProductService.list_finalized_projects(ctx.db)
+
+
+# Modelo Markdown padrão para nova documentação (registrado antes de /{product_id}).
+@router.get("/documentation-template", response_model=dict)
+async def documentation_template(ctx: ModuleContext = Depends(_ctx)):
+    return {"conteudo_md": DocumentationService.template()}
 
 
 @router.post("/from-project", response_model=schemas.ProductResponse, status_code=201)
@@ -105,6 +117,85 @@ async def update_processo(processo_id: uuid.UUID, data: schemas.ProcessoUpdate, 
 @router.delete("/processos/{processo_id}", status_code=204)
 async def delete_processo(processo_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
     await ProcessoService.delete(ctx.db, processo_id, ctx.user.id)
+
+
+# ── Portfólio de Processos (versionado) ───────
+# IMPORTANTE: registrado ANTES das rotas /{product_id} para não colidir com o catch-all.
+@router.get("/process-portfolios", response_model=list[schemas.ProcessPortfolioResponse])
+async def list_process_portfolios(ctx: ModuleContext = Depends(_ctx)):
+    return await ProcessPortfolioService.list_portfolios(ctx.db)
+
+
+@router.post("/process-portfolios", response_model=schemas.ProcessPortfolioResponse, status_code=201)
+async def create_process_portfolio(data: schemas.ProcessPortfolioCreate, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    return await ProcessPortfolioService.create_portfolio(ctx.db, data, ctx.user.id)
+
+
+@router.patch("/process-portfolios/{portfolio_id}", response_model=schemas.ProcessPortfolioResponse)
+async def update_process_portfolio(portfolio_id: uuid.UUID, data: schemas.ProcessPortfolioUpdate, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    return await ProcessPortfolioService.update_portfolio(ctx.db, portfolio_id, data, ctx.user.id)
+
+
+@router.delete("/process-portfolios/{portfolio_id}", status_code=204)
+async def delete_process_portfolio(portfolio_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    await ProcessPortfolioService.delete_portfolio(ctx.db, portfolio_id, ctx.user.id)
+
+
+@router.get("/process-portfolios/{portfolio_id}/current", response_model=schemas.ProcessVersionTree)
+async def get_current_portfolio_tree(portfolio_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+    return await ProcessPortfolioService.get_current_tree(ctx.db, portfolio_id)
+
+
+@router.get("/process-portfolios/{portfolio_id}/versions", response_model=list[schemas.ProcessVersionSummary])
+async def list_portfolio_versions(portfolio_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+    return await ProcessPortfolioService.list_versions(ctx.db, portfolio_id)
+
+
+@router.post("/process-portfolios/{portfolio_id}/versions", response_model=schemas.ProcessVersionTree, status_code=201)
+async def create_portfolio_version(portfolio_id: uuid.UUID, data: schemas.CreateVersionRequest, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    return await ProcessPortfolioService.create_version(ctx.db, portfolio_id, data, ctx.user.id)
+
+
+@router.get("/process-portfolios/versions/{version_id}/tree", response_model=schemas.ProcessVersionTree)
+async def get_version_tree(version_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+    return await ProcessPortfolioService.get_version_tree(ctx.db, version_id)
+
+
+@router.post("/process-portfolios/versions/{version_id}/consolidate", response_model=schemas.ProcessVersionTree)
+async def consolidate_version(version_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    return await ProcessPortfolioService.consolidate_version(ctx.db, version_id, ctx.user.id)
+
+
+@router.post("/process-portfolios/versions/{version_id}/items", response_model=schemas.ProcessItemResponse, status_code=201)
+async def create_portfolio_item(version_id: uuid.UUID, data: schemas.ProcessItemCreate, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    return await ProcessPortfolioService.create_item(ctx.db, version_id, data, ctx.user.id)
+
+
+# IMPORTANTE: 'reorder' antes de '{item_id}' para não ser capturado como UUID.
+@router.patch("/process-portfolios/versions/{version_id}/items/reorder", response_model=schemas.ProcessVersionTree)
+async def reorder_portfolio_items(version_id: uuid.UUID, data: schemas.ProcessItemReorderRequest, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    return await ProcessPortfolioService.reorder_items(ctx.db, version_id, data, ctx.user.id)
+
+
+@router.patch("/process-portfolios/versions/{version_id}/items/{item_id}", response_model=schemas.ProcessItemResponse)
+async def update_portfolio_item(version_id: uuid.UUID, item_id: uuid.UUID, data: schemas.ProcessItemUpdate, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    return await ProcessPortfolioService.update_item(ctx.db, version_id, item_id, data, ctx.user.id)
+
+
+@router.delete("/process-portfolios/versions/{version_id}/items/{item_id}", status_code=204)
+async def delete_portfolio_item(version_id: uuid.UUID, item_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    await ProcessPortfolioService.delete_item(ctx.db, version_id, item_id, ctx.user.id)
+
+
+# ── Vínculo serviço ↔ sub-processo ────────────
+@router.get("/servicos/{servico_id}/process-links", response_model=list[schemas.ServiceLinkItem])
+async def list_service_process_links(servico_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+    return await ProcessPortfolioService.list_service_links(ctx.db, servico_id)
+
+
+@router.put("/servicos/{servico_id}/process-links", response_model=list[schemas.ServiceLinkItem])
+async def set_service_process_links(servico_id: uuid.UUID, data: schemas.ServiceLinkSetRequest, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    return await ProcessPortfolioService.set_service_links(ctx.db, servico_id, data, ctx.user.id)
 
 
 # ── Fornecedores ──────────────────────────────
@@ -200,6 +291,11 @@ async def add_documento(product_id: uuid.UUID, data: schemas.DocumentoCreate, ct
     return await ProductService.add_documento(ctx.db, product_id, data, ctx.user.id)
 
 
+@router.patch("/{product_id}/documentos/{doc_id}", response_model=schemas.DocumentoResponse)
+async def update_documento(product_id: uuid.UUID, doc_id: uuid.UUID, data: schemas.DocumentoUpdate, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    return await ProductService.update_documento(ctx.db, product_id, doc_id, data, ctx.user.id)
+
+
 @router.delete("/{product_id}/documentos/{doc_id}", status_code=204)
 async def delete_documento(product_id: uuid.UUID, doc_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
     await ProductService.delete_documento(ctx.db, product_id, doc_id, ctx.user.id)
@@ -235,3 +331,67 @@ async def update_contrato(product_id: uuid.UUID, contrato_id: uuid.UUID, data: s
 @router.delete("/{product_id}/contratos/{contrato_id}", status_code=204)
 async def delete_contrato(product_id: uuid.UUID, contrato_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
     await ProductService.delete_contrato(ctx.db, product_id, contrato_id, ctx.user.id)
+
+
+# ── Releases / Versões ────────────────────────
+@router.get("/{product_id}/releases", response_model=list[schemas.ReleaseResponse])
+async def list_releases(product_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+    return await ReleaseService.list(ctx.db, product_id)
+
+
+@router.post("/{product_id}/releases", response_model=schemas.ReleaseResponse, status_code=201)
+async def add_release(product_id: uuid.UUID, data: schemas.ReleaseCreate, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    return await ReleaseService.create(ctx.db, product_id, data, ctx.user.id)
+
+
+@router.patch("/{product_id}/releases/{release_id}", response_model=schemas.ReleaseResponse)
+async def update_release(product_id: uuid.UUID, release_id: uuid.UUID, data: schemas.ReleaseUpdate, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    return await ReleaseService.update(ctx.db, product_id, release_id, data, ctx.user.id)
+
+
+@router.delete("/{product_id}/releases/{release_id}", status_code=204)
+async def delete_release(product_id: uuid.UUID, release_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    await ReleaseService.delete(ctx.db, product_id, release_id, ctx.user.id)
+
+
+# ── Documentação (Markdown) ───────────────────
+@router.get("/{product_id}/documentations", response_model=list[schemas.DocumentationResponse])
+async def list_documentations(product_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+    return await DocumentationService.list(ctx.db, product_id)
+
+
+@router.post("/{product_id}/documentations", response_model=schemas.DocumentationResponse, status_code=201)
+async def add_documentation(product_id: uuid.UUID, data: schemas.DocumentationCreate, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    return await DocumentationService.create(ctx.db, product_id, data, ctx.user.id)
+
+
+@router.patch("/{product_id}/documentations/{doc_id}", response_model=schemas.DocumentationResponse)
+async def update_documentation(product_id: uuid.UUID, doc_id: uuid.UUID, data: schemas.DocumentationUpdate, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    return await DocumentationService.update(ctx.db, product_id, doc_id, data, ctx.user.id)
+
+
+@router.delete("/{product_id}/documentations/{doc_id}", status_code=204)
+async def delete_documentation(product_id: uuid.UUID, doc_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    await DocumentationService.delete(ctx.db, product_id, doc_id, ctx.user.id)
+
+
+# ── Sustentação / SLA ─────────────────────────
+@router.get("/{product_id}/support", response_model=Optional[schemas.SupportResponse])
+async def get_support(product_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+    return await SupportService.get(ctx.db, product_id)
+
+
+@router.put("/{product_id}/support", response_model=schemas.SupportResponse)
+async def upsert_support(product_id: uuid.UUID, data: schemas.SupportUpsert, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    return await SupportService.upsert(ctx.db, product_id, data, ctx.user.id)
+
+
+# ── Integrações, dados e segurança ────────────
+@router.get("/{product_id}/security", response_model=Optional[schemas.SecurityResponse])
+async def get_security(product_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+    return await SecurityIntegrationService.get(ctx.db, product_id)
+
+
+@router.put("/{product_id}/security", response_model=schemas.SecurityResponse)
+async def upsert_security(product_id: uuid.UUID, data: schemas.SecurityUpsert, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    return await SecurityIntegrationService.upsert(ctx.db, product_id, data, ctx.user.id)

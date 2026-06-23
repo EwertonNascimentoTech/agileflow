@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { AlertTriangle, Boxes, CheckCircle2, FileText, Workflow, Wrench } from "lucide-react"
+import { AlertTriangle, Boxes, CheckCircle2, FileBox, FileText, Hammer, LifeBuoy, Rocket, ShieldAlert, ShieldCheck, Workflow, Wrench } from "lucide-react"
 
 import { produtosApi, type AlertaContrato, type DashboardKpis } from "@/api/produtos"
 import { KpiCard } from "@/components/KpiCard"
@@ -41,11 +41,22 @@ export default function ProdutosDashboardPage() {
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
         <KpiCard label="Produtos" value={data?.total_products ?? 0} icon={Boxes} />
-        <KpiCard label="Em produção" value={data?.by_lifecycle?.producao ?? 0} icon={CheckCircle2} />
+        <KpiCard label="Em desenvolvimento" value={data?.em_desenvolvimento ?? 0} icon={Hammer} />
+        <KpiCard label="Em produção" value={data?.em_producao ?? 0} icon={CheckCircle2} />
+        <KpiCard label="Em sustentação" value={data?.em_sustentacao ?? 0} icon={LifeBuoy} />
+        <KpiCard label="Descontinuados" value={data?.descontinuados ?? 0} icon={FileBox} />
+        <KpiCard label="Releases no mês" value={data?.releases_publicadas_mes ?? 0} icon={Rocket} />
+        <KpiCard label="Internos" value={data?.internos ?? 0} icon={Boxes} />
+        <KpiCard label="Externos" value={data?.externos ?? 0} icon={Boxes} />
+        <KpiCard label="Sem contrato" value={data?.sem_contrato ?? 0} icon={FileText} />
+        <KpiCard label="Contratos a vencer (90d)" value={data?.contratos_a_vencer_90d ?? 0} icon={AlertTriangle} deltaTone={(data?.contratos_a_vencer_90d ?? 0) > 0 ? "down" : "up"} />
+        <KpiCard label="Sem documentação" value={data?.sem_documentacao ?? 0} icon={FileText} deltaTone={(data?.sem_documentacao ?? 0) > 0 ? "down" : "up"} />
+        <KpiCard label="Críticos" value={data?.criticos ?? 0} icon={ShieldAlert} deltaTone={(data?.criticos ?? 0) > 0 ? "down" : "up"} />
+        <KpiCard label="Com dados pessoais" value={data?.com_dados_pessoais ?? 0} icon={ShieldAlert} />
+        <KpiCard label="Com plano contingência" value={data?.com_plano_contingencia ?? 0} icon={ShieldCheck} />
         <KpiCard label="Serviços digitais" value={data?.total_servicos ?? 0} icon={Wrench} />
         <KpiCard label="Documentos natos" value={data?.total_documentos ?? 0} icon={FileText} />
         <KpiCard label="Proc. automatizados" value={data?.total_processos_automatizados ?? 0} icon={Workflow} />
-        <KpiCard label="Contratos vencendo" value={data?.contratos_vencendo ?? 0} icon={AlertTriangle} deltaTone={(data?.contratos_vencendo ?? 0) > 0 ? "down" : "up"} />
       </div>
 
       {data && Object.keys(data.by_lifecycle).length > 0 && (

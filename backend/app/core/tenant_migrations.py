@@ -2841,6 +2841,335 @@ async def _step_068_projetos_schedule_baselines(conn: AsyncConnection, schema: s
     """))
 
 
+async def _step_069_produtos_process_portfolio(conn: AsyncConnection, schema: str) -> None:
+    """Portfólio de Processos versionado (Diretoria→Macro→Processo→Sub):
+      - process_portfolios (container + ponteiro p/ versão consolidada vigente)
+      - process_portfolio_versions (série histórica + justificativa + status)
+      - process_portfolio_items (árvore por versão, lineage_id estável, governança/anexos)
+      - process_portfolio_service_links (vínculo serviço↔sub-processo por lineage)
+    Idempotente. Só roda em tenants que já têm o módulo produtos (tabela products)."""
+    if not await _table_exists(conn, schema, "products"):
+        return
+
+    if not await _table_exists(conn, schema, "process_portfolios"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.process_portfolios (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name VARCHAR(200) NOT NULL,
+                description TEXT,
+                current_version_id UUID,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_by UUID, created_at TIMESTAMP DEFAULT now(),
+                updated_by UUID, updated_at TIMESTAMP DEFAULT now(),
+                inactivated_by UUID, inactivated_at TIMESTAMP
+            )
+        """))
+
+    if not await _table_exists(conn, schema, "process_portfolio_versions"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.process_portfolio_versions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                portfolio_id UUID NOT NULL REFERENCES {schema}.process_portfolios(id) ON DELETE CASCADE,
+                version INTEGER NOT NULL DEFAULT 1,
+                status VARCHAR(20) NOT NULL DEFAULT 'rascunho',
+                justification TEXT,
+                consolidated_by UUID, consolidated_at TIMESTAMP,
+                created_by UUID, created_at TIMESTAMP DEFAULT now(),
+                updated_by UUID, updated_at TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_process_portfolio_version UNIQUE (portfolio_id, version)
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_pp_versions_portfolio ON {schema}.process_portfolio_versions(portfolio_id)"
+        ))
+
+    # FK tardia: current_version_id → versions (após a tabela de versões existir)
+    fk_exists = await conn.execute(text(
+        "SELECT 1 FROM information_schema.table_constraints "
+        "WHERE table_schema=:s AND table_name='process_portfolios' AND constraint_name='fk_portfolio_current_version'"
+    ), {"s": schema})
+    if fk_exists.scalar() is None:
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.process_portfolios ADD CONSTRAINT fk_portfolio_current_version "
+            f"FOREIGN KEY (current_version_id) REFERENCES {schema}.process_portfolio_versions(id) ON DELETE SET NULL"
+        ))
+
+    if not await _table_exists(conn, schema, "process_portfolio_items"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.process_portfolio_items (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                version_id UUID NOT NULL REFERENCES {schema}.process_portfolio_versions(id) ON DELETE CASCADE,
+                lineage_id UUID NOT NULL DEFAULT gen_random_uuid(),
+                parent_id UUID REFERENCES {schema}.process_portfolio_items(id) ON DELETE CASCADE,
+                nivel VARCHAR(20) NOT NULL,
+                codigo VARCHAR(40),
+                name VARCHAR(200) NOT NULL,
+                description TEXT,
+                "order" INTEGER NOT NULL DEFAULT 0,
+                analista_person_id UUID REFERENCES {schema}.team_persons(id) ON DELETE SET NULL,
+                dono_person_id UUID REFERENCES {schema}.team_persons(id) ON DELETE SET NULL,
+                area_id UUID REFERENCES {schema}.team_areas(id) ON DELETE SET NULL,
+                vigencia_inicio DATE, vigencia_fim DATE,
+                documentado BOOLEAN NOT NULL DEFAULT FALSE,
+                data_documentacao DATE,
+                doc_previsao_inicio DATE, doc_previsao_fim DATE,
+                anexos JSONB,
+                status_item VARCHAR(20) NOT NULL DEFAULT 'ativo',
+                criticidade VARCHAR(20),
+                objetivo TEXT,
+                nivel_maturidade VARCHAR(20),
+                tipo_documento VARCHAR(80),
+                versao_documento VARCHAR(40),
+                proxima_revisao DATE,
+                link_externo TEXT,
+                frequencia VARCHAR(120),
+                entradas TEXT, saidas TEXT,
+                created_by UUID, created_at TIMESTAMP DEFAULT now(),
+                updated_by UUID, updated_at TIMESTAMP DEFAULT now()
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_pp_items_version ON {schema}.process_portfolio_items(version_id)"
+        ))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_pp_items_lineage ON {schema}.process_portfolio_items(lineage_id)"
+        ))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_pp_items_parent ON {schema}.process_portfolio_items(parent_id)"
+        ))
+
+    # Diretoria demandante como atributo do item (tipicamente do macroprocesso). Idempotente.
+    if not await _column_exists(conn, schema, "process_portfolio_items", "diretoria"):
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.process_portfolio_items ADD COLUMN diretoria VARCHAR(200)"
+        ))
+
+    if not await _column_exists(conn, schema, "process_portfolio_items", "area"):
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.process_portfolio_items ADD COLUMN area VARCHAR(120)"
+        ))
+
+    if not await _column_exists(conn, schema, "process_portfolio_items", "analista"):
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.process_portfolio_items ADD COLUMN analista VARCHAR(200)"
+        ))
+
+    if not await _column_exists(conn, schema, "process_portfolio_items", "dono"):
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.process_portfolio_items ADD COLUMN dono VARCHAR(200)"
+        ))
+
+    if not await _table_exists(conn, schema, "process_portfolio_service_links"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.process_portfolio_service_links (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                servico_id UUID NOT NULL REFERENCES {schema}.product_servicos(id) ON DELETE CASCADE,
+                portfolio_id UUID NOT NULL REFERENCES {schema}.process_portfolios(id) ON DELETE CASCADE,
+                item_lineage_id UUID NOT NULL,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_by UUID, created_at TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_process_service_link UNIQUE (servico_id, item_lineage_id)
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_pp_links_servico ON {schema}.process_portfolio_service_links(servico_id)"
+        ))
+
+
+async def _add_columns(conn: AsyncConnection, schema: str, table: str, cols: dict[str, str]) -> None:
+    """Adiciona colunas faltantes (idempotente). cols: {nome: 'TIPO [DEFAULT ...]'}."""
+    if not await _table_exists(conn, schema, table):
+        return
+    for name, ddl in cols.items():
+        if not await _column_exists(conn, schema, table, name):
+            await conn.execute(text(f'ALTER TABLE {schema}.{table} ADD COLUMN "{name}" {ddl}'))
+
+
+async def _step_070_produtos_product_extend(conn: AsyncConnection, schema: str) -> None:
+    """Campos 'Produtos Digitais' no products (todos opcionais). Idempotente."""
+    await _add_columns(conn, schema, "products", {
+        "sigla": "VARCHAR(40)",
+        "link_descricao": "TEXT",
+        "categoria": "VARCHAR(30)",
+        "unidade": "VARCHAR(20)",
+        "dono_negocio_person_id": f"UUID REFERENCES {schema}.team_persons(id) ON DELETE SET NULL",
+        "publico_alvo": "TEXT",
+        "url_acesso": "TEXT",
+        "observacoes": "TEXT",
+        "status_produto": "VARCHAR(20)",
+        "tipo_desenvolvimento": "VARCHAR(20)",
+        "desenvolvido_por": "VARCHAR(200)",
+        "fornecedor_cnpj": "VARCHAR(20)",
+        "modelo_contratacao": "VARCHAR(30)",
+        "ambiente_tecnologico": "TEXT",
+        "tecnologias": "TEXT",
+        "link_repositorio": "TEXT",
+        "link_dev": "TEXT",
+        "link_hml": "TEXT",
+        "link_prd": "TEXT",
+    })
+
+
+async def _step_071_produtos_servico_extend(conn: AsyncConnection, schema: str) -> None:
+    await _add_columns(conn, schema, "product_servicos", {
+        "area_usuaria": "VARCHAR(200)",
+        "processo_relacionado": "VARCHAR(200)",
+        "disponibilidade": "VARCHAR(120)",
+        "sla_atendimento": "VARCHAR(200)",
+        "tipo_suporte": "VARCHAR(30)",
+        "status_servico": "VARCHAR(20)",
+    })
+
+
+async def _step_072_produtos_documento_extend(conn: AsyncConnection, schema: str) -> None:
+    await _add_columns(conn, schema, "product_documentos", {
+        "tipo_documento": "VARCHAR(20)",
+        "is_nato_digital": "BOOLEAN NOT NULL DEFAULT TRUE",
+        "assinatura_digital": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "trilha_auditoria": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "local_armazenamento": "VARCHAR(200)",
+        "prazo_retencao": "VARCHAR(120)",
+        "classificacao": "VARCHAR(20)",
+        "dados_pessoais": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "dados_sensiveis": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "observacoes": "TEXT",
+    })
+
+
+async def _step_073_produtos_contrato_extend(conn: AsyncConnection, schema: str) -> None:
+    await _add_columns(conn, schema, "produto_contratos", {
+        "numero": "VARCHAR(120)",
+        "objeto_contratual": "TEXT",
+        "status_contrato": "VARCHAR(20)",
+        "valor": "NUMERIC(18,2)",
+        "tipo_valor": "VARCHAR(20)",
+        "centro_custo": "VARCHAR(120)",
+        "fiscal_person_id": f"UUID REFERENCES {schema}.team_persons(id) ON DELETE SET NULL",
+        "sla_contratual": "TEXT",
+        "aditivos": "JSONB",
+        "observacoes": "TEXT",
+    })
+
+
+async def _step_074_produtos_release(conn: AsyncConnection, schema: str) -> None:
+    if not await _table_exists(conn, schema, "products"):
+        return
+    if not await _table_exists(conn, schema, "product_releases"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.product_releases (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                product_id UUID NOT NULL REFERENCES {schema}.products(id) ON DELETE CASCADE,
+                versao VARCHAR(60) NOT NULL,
+                nome VARCHAR(200),
+                data_release DATE,
+                ambiente VARCHAR(10),
+                tipo VARCHAR(30),
+                descricao_mudanca TEXT,
+                impacto VARCHAR(10),
+                responsavel_person_id UUID REFERENCES {schema}.team_persons(id) ON DELETE SET NULL,
+                evidencia_link TEXT,
+                evidencia_anexos JSONB,
+                changelog TEXT,
+                tem_rollback BOOLEAN NOT NULL DEFAULT FALSE,
+                descricao_rollback TEXT,
+                doc_atualizada BOOLEAN NOT NULL DEFAULT FALSE,
+                status VARCHAR(20) NOT NULL DEFAULT 'planejada',
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_by UUID, created_at TIMESTAMP DEFAULT now(),
+                updated_by UUID, updated_at TIMESTAMP DEFAULT now()
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_prod_releases_product ON {schema}.product_releases(product_id)"
+        ))
+
+
+async def _step_075_produtos_documentation(conn: AsyncConnection, schema: str) -> None:
+    if not await _table_exists(conn, schema, "products"):
+        return
+    if not await _table_exists(conn, schema, "product_documentations"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.product_documentations (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                product_id UUID NOT NULL REFERENCES {schema}.products(id) ON DELETE CASCADE,
+                tipo VARCHAR(20) NOT NULL DEFAULT 'usuario',
+                titulo VARCHAR(200) NOT NULL,
+                conteudo_md TEXT,
+                versao_relacionada VARCHAR(60),
+                autor_person_id UUID REFERENCES {schema}.team_persons(id) ON DELETE SET NULL,
+                status VARCHAR(30) NOT NULL DEFAULT 'nao_iniciada',
+                link_interno TEXT,
+                anexos JSONB,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_by UUID, created_at TIMESTAMP DEFAULT now(),
+                updated_by UUID, updated_at TIMESTAMP DEFAULT now()
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_prod_docs_product ON {schema}.product_documentations(product_id)"
+        ))
+
+
+async def _step_076_produtos_support(conn: AsyncConnection, schema: str) -> None:
+    if not await _table_exists(conn, schema, "products"):
+        return
+    if not await _table_exists(conn, schema, "product_supports"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.product_supports (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                product_id UUID NOT NULL REFERENCES {schema}.products(id) ON DELETE CASCADE,
+                tipo VARCHAR(20),
+                canal_atendimento VARCHAR(200),
+                sla_critico VARCHAR(120),
+                sla_medio VARCHAR(120),
+                sla_solicitacao VARCHAR(120),
+                equipe_responsavel VARCHAR(200),
+                horario_suporte VARCHAR(120),
+                escalonamento TEXT,
+                link_base_conhecimento TEXT,
+                observacoes TEXT,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_by UUID, created_at TIMESTAMP DEFAULT now(),
+                updated_by UUID, updated_at TIMESTAMP DEFAULT now()
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_prod_supports_product ON {schema}.product_supports(product_id)"
+        ))
+
+
+async def _step_077_produtos_security(conn: AsyncConnection, schema: str) -> None:
+    if not await _table_exists(conn, schema, "products"):
+        return
+    if not await _table_exists(conn, schema, "product_security_integrations"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.product_security_integrations (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                product_id UUID NOT NULL REFERENCES {schema}.products(id) ON DELETE CASCADE,
+                possui_integracao BOOLEAN NOT NULL DEFAULT FALSE,
+                sistemas_integrados TEXT,
+                tipo_integracao VARCHAR(20),
+                dados_tratados TEXT,
+                dados_pessoais BOOLEAN NOT NULL DEFAULT FALSE,
+                dados_sensiveis BOOLEAN NOT NULL DEFAULT FALSE,
+                classificacao VARCHAR(20),
+                tipo_autenticacao VARCHAR(30),
+                perfis_acesso TEXT,
+                logs_auditoria BOOLEAN NOT NULL DEFAULT FALSE,
+                backup BOOLEAN NOT NULL DEFAULT FALSE,
+                plano_contingencia BOOLEAN NOT NULL DEFAULT FALSE,
+                risco_indisponibilidade VARCHAR(20),
+                observacoes TEXT,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_by UUID, created_at TIMESTAMP DEFAULT now(),
+                updated_by UUID, updated_at TIMESTAMP DEFAULT now()
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_prod_secint_product ON {schema}.product_security_integrations(product_id)"
+        ))
+
+
 # Lista ordenada de steps. Adicionar novos no final.
 STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("001_funnels", _step_001_funnels),
@@ -2911,6 +3240,15 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("066_projetos_stage_agents", _step_066_projetos_stage_agents),
     ("067_projetos_stage_agent_kind", _step_067_projetos_stage_agent_kind),
     ("068_projetos_schedule_baselines", _step_068_projetos_schedule_baselines),
+    ("069_produtos_process_portfolio", _step_069_produtos_process_portfolio),
+    ("070_produtos_product_extend", _step_070_produtos_product_extend),
+    ("071_produtos_servico_extend", _step_071_produtos_servico_extend),
+    ("072_produtos_documento_extend", _step_072_produtos_documento_extend),
+    ("073_produtos_contrato_extend", _step_073_produtos_contrato_extend),
+    ("074_produtos_release", _step_074_produtos_release),
+    ("075_produtos_documentation", _step_075_produtos_documentation),
+    ("076_produtos_support", _step_076_produtos_support),
+    ("077_produtos_security", _step_077_produtos_security),
 ]
 
 
