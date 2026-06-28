@@ -350,6 +350,14 @@ async def delete_absence_type(
 # ─────────────────────────────────────────────
 
 
+@router.get("/me/person", response_model=PersonResponse)
+async def get_my_person(ctx: ModuleContext = Depends(_ctx)):
+    person_id = await _current_person_id(ctx)
+    if not person_id:
+        raise HTTPException(status_code=404, detail="Nenhuma pessoa vinculada ao usuário autenticado.")
+    return await PersonService.get(ctx.db, person_id)
+
+
 @router.get("/persons", response_model=list[PersonResponse])
 async def list_persons(
     area_id: Optional[uuid.UUID] = Query(None),

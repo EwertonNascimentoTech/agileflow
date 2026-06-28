@@ -22,6 +22,7 @@ export const MODULE_CONFIG_PERMISSIONS: Record<string, readonly string[]> = {
   ],
   teamops: ["teamops.config.manage"],
   produtos: ["produtos.config.manage"],
+  indicadores: ["indicadores.config.manage"],
   crm: ["atendimento.config.manage", "crm.config.manage"],
   estoque: ["estoque.config.manage"],
   pdv: ["pdv.config.manage"],

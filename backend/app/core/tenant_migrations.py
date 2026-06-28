@@ -3170,6 +3170,335 @@ async def _step_077_produtos_security(conn: AsyncConnection, schema: str) -> Non
         ))
 
 
+async def _step_078_produtos_responsavel_tecnico(conn: AsyncConnection, schema: str) -> None:
+    """Adiciona o responsável técnico ao produto. Idempotente."""
+    if not await _table_exists(conn, schema, "products"):
+        return
+    await _add_columns(conn, schema, "products", {
+        "responsavel_tecnico_person_id": f"UUID REFERENCES {schema}.team_persons(id) ON DELETE SET NULL",
+    })
+
+
+async def _step_079_produtos_stacks(conn: AsyncConnection, schema: str) -> None:
+    """Stacks do produto (multi-valorado): lista de ids do catálogo. Idempotente."""
+    if not await _table_exists(conn, schema, "products"):
+        return
+    await _add_columns(conn, schema, "products", {
+        "stacks": "JSONB NOT NULL DEFAULT '[]'::jsonb",
+    })
+
+
+async def _step_080_process_portfolio_passagem_ti(conn: AsyncConnection, schema: str) -> None:
+    """Sub processo do portfólio: flag passagem para TI. Idempotente."""
+    if not await _table_exists(conn, schema, "process_portfolio_items"):
+        return
+    if not await _column_exists(conn, schema, "process_portfolio_items", "passagem_para_ti"):
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.process_portfolio_items "
+            f"ADD COLUMN passagem_para_ti BOOLEAN NOT NULL DEFAULT FALSE"
+        ))
+
+
+async def _step_081_process_portfolio_status_values(conn: AsyncConnection, schema: str) -> None:
+    """Portfólio de processos: novos valores de status_item. Idempotente."""
+    if not await _table_exists(conn, schema, "process_portfolio_items"):
+        return
+    await conn.execute(text(f"""
+        UPDATE {schema}.process_portfolio_items SET status_item = CASE status_item
+            WHEN 'proposto' THEN 'planejado'
+            WHEN 'ativo' THEN 'em_andamento'
+            WHEN 'em_revisao' THEN 'em_andamento'
+            WHEN 'descontinuado' THEN 'concluido'
+            ELSE status_item
+        END
+        WHERE status_item IN ('proposto', 'ativo', 'em_revisao', 'descontinuado')
+    """))
+    await conn.execute(text(
+        f"ALTER TABLE {schema}.process_portfolio_items "
+        f"ALTER COLUMN status_item SET DEFAULT 'planejado'"
+    ))
+
+
+async def _step_082_process_portfolio_drop_documentado(conn: AsyncConnection, schema: str) -> None:
+    """Remove a flag `documentado` do sub processo — agora deriva de status_item == concluido. Idempotente."""
+    if not await _table_exists(conn, schema, "process_portfolio_items"):
+        return
+    if await _column_exists(conn, schema, "process_portfolio_items", "documentado"):
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.process_portfolio_items DROP COLUMN documentado"
+        ))
+
+
+def _pp_aggregate_status(values: list[str]) -> str | None:
+    if not values:
+        return None
+    if all(v == "concluido" for v in values):
+        return "concluido"
+    if any(v == "em_andamento" for v in values):
+        return "em_andamento"
+    if all(v == "planejado" for v in values):
+        return "planejado"
+    return "em_andamento"
+
+
+async def _step_083_process_portfolio_status_rollup(conn: AsyncConnection, schema: str) -> None:
+    """Recalcula status de processo/macro a partir dos sub processos. Idempotente."""
+    if not await _table_exists(conn, schema, "process_portfolio_items"):
+        return
+
+    version_ids = (await conn.execute(text(
+        f"SELECT DISTINCT version_id FROM {schema}.process_portfolio_items"
+    ))).scalars().all()
+
+    for version_id in version_ids:
+        rows = (await conn.execute(text(
+            f"SELECT id, parent_id, nivel, status_item FROM {schema}.process_portfolio_items "
+            f"WHERE version_id = :v"
+        ), {"v": version_id})).mappings().all()
+        if not rows:
+            continue
+
+        by_id = {r["id"]: dict(r) for r in rows}
+        children: dict = {}
+        for r in rows:
+            children.setdefault(r["parent_id"], []).append(r["id"])
+
+        def collect_subs(root_id):
+            out = []
+            stack = list(children.get(root_id, []))
+            while stack:
+                cid = stack.pop()
+                node = by_id[cid]
+                if node["nivel"] == "subprocesso":
+                    out.append(node)
+                else:
+                    stack.extend(children.get(cid, []))
+            return out
+
+        def status_for_processo(pid):
+            subs = collect_subs(pid)
+            if not subs:
+                return None
+            return _pp_aggregate_status([s["status_item"] for s in subs])
+
+        updates: dict = {}
+        for r in rows:
+            if r["nivel"] not in ("processo", "macroprocesso"):
+                continue
+            if r["nivel"] == "processo":
+                agg = status_for_processo(r["id"])
+            else:
+                proc_ids = [cid for cid in children.get(r["id"], []) if by_id[cid]["nivel"] == "processo"]
+                proc_statuses = [status_for_processo(pid) for pid in proc_ids]
+                proc_statuses = [s for s in proc_statuses if s]
+                agg = _pp_aggregate_status(proc_statuses) if proc_statuses else None
+            if agg:
+                updates[r["id"]] = agg
+
+        for item_id, status in updates.items():
+            await conn.execute(text(
+                f"UPDATE {schema}.process_portfolio_items SET status_item = :s WHERE id = :id"
+            ), {"s": status, "id": item_id})
+
+
+async def _step_086_produtos_categoria_unify(conn: AsyncConnection, schema: str) -> None:
+    """Unifica Categoria + Tipo de desenvolvimento: remapeia categorias antigas para os 5
+    novos valores (auto-map pelo tipo) e sincroniza tipo_desenvolvimento. Idempotente."""
+    if not await _column_exists(conn, schema, "products", "categoria"):
+        return
+    novos = "('sistema_interno_dev','sistema_interno_ia','sistema_externo_ia','sistema_externo_implantacao','sistema_externo_dn')"
+    await conn.execute(text(f"""
+        UPDATE {schema}.products SET categoria = CASE
+            WHEN tipo_desenvolvimento = 'interno' THEN 'sistema_interno_dev'
+            WHEN tipo_desenvolvimento IN ('externo','hibrido') THEN 'sistema_externo_implantacao'
+            WHEN categoria LIKE 'sistema_interno%' THEN 'sistema_interno_dev'
+            WHEN categoria LIKE 'sistema_externo%' THEN 'sistema_externo_implantacao'
+            ELSE 'sistema_interno_dev' END
+        WHERE categoria IS NOT NULL AND categoria NOT IN {novos}
+    """))
+    # sincroniza interno/externo a partir da categoria nova
+    await conn.execute(text(f"""
+        UPDATE {schema}.products SET tipo_desenvolvimento =
+            CASE WHEN categoria LIKE 'sistema_interno%' THEN 'interno' ELSE 'externo' END
+        WHERE categoria IN {novos}
+    """))
+
+
+async def _step_087_produtos_servico_data_publicacao(conn: AsyncConnection, schema: str) -> None:
+    """Data de publicação do serviço digital. Idempotente."""
+    if not await _table_exists(conn, schema, "product_servicos"):
+        return
+    await _add_columns(conn, schema, "product_servicos", {
+        "data_publicacao": "DATE",
+    })
+    if await _column_exists(conn, schema, "product_servicos", "ano_referencia"):
+        await conn.execute(text(f"""
+            UPDATE {schema}.product_servicos
+            SET data_publicacao = make_date(ano_referencia, 1, 1)
+            WHERE data_publicacao IS NULL AND ano_referencia IS NOT NULL
+        """))
+
+
+async def _step_088_produtos_documento_cadastro(conn: AsyncConnection, schema: str) -> None:
+    """Campos do cadastro documental (data, formato, origem, nível LGPD) + migração de espécies. Idempotente."""
+    if not await _table_exists(conn, schema, "product_documentos"):
+        return
+    await _add_columns(conn, schema, "product_documentos", {
+        "data_documento": "DATE",
+        "formato": "VARCHAR(40)",
+        "origem_sistema": "VARCHAR(200)",
+        "nivel_dados_pessoais": "VARCHAR(40)",
+    })
+    if await _column_exists(conn, schema, "product_documentos", "ano_referencia"):
+        await conn.execute(text(f"""
+            UPDATE {schema}.product_documentos
+            SET data_documento = make_date(ano_referencia, 1, 1)
+            WHERE data_documento IS NULL AND ano_referencia IS NOT NULL
+        """))
+    await conn.execute(text(f"""
+        UPDATE {schema}.product_documentos SET tipo_documento = CASE tipo_documento
+            WHEN 'pdf' THEN 'outro'
+            WHEN 'planilha' THEN 'outro'
+            WHEN 'formulario' THEN 'formulario_eletronico'
+            WHEN 'workflow' THEN 'outro'
+            WHEN 'registro' THEN 'registro_sistemico'
+            ELSE tipo_documento
+        END
+        WHERE tipo_documento IN ('pdf', 'planilha', 'formulario', 'workflow', 'registro')
+    """))
+    await conn.execute(text(f"""
+        UPDATE {schema}.product_documentos SET nivel_dados_pessoais = CASE
+            WHEN dados_sensiveis THEN 'dados_pessoais_sensiveis'
+            WHEN dados_pessoais THEN 'dados_pessoais'
+            ELSE 'sem_dados_pessoais'
+        END
+        WHERE nivel_dados_pessoais IS NULL
+    """))
+
+
+async def _step_085_produtos_login_idigital(conn: AsyncConnection, schema: str) -> None:
+    """Flag de autenticação via Idigital no products. Idempotente."""
+    await _add_columns(conn, schema, "products", {
+        "login_idigital": "BOOLEAN NOT NULL DEFAULT FALSE",
+    })
+
+
+async def _step_089_produtos_corporativo(conn: AsyncConnection, schema: str) -> None:
+    """Produto corporativo (PO por serviço). Idempotente."""
+    if not await _table_exists(conn, schema, "products"):
+        return
+    await _add_columns(conn, schema, "products", {
+        "corporativo": "BOOLEAN NOT NULL DEFAULT FALSE",
+    })
+    await _add_columns(conn, schema, "product_servicos", {
+        "responsavel_person_id": f"UUID REFERENCES {schema}.team_persons(id) ON DELETE SET NULL",
+    })
+
+
+async def _step_084_produtos_health_config(conn: AsyncConnection, schema: str) -> None:
+    """Tabela singleton de configuração do Índice de Saúde do portfólio (pesos + limiares)."""
+    if not await _table_exists(conn, schema, "produto_health_config"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.produto_health_config (
+                id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                weights          JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                limiar_saudavel  INTEGER NOT NULL DEFAULT 75,
+                limiar_atencao   INTEGER NOT NULL DEFAULT 40,
+                updated_by       UUID,
+                created_at       TIMESTAMP DEFAULT now(),
+                updated_at       TIMESTAMP DEFAULT now()
+            )
+        """))
+
+
+async def _step_090_indicadores(conn: AsyncConnection, schema: str) -> None:
+    """Tabelas do módulo Indicadores (KPIs institucionais). Idempotente.
+    Só cria se o tenant já tiver teamops (FKs para team_areas/team_persons)."""
+    if not await _table_exists(conn, schema, "team_persons"):
+        return
+    if not await _table_exists(conn, schema, "indicadores"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.indicadores (
+                id                        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                codigo                    VARCHAR(40) NOT NULL,
+                nome                      VARCHAR(200) NOT NULL,
+                categoria                 VARCHAR(20) NOT NULL,
+                descricao                 TEXT,
+                objetivo_estrategico      TEXT,
+                area_id                   UUID REFERENCES {schema}.team_areas(id) ON DELETE SET NULL,
+                responsavel_person_id     UUID REFERENCES {schema}.team_persons(id) ON DELETE SET NULL,
+                unidade_medida            VARCHAR(60),
+                formula_calculo           TEXT,
+                fonte_dados               TEXT,
+                granularidade             VARCHAR(20) NOT NULL,
+                periodicidade_atualizacao VARCHAR(60),
+                sentido                   VARCHAR(20) NOT NULL,
+                meta_min                  NUMERIC(18,4),
+                meta_max                  NUMERIC(18,4),
+                tolerancia_pct            NUMERIC(6,2) NOT NULL DEFAULT 20,
+                fonte                     VARCHAR(20) NOT NULL DEFAULT 'manual',
+                fonte_metrica             VARCHAR(40),
+                fonte_corte               DATE,
+                status                    VARCHAR(20) NOT NULL DEFAULT 'ativo',
+                is_active                 BOOLEAN NOT NULL DEFAULT TRUE,
+                created_by                UUID, created_at TIMESTAMP DEFAULT now(),
+                updated_by                UUID, updated_at TIMESTAMP DEFAULT now(),
+                inactivated_by            UUID, inactivated_at TIMESTAMP,
+                CONSTRAINT uq_indicadores_codigo UNIQUE (codigo)
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_indicadores_area ON {schema}.indicadores(area_id)"
+        ))
+    if not await _table_exists(conn, schema, "indicador_acompanhamentos"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.indicador_acompanhamentos (
+                id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                indicador_id            UUID NOT NULL REFERENCES {schema}.indicadores(id) ON DELETE CASCADE,
+                ano_referencia          INTEGER NOT NULL,
+                ordem                   INTEGER NOT NULL,
+                competencia             VARCHAR(40) NOT NULL,
+                periodo_inicio          DATE NOT NULL,
+                periodo_fim             DATE NOT NULL,
+                meta                    NUMERIC(18,4),
+                realizado               NUMERIC(18,4),
+                percentual_atingimento  NUMERIC(7,2),
+                status                  VARCHAR(20) NOT NULL DEFAULT 'pendente',
+                fonte                   VARCHAR(20) NOT NULL DEFAULT 'manual',
+                observacao              TEXT,
+                evidencias              JSONB,
+                created_by              UUID, created_at TIMESTAMP DEFAULT now(),
+                updated_by              UUID, updated_at TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_indicador_acomp_periodo UNIQUE (indicador_id, ano_referencia, ordem)
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_ind_acomp_indicador ON {schema}.indicador_acompanhamentos(indicador_id)"
+        ))
+
+
+async def _step_091_indicadores_drop_datas(conn: AsyncConnection, schema: str) -> None:
+    """Remove data_inicio/data_fim de indicadores (campos descontinuados). Idempotente."""
+    if not await _table_exists(conn, schema, "indicadores"):
+        return
+    await conn.execute(text(f"ALTER TABLE {schema}.indicadores DROP COLUMN IF EXISTS data_inicio"))
+    await conn.execute(text(f"ALTER TABLE {schema}.indicadores DROP COLUMN IF EXISTS data_fim"))
+
+
+async def _step_092_indicadores_fonte(conn: AsyncConnection, schema: str) -> None:
+    """Origem de dados do acompanhamento (manual × portfólio de Produtos). Idempotente."""
+    if not await _table_exists(conn, schema, "indicadores"):
+        return
+    await _add_columns(conn, schema, "indicadores", {
+        "fonte": "VARCHAR(20) NOT NULL DEFAULT 'manual'",
+        "fonte_metrica": "VARCHAR(40)",
+        "fonte_corte": "DATE",
+    })
+    await _add_columns(conn, schema, "indicador_acompanhamentos", {
+        "fonte": "VARCHAR(20) NOT NULL DEFAULT 'manual'",
+    })
+
+
 # Lista ordenada de steps. Adicionar novos no final.
 STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("001_funnels", _step_001_funnels),
@@ -3249,6 +3578,21 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("075_produtos_documentation", _step_075_produtos_documentation),
     ("076_produtos_support", _step_076_produtos_support),
     ("077_produtos_security", _step_077_produtos_security),
+    ("078_produtos_responsavel_tecnico", _step_078_produtos_responsavel_tecnico),
+    ("079_produtos_stacks", _step_079_produtos_stacks),
+    ("080_process_portfolio_passagem_ti", _step_080_process_portfolio_passagem_ti),
+    ("081_process_portfolio_status_values", _step_081_process_portfolio_status_values),
+    ("082_process_portfolio_drop_documentado", _step_082_process_portfolio_drop_documentado),
+    ("083_process_portfolio_status_rollup", _step_083_process_portfolio_status_rollup),
+    ("084_produtos_health_config", _step_084_produtos_health_config),
+    ("085_produtos_login_idigital", _step_085_produtos_login_idigital),
+    ("086_produtos_categoria_unify", _step_086_produtos_categoria_unify),
+    ("087_produtos_servico_data_publicacao", _step_087_produtos_servico_data_publicacao),
+    ("088_produtos_documento_cadastro", _step_088_produtos_documento_cadastro),
+    ("089_produtos_corporativo", _step_089_produtos_corporativo),
+    ("090_indicadores", _step_090_indicadores),
+    ("091_indicadores_drop_datas", _step_091_indicadores_drop_datas),
+    ("092_indicadores_fonte", _step_092_indicadores_fonte),
 ]
 
 

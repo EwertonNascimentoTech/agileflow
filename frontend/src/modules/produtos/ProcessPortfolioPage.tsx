@@ -37,7 +37,8 @@ import { defaultSelectLabel } from "@/modules/projetos/defaultFormUtils"
 import { useDefaultFormConfig } from "@/modules/projetos/useDefaultFormConfig"
 import ProcessPortfolioItemDialog, { type ItemDialogSpec } from "./ProcessPortfolioItemDialog"
 import ProcessPortfolioVersionDiffDialog from "./ProcessPortfolioVersionDiffDialog"
-import { documentationStats, formatVigenciaRange } from "./processPortfolioDocUtils"
+import { documentationStats, effectiveStatusItem, formatVigenciaRange } from "./processPortfolioDocUtils"
+import { PROCESS_ITEM_STATUS_COLOR, PROCESS_ITEM_STATUS_LABEL } from "@/modules/produtos/constants"
 
 const NIVEL_LABEL: Record<ProcessNivel, string> = {
   diretoria: "Diretoria", macroprocesso: "Macro Processo", processo: "Processo", subprocesso: "Sub Processo",
@@ -374,6 +375,7 @@ function Node({ node, depth = 0, editable, siblings, index, collapsedIds, onTogg
   const hasChildren = node.children.length > 0
   const expanded = hasChildren && !collapsedIds.has(node.id)
   const vigenciaLabel = formatVigenciaRange(node.vigencia_inicio, node.vigencia_fim)
+  const statusItem = effectiveStatusItem(node)
   return (
     <div>
       <div className="flex items-center gap-2 rounded-md border p-2" style={{ marginLeft: depth * 20 }}>
@@ -405,10 +407,22 @@ function Node({ node, depth = 0, editable, siblings, index, collapsedIds, onTogg
           </div>
         </div>
         {node.nivel === "subprocesso" ? (
-          <Badge variant={node.documentado ? "default" : "outline"} className="shrink-0 text-[9px]">
-            {node.documentado ? "Documentado" : "Não doc."}
-          </Badge>
+          <>
+            <Badge variant={node.passagem_para_ti ? "default" : "outline"} className="shrink-0 text-[9px]">
+              {node.passagem_para_ti ? "Passagem TI" : "Sem passagem TI"}
+            </Badge>
+          </>
         ) : null}
+        <Badge
+          variant="secondary"
+          className="shrink-0 text-[9px]"
+          style={{
+            backgroundColor: `${PROCESS_ITEM_STATUS_COLOR[statusItem] ?? "#6B7280"}22`,
+            color: PROCESS_ITEM_STATUS_COLOR[statusItem] ?? "#6B7280",
+          }}
+        >
+          {PROCESS_ITEM_STATUS_LABEL[statusItem] ?? statusItem}
+        </Badge>
         <Badge variant="outline" className="shrink-0 text-[9px] uppercase">{NIVEL_LABEL[node.nivel]}</Badge>
         {editable && (
           <>

@@ -5,8 +5,10 @@ import type {
   ContratoTipoValor,
   DocumentacaoStatus,
   DocumentacaoTipo,
-  DocumentoTipo,
+  DocumentoEspecie,
+  DocumentoFormato,
   IntegracaoTipo,
+  NivelDadosPessoais,
   ProductCategoria,
   ProductCriticidade,
   ProductLifecycle,
@@ -14,6 +16,7 @@ import type {
   ProductOrigem,
   ProductStatus,
   ProductTipoDev,
+  ProcessItemStatus,
   ProductUnidade,
   ReleaseAmbiente,
   ReleaseImpacto,
@@ -24,6 +27,12 @@ import type {
   ServicoSuporte,
   Sustentacao,
 } from "@/api/produtos"
+
+export const TIPODEV_LABEL: Record<ProductTipoDev, string> = {
+  interno: "Interno",
+  externo: "Externo",
+  hibrido: "Híbrido",
+}
 
 export const ORIGEM_LABEL: Record<ProductOrigem, string> = {
   interno: "Interno", cots: "COTS", customizacao: "Customização", saas: "SaaS",
@@ -36,6 +45,13 @@ export const CRITICIDADE_LABEL: Record<ProductCriticidade, string> = {
 }
 export const CRITICIDADE_COLOR: Record<ProductCriticidade, string> = {
   baixa: "#16A34A", media: "#CA8A04", alta: "#EA580C", critica: "#DC2626",
+}
+// Saúde/maturidade do produto (índice de portfólio)
+export const SAUDE_LABEL: Record<"saudavel" | "atencao" | "critico", string> = {
+  saudavel: "Saudável", atencao: "Atenção", critico: "Crítico",
+}
+export const SAUDE_COLOR: Record<"saudavel" | "atencao" | "critico", string> = {
+  saudavel: "#16A34A", atencao: "#CA8A04", critico: "#DC2626",
 }
 export const SUSTENTACAO_LABEL: Record<Sustentacao, string> = {
   interna: "Interna", externa: "Externa", hibrida: "Híbrida",
@@ -58,18 +74,18 @@ export const STATUS_COLOR: Record<ProductStatus, string> = {
 export const STATUS_OPTS: ProductStatus[] = ["ideia", "discovery", "desenvolvimento", "homologacao", "producao", "sustentacao", "evolucao", "suspenso", "descontinuado"]
 
 export const CATEGORIA_LABEL: Record<ProductCategoria, string> = {
-  sistema_interno: "Sistema interno", sistema_externo: "Sistema externo", saas: "SaaS", dashboard: "Dashboard",
-  api: "API", integracao: "Integração", automacao: "Automação", aplicativo: "Aplicativo", bi: "BI", workflow: "Workflow", outro: "Outro",
+  sistema_interno_dev: "Sistema interno (Desenvolvimento)",
+  sistema_interno_ia: "Sistema interno (IA)",
+  sistema_externo_ia: "Sistema externo (IA)",
+  sistema_externo_implantacao: "Sistema externo (Implantação)",
+  sistema_externo_dn: "Sistema externo (DN)",
 }
-export const CATEGORIA_OPTS: ProductCategoria[] = ["sistema_interno", "sistema_externo", "saas", "dashboard", "api", "integracao", "automacao", "aplicativo", "bi", "workflow", "outro"]
+export const CATEGORIA_OPTS: ProductCategoria[] = ["sistema_interno_dev", "sistema_interno_ia", "sistema_externo_ia", "sistema_externo_implantacao", "sistema_externo_dn"]
 
 export const UNIDADE_LABEL: Record<ProductUnidade, string> = {
   sesi: "SESI", senai: "SENAI", iel: "IEL", fiea: "FIEA", corporativo: "Corporativo",
 }
 export const UNIDADE_OPTS: ProductUnidade[] = ["sesi", "senai", "iel", "fiea", "corporativo"]
-
-export const TIPODEV_LABEL: Record<ProductTipoDev, string> = { interno: "Interno", externo: "Externo", hibrido: "Híbrido" }
-export const TIPODEV_OPTS: ProductTipoDev[] = ["interno", "externo", "hibrido"]
 
 export const MODELO_CONTRAT_LABEL: Record<ProductModeloContratacao, string> = {
   licenca: "Licença", saas: "SaaS", fabrica: "Fábrica de Software", servico_continuado: "Serviço continuado",
@@ -88,11 +104,46 @@ export const SERVICO_STATUS_LABEL: Record<ServicoStatus, string> = {
 }
 export const SERVICO_STATUS_OPTS: ServicoStatus[] = ["ativo", "em_implantacao", "suspenso", "descontinuado"]
 
-export const DOC_TIPO_LABEL: Record<DocumentoTipo, string> = {
-  pdf: "PDF", planilha: "Planilha", formulario: "Formulário eletrônico", workflow: "Workflow", dashboard: "Dashboard",
-  registro: "Registro sistêmico", relatorio: "Relatório", certificado: "Certificado", termo: "Termo", outro: "Outro",
+export const DOC_ESPECIE_LABEL: Record<DocumentoEspecie, string> = {
+  relatorio: "Relatório",
+  parecer: "Parecer",
+  termo: "Termo",
+  certificado: "Certificado",
+  formulario_eletronico: "Formulário eletrônico",
+  dashboard: "Dashboard",
+  registro_sistemico: "Registro sistêmico",
+  comprovante_recibo: "Comprovante/Recibo",
+  extrato: "Extrato",
+  documento_fiscal_eletronico: "Documento fiscal eletrônico",
+  oficio: "Ofício",
+  outro: "Outro",
 }
-export const DOC_TIPO_OPTS: DocumentoTipo[] = ["pdf", "planilha", "formulario", "workflow", "dashboard", "registro", "relatorio", "certificado", "termo", "outro"]
+export const DOC_ESPECIE_OPTS: DocumentoEspecie[] = [
+  "relatorio", "parecer", "termo", "certificado", "formulario_eletronico", "dashboard",
+  "registro_sistemico", "comprovante_recibo", "extrato", "documento_fiscal_eletronico", "oficio", "outro",
+]
+/** Rótulos legados + espécies atuais (exibição de registros antigos). */
+export const DOC_TIPO_LABEL: Record<string, string> = {
+  ...DOC_ESPECIE_LABEL,
+  pdf: "PDF",
+  planilha: "Planilha",
+  formulario: "Formulário eletrônico",
+  workflow: "Workflow",
+  registro: "Registro sistêmico",
+}
+export const DOC_TIPO_OPTS = DOC_ESPECIE_OPTS
+
+export const DOC_FORMATO_LABEL: Record<DocumentoFormato, string> = {
+  pdf: "PDF", xlsx: "XLSX", xls: "XLS", docx: "DOCX", doc: "DOC", xml: "XML",
+  csv: "CSV", txt: "TXT", imagem: "Imagem", outro: "Outro",
+}
+
+export const NIVEL_LGPD_LABEL: Record<NivelDadosPessoais, string> = {
+  sem_dados_pessoais: "Sem dados pessoais",
+  dados_pessoais: "Dados pessoais",
+  dados_pessoais_sensiveis: "Dados pessoais sensíveis",
+}
+export const NIVEL_LGPD_OPTS: NivelDadosPessoais[] = ["sem_dados_pessoais", "dados_pessoais", "dados_pessoais_sensiveis"]
 
 export const CLASSIFICACAO_LABEL: Record<ClassificacaoInformacao, string> = {
   publica: "Pública", interna: "Interna", confidencial: "Confidencial", restrita: "Restrita",
@@ -173,3 +224,11 @@ export const RISCO_COLOR: Record<RiscoIndisponibilidade, string> = {
   baixo: "#16A34A", medio: "#CA8A04", alto: "#EA580C", critico: "#DC2626",
 }
 export const RISCO_OPTS: RiscoIndisponibilidade[] = ["baixo", "medio", "alto", "critico"]
+
+export const PROCESS_ITEM_STATUS_LABEL: Record<ProcessItemStatus, string> = {
+  planejado: "Planejado", em_andamento: "Em andamento", concluido: "Concluído",
+}
+export const PROCESS_ITEM_STATUS_COLOR: Record<ProcessItemStatus, string> = {
+  planejado: "#6B7280", em_andamento: "#2563EB", concluido: "#16A34A",
+}
+export const PROCESS_ITEM_STATUS_OPTS: ProcessItemStatus[] = ["planejado", "em_andamento", "concluido"]

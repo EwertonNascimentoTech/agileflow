@@ -46,12 +46,9 @@ export default function ProdutosDashboardPage() {
         <KpiCard label="Em sustentação" value={data?.em_sustentacao ?? 0} icon={LifeBuoy} />
         <KpiCard label="Descontinuados" value={data?.descontinuados ?? 0} icon={FileBox} />
         <KpiCard label="Releases no mês" value={data?.releases_publicadas_mes ?? 0} icon={Rocket} />
-        <KpiCard label="Internos" value={data?.internos ?? 0} icon={Boxes} />
-        <KpiCard label="Externos" value={data?.externos ?? 0} icon={Boxes} />
         <KpiCard label="Sem contrato" value={data?.sem_contrato ?? 0} icon={FileText} />
         <KpiCard label="Contratos a vencer (90d)" value={data?.contratos_a_vencer_90d ?? 0} icon={AlertTriangle} deltaTone={(data?.contratos_a_vencer_90d ?? 0) > 0 ? "down" : "up"} />
         <KpiCard label="Sem documentação" value={data?.sem_documentacao ?? 0} icon={FileText} deltaTone={(data?.sem_documentacao ?? 0) > 0 ? "down" : "up"} />
-        <KpiCard label="Críticos" value={data?.criticos ?? 0} icon={ShieldAlert} deltaTone={(data?.criticos ?? 0) > 0 ? "down" : "up"} />
         <KpiCard label="Com dados pessoais" value={data?.com_dados_pessoais ?? 0} icon={ShieldAlert} />
         <KpiCard label="Com plano contingência" value={data?.com_plano_contingencia ?? 0} icon={ShieldCheck} />
         <KpiCard label="Serviços digitais" value={data?.total_servicos ?? 0} icon={Wrench} />

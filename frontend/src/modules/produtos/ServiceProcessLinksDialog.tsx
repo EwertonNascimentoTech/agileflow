@@ -1,15 +1,19 @@
-import { useEffect, useState } from "react"
-import { Loader2, Workflow } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
+import { CheckCircle2, Loader2, Search, Workflow } from "lucide-react"
 
 import { produtosApi, type ProcessItem, type ProcessPortfolio } from "@/api/produtos"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { toast } from "@/lib/toast"
 
+type SubEntry = { item: ProcessItem; path: string }
+
 /** Achata a árvore retornando apenas sub-processos (folhas vinculáveis a serviços). */
-function collectSubprocessos(items: ProcessItem[], acc: { item: ProcessItem; path: string }[] = [], path = ""): { item: ProcessItem; path: string }[] {
+function collectSubprocessos(items: ProcessItem[], acc: SubEntry[] = [], path = ""): SubEntry[] {
   for (const it of items) {
     const here = path ? `${path} › ${it.name}` : it.name
     if (it.nivel === "subprocesso") acc.push({ item: it, path: here })
@@ -18,19 +22,26 @@ function collectSubprocessos(items: ProcessItem[], acc: { item: ProcessItem; pat
   return acc
 }
 
+function normalize(s: string) {
+  return s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase()
+}
+
 export default function ServiceProcessLinksDialog({
   servicoId,
   servicoName,
   onClose,
+  onSaved,
 }: {
   servicoId: string
   servicoName: string
   onClose: () => void
+  onSaved?: () => void
 }) {
   const [portfolios, setPortfolios] = useState<ProcessPortfolio[]>([])
   const [portfolioId, setPortfolioId] = useState("")
-  const [subs, setSubs] = useState<{ item: ProcessItem; path: string }[]>([])
+  const [subs, setSubs] = useState<SubEntry[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [query, setQuery] = useState("")
   const [loading, setLoading] = useState(true)
   const [loadingTree, setLoadingTree] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -50,16 +61,39 @@ export default function ServiceProcessLinksDialog({
   useEffect(() => {
     if (!portfolioId) { setSubs([]); return }
     setLoadingTree(true)
+    setQuery("")
     produtosApi.getCurrentPortfolioTree(portfolioId)
       .then((tree) => setSubs(collectSubprocessos(tree.items)))
       .catch(() => setSubs([]))
       .finally(() => setLoadingTree(false))
   }, [portfolioId])
 
+  const selectedInPortfolio = useMemo(
+    () => subs.filter((s) => selected.has(s.item.lineage_id)).length,
+    [subs, selected],
+  )
+
+  const visibleSubs = useMemo(() => {
+    const q = normalize(query.trim())
+    let list = subs
+    if (q) {
+      list = subs.filter(
+        (s) => normalize(s.item.name).includes(q) || normalize(s.path).includes(q) || (s.item.codigo && normalize(s.item.codigo).includes(q)),
+      )
+    }
+    return [...list].sort((a, b) => {
+      const aSel = selected.has(a.item.lineage_id)
+      const bSel = selected.has(b.item.lineage_id)
+      if (aSel !== bSel) return aSel ? -1 : 1
+      return a.item.name.localeCompare(b.item.name, "pt-BR")
+    })
+  }, [subs, selected, query])
+
   function toggle(lineageId: string) {
     setSelected((cur) => {
       const next = new Set(cur)
-      if (next.has(lineageId)) next.delete(lineageId); else next.add(lineageId)
+      if (next.has(lineageId)) next.delete(lineageId)
+      else next.add(lineageId)
       return next
     })
   }
@@ -68,10 +102,12 @@ export default function ServiceProcessLinksDialog({
     if (!portfolioId) return
     setSaving(true)
     try {
-      // só envia os lineage_ids deste portfólio (set é por serviço, mas o backend recria por portfólio)
-      const idsThisPortfolio = subs.map((s) => s.item.lineage_id).filter((id) => selected.has(id))
+      const idsThisPortfolio = subs
+        .filter((s) => selected.has(s.item.lineage_id))
+        .map((s) => s.item.lineage_id)
       await produtosApi.setServiceProcessLinks(servicoId, portfolioId, idsThisPortfolio)
       toast.success("Vínculos salvos.")
+      onSaved?.()
       onClose()
     } catch {
       toast.error("Falha ao salvar vínculos.")
@@ -82,50 +118,127 @@ export default function ServiceProcessLinksDialog({
 
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose() }}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
-        <DialogHeader><DialogTitle>Vincular sub-processos · {servicoName}</DialogTitle></DialogHeader>
+      <DialogContent className="flex max-h-[90vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
+        <DialogHeader className="shrink-0 space-y-1 border-b px-6 py-4">
+          <DialogTitle>Vincular sub-processos</DialogTitle>
+          <DialogDescription>
+            Serviço <span className="font-medium text-foreground">{servicoName}</span> — selecione um ou mais sub-processos do portfólio.
+          </DialogDescription>
+        </DialogHeader>
 
         {loading ? (
-          <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+          <div className="flex flex-1 justify-center py-16">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
         ) : portfolios.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">Nenhum portfólio de processos cadastrado.</p>
+          <p className="flex-1 px-6 py-16 text-center text-sm text-muted-foreground">
+            Nenhum portfólio de processos cadastrado.
+          </p>
         ) : (
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <Label className="text-xs">Portfólio</Label>
-              <Select value={portfolioId} onValueChange={setPortfolioId}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>{portfolios.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
-              </Select>
+          <>
+            <div className="shrink-0 space-y-3 border-b bg-muted/20 px-6 py-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Portfólio</Label>
+                  <Select value={portfolioId} onValueChange={setPortfolioId}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {portfolios.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Pesquisar</Label>
+                  <div className="relative">
+                    <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      className="pl-9"
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder="Nome, código ou caminho..."
+                      disabled={loadingTree || subs.length === 0}
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <Badge variant="secondary" className="font-normal">
+                  {selectedInPortfolio} selecionado{selectedInPortfolio !== 1 ? "s" : ""} neste portfólio
+                </Badge>
+                {subs.length > 0 && (
+                  <span>{visibleSubs.length} de {subs.length} exibido{visibleSubs.length !== 1 ? "s" : ""}</span>
+                )}
+              </div>
             </div>
 
-            {loadingTree ? (
-              <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
-            ) : subs.length === 0 ? (
-              <div className="flex flex-col items-center gap-1 py-6 text-center text-sm text-muted-foreground">
-                <Workflow size={20} /> Nenhum sub-processo na versão consolidada deste portfólio.
-              </div>
-            ) : (
-              <ul className="space-y-1">
-                {subs.map(({ item, path }) => (
-                  <li key={item.lineage_id}>
-                    <label className="flex cursor-pointer items-start gap-2 rounded-md border p-2 text-sm hover:bg-muted/40">
-                      <input type="checkbox" className="mt-0.5" checked={selected.has(item.lineage_id)} onChange={() => toggle(item.lineage_id)} />
-                      <span className="min-w-0">
-                        <span className="font-medium">{item.name}</span>
-                        <span className="block truncate text-[11px] text-muted-foreground">{path}</span>
-                      </span>
-                    </label>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+              {loadingTree ? (
+                <div className="flex justify-center py-16">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : subs.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 py-16 text-center text-sm text-muted-foreground">
+                  <Workflow size={24} className="opacity-50" />
+                  Nenhum sub-processo na versão consolidada deste portfólio.
+                </div>
+              ) : visibleSubs.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 py-16 text-center text-sm text-muted-foreground">
+                  <Search size={24} className="opacity-50" />
+                  Nenhum sub-processo encontrado para &quot;{query}&quot;.
+                </div>
+              ) : (
+                <ul className="space-y-1.5">
+                  {visibleSubs.map(({ item, path }, idx) => {
+                    const isSelected = selected.has(item.lineage_id)
+                    const showDivider = idx > 0 && !isSelected && selected.has(visibleSubs[idx - 1].item.lineage_id)
+                    return (
+                      <li key={item.lineage_id}>
+                        {showDivider && (
+                          <div className="mb-1.5 mt-3 flex items-center gap-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                            <span className="h-px flex-1 bg-border" />
+                            Demais sub-processos
+                            <span className="h-px flex-1 bg-border" />
+                          </div>
+                        )}
+                        <label
+                          className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm transition-colors hover:bg-muted/40 ${
+                            isSelected ? "border-primary/40 bg-primary/5" : "border-border"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            className="mt-1 size-4 shrink-0 accent-primary"
+                            checked={isSelected}
+                            onChange={() => toggle(item.lineage_id)}
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="flex flex-wrap items-center gap-1.5">
+                              {item.codigo && (
+                                <Badge variant="outline" className="text-[10px] font-mono font-normal">{item.codigo}</Badge>
+                              )}
+                              <span className="font-medium">{item.name}</span>
+                              {isSelected && <CheckCircle2 size={14} className="shrink-0 text-primary" />}
+                            </span>
+                            <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">{path}</span>
+                          </span>
+                        </label>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </div>
+          </>
         )}
 
-        <DialogFooter className="gap-2">
+        <DialogFooter className="shrink-0 gap-2 border-t px-6 py-4">
           <Button variant="outline" onClick={onClose}>Cancelar</Button>
-          <Button onClick={() => void save()} disabled={saving || !portfolioId}>{saving && <Loader2 size={14} className="mr-1.5 animate-spin" />}Salvar</Button>
+          <Button onClick={() => void save()} disabled={saving || !portfolioId || loading}>
+            {saving && <Loader2 size={14} className="mr-1.5 animate-spin" />}
+            Salvar{selectedInPortfolio > 0 ? ` (${selectedInPortfolio})` : ""}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

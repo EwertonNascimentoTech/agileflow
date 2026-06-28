@@ -85,17 +85,11 @@ class ProductStatus(str, enum.Enum):
 
 
 class ProductCategoria(str, enum.Enum):
-    SISTEMA_INTERNO = "sistema_interno"
-    SISTEMA_EXTERNO = "sistema_externo"
-    SAAS = "saas"
-    DASHBOARD = "dashboard"
-    API = "api"
-    INTEGRACAO = "integracao"
-    AUTOMACAO = "automacao"
-    APLICATIVO = "aplicativo"
-    BI = "bi"
-    WORKFLOW = "workflow"
-    OUTRO = "outro"
+    SISTEMA_INTERNO_DEV = "sistema_interno_dev"
+    SISTEMA_INTERNO_IA = "sistema_interno_ia"
+    SISTEMA_EXTERNO_IA = "sistema_externo_ia"
+    SISTEMA_EXTERNO_IMPLANTACAO = "sistema_externo_implantacao"
+    SISTEMA_EXTERNO_DN = "sistema_externo_dn"
 
 
 class ProductUnidade(str, enum.Enum):
@@ -140,16 +134,25 @@ class ServicoStatus(str, enum.Enum):
 
 
 class DocumentoTipo(str, enum.Enum):
-    PDF = "pdf"
-    PLANILHA = "planilha"
-    FORMULARIO = "formulario"
-    WORKFLOW = "workflow"
-    DASHBOARD = "dashboard"
-    REGISTRO = "registro"
+    """Espécie documental (não confundir com formato de arquivo)."""
     RELATORIO = "relatorio"
-    CERTIFICADO = "certificado"
+    PARECER = "parecer"
     TERMO = "termo"
+    CERTIFICADO = "certificado"
+    FORMULARIO_ELETRONICO = "formulario_eletronico"
+    DASHBOARD = "dashboard"
+    REGISTRO_SISTEMICO = "registro_sistemico"
+    COMPROVANTE_RECIBO = "comprovante_recibo"
+    EXTRATO = "extrato"
+    DOCUMENTO_FISCAL_ELETRONICO = "documento_fiscal_eletronico"
+    OFICIO = "oficio"
     OUTRO = "outro"
+
+
+class NivelDadosPessoais(str, enum.Enum):
+    SEM_DADOS = "sem_dados_pessoais"
+    DADOS_PESSOAIS = "dados_pessoais"
+    DADOS_SENSIVEIS = "dados_pessoais_sensiveis"
 
 
 class ClassificacaoInformacao(str, enum.Enum):
@@ -275,10 +278,9 @@ class ProcessItemNivel(str, enum.Enum):
 
 
 class ProcessItemStatus(str, enum.Enum):
-    PROPOSTO = "proposto"
-    ATIVO = "ativo"
-    EM_REVISAO = "em_revisao"
-    DESCONTINUADO = "descontinuado"
+    PLANEJADO = "planejado"
+    EM_ANDAMENTO = "em_andamento"
+    CONCLUIDO = "concluido"
 
 
 class ProcessItemCriticidade(str, enum.Enum):
@@ -351,6 +353,9 @@ class Product(TenantBase):
     responsavel_person_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("team_persons.id", ondelete="SET NULL"), nullable=True,
     )
+    responsavel_tecnico_person_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("team_persons.id", ondelete="SET NULL"), nullable=True,
+    )
     fornecedor_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("produto_fornecedores.id", ondelete="SET NULL"), nullable=True,
     )
@@ -385,10 +390,16 @@ class Product(TenantBase):
     )
     ambiente_tecnologico: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     tecnologias: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Stacks do produto (multi-valorado) — lista de ids do catálogo team_stacks.
+    stacks: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     link_repositorio: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     link_dev: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     link_hml: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     link_prd: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Autenticação via Idigital (provedor de identidade corporativo)
+    login_idigital: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Produto corporativo: quando True, o PO (responsável) não é do produto e sim de cada serviço.
+    corporativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
@@ -400,6 +411,7 @@ class Product(TenantBase):
 
     area: Mapped[Optional["Area"]] = relationship("Area", lazy="selectin")
     responsavel: Mapped[Optional["Person"]] = relationship("Person", foreign_keys=[responsavel_person_id], lazy="selectin")
+    responsavel_tecnico: Mapped[Optional["Person"]] = relationship("Person", foreign_keys=[responsavel_tecnico_person_id], lazy="selectin")
     dono_negocio: Mapped[Optional["Person"]] = relationship("Person", foreign_keys=[dono_negocio_person_id], lazy="selectin")
     fornecedor: Mapped[Optional["Fornecedor"]] = relationship("Fornecedor", lazy="selectin")
     servicos: Mapped[list["ProductServico"]] = relationship(
@@ -437,7 +449,12 @@ class ProductServico(TenantBase):
     )
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    data_publicacao: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     ano_referencia: Mapped[int] = mapped_column(Integer, nullable=False)
+    # PO (responsável) do serviço — usado quando o produto é corporativo (PO por serviço).
+    responsavel_person_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("team_persons.id", ondelete="SET NULL"), nullable=True,
+    )
     # ── Extensão spec ──
     area_usuaria: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     processo_relacionado: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
@@ -459,6 +476,7 @@ class ProductServico(TenantBase):
     inactivated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     product: Mapped["Product"] = relationship(back_populates="servicos")
+    responsavel: Mapped[Optional["Person"]] = relationship("Person", foreign_keys=[responsavel_person_id], lazy="selectin")
 
 
 class ProductDocumento(TenantBase):
@@ -469,6 +487,7 @@ class ProductDocumento(TenantBase):
         UUID(as_uuid=True), ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True,
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
+    data_documento: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     ano_referencia: Mapped[int] = mapped_column(Integer, nullable=False)
     object_name: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     filename: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -480,6 +499,8 @@ class ProductDocumento(TenantBase):
     tipo_documento: Mapped[Optional[DocumentoTipo]] = mapped_column(
         SAEnum(DocumentoTipo, native_enum=False, values_callable=_enum_values), nullable=True,
     )
+    formato: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    origem_sistema: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     is_nato_digital: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     assinatura_digital: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     trilha_auditoria: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -487,6 +508,9 @@ class ProductDocumento(TenantBase):
     prazo_retencao: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     classificacao: Mapped[Optional[ClassificacaoInformacao]] = mapped_column(
         SAEnum(ClassificacaoInformacao, native_enum=False, values_callable=_enum_values), nullable=True,
+    )
+    nivel_dados_pessoais: Mapped[Optional[NivelDadosPessoais]] = mapped_column(
+        SAEnum(NivelDadosPessoais, native_enum=False, values_callable=_enum_values), nullable=True,
     )
     dados_pessoais: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     dados_sensiveis: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -886,17 +910,18 @@ class ProcessPortfolioItem(TenantBase):
     # Vigência + documentação
     vigencia_inicio: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     vigencia_fim: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
-    documentado: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # "Documentado" deixou de ser flag própria — deriva de status_item == concluido.
     data_documentacao: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     doc_previsao_inicio: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     doc_previsao_fim: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    passagem_para_ti: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # Lista de anexos: [{object_name, filename, content_type, size}, ...]
     anexos: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
 
     # Campos extras de controle
     status_item: Mapped[ProcessItemStatus] = mapped_column(
         SAEnum(ProcessItemStatus, native_enum=False, values_callable=_enum_values),
-        nullable=False, default=ProcessItemStatus.ATIVO,
+        nullable=False, default=ProcessItemStatus.PLANEJADO,
     )
     criticidade: Mapped[Optional[ProcessItemCriticidade]] = mapped_column(
         SAEnum(ProcessItemCriticidade, native_enum=False, values_callable=_enum_values), nullable=True,
@@ -950,3 +975,22 @@ class ProcessServiceLink(TenantBase):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+# ─────────────────────────────────────────────
+# Configuração do Índice de Saúde/Maturidade (singleton por tenant)
+# ─────────────────────────────────────────────
+
+class ProductHealthConfig(TenantBase):
+    """Pesos e limiares configuráveis do score de saúde do portfólio. Linha única por tenant
+    (criada na primeira gravação; até lá valem os padrões do código)."""
+    __tablename__ = "produto_health_config"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # {check_code: peso}. Códigos ausentes usam o peso padrão de _HEALTH_CHECKS.
+    weights: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    limiar_saudavel: Mapped[int] = mapped_column(Integer, nullable=False, default=75)
+    limiar_atencao: Mapped[int] = mapped_column(Integer, nullable=False, default=40)
+    updated_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

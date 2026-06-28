@@ -1,14 +1,39 @@
-import type { ProcessItem } from "@/api/produtos"
+import type { ProcessItem, ProcessItemStatus } from "@/api/produtos"
 
 export function collectSubprocessos(node: ProcessItem): ProcessItem[] {
   if (node.nivel === "subprocesso") return [node]
   return (node.children ?? []).flatMap(collectSubprocessos)
 }
 
+function aggregateStatus(values: ProcessItemStatus[]): ProcessItemStatus | null {
+  if (values.length === 0) return null
+  if (values.every((v) => v === "concluido")) return "concluido"
+  if (values.some((v) => v === "em_andamento")) return "em_andamento"
+  if (values.every((v) => v === "planejado")) return "planejado"
+  return "em_andamento"
+}
+
+function statusForProcesso(node: ProcessItem): ProcessItemStatus | null {
+  const subs = collectSubprocessos(node)
+  if (subs.length === 0) return null
+  return aggregateStatus(subs.map((s) => s.status_item))
+}
+
+/** Status efetivo: sub processo usa o valor salvo; processo/macro são calculados dos filhos. */
+export function effectiveStatusItem(node: ProcessItem): ProcessItemStatus {
+  if (node.nivel === "subprocesso") return node.status_item
+  if (node.nivel === "processo") return statusForProcesso(node) ?? node.status_item
+  const processos = (node.children ?? []).filter((c) => c.nivel === "processo")
+  const statuses = processos
+    .map((p) => statusForProcesso(p))
+    .filter((s): s is ProcessItemStatus => s != null)
+  return aggregateStatus(statuses) ?? node.status_item
+}
+
 export function documentationStats(node: ProcessItem): { pct: number; total: number; documented: number } {
   const subs = collectSubprocessos(node)
   if (subs.length === 0) return { pct: 0, total: 0, documented: 0 }
-  const documented = subs.filter((s) => s.documentado).length
+  const documented = subs.filter((s) => s.status_item === "concluido").length
   return {
     pct: Math.round((documented / subs.length) * 100),
     total: subs.length,

@@ -15,13 +15,17 @@ _GROUP_BY = Literal["produto", "area", "setor", "portfolio"]
 
 # ── Enums "Produtos Digitais" (spec TI corporativa) ──
 _PROD_STATUS = Literal["ideia", "discovery", "desenvolvimento", "homologacao", "producao", "sustentacao", "evolucao", "suspenso", "descontinuado"]
-_PROD_CATEGORIA = Literal["sistema_interno", "sistema_externo", "saas", "dashboard", "api", "integracao", "automacao", "aplicativo", "bi", "workflow", "outro"]
+_PROD_CATEGORIA = Literal["sistema_interno_dev", "sistema_interno_ia", "sistema_externo_ia", "sistema_externo_implantacao", "sistema_externo_dn"]
 _PROD_UNIDADE = Literal["sesi", "senai", "iel", "fiea", "corporativo"]
-_PROD_TIPODEV = Literal["interno", "externo", "hibrido"]
 _PROD_MODELO_CONTRAT = Literal["licenca", "saas", "fabrica", "servico_continuado", "projeto_pontual", "interno", "outro"]
 _SERVICO_SUPORTE = Literal["interno", "fornecedor", "compartilhado", "service_desk", "devops", "desenvolvimento", "infraestrutura"]
 _SERVICO_STATUS = Literal["ativo", "em_implantacao", "suspenso", "descontinuado"]
-_DOC_TIPO = Literal["pdf", "planilha", "formulario", "workflow", "dashboard", "registro", "relatorio", "certificado", "termo", "outro"]
+_DOC_ESPECIE = Literal[
+    "relatorio", "parecer", "termo", "certificado", "formulario_eletronico", "dashboard",
+    "registro_sistemico", "comprovante_recibo", "extrato", "documento_fiscal_eletronico", "oficio", "outro",
+]
+_DOC_FORMATO = Literal["pdf", "xlsx", "xls", "docx", "doc", "xml", "csv", "txt", "imagem", "outro"]
+_NIVEL_LGPD = Literal["sem_dados_pessoais", "dados_pessoais", "dados_pessoais_sensiveis"]
 _CLASSIFICACAO = Literal["publica", "interna", "confidencial", "restrita"]
 _CONTRATO_STATUS = Literal["sem_contrato", "em_formalizacao", "vigente", "a_vencer", "vencido", "em_renovacao", "encerrado"]
 _CONTRATO_TIPOVALOR = Literal["mensal", "anual", "global", "sob_demanda"]
@@ -55,6 +59,13 @@ class AreaRefMini(BaseModel):
 class PersonMini(BaseModel):
     id: uuid.UUID
     full_name: str
+    model_config = {"from_attributes": True}
+
+
+class StackMini(BaseModel):
+    id: uuid.UUID
+    name: str
+    category: Optional[str] = None
     model_config = {"from_attributes": True}
 
 
@@ -93,31 +104,38 @@ class FornecedorResponse(BaseModel):
 class ServicoCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=160)
     description: Optional[str] = None
+    data_publicacao: Optional[date] = None
+    status_servico: _SERVICO_STATUS
+    # PO do serviço (usado em produtos corporativos)
+    responsavel_person_id: Optional[uuid.UUID] = None
+    # legado — mantidos opcionais para compatibilidade
     ano_referencia: Optional[int] = None
     area_usuaria: Optional[str] = Field(None, max_length=200)
     processo_relacionado: Optional[str] = Field(None, max_length=200)
     disponibilidade: Optional[str] = Field(None, max_length=120)
     sla_atendimento: Optional[str] = Field(None, max_length=200)
     tipo_suporte: Optional[_SERVICO_SUPORTE] = None
-    status_servico: Optional[_SERVICO_STATUS] = None
 
 
 class ServicoUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=160)
     description: Optional[str] = None
+    data_publicacao: Optional[date] = None
+    status_servico: Optional[_SERVICO_STATUS] = None
+    responsavel_person_id: Optional[uuid.UUID] = None
     ano_referencia: Optional[int] = None
     area_usuaria: Optional[str] = None
     processo_relacionado: Optional[str] = None
     disponibilidade: Optional[str] = None
     sla_atendimento: Optional[str] = None
     tipo_suporte: Optional[_SERVICO_SUPORTE] = None
-    status_servico: Optional[_SERVICO_STATUS] = None
 
 
 class ServicoResponse(BaseModel):
     id: uuid.UUID
     name: str
     description: Optional[str]
+    data_publicacao: Optional[date] = None
     ano_referencia: int
     area_usuaria: Optional[str] = None
     processo_relacionado: Optional[str] = None
@@ -125,19 +143,25 @@ class ServicoResponse(BaseModel):
     sla_atendimento: Optional[str] = None
     tipo_suporte: Optional[str] = None
     status_servico: Optional[str] = None
+    responsavel_person_id: Optional[uuid.UUID] = None
+    responsavel: Optional[PersonMini] = None
+    process_links: list["ServiceLinkItem"] = Field(default_factory=list)
     is_active: bool
     order: int
     model_config = {"from_attributes": True}
 
 
 class _DocumentoFields(BaseModel):
-    tipo_documento: Optional[_DOC_TIPO] = None
+    tipo_documento: Optional[_DOC_ESPECIE] = None
+    formato: Optional[_DOC_FORMATO] = None
+    origem_sistema: Optional[str] = Field(None, max_length=200)
     is_nato_digital: Optional[bool] = None
     assinatura_digital: Optional[bool] = None
     trilha_auditoria: Optional[bool] = None
     local_armazenamento: Optional[str] = Field(None, max_length=200)
     prazo_retencao: Optional[str] = Field(None, max_length=120)
     classificacao: Optional[_CLASSIFICACAO] = None
+    nivel_dados_pessoais: Optional[_NIVEL_LGPD] = None
     dados_pessoais: Optional[bool] = None
     dados_sensiveis: Optional[bool] = None
     observacoes: Optional[str] = None
@@ -145,6 +169,7 @@ class _DocumentoFields(BaseModel):
 
 class DocumentoCreate(_DocumentoFields):
     name: str = Field(..., min_length=1, max_length=200)
+    data_documento: Optional[date] = None
     ano_referencia: Optional[int] = None
     object_name: Optional[str] = None
     filename: Optional[str] = None
@@ -156,14 +181,18 @@ class DocumentoCreate(_DocumentoFields):
 
 class DocumentoUpdate(_DocumentoFields):
     name: Optional[str] = Field(None, min_length=1, max_length=200)
+    data_documento: Optional[date] = None
     ano_referencia: Optional[int] = None
     category: Optional[str] = None
     external_link: Optional[str] = None
+    formato: Optional[_DOC_FORMATO] = None
+    origem_sistema: Optional[str] = Field(None, max_length=200)
 
 
 class DocumentoResponse(BaseModel):
     id: uuid.UUID
     name: str
+    data_documento: Optional[date] = None
     ano_referencia: int
     object_name: Optional[str]
     filename: Optional[str]
@@ -172,12 +201,15 @@ class DocumentoResponse(BaseModel):
     category: Optional[str]
     external_link: Optional[str]
     tipo_documento: Optional[str] = None
+    formato: Optional[str] = None
+    origem_sistema: Optional[str] = None
     is_nato_digital: bool = True
     assinatura_digital: bool = False
     trilha_auditoria: bool = False
     local_armazenamento: Optional[str] = None
     prazo_retencao: Optional[str] = None
     classificacao: Optional[str] = None
+    nivel_dados_pessoais: Optional[str] = None
     dados_pessoais: bool = False
     dados_sensiveis: bool = False
     observacoes: Optional[str] = None
@@ -185,6 +217,17 @@ class DocumentoResponse(BaseModel):
     order: int
     created_at: datetime
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="after")
+    def _fill_nivel_lgpd(self) -> "DocumentoResponse":
+        if not self.nivel_dados_pessoais:
+            if self.dados_sensiveis:
+                self.nivel_dados_pessoais = "dados_pessoais_sensiveis"
+            elif self.dados_pessoais:
+                self.nivel_dados_pessoais = "dados_pessoais"
+            else:
+                self.nivel_dados_pessoais = "sem_dados_pessoais"
+        return self
 
 
 # ── Catálogo de processos (global) ────────────
@@ -346,7 +389,6 @@ class _ProductDigitalFields(BaseModel):
     url_acesso: Optional[str] = None
     observacoes: Optional[str] = None
     status_produto: Optional[_PROD_STATUS] = None
-    tipo_desenvolvimento: Optional[_PROD_TIPODEV] = None
     desenvolvido_por: Optional[str] = Field(None, max_length=200)
     fornecedor_cnpj: Optional[str] = Field(None, max_length=20)
     modelo_contratacao: Optional[_PROD_MODELO_CONTRAT] = None
@@ -356,6 +398,8 @@ class _ProductDigitalFields(BaseModel):
     link_dev: Optional[str] = None
     link_hml: Optional[str] = None
     link_prd: Optional[str] = None
+    login_idigital: Optional[bool] = None     # autenticação via Idigital
+    corporativo: Optional[bool] = None        # PO por serviço (não no produto)
 
 
 class ProductCreate(_ProductDigitalFields):
@@ -369,6 +413,8 @@ class ProductCreate(_ProductDigitalFields):
     data_entrada_producao: Optional[date] = None
     area_id: Optional[uuid.UUID] = None
     responsavel_person_id: Optional[uuid.UUID] = None
+    responsavel_tecnico_person_id: Optional[uuid.UUID] = None
+    stack_ids: Optional[list[uuid.UUID]] = None
     fornecedor_id: Optional[uuid.UUID] = None
     origin_task_id: Optional[uuid.UUID] = None
 
@@ -384,8 +430,34 @@ class ProductUpdate(_ProductDigitalFields):
     data_entrada_producao: Optional[date] = None
     area_id: Optional[uuid.UUID] = None
     responsavel_person_id: Optional[uuid.UUID] = None
+    responsavel_tecnico_person_id: Optional[uuid.UUID] = None
+    stack_ids: Optional[list[uuid.UUID]] = None
     fornecedor_id: Optional[uuid.UUID] = None
     is_active: Optional[bool] = None
+
+
+class ProductAlerta(BaseModel):
+    """Alerta de governança/portfólio derivado do estado do produto (calculado na listagem)."""
+    code: str          # producao_sem_servico | tecnico_nao_referencia | sem_documentacao | externo_sem_contrato | produto_parado | doc_desatualizada
+    nivel: str         # alto | medio
+    message: str
+
+
+class HealthCheck(BaseModel):
+    """Item transparente do score de saúde/maturidade do produto."""
+    code: str
+    label: str
+    status: str        # pass | fail | na
+    weight: int
+
+
+class ProductHealth(BaseModel):
+    """Score 0–100 ponderado, com breakdown para transparência."""
+    score: int                       # 0..100 (100 se nenhum check aplicável)
+    classe: str                      # saudavel | atencao | critico
+    applicable_weight: int
+    passed_weight: int
+    checks: list[HealthCheck] = []
 
 
 class ProductListItem(BaseModel):
@@ -398,6 +470,7 @@ class ProductListItem(BaseModel):
     area_name: Optional[str] = None
     setor_name: Optional[str] = None
     responsavel_nome: Optional[str] = None
+    responsavel_tecnico_nome: Optional[str] = None
     requires_contract: bool
     has_active_contract: bool
     is_active: bool
@@ -417,6 +490,12 @@ class ProductListItem(BaseModel):
     has_documentation: bool = False
     tem_dados_pessoais: bool = False
     is_critico: bool = False
+    corporativo: bool = False
+    alertas: list[ProductAlerta] = []
+    score: int = 100                           # índice de saúde/maturidade 0–100
+    classe: str = "saudavel"                   # saudavel | atencao | critico
+    servicos_count: int = 0                    # serviços digitais ativos
+    stacks: list[StackMini] = Field(default_factory=list)
 
 
 class ProductResponse(BaseModel):
@@ -432,6 +511,8 @@ class ProductResponse(BaseModel):
     area: Optional[AreaRefMini]
     setor_name: Optional[str]
     responsavel: Optional[PersonMini]
+    responsavel_tecnico: Optional[PersonMini] = None
+    stacks: list[StackMini] = Field(default_factory=list)
     fornecedor: Optional[FornecedorResponse]
     origin_task_id: Optional[uuid.UUID]
     is_active: bool
@@ -459,6 +540,8 @@ class ProductResponse(BaseModel):
     link_dev: Optional[str] = None
     link_hml: Optional[str] = None
     link_prd: Optional[str] = None
+    login_idigital: bool = False
+    corporativo: bool = False
     servicos: list[ServicoResponse]
     documentos: list[DocumentoResponse]
     processos: list[ProdutoProcessoResponse]
@@ -467,6 +550,7 @@ class ProductResponse(BaseModel):
     documentations: list["DocumentationResponse"] = Field(default_factory=list)
     support: Optional["SupportResponse"] = None
     security: Optional["SecurityResponse"] = None
+    health: Optional[ProductHealth] = None
 
 
 # ── Projeto finalizado → produto ──────────────
@@ -546,7 +630,7 @@ class AlertaContrato(BaseModel):
 # ── Portfólio de Processos (versionado) ───────
 _PP_VERSION_STATUS = Literal["rascunho", "consolidada", "arquivada"]
 _PP_NIVEL = Literal["diretoria", "macroprocesso", "processo", "subprocesso"]
-_PP_ITEM_STATUS = Literal["proposto", "ativo", "em_revisao", "descontinuado"]
+_PP_ITEM_STATUS = Literal["planejado", "em_andamento", "concluido"]
 _PP_CRITICIDADE = Literal["baixa", "media", "alta", "critica"]
 _PP_MATURIDADE = Literal["inexistente", "inicial", "definido", "gerenciado", "otimizado"]
 
@@ -600,12 +684,12 @@ class ProcessItemBase(BaseModel):
     area_id: Optional[uuid.UUID] = None
     vigencia_inicio: Optional[date] = None
     vigencia_fim: Optional[date] = None
-    documentado: bool = False
     data_documentacao: Optional[date] = None
     doc_previsao_inicio: Optional[date] = None
     doc_previsao_fim: Optional[date] = None
+    passagem_para_ti: bool = False
     anexos: Optional[list[AnexoItem]] = None
-    status_item: _PP_ITEM_STATUS = "ativo"
+    status_item: _PP_ITEM_STATUS = "planejado"
     criticidade: Optional[_PP_CRITICIDADE] = None
     objetivo: Optional[str] = None
     nivel_maturidade: Optional[_PP_MATURIDADE] = None
@@ -637,10 +721,10 @@ class ProcessItemUpdate(BaseModel):
     area_id: Optional[uuid.UUID] = None
     vigencia_inicio: Optional[date] = None
     vigencia_fim: Optional[date] = None
-    documentado: Optional[bool] = None
     data_documentacao: Optional[date] = None
     doc_previsao_inicio: Optional[date] = None
     doc_previsao_fim: Optional[date] = None
+    passagem_para_ti: Optional[bool] = None
     anexos: Optional[list[AnexoItem]] = None
     status_item: Optional[_PP_ITEM_STATUS] = None
     criticidade: Optional[_PP_CRITICIDADE] = None
@@ -676,10 +760,10 @@ class ProcessItemResponse(BaseModel):
     area_nome: Optional[str] = None
     vigencia_inicio: Optional[date]
     vigencia_fim: Optional[date]
-    documentado: bool
     data_documentacao: Optional[date]
     doc_previsao_inicio: Optional[date]
     doc_previsao_fim: Optional[date]
+    passagem_para_ti: bool
     anexos: Optional[list[AnexoItem]] = None
     status_item: str
     criticidade: Optional[str]
@@ -757,6 +841,114 @@ class DashboardKpis(BaseModel):
     com_dados_pessoais: int = 0
     com_plano_contingencia: int = 0
     releases_publicadas_mes: int = 0
+
+
+# ─────────────────────────────────────────────
+# Inteligência de portfólio (saúde, risco, ações, contratos)
+# ─────────────────────────────────────────────
+
+class PendenciaAgg(BaseModel):
+    code: str
+    nivel: str            # alto | medio
+    label: str
+    count: int
+
+
+class MatrizRiscoCell(BaseModel):
+    criticidade: str      # baixa | media | alta | critica
+    classe: str           # saudavel | atencao | critico
+    count: int
+
+
+class TopRiscoItem(BaseModel):
+    id: uuid.UUID
+    name: str
+    score: int
+    classe: str
+    criticidade: str
+    principais_gaps: list[str] = []   # labels dos checks "fail" mais pesados (≤3)
+
+
+class ProdutoParadoItem(BaseModel):
+    id: uuid.UUID
+    name: str
+    ultima_release_date: Optional[date] = None
+    meses: Optional[int] = None
+
+
+class DocDebtItem(BaseModel):
+    id: uuid.UUID
+    name: str
+    doc_status: Optional[str] = None
+
+
+class PortfolioInteligencia(BaseModel):
+    media_score: float
+    distribuicao: dict[str, int]      # {"saudavel","atencao","critico"}
+    matriz_risco: list[MatrizRiscoCell]
+    top_risco: list[TopRiscoItem]
+    pendencias: list[PendenciaAgg]
+    produtos_parados: list[ProdutoParadoItem]
+    doc_debt: list[DocDebtItem]
+
+
+class FornecedorContratoAgg(BaseModel):
+    fornecedor_id: Optional[uuid.UUID] = None
+    fornecedor_nome: str
+    produtos_count: int
+    contratos_count: int
+    valor_total: float
+    proximo_vencimento: Optional[date] = None
+
+
+class ContratoAVencerItem(BaseModel):
+    contrato_id: uuid.UUID
+    product_id: uuid.UUID
+    product_name: str
+    fornecedor_nome: Optional[str] = None
+    vigencia_fim: date
+    dias_para_vencer: int
+    valor: Optional[float] = None
+
+
+class ContratosInteligencia(BaseModel):
+    valor_total: float
+    valor_total_por_tipo: dict[str, float]    # mensal/anual/global/sob_demanda/indefinido
+    valor_ambiguo: bool                       # mix de periodicidades → soma só indicativa
+    por_fornecedor: list[FornecedorContratoAgg]
+    buckets_vencimento: dict[str, int]        # vencidos/ate_30/ate_60/ate_90/acima_90
+    sem_renovacao_avencer: list[ContratoAVencerItem]
+
+
+# ── Configuração do Índice de Saúde ──
+class HealthConfigCheck(BaseModel):
+    code: str
+    label: str
+    weight: int               # peso vigente (config ou padrão)
+    default_weight: int       # peso padrão de fábrica (para "restaurar")
+    aplicabilidade: str       # texto explicando quando o critério se aplica
+
+
+class HealthConfigResponse(BaseModel):
+    checks: list[HealthConfigCheck]
+    limiar_saudavel: int
+    limiar_atencao: int
+    is_customizado: bool      # True se já houver config salva (≠ padrão)
+
+
+class HealthConfigUpdate(BaseModel):
+    weights: dict[str, int] = Field(default_factory=dict)   # {code: peso} (≥0)
+    limiar_saudavel: int = Field(..., ge=1, le=100)
+    limiar_atencao: int = Field(..., ge=0, le=99)
+
+    @model_validator(mode="after")
+    def _check(self):
+        if self.limiar_atencao >= self.limiar_saudavel:
+            raise ValueError("O limiar de 'Atenção' deve ser menor que o de 'Saudável'.")
+        for code, w in self.weights.items():
+            if w < 0:
+                raise ValueError(f"Peso de '{code}' não pode ser negativo.")
+        return self
 
 
 # ─────────────────────────────────────────────

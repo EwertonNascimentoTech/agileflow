@@ -11,13 +11,19 @@ export type GroupBy = "produto" | "area" | "setor" | "portfolio"
 
 // ── Enums "Produtos Digitais" (spec TI corporativa) ──
 export type ProductStatus = "ideia" | "discovery" | "desenvolvimento" | "homologacao" | "producao" | "sustentacao" | "evolucao" | "suspenso" | "descontinuado"
-export type ProductCategoria = "sistema_interno" | "sistema_externo" | "saas" | "dashboard" | "api" | "integracao" | "automacao" | "aplicativo" | "bi" | "workflow" | "outro"
+export type ProductCategoria = "sistema_interno_dev" | "sistema_interno_ia" | "sistema_externo_ia" | "sistema_externo_implantacao" | "sistema_externo_dn"
 export type ProductUnidade = "sesi" | "senai" | "iel" | "fiea" | "corporativo"
 export type ProductTipoDev = "interno" | "externo" | "hibrido"
 export type ProductModeloContratacao = "licenca" | "saas" | "fabrica" | "servico_continuado" | "projeto_pontual" | "interno" | "outro"
 export type ServicoSuporte = "interno" | "fornecedor" | "compartilhado" | "service_desk" | "devops" | "desenvolvimento" | "infraestrutura"
 export type ServicoStatus = "ativo" | "em_implantacao" | "suspenso" | "descontinuado"
-export type DocumentoTipo = "pdf" | "planilha" | "formulario" | "workflow" | "dashboard" | "registro" | "relatorio" | "certificado" | "termo" | "outro"
+export type DocumentoEspecie =
+  | "relatorio" | "parecer" | "termo" | "certificado" | "formulario_eletronico" | "dashboard"
+  | "registro_sistemico" | "comprovante_recibo" | "extrato" | "documento_fiscal_eletronico" | "oficio" | "outro"
+/** @deprecated use DocumentoEspecie */
+export type DocumentoTipo = DocumentoEspecie
+export type DocumentoFormato = "pdf" | "xlsx" | "xls" | "docx" | "doc" | "xml" | "csv" | "txt" | "imagem" | "outro"
+export type NivelDadosPessoais = "sem_dados_pessoais" | "dados_pessoais" | "dados_pessoais_sensiveis"
 export type ClassificacaoInformacao = "publica" | "interna" | "confidencial" | "restrita"
 export type ContratoStatus = "sem_contrato" | "em_formalizacao" | "vigente" | "a_vencer" | "vencido" | "em_renovacao" | "encerrado"
 export type ContratoTipoValor = "mensal" | "anual" | "global" | "sob_demanda"
@@ -50,6 +56,12 @@ export interface PersonMini {
   full_name: string
 }
 
+export interface StackMini {
+  id: string
+  name: string
+  category: string | null
+}
+
 export interface Fornecedor {
   id: string
   nome: string
@@ -76,6 +88,7 @@ export interface Servico {
   id: string
   name: string
   description: string | null
+  data_publicacao: string | null
   ano_referencia: number
   area_usuaria: string | null
   processo_relacionado: string | null
@@ -83,25 +96,31 @@ export interface Servico {
   sla_atendimento: string | null
   tipo_suporte: ServicoSuporte | null
   status_servico: ServicoStatus | null
+  responsavel_person_id: string | null
+  responsavel: PersonMini | null
+  process_links?: ServiceProcessLink[]
   is_active: boolean
   order: number
 }
 
 export interface ServicoCreate {
   name: string
-  description?: string
-  ano_referencia?: number
+  description?: string | null
+  data_publicacao?: string | null
+  status_servico: ServicoStatus
+  responsavel_person_id?: string | null
+  ano_referencia?: number | null
   area_usuaria?: string | null
   processo_relacionado?: string | null
   disponibilidade?: string | null
   sla_atendimento?: string | null
   tipo_suporte?: ServicoSuporte | null
-  status_servico?: ServicoStatus | null
 }
 
 export interface Documento {
   id: string
   name: string
+  data_documento: string | null
   ano_referencia: number
   object_name: string | null
   filename: string | null
@@ -109,13 +128,16 @@ export interface Documento {
   size: number | null
   category: string | null
   external_link: string | null
-  tipo_documento: DocumentoTipo | null
+  tipo_documento: DocumentoEspecie | null
+  formato: DocumentoFormato | string | null
+  origem_sistema: string | null
   is_nato_digital: boolean
   assinatura_digital: boolean
   trilha_auditoria: boolean
   local_armazenamento: string | null
   prazo_retencao: string | null
   classificacao: ClassificacaoInformacao | null
+  nivel_dados_pessoais: NivelDadosPessoais | null
   dados_pessoais: boolean
   dados_sensiveis: boolean
   observacoes: string | null
@@ -126,6 +148,7 @@ export interface Documento {
 
 export interface DocumentoCreate {
   name: string
+  data_documento?: string | null
   ano_referencia?: number
   object_name?: string
   filename?: string
@@ -133,13 +156,16 @@ export interface DocumentoCreate {
   size?: number
   category?: string
   external_link?: string
-  tipo_documento?: DocumentoTipo | null
+  tipo_documento?: DocumentoEspecie | null
+  formato?: DocumentoFormato | string | null
+  origem_sistema?: string | null
   is_nato_digital?: boolean
   assinatura_digital?: boolean
   trilha_auditoria?: boolean
   local_armazenamento?: string | null
   prazo_retencao?: string | null
   classificacao?: ClassificacaoInformacao | null
+  nivel_dados_pessoais?: NivelDadosPessoais | null
   dados_pessoais?: boolean
   dados_sensiveis?: boolean
   observacoes?: string | null
@@ -260,6 +286,33 @@ export type ContratoUpdate = Partial<Omit<ContratoCreate, "fornecedor_id" | "vig
   vigencia_fim?: string
 }
 
+export type ProductAlertaCode =
+  | "producao_sem_servico" | "tecnico_nao_referencia" | "sem_documentacao"
+  | "externo_sem_contrato" | "produto_parado" | "doc_desatualizada"
+
+export interface ProductAlerta {
+  code: ProductAlertaCode
+  nivel: "alto" | "medio"
+  message: string
+}
+
+export type SaudeClasse = "saudavel" | "atencao" | "critico"
+
+export interface HealthCheck {
+  code: string
+  label: string
+  status: "pass" | "fail" | "na"
+  weight: number
+}
+
+export interface ProductHealth {
+  score: number
+  classe: SaudeClasse
+  applicable_weight: number
+  passed_weight: number
+  checks: HealthCheck[]
+}
+
 export interface ProductListItem {
   id: string
   name: string
@@ -270,6 +323,7 @@ export interface ProductListItem {
   area_name: string | null
   setor_name: string | null
   responsavel_nome: string | null
+  responsavel_tecnico_nome: string | null
   requires_contract: boolean
   has_active_contract: boolean
   is_active: boolean
@@ -288,6 +342,12 @@ export interface ProductListItem {
   has_documentation: boolean
   tem_dados_pessoais: boolean
   is_critico: boolean
+  corporativo?: boolean
+  alertas: ProductAlerta[]
+  score: number
+  classe: SaudeClasse
+  servicos_count: number
+  stacks?: StackMini[]
 }
 
 export interface Product {
@@ -303,6 +363,8 @@ export interface Product {
   area: AreaRefMini | null
   setor_name: string | null
   responsavel: PersonMini | null
+  responsavel_tecnico: PersonMini | null
+  stacks: StackMini[]
   fornecedor: Fornecedor | null
   origin_task_id: string | null
   is_active: boolean
@@ -330,6 +392,8 @@ export interface Product {
   link_dev: string | null
   link_hml: string | null
   link_prd: string | null
+  login_idigital: boolean
+  corporativo: boolean
   servicos: Servico[]
   documentos: Documento[]
   processos: ProdutoProcessoLink[]
@@ -338,6 +402,7 @@ export interface Product {
   documentations: Documentation[]
   support: Support | null
   security: SecurityIntegration | null
+  health: ProductHealth | null
 }
 
 export interface ProductCreate {
@@ -351,6 +416,8 @@ export interface ProductCreate {
   data_entrada_producao?: string
   area_id?: string | null
   responsavel_person_id?: string | null
+  responsavel_tecnico_person_id?: string | null
+  stack_ids?: string[] | null
   fornecedor_id?: string | null
   origin_task_id?: string
   // campos novos
@@ -363,7 +430,6 @@ export interface ProductCreate {
   url_acesso?: string | null
   observacoes?: string | null
   status_produto?: ProductStatus | null
-  tipo_desenvolvimento?: ProductTipoDev | null
   desenvolvido_por?: string | null
   fornecedor_cnpj?: string | null
   modelo_contratacao?: ProductModeloContratacao | null
@@ -373,6 +439,8 @@ export interface ProductCreate {
   link_dev?: string | null
   link_hml?: string | null
   link_prd?: string | null
+  login_idigital?: boolean | null
+  corporativo?: boolean | null
 }
 
 export type ProductUpdate = Partial<ProductCreate> & { is_active?: boolean }
@@ -542,6 +610,92 @@ export interface AlertaContrato {
   mensagem: string
 }
 
+// ── Inteligência de portfólio ──
+export interface PendenciaAgg {
+  code: ProductAlertaCode | string
+  nivel: "alto" | "medio"
+  label: string
+  count: number
+}
+export interface MatrizRiscoCell {
+  criticidade: ProductCriticidade
+  classe: SaudeClasse
+  count: number
+}
+export interface TopRiscoItem {
+  id: string
+  name: string
+  score: number
+  classe: SaudeClasse
+  criticidade: ProductCriticidade
+  principais_gaps: string[]
+}
+export interface ProdutoParadoItem {
+  id: string
+  name: string
+  ultima_release_date: string | null
+  meses: number | null
+}
+export interface DocDebtItem {
+  id: string
+  name: string
+  doc_status: string | null
+}
+export interface PortfolioInteligencia {
+  media_score: number
+  distribuicao: Record<SaudeClasse, number>
+  matriz_risco: MatrizRiscoCell[]
+  top_risco: TopRiscoItem[]
+  pendencias: PendenciaAgg[]
+  produtos_parados: ProdutoParadoItem[]
+  doc_debt: DocDebtItem[]
+}
+export interface FornecedorContratoAgg {
+  fornecedor_id: string | null
+  fornecedor_nome: string
+  produtos_count: number
+  contratos_count: number
+  valor_total: number
+  proximo_vencimento: string | null
+}
+export interface ContratoAVencerItem {
+  contrato_id: string
+  product_id: string
+  product_name: string
+  fornecedor_nome: string | null
+  vigencia_fim: string
+  dias_para_vencer: number
+  valor: number | null
+}
+export interface ContratosInteligencia {
+  valor_total: number
+  valor_total_por_tipo: Record<string, number>
+  valor_ambiguo: boolean
+  por_fornecedor: FornecedorContratoAgg[]
+  buckets_vencimento: Record<string, number>
+  sem_renovacao_avencer: ContratoAVencerItem[]
+}
+
+// ── Configuração do Índice de Saúde ──
+export interface HealthConfigCheck {
+  code: string
+  label: string
+  weight: number
+  default_weight: number
+  aplicabilidade: string
+}
+export interface HealthConfigResponse {
+  checks: HealthConfigCheck[]
+  limiar_saudavel: number
+  limiar_atencao: number
+  is_customizado: boolean
+}
+export interface HealthConfigUpdate {
+  weights: Record<string, number>
+  limiar_saudavel: number
+  limiar_atencao: number
+}
+
 export interface IndicadorCounts {
   servicos: number
   documentos: number
@@ -578,7 +732,7 @@ export interface ProcessoConsolidacaoNode {
 
 export type ProcessNivel = "diretoria" | "macroprocesso" | "processo" | "subprocesso"
 export type ProcessVersionStatus = "rascunho" | "consolidada" | "arquivada"
-export type ProcessItemStatus = "proposto" | "ativo" | "em_revisao" | "descontinuado"
+export type ProcessItemStatus = "planejado" | "em_andamento" | "concluido"
 export type ProcessCriticidade = "baixa" | "media" | "alta" | "critica"
 export type ProcessMaturidade = "inexistente" | "inicial" | "definido" | "gerenciado" | "otimizado"
 
@@ -630,10 +784,11 @@ export interface ProcessItem {
   area_nome: string | null
   vigencia_inicio: string | null
   vigencia_fim: string | null
-  documentado: boolean
   data_documentacao: string | null
   doc_previsao_inicio: string | null
   doc_previsao_fim: string | null
+  passagem_para_ti: boolean
+  documentado?: boolean
   anexos: Anexo[] | null
   status_item: ProcessItemStatus
   criticidade: ProcessCriticidade | null
@@ -677,10 +832,11 @@ export interface ProcessItemInput {
   area_id?: string | null
   vigencia_inicio?: string | null
   vigencia_fim?: string | null
-  documentado?: boolean
   data_documentacao?: string | null
   doc_previsao_inicio?: string | null
   doc_previsao_fim?: string | null
+  passagem_para_ti?: boolean
+  documentado?: boolean
   anexos?: Anexo[] | null
   status_item?: ProcessItemStatus
   criticidade?: ProcessCriticidade | null
@@ -711,6 +867,18 @@ export const produtosApi = {
   getAlertasContratos: () =>
     api.get<AlertaContrato[]>("/produtos/alertas/contratos").then((r) => r.data),
 
+  getPortfolioIntelligence: () =>
+    api.get<PortfolioInteligencia>("/produtos/inteligencia/portfolio").then((r) => r.data),
+
+  getContratosIntelligence: () =>
+    api.get<ContratosInteligencia>("/produtos/inteligencia/contratos").then((r) => r.data),
+
+  getHealthConfig: () =>
+    api.get<HealthConfigResponse>("/produtos/config/health").then((r) => r.data),
+
+  updateHealthConfig: (data: HealthConfigUpdate) =>
+    api.put<HealthConfigResponse>("/produtos/config/health", data).then((r) => r.data),
+
   listAreas: () =>
     api.get<AreaRefMini[]>("/produtos/areas").then((r) => r.data),
 
@@ -719,6 +887,15 @@ export const produtosApi = {
 
   listPersons: () =>
     api.get<PersonMini[]>("/produtos/persons").then((r) => r.data),
+
+  listPos: () =>
+    api.get<PersonMini[]>("/produtos/pos").then((r) => r.data),
+
+  listTechReferences: () =>
+    api.get<PersonMini[]>("/produtos/tech-references").then((r) => r.data),
+
+  listStacks: () =>
+    api.get<StackMini[]>("/produtos/stacks").then((r) => r.data),
 
   listFinalizedProjects: () =>
     api.get<FinalizedProject[]>("/produtos/finalized-projects").then((r) => r.data),

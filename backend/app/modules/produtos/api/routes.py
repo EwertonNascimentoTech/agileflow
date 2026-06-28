@@ -13,6 +13,7 @@ from app.modules.produtos.service import (
     AlertaService,
     DocumentationService,
     FornecedorService,
+    HealthConfigService,
     IndicadorService,
     ProcessoService,
     ProcessPortfolioService,
@@ -35,6 +36,26 @@ async def dashboard(ctx: ModuleContext = Depends(_ctx)):
     return await ProductService.dashboard(ctx.db)
 
 
+@router.get("/inteligencia/portfolio", response_model=schemas.PortfolioInteligencia)
+async def inteligencia_portfolio(ctx: ModuleContext = Depends(_ctx)):
+    return await ProductService.portfolio_intelligence(ctx.db)
+
+
+@router.get("/inteligencia/contratos", response_model=schemas.ContratosInteligencia)
+async def inteligencia_contratos(ctx: ModuleContext = Depends(_ctx)):
+    return await ProductService.contratos_intelligence(ctx.db)
+
+
+@router.get("/config/health", response_model=schemas.HealthConfigResponse)
+async def get_health_config(ctx: ModuleContext = Depends(_ctx)):
+    return await HealthConfigService.get(ctx.db)
+
+
+@router.put("/config/health", response_model=schemas.HealthConfigResponse)
+async def update_health_config(data: schemas.HealthConfigUpdate, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    return await HealthConfigService.update(ctx.db, data, ctx.user.id)
+
+
 @router.get("/areas", response_model=list[schemas.AreaRefMini])
 async def list_areas(ctx: ModuleContext = Depends(_ctx)):
     try:
@@ -55,6 +76,33 @@ async def list_setores(ctx: ModuleContext = Depends(_ctx)):
 async def list_persons(ctx: ModuleContext = Depends(_ctx)):
     try:
         return await ProductService.list_persons(ctx.db)
+    except Exception:
+        return []
+
+
+@router.get("/pos", response_model=list[schemas.PersonMini])
+async def list_pos(ctx: ModuleContext = Depends(_ctx)):
+    """Pessoas com cargo PO/Product Owner — para o campo Responsável do produto."""
+    try:
+        return await ProductService.list_pos(ctx.db)
+    except Exception:
+        return []
+
+
+@router.get("/tech-references", response_model=list[schemas.PersonMini])
+async def list_tech_references(ctx: ModuleContext = Depends(_ctx)):
+    """Pessoas com cargo Referência Técnica — para o Responsável técnico do produto."""
+    try:
+        return await ProductService.list_tech_references(ctx.db)
+    except Exception:
+        return []
+
+
+@router.get("/stacks", response_model=list[schemas.StackMini])
+async def list_stacks(ctx: ModuleContext = Depends(_ctx)):
+    """Catálogo de stacks (reusa team_stacks) — para o multi-select do produto."""
+    try:
+        return await ProductService.list_stacks(ctx.db)
     except Exception:
         return []
 

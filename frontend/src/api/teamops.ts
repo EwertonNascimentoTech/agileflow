@@ -150,6 +150,7 @@ export interface Person {
   updated_at: string
   position: PositionMini | null
   area: AreaMini | null
+  areas?: AreaMini[]
   po_person: PersonMini | null
   tech_reference_person: PersonMini | null
   manager_person: PersonMini | null
@@ -417,6 +418,7 @@ export const teamopsApi = {
     api.delete<void>(`/teamops/absence-types/${id}`).then((r) => r.data),
 
   // Persons
+  getMyPerson: () => api.get<Person>("/teamops/me/person").then((r) => r.data),
   listPersons: (params?: {
     area_id?: string
     position_id?: string

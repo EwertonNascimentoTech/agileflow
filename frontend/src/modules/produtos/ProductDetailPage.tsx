@@ -5,7 +5,7 @@ import { AlertTriangle, ArrowLeft, Download, ExternalLink, FileText, Link2, Load
 import {
   produtosApi, type Contrato, type ContratoCreate, type Documento, type Documentation, type ProcessoCatalog,
   type Product, type ProdutoProcessoLink, type Release, type ReleaseCreate, type SecurityUpsert, type Servico,
-  type SupportUpsert, type Sustentacao,
+  type ServicoStatus, type SupportUpsert, type Sustentacao,
 } from "@/api/produtos"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -203,7 +203,7 @@ function ServicosTab({ p, onChange }: { p: Product; onChange: () => void }) {
       await produtosApi.addServico(p.id, {
         name: name.trim(), ano_referencia: ano, area_usuaria: areaUsuaria.trim() || null, sla_atendimento: sla.trim() || null,
         tipo_suporte: tipoSuporte === "__none__" ? null : (tipoSuporte as Servico["tipo_suporte"]),
-        status_servico: statusSvc === "__none__" ? null : (statusSvc as Servico["status_servico"]),
+        status_servico: statusSvc === "__none__" ? "ativo" : (statusSvc as ServicoStatus),
       })
       setName(""); setAreaUsuaria(""); setSla(""); setTipoSuporte("__none__"); setStatusSvc("__none__"); onChange()
     } finally { setAdding(false) }

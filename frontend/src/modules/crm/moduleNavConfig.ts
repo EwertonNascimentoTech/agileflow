@@ -9,7 +9,7 @@ import {
   Package, Boxes, ArrowLeftRight, Layers, BadgeCheck,
   ShoppingCart, Wallet, ReceiptText,
   Network, Code2, CalendarOff,
-  CirclePlus, ClipboardList,
+  CirclePlus, ClipboardList, Gauge, TrendingUp, ListChecks,
 } from "lucide-react"
 import type { ElementType } from "react"
 
@@ -57,10 +57,16 @@ export const moduleNavConfig: Record<string, ModuleNavItem[]> = {
   produtos: [
     { to: "/app/modules/produtos/dashboard", icon: BarChart3, label: "Dashboard", requiredAnyPermission: ["produtos.view"] },
     { to: "/app/modules/produtos/produtos", icon: Package, label: "Produtos", requiredAnyPermission: ["produtos.view"] },
+    { to: "/app/modules/produtos/inteligencia", icon: Gauge, label: "Inteligência", requiredAnyPermission: ["produtos.view"] },
     { to: "/app/modules/produtos/processos-portfolio", icon: Network, label: "Portfólio de Processos", requiredAnyPermission: ["produtos.view"] },
     { to: "/app/modules/produtos/indicadores", icon: BarChart3, label: "Indicadores", requiredAnyPermission: ["produtos.view"] },
     { to: "/app/modules/produtos/fornecedores", icon: Building2, label: "Fornecedores", requiredAnyPermission: ["produtos.view"] },
     { to: "/app/modules/produtos/config", icon: Settings2, label: "Configurações" },
+  ],
+  indicadores: [
+    { to: "/app/modules/indicadores/dashboard", icon: TrendingUp, label: "Painel", requiredAnyPermission: ["indicadores.view"] },
+    { to: "/app/modules/indicadores/indicadores", icon: ListChecks, label: "Indicadores", requiredAnyPermission: ["indicadores.view"] },
+    { to: "/app/modules/indicadores/config", icon: Settings2, label: "Configurações" },
   ],
   teamops: [
     { to: "/app/modules/teamops",          icon: BarChart3,   label: "Dashboard",    requiredAnyPermission: ["teamops.view"] },

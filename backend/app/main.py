@@ -15,6 +15,7 @@ from app.modules.company.api.routes import router as company_admin_router
 from app.modules.projetos.api.routes import router as projetos_router
 from app.modules.teamops.api.routes import router as teamops_router
 from app.modules.produtos.api.routes import router as produtos_router
+from app.modules.indicadores.api.routes import router as indicadores_router
 
 
 @asynccontextmanager
@@ -94,6 +95,15 @@ async def _seed_known_modules() -> None:
             "backend_path": "backend/app/modules/produtos",
             "frontend_path": "frontend/src/modules/produtos",
         },
+        {
+            "slug": "indicadores",
+            "name": "Indicadores",
+            "description": "Indicadores institucionais (estratégicos e táticos) com metas, acompanhamento por período, atingimento e dashboard.",
+            "icon": "TrendingUp",
+            "color": "#059669",
+            "backend_path": "backend/app/modules/indicadores",
+            "frontend_path": "frontend/src/modules/indicadores",
+        },
     ]
 
     async with AsyncSessionLocal() as db:
@@ -139,6 +149,7 @@ app.include_router(company_admin_router, prefix="/api/v1")
 app.include_router(projetos_router, prefix="/api/v1")
 app.include_router(teamops_router, prefix="/api/v1")
 app.include_router(produtos_router, prefix="/api/v1")
+app.include_router(indicadores_router, prefix="/api/v1")
 
 
 @app.get("/health")

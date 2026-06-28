@@ -1,0 +1,51 @@
+LISTA PARA ANÁLISE MANUAL — subprocessos não atualizados
+
+======================================================================
+
+Resumo: 249 atualizados | 6 ambíguos | 14 sem match
+
+
+## AMBÍGUOS (duplicados na planilha e/ou no banco) — 6
+
+
+• Administrar Aquisição de Consumos, Insumos, Bens e Serviços  [linhas na planilha: 2 | nós no banco: 1]
+    - status=Concluído | TI=0 | analista=João Vitor de Oliveira Santos | ini=2025-11-03 | fim=2026-01-30
+    - status=Concluído | TI=1 | analista=Fernando Guilherme da Gama Romeiro | ini=2024-01-22 | fim=2024-09-23
+
+• Administrar Contratos de Suprimentos  [linhas na planilha: 2 | nós no banco: 2]
+    - status=Em andamento | TI=0 | analista=João Vitor de Oliveira Santos | ini=2025-11-03 | fim=2025-01-30
+    - status=Concluído | TI=1 | analista=Fernando Guilherme da Gama Romeiro | ini=2024-08-01 | fim=2024-08-30
+
+• Administrar Desligamento de Pessoal  [linhas na planilha: 2 | nós no banco: 2]
+    - status=Em andamento | TI=0 | analista=Sarahy Delane Lemos de França Ribeiro | ini=2025-11-12 | fim=2025-12-19
+    - status=Concluído | TI=0 | analista=Rômulo Silva Serafim | ini=2024-01-16 | fim=2024-02-22
+
+• Administrar Férias  [linhas na planilha: 2 | nós no banco: 1]
+    - status=Em andamento | TI=0 | analista=Sarahy Delane Lemos de França Ribeiro | ini=2025-11-12 | fim=2025-12-19
+    - status=Concluído | TI=0 | analista=Rômulo Silva Serafim | ini=2024-01-16 | fim=2024-02-22
+
+• Administrar Portfólio de Materiais e Serviços  [linhas na planilha: 2 | nós no banco: 1]
+    - status=Concluído | TI=0 | analista=João Vitor de Oliveira Santos | ini=2025-11-03 | fim=2026-01-30
+    - status=Concluído | TI=1 | analista=Fernando Guilherme da Gama Romeiro | ini=2024-05-27 | fim=2024-07-23
+
+• Administrar Processo de Contratação  [linhas na planilha: 2 | nós no banco: 1]
+    - status=Em andamento | TI=0 | analista=João Vitor de Oliveira Santos | ini=2025-11-03 | fim=2026-01-30
+    - status=Concluído | TI=1 | analista=Fernando Guilherme da Gama Romeiro | ini=2024-05-13 | fim=2024-07-23
+
+
+## SEM MATCH EXATO no banco (não atualizados) — 14
+
+• Administrar ASO  (status=Planejado, TI=0)
+• Administrar Equipamentos Médicos  (status=Concluído, TI=0)
+• Administrar o Relacionamento de Aprendizagem Industrial  (status=Em andamento, TI=0)
+• Administrar Processamento de Materiais  (status=Concluído, TI=0)
+• Administrar Serviços de Segurança no Trabalho (Programas, Laudos e Demais Serviços)  (status=Em andamento, TI=0)
+• Administrar Solicitações de Assessoria de Imprensa  (status=Concluído, TI=1)
+• Estruturar Modelo de Oferta da Modalidade de Jovens e Adultos (EJA)  (status=Em andamento, TI=0)
+• Estruturar Modelo de Operação Integrado  (status=Em andamento, TI=0)
+• Estruturar Modelo Pedagógico de Educação Profissional  (status=Em andamento, TI=0)
+• Executar Logística para Operação de Serviços de Educação Profissional;  (status=Em andamento, TI=0)
+• Executar o Serviço de Educação Profissional (ministrar aulas)  (status=Em andamento, TI=0)
+• Gerenciar Projetos e Programas de Educação Profissional  (status=Em andamento, TI=0)
+• Realizar Acompanhamento Pedagógico  (status=Em andamento, TI=0)
+• Realizar Serviço de Aprendizagem Industrial  (status=Planejado, TI=0)

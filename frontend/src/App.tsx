@@ -117,8 +117,14 @@ import ProdutosProductsPage from "@/modules/produtos/ProductsPage"
 import ProdutosProductDetailPage from "@/modules/produtos/ProductDetailPage"
 import ProdutosProcessPortfolioPage from "@/modules/produtos/ProcessPortfolioPage"
 import ProdutosIndicadoresPage from "@/modules/produtos/IndicadoresPage"
+import ProdutosInteligenciaPage from "@/modules/produtos/InteligenciaPage"
 import ProdutosFornecedoresPage from "@/modules/produtos/FornecedoresPage"
 import ProdutosConfigPage from "@/modules/produtos/config/ProdutosConfigPage"
+import IndicadoresLayout from "@/modules/indicadores/IndicadoresLayout"
+import IndicadoresDashboardPage from "@/modules/indicadores/DashboardPage"
+import IndicadoresListPage from "@/modules/indicadores/IndicadoresListPage"
+import IndicadorDetailPage from "@/modules/indicadores/IndicadorDetailPage"
+import IndicadoresConfigPage from "@/modules/indicadores/config/IndicadoresConfigPage"
 
 export default function App() {
   return (
@@ -283,11 +289,23 @@ export default function App() {
                     <Route path="dashboard" element={<ProdutosDashboardPage />} />
                     <Route path="produtos" element={<ProdutosProductsPage />} />
                     <Route path="produtos/:id" element={<ProdutosProductDetailPage />} />
+                    <Route path="inteligencia" element={<ProdutosInteligenciaPage />} />
                     <Route path="processos-portfolio" element={<ProdutosProcessPortfolioPage />} />
                     <Route path="indicadores" element={<ProdutosIndicadoresPage />} />
                     <Route path="fornecedores" element={<ProdutosFornecedoresPage />} />
                     <Route element={<ModuleConfigGuard moduleSlug="produtos" />}>
                       <Route path="config" element={<ProdutosConfigPage />} />
+                    </Route>
+                  </Route>
+
+                  {/* Indicadores */}
+                  <Route path="modules/indicadores" element={<IndicadoresLayout />}>
+                    <Route index element={<IndicadoresDashboardPage />} />
+                    <Route path="dashboard" element={<IndicadoresDashboardPage />} />
+                    <Route path="indicadores" element={<IndicadoresListPage />} />
+                    <Route path="indicadores/:id" element={<IndicadorDetailPage />} />
+                    <Route element={<ModuleConfigGuard moduleSlug="indicadores" />}>
+                      <Route path="config" element={<IndicadoresConfigPage />} />
                     </Route>
                   </Route>
 

@@ -1,11 +1,12 @@
 import { useEffect, useState, type ReactNode } from "react"
 import { ArrowRight, Loader2, ListPlus, ListX, Pencil } from "lucide-react"
 
-import { produtosApi, type ProcessItem, type ProcessVersionSummary } from "@/api/produtos"
+import { produtosApi, type ProcessItem, type ProcessItemStatus, type ProcessVersionSummary } from "@/api/produtos"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { PROCESS_ITEM_STATUS_LABEL } from "@/modules/produtos/constants"
 
 // Campos comparados na detecção de "modificado".
 const COMPARED: { key: keyof ProcessItem; label: string }[] = [
@@ -18,7 +19,7 @@ const COMPARED: { key: keyof ProcessItem; label: string }[] = [
   { key: "area", label: "Área" },
   { key: "status_item", label: "Status" },
   { key: "criticidade", label: "Criticidade" },
-  { key: "documentado", label: "Documentado" },
+  { key: "passagem_para_ti", label: "Passagem para TI" },
   { key: "vigencia_inicio", label: "Vigência início" },
   { key: "vigencia_fim", label: "Vigência fim" },
   { key: "nivel_maturidade", label: "Maturidade" },
@@ -36,9 +37,12 @@ function flatten(items: ProcessItem[]): Map<string, ProcessItem> {
   return map
 }
 
-function fmt(v: unknown): string {
+function fmt(v: unknown, key?: keyof ProcessItem): string {
   if (v === null || v === undefined || v === "") return "—"
   if (typeof v === "boolean") return v ? "Sim" : "Não"
+  if (key === "status_item" && typeof v === "string") {
+    return PROCESS_ITEM_STATUS_LABEL[v as ProcessItemStatus] ?? v
+  }
   return String(v)
 }
 
@@ -73,8 +77,8 @@ export default function ProcessPortfolioVersionDiffDialog({
           if (!prev) { add.push(item); continue }
           const changes: FieldChange[] = []
           for (const c of COMPARED) {
-            if (fmt(prev[c.key]) !== fmt(item[c.key])) {
-              changes.push({ label: c.label, from: fmt(prev[c.key]), to: fmt(item[c.key]) })
+            if (fmt(prev[c.key], c.key) !== fmt(item[c.key], c.key)) {
+              changes.push({ label: c.label, from: fmt(prev[c.key], c.key), to: fmt(item[c.key], c.key) })
             }
           }
           if (changes.length) mod.push({ name: item.name, changes })

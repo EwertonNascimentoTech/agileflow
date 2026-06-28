@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { AlertTriangle, Boxes, Loader2, Plus, ShieldAlert, Sparkles } from "lucide-react"
+import {
+  AlertTriangle, Boxes, Clock, FileQuestion, FileWarning, FileX, Loader2, type LucideIcon,
+  PackageX, Plus, ShieldAlert, Sparkles, Trash2, UserX,
+} from "lucide-react"
 
-import { produtosApi, type FinalizedProject, type ProductListItem } from "@/api/produtos"
+import { produtosApi, type FinalizedProject, type ProductAlertaCode, type ProductListItem } from "@/api/produtos"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -14,20 +17,41 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "@/lib/toast"
 import { ProductFormDialog } from "@/modules/produtos/ProductFormDialog"
 import {
-  CATEGORIA_LABEL, CONTRATO_STATUS_COLOR, CONTRATO_STATUS_LABEL, CRITICIDADE_COLOR, CRITICIDADE_LABEL,
-  DOCNT_STATUS_COLOR, DOCNT_STATUS_LABEL, STATUS_COLOR, STATUS_LABEL, TIPODEV_LABEL,
+  CATEGORIA_LABEL, CONTRATO_STATUS_COLOR, CONTRATO_STATUS_LABEL,
+  DOCNT_STATUS_COLOR, DOCNT_STATUS_LABEL, LIFECYCLE_LABEL, LIFECYCLE_OPTS,
+  SAUDE_COLOR, SAUDE_LABEL,
 } from "@/modules/produtos/constants"
 
 function fmtDate(iso: string | null) { return iso ? new Date(iso).toLocaleDateString("pt-BR") : "—" }
 const ALL = "__all__"
 
-type Toggle = "sem_contrato" | "a_vencer" | "sem_doc" | "dados_pessoais" | "criticos"
+type Toggle = "saude_critico" | "saude_atencao" | "com_alertas" | "sem_contrato" | "a_vencer" | "sem_doc" | "dados_pessoais"
 const TOGGLES: { key: Toggle; label: string }[] = [
+  { key: "saude_critico", label: "Saúde: Crítico" },
+  { key: "saude_atencao", label: "Saúde: Atenção" },
+  { key: "com_alertas", label: "Com alertas" },
   { key: "sem_contrato", label: "Sem contrato" },
   { key: "a_vencer", label: "Contrato a vencer" },
   { key: "sem_doc", label: "Sem documentação" },
   { key: "dados_pessoais", label: "Com dados pessoais" },
-  { key: "criticos", label: "Críticos" },
+]
+
+const ALERTA_ICON: Record<ProductAlertaCode, LucideIcon> = {
+  producao_sem_servico: PackageX,
+  externo_sem_contrato: FileX,
+  sem_documentacao: FileQuestion,
+  tecnico_nao_referencia: UserX,
+  produto_parado: Clock,
+  doc_desatualizada: FileWarning,
+}
+
+const ALERTA_LEGENDA: { code: ProductAlertaCode; label: string; nivel: "alto" | "medio" }[] = [
+  { code: "producao_sem_servico", label: "Em produção sem serviço", nivel: "alto" },
+  { code: "externo_sem_contrato", label: "Externo sem contrato", nivel: "alto" },
+  { code: "produto_parado", label: "Parado (>12m sem release)", nivel: "alto" },
+  { code: "sem_documentacao", label: "Sem documentação", nivel: "medio" },
+  { code: "tecnico_nao_referencia", label: "Téc. não é Referência Técnica", nivel: "medio" },
+  { code: "doc_desatualizada", label: "Documentação desatualizada", nivel: "medio" },
 ]
 
 export default function ProductsPage() {
@@ -36,41 +60,54 @@ export default function ProductsPage() {
   const [loading, setLoading] = useState(true)
   const [openNew, setOpenNew] = useState(false)
   const [openFromProject, setOpenFromProject] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
-  // filtros
   const [q, setQ] = useState("")
-  const [fStatus, setFStatus] = useState(ALL)
   const [fCategoria, setFCategoria] = useState(ALL)
-  const [fCriticidade, setFCriticidade] = useState(ALL)
-  const [fTipoDev, setFTipoDev] = useState(ALL)
-  const [fArea, setFArea] = useState(ALL)
-  const [fForn, setFForn] = useState(ALL)
+  const [fLifecycle, setFLifecycle] = useState(ALL)
+  const [fPO, setFPO] = useState(ALL)
   const [toggles, setToggles] = useState<Set<Toggle>>(new Set())
 
   async function reload() { setProducts(await produtosApi.listProducts().catch(() => [])) }
   useEffect(() => { produtosApi.listProducts().catch(() => []).then(setProducts).finally(() => setLoading(false)) }, [])
 
-  const areas = useMemo(() => Array.from(new Set(products.map((p) => p.area_name).filter(Boolean))) as string[], [products])
-  const forns = useMemo(() => Array.from(new Set(products.map((p) => p.fornecedor_nome).filter(Boolean))) as string[], [products])
+  const poOptions = useMemo<[string, string][]>(() =>
+    Array.from(new Set(products.map((p) => p.responsavel_nome).filter((n): n is string => !!n)))
+      .sort((a, b) => a.localeCompare(b, "pt-BR"))
+      .map((n) => [n, n]),
+  [products])
 
   const filtered = useMemo(() => products.filter((p) => {
-    if (q && !`${p.name} ${p.sigla ?? ""}`.toLowerCase().includes(q.toLowerCase())) return false
-    if (fStatus !== ALL && p.status_produto !== fStatus) return false
+    if (q && !p.name.toLowerCase().includes(q.toLowerCase())) return false
     if (fCategoria !== ALL && p.categoria !== fCategoria) return false
-    if (fCriticidade !== ALL && p.criticidade !== fCriticidade) return false
-    if (fTipoDev !== ALL && p.tipo_desenvolvimento !== fTipoDev) return false
-    if (fArea !== ALL && p.area_name !== fArea) return false
-    if (fForn !== ALL && p.fornecedor_nome !== fForn) return false
+    if (fLifecycle !== ALL && p.lifecycle !== fLifecycle) return false
+    if (fPO !== ALL && p.responsavel_nome !== fPO) return false
+    if (toggles.has("saude_critico") && p.classe !== "critico") return false
+    if (toggles.has("saude_atencao") && p.classe !== "atencao") return false
+    if (toggles.has("com_alertas") && p.alertas.length === 0) return false
     if (toggles.has("sem_contrato") && p.has_active_contract) return false
     if (toggles.has("a_vencer") && !p.contrato_a_vencer) return false
     if (toggles.has("sem_doc") && p.has_documentation) return false
     if (toggles.has("dados_pessoais") && !p.tem_dados_pessoais) return false
-    if (toggles.has("criticos") && !p.is_critico) return false
     return true
-  }), [products, q, fStatus, fCategoria, fCriticidade, fTipoDev, fArea, fForn, toggles])
+  }), [products, q, fCategoria, fLifecycle, fPO, toggles])
 
   function toggle(t: Toggle) {
     setToggles((cur) => { const n = new Set(cur); n.has(t) ? n.delete(t) : n.add(t); return n })
+  }
+
+  async function handleDelete(p: ProductListItem) {
+    if (!confirm(`Inativar "${p.name}"? (exclusão lógica, preserva histórico)`)) return
+    setDeletingId(p.id)
+    try {
+      await produtosApi.deleteProduct(p.id)
+      toast.info("Produto inativado.")
+      await reload()
+    } catch (e) {
+      toast.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Falha ao inativar.")
+    } finally {
+      setDeletingId(null)
+    }
   }
 
   if (loading) return <Skeleton className="h-64 w-full" />
@@ -93,16 +130,12 @@ export default function ProductsPage() {
           action={{ label: "Novo produto", onClick: () => setOpenNew(true) }} />
       ) : (
         <>
-          {/* Filtros */}
           <div className="space-y-2 rounded-md border p-3">
             <div className="flex flex-wrap items-end gap-2">
-              <div className="space-y-1"><Label className="text-[11px]">Buscar</Label><Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nome ou sigla" className="h-9 w-48" /></div>
-              <FilterSelect label="Status" value={fStatus} onChange={setFStatus} options={Object.entries(STATUS_LABEL)} />
+              <div className="space-y-1"><Label className="text-[11px]">Buscar</Label><Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nome" className="h-9 w-48" /></div>
               <FilterSelect label="Categoria" value={fCategoria} onChange={setFCategoria} options={Object.entries(CATEGORIA_LABEL)} />
-              <FilterSelect label="Criticidade" value={fCriticidade} onChange={setFCriticidade} options={Object.entries(CRITICIDADE_LABEL)} />
-              <FilterSelect label="Tipo dev." value={fTipoDev} onChange={setFTipoDev} options={Object.entries(TIPODEV_LABEL)} />
-              <FilterSelect label="Área" value={fArea} onChange={setFArea} options={areas.map((a) => [a, a])} />
-              <FilterSelect label="Fornecedor" value={fForn} onChange={setFForn} options={forns.map((a) => [a, a])} />
+              <FilterSelect label="Ciclo de vida" value={fLifecycle} onChange={setFLifecycle} options={LIFECYCLE_OPTS.map((v) => [v, LIFECYCLE_LABEL[v]])} allLabel="Todos" />
+              <FilterSelect label="Product Owner" value={fPO} onChange={setFPO} options={poOptions} allLabel="Todos os POs" />
             </div>
             <div className="flex flex-wrap gap-1.5">
               {TOGGLES.map((t) => (
@@ -115,41 +148,69 @@ export default function ProductsPage() {
             </div>
           </div>
 
-          {/* Tabela */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-md border bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
+            <span className="font-semibold uppercase tracking-wide">Legenda de alertas</span>
+            {ALERTA_LEGENDA.map(({ code, label, nivel }) => {
+              const Icon = ALERTA_ICON[code]
+              return (
+                <span key={code} className="inline-flex items-center gap-1">
+                  <Icon size={13} className={nivel === "alto" ? "text-red-600" : "text-amber-600"} /> {label}
+                </span>
+              )
+            })}
+            <span className="ml-auto inline-flex items-center gap-2">
+              <span className="inline-flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-full bg-red-600" /> alto</span>
+              <span className="inline-flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-full bg-amber-600" /> médio</span>
+            </span>
+          </div>
+
           <div className="overflow-x-auto rounded-md border">
-            <table className="w-full min-w-[1100px] text-sm">
+            <table className="w-full min-w-[1050px] text-sm">
               <thead className="border-b bg-muted/40 text-left text-[11px] uppercase text-muted-foreground">
                 <tr>
-                  {["Produto", "Categoria", "Status", "Criticidade", "Área", "Resp. TI", "Tipo dev.", "Fornecedor", "Contrato", "Fim contrato", "Últ. release", "Documentação"].map((h) => (
+                  {["Produto", "Serviços", "Saúde", "Alertas", "Ciclo de vida", "Categoria", "Resp. (PO)", "Resp. técnico", "Contrato", "Fim contrato", "Últ. release", "Documentação"].map((h) => (
                     <th key={h} className="whitespace-nowrap px-3 py-2 font-semibold">{h}</th>
                   ))}
+                  <th className="w-10 px-3 py-2" />
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((p) => (
-                  <tr key={p.id} className="cursor-pointer border-b transition last:border-0 hover:bg-muted/40"
+                  <tr key={p.id} className="group cursor-pointer border-b transition last:border-0 hover:bg-muted/40"
                     onClick={() => navigate(`/app/modules/produtos/produtos/${p.id}`)}>
                     <td className="px-3 py-2">
                       <div className="flex items-center gap-1.5 font-medium">
-                        {p.simbolo ? <span>{p.simbolo}</span> : null}
                         <span>{p.name}</span>
-                        {p.sigla && <span className="text-[11px] text-muted-foreground">({p.sigla})</span>}
                         {p.tem_dados_pessoais && <ShieldAlert size={12} className="text-amber-600" aria-label="Trata dados pessoais" />}
                       </div>
                     </td>
+                    <td className="px-3 py-2 text-center tabular-nums">{p.servicos_count ?? 0}</td>
+                    <td className="px-3 py-2">
+                      <span title={`Saúde: ${SAUDE_LABEL[p.classe]} (${p.score}/100)`}
+                        className="inline-flex min-w-[2.25rem] items-center justify-center gap-1 rounded-full border px-1.5 py-0.5 text-[11px] font-semibold tabular-nums"
+                        style={{ backgroundColor: `${SAUDE_COLOR[p.classe]}1a`, color: SAUDE_COLOR[p.classe], borderColor: `${SAUDE_COLOR[p.classe]}55` }}>
+                        {p.score}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2">
+                      {p.alertas.length === 0
+                        ? <span className="text-muted-foreground">—</span>
+                        : <div className="flex items-center gap-1.5">
+                            {p.alertas.map((a) => {
+                              const Icon = ALERTA_ICON[a.code]
+                              return (
+                                <span key={a.code} title={a.message} aria-label={a.message}
+                                  className={a.nivel === "alto" ? "text-red-600" : "text-amber-600"}>
+                                  <Icon size={15} />
+                                </span>
+                              )
+                            })}
+                          </div>}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{LIFECYCLE_LABEL[p.lifecycle]}</td>
                     <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{p.categoria ? CATEGORIA_LABEL[p.categoria] : "—"}</td>
-                    <td className="whitespace-nowrap px-3 py-2">
-                      {p.status_produto
-                        ? <Badge variant="secondary" className="text-[10px]" style={{ backgroundColor: `${STATUS_COLOR[p.status_produto]}22`, color: STATUS_COLOR[p.status_produto] }}>{STATUS_LABEL[p.status_produto]}</Badge>
-                        : <span className="text-muted-foreground">—</span>}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2">
-                      <Badge variant="secondary" className="text-[10px]" style={{ backgroundColor: `${CRITICIDADE_COLOR[p.criticidade]}22`, color: CRITICIDADE_COLOR[p.criticidade] }}>{CRITICIDADE_LABEL[p.criticidade]}</Badge>
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{p.area_name ?? "—"}</td>
                     <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{p.responsavel_nome ?? "—"}</td>
-                    <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{p.tipo_desenvolvimento ? TIPODEV_LABEL[p.tipo_desenvolvimento] : "—"}</td>
-                    <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{p.fornecedor_nome ?? "—"}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{p.responsavel_tecnico_nome ?? "—"}</td>
                     <td className="whitespace-nowrap px-3 py-2">
                       {p.contrato_status
                         ? <Badge variant="secondary" className="text-[10px]" style={{ backgroundColor: `${CONTRATO_STATUS_COLOR[p.contrato_status]}22`, color: CONTRATO_STATUS_COLOR[p.contrato_status] }}>{CONTRATO_STATUS_LABEL[p.contrato_status]}</Badge>
@@ -162,10 +223,23 @@ export default function ProductsPage() {
                         ? <Badge variant="secondary" className="text-[10px]" style={{ backgroundColor: `${DOCNT_STATUS_COLOR[p.doc_status]}22`, color: DOCNT_STATUS_COLOR[p.doc_status] }}>{DOCNT_STATUS_LABEL[p.doc_status]}</Badge>
                         : <span className="text-muted-foreground">—</span>}
                     </td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center opacity-0 transition group-hover:opacity-100">
+                        <Button
+                          size="icon" variant="ghost"
+                          className="h-7 w-7 text-destructive hover:text-destructive"
+                          title="Inativar produto"
+                          onClick={(e) => { e.stopPropagation(); void handleDelete(p) }}
+                          disabled={deletingId === p.id}
+                        >
+                          {deletingId === p.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                        </Button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={12} className="px-3 py-8 text-center text-sm text-muted-foreground">Nenhum produto corresponde aos filtros.</td></tr>
+                  <tr><td colSpan={13} className="px-3 py-8 text-center text-sm text-muted-foreground">Nenhum produto corresponde aos filtros.</td></tr>
                 )}
               </tbody>
             </table>
@@ -179,14 +253,14 @@ export default function ProductsPage() {
   )
 }
 
-function FilterSelect({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: [string, string][] }) {
+function FilterSelect({ label, value, onChange, options, allLabel = "Todos" }: { label: string; value: string; onChange: (v: string) => void; options: [string, string][]; allLabel?: string }) {
   return (
     <div className="space-y-1">
       <Label className="text-[11px]">{label}</Label>
       <Select value={value} onValueChange={onChange}>
         <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
         <SelectContent>
-          <SelectItem value={ALL}>Todos</SelectItem>
+          <SelectItem value={ALL}>{allLabel}</SelectItem>
           {options.map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
         </SelectContent>
       </Select>

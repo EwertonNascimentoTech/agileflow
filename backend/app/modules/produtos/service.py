@@ -1,11 +1,13 @@
 """Lógica de negócio do módulo Produtos (Portfólio)."""
 
+import os
 import uuid
+from collections import defaultdict
 from datetime import date, datetime
 from typing import Optional
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import storage
@@ -22,11 +24,13 @@ from app.modules.produtos.models import (
     DocumentoTipo,
     Fornecedor,
     IntegracaoTipo,
+    NivelDadosPessoais,
     RiscoIndisponibilidade,
     SuporteTipo,
     Processo,
     ProcessoNivel,
     ProcessItemNivel,
+    ProcessItemStatus,
     ProcessPortfolio,
     ProcessPortfolioItem,
     ProcessPortfolioVersion,
@@ -37,6 +41,7 @@ from app.modules.produtos.models import (
     ProductCriticidade,
     ProductDocumentation,
     ProductDocumento,
+    ProductHealthConfig,
     ProductLifecycle,
     ProductModeloContratacao,
     ProductOrigem,
@@ -65,8 +70,110 @@ def _now() -> datetime:
     return datetime.utcnow()
 
 
+def _nivel_lgpd_to_bools(nivel: str | None) -> tuple[bool, bool]:
+    if nivel == NivelDadosPessoais.DADOS_SENSIVEIS.value:
+        return True, True
+    if nivel == NivelDadosPessoais.DADOS_PESSOAIS.value:
+        return True, False
+    return False, False
+
+
+def _resolve_lgpd_fields(
+    nivel: str | None,
+    dados_pessoais: bool | None,
+    dados_sensiveis: bool | None,
+) -> tuple[bool, bool, NivelDadosPessoais]:
+    if nivel is not None:
+        pessoais, sensiveis = _nivel_lgpd_to_bools(nivel)
+        return pessoais, sensiveis, NivelDadosPessoais(nivel)
+    pessoais = bool(dados_pessoais)
+    sensiveis = bool(dados_sensiveis)
+    if sensiveis:
+        return pessoais, sensiveis, NivelDadosPessoais.DADOS_SENSIVEIS
+    if pessoais:
+        return pessoais, sensiveis, NivelDadosPessoais.DADOS_PESSOAIS
+    return False, False, NivelDadosPessoais.SEM_DADOS
+
+
+def _detect_documento_formato(filename: str | None, content_type: str | None) -> str | None:
+    ext_map = {
+        ".pdf": "pdf", ".xlsx": "xlsx", ".xls": "xls", ".docx": "docx", ".doc": "doc",
+        ".xml": "xml", ".csv": "csv", ".txt": "txt",
+        ".png": "imagem", ".jpg": "imagem", ".jpeg": "imagem", ".gif": "imagem",
+        ".webp": "imagem", ".svg": "imagem", ".bmp": "imagem",
+    }
+    if filename:
+        ext = os.path.splitext(filename)[1].lower()
+        if ext in ext_map:
+            return ext_map[ext]
+    if content_type:
+        ct = content_type.lower().split(";")[0].strip()
+        mime_map = {
+            "application/pdf": "pdf",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+            "application/vnd.ms-excel": "xls",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+            "application/msword": "doc",
+            "application/xml": "xml", "text/xml": "xml",
+            "text/csv": "csv", "text/plain": "txt",
+            "image/png": "imagem", "image/jpeg": "imagem", "image/gif": "imagem",
+            "image/webp": "imagem", "image/svg+xml": "imagem", "image/bmp": "imagem",
+        }
+        return mime_map.get(ct)
+    return None
+
+
+def _documento_ano_referencia(data_documento: date | None, ano_referencia: int | None) -> int:
+    if data_documento is not None:
+        return data_documento.year
+    if ano_referencia is not None:
+        return ano_referencia
+    return date.today().year
+
+
 def _ev(x):
     return x.value if hasattr(x, "value") else x
+
+
+def _months_ago(d: Optional[date], today: date, months: int = 12) -> bool:
+    """True se a data d é anterior a `months` meses atrás de today (None => False)."""
+    return d is not None and (today - d).days > months * 365 // 12
+
+
+def _tipo_from_categoria(cat) -> Optional[str]:
+    """Deriva interno/externo da categoria unificada (Sistema interno* → interno; senão externo)."""
+    cat = _ev(cat) if cat is not None else None
+    if not cat:
+        return None
+    return "interno" if str(cat).startswith("sistema_interno") else "externo"
+
+
+# Tabela do score de saúde/maturidade: (code, label, peso PADRÃO). Aplicabilidade e "passa"
+# são calculados por produto em ProductService._health. Os pesos e limiares podem ser
+# customizados por tenant em produto_health_config (ver HealthConfigService).
+_HEALTH_CHECKS = [
+    ("servicos_cadastrados", "Serviços cadastrados", 20),
+    ("contrato_vigente", "Contrato vigente", 20),
+    ("release_recente", "Release recente (≤12m)", 15),
+    ("documentacao", "Documentação", 15),
+    ("referencia_tecnica", "Referência técnica válida", 15),
+    ("sustentacao_sla", "Sustentação/SLA definida", 10),
+    ("avaliacao_seguranca", "Avaliação de segurança", 10),
+    ("processo_vinculado", "Processo vinculado", 5),
+]
+_HEALTH_DEFAULT_WEIGHTS = {code: w for code, _lbl, w in _HEALTH_CHECKS}
+_HEALTH_APLICABILIDADE = {
+    "servicos_cadastrados": "Só aplica a produtos em produção.",
+    "contrato_vigente": "Só aplica a produtos externos / que exigem contrato.",
+    "release_recente": "Só aplica a produtos em produção que já têm release.",
+    "documentacao": "Aplica a todos, exceto descontinuados.",
+    "referencia_tecnica": "Aplica a todos os produtos.",
+    "sustentacao_sla": "Aplica a produtos em produção ou desenvolvimento.",
+    "avaliacao_seguranca": "Aplica a todos os produtos.",
+    "processo_vinculado": "Só aplica a produtos em produção.",
+}
+_HEALTH_DEFAULT_LIMIAR_SAUDAVEL = 75
+_HEALTH_DEFAULT_LIMIAR_ATENCAO = 40
 
 
 def _contrato_effective_status(c, today: date) -> Optional[str]:
@@ -156,6 +263,145 @@ class ProductService:
         return any(c.is_active and c.vigencia_fim >= today for c in p.contratos)
 
     @staticmethod
+    async def _tech_reference_ids(db: AsyncSession) -> set:
+        """Ids das pessoas cujo cargo é Referência Técnica (mesma regra de `list_tech_references`)."""
+        from sqlalchemy import or_
+        from app.modules.teamops.models import Position
+        rows = await db.execute(
+            select(Person.id)
+            .join(Position, Position.id == Person.position_id)
+            .where(or_(
+                Position.slug == "tech_reference",
+                func.lower(Position.name).like("%refer%cnic%"),
+            ))
+        )
+        return set(rows.scalars().all())
+
+    @staticmethod
+    async def _load_health_params(db: AsyncSession) -> tuple[dict, int, int]:
+        """Carrega pesos e limiares do score (config do tenant ou padrões). Read-only — não grava."""
+        cfg = (await db.execute(select(ProductHealthConfig).limit(1))).scalar_one_or_none()
+        if cfg is None:
+            return ({}, _HEALTH_DEFAULT_LIMIAR_SAUDAVEL, _HEALTH_DEFAULT_LIMIAR_ATENCAO)
+        return (cfg.weights or {}, cfg.limiar_saudavel, cfg.limiar_atencao)
+
+    @staticmethod
+    def _compute_alertas(p: Product, *, has_doc: bool, has_active_contract: bool,
+                         tech_ref_ids: set, today: Optional[date] = None) -> list[schemas.ProductAlerta]:
+        """Inteligência de portfólio: problemas de controle derivados do estado do produto."""
+        today = today or date.today()
+        alertas: list[schemas.ProductAlerta] = []
+        lifecycle = _ev(p.lifecycle)
+        tipo_dev = _ev(p.tipo_desenvolvimento) if p.tipo_desenvolvimento else None
+        servicos_ativos = sum(1 for s in p.servicos if s.is_active)
+
+        # 1) Em produção sem nenhum serviço cadastrado → portfólio desatualizado.
+        if lifecycle == "producao" and servicos_ativos == 0:
+            alertas.append(schemas.ProductAlerta(
+                code="producao_sem_servico", nivel="alto",
+                message="Em produção sem serviços cadastrados — portfólio desatualizado.",
+            ))
+        # 2) Responsável técnico informado não é Referência Técnica no TeamOps.
+        if p.responsavel_tecnico_person_id and p.responsavel_tecnico_person_id not in tech_ref_ids:
+            alertas.append(schemas.ProductAlerta(
+                code="tecnico_nao_referencia", nivel="medio",
+                message="Responsável técnico não é uma Referência Técnica cadastrada no TeamOps.",
+            ))
+        # 3) Sem documentação (exceto descontinuados).
+        if not has_doc and lifecycle != "descontinuado":
+            alertas.append(schemas.ProductAlerta(
+                code="sem_documentacao", nivel="medio",
+                message="Sem documentação cadastrada.",
+            ))
+        # 4) Ferramenta externa sem contrato vigente.
+        if tipo_dev == "externo" and not has_active_contract:
+            alertas.append(schemas.ProductAlerta(
+                code="externo_sem_contrato", nivel="alto",
+                message="Ferramenta externa sem contrato vigente.",
+            ))
+        # 5) Em produção, com releases, mas a última passou de 12 meses → produto parado.
+        releases_com_data = [r for r in p.releases if r.is_active and r.data_release]
+        if lifecycle == "producao" and releases_com_data:
+            ult = max(releases_com_data, key=lambda r: r.data_release)
+            if _months_ago(ult.data_release, today, 12):
+                alertas.append(schemas.ProductAlerta(
+                    code="produto_parado", nivel="alto",
+                    message="Em produção sem releases há mais de 12 meses — possível produto parado.",
+                ))
+        # 6) Documentação ativa em estado obsoleto / que necessita atualização.
+        if any(d.is_active and _ev(d.status) in ("obsoleta", "necessita_atualizacao") for d in p.documentations):
+            alertas.append(schemas.ProductAlerta(
+                code="doc_desatualizada", nivel="medio",
+                message="Documentação obsoleta ou que necessita atualização.",
+            ))
+        return alertas
+
+    @classmethod
+    def _health(cls, p: Product, *, today: date, has_active_contract: bool, tech_ref_ids: set,
+                weights: Optional[dict] = None,
+                lim_saud: int = _HEALTH_DEFAULT_LIMIAR_SAUDAVEL,
+                lim_aten: int = _HEALTH_DEFAULT_LIMIAR_ATENCAO) -> schemas.ProductHealth:
+        """Score 0–100 ponderado de saúde/maturidade, com breakdown transparente. Puro em memória.
+        `weights`/`lim_*` vêm da config do tenant (None => pesos/limiares padrão)."""
+        weights = weights or {}
+        lifecycle = _ev(p.lifecycle)
+        tipo_dev = _ev(p.tipo_desenvolvimento) if p.tipo_desenvolvimento else None
+
+        servicos_ativos = [s for s in p.servicos if s.is_active]
+        releases_com_data = [r for r in p.releases if r.is_active and r.data_release]
+        ult_rel = max(releases_com_data, key=lambda r: r.data_release, default=None)
+        docs_ativas = [d for d in p.documentations if d.is_active]
+        docs_validas = [d for d in docs_ativas if _ev(d.status) not in ("nao_iniciada", "obsoleta")]
+        proc_ativos = [l for l in p.processos if l.is_active]
+        support = next((s for s in p.supports if s.is_active), None)
+        security = next((s for s in p.security if s.is_active), None)
+
+        # (aplicável?, passou?) por code
+        defs = {
+            "servicos_cadastrados": (lifecycle == "producao",
+                                     len(servicos_ativos) > 0),
+            "contrato_vigente": (cls._requires_contract(p) or tipo_dev == "externo",
+                                 has_active_contract),
+            "release_recente": (lifecycle == "producao" and len(releases_com_data) > 0,
+                                ult_rel is not None and not _months_ago(ult_rel.data_release, today, 12)),
+            "documentacao": (lifecycle != "descontinuado",
+                             len(docs_validas) > 0),
+            "referencia_tecnica": (True,
+                                   bool(p.responsavel_tecnico_person_id) and p.responsavel_tecnico_person_id in tech_ref_ids),
+            "sustentacao_sla": (lifecycle in ("producao", "desenvolvimento"),
+                                support is not None and support.tipo is not None
+                                and any([support.sla_critico, support.sla_medio, support.sla_solicitacao])),
+            "avaliacao_seguranca": (True,
+                                    security is not None and security.risco_indisponibilidade is not None),
+            "processo_vinculado": (lifecycle == "producao",
+                                   len(proc_ativos) > 0),
+        }
+
+        checks: list[schemas.HealthCheck] = []
+        applicable_weight = 0
+        passed_weight = 0
+        for code, label, default_weight in _HEALTH_CHECKS:
+            weight = int(weights.get(code, default_weight))
+            applicable, passed = defs[code]
+            if not applicable:
+                status = "na"
+            else:
+                applicable_weight += weight
+                if passed:
+                    passed_weight += weight
+                    status = "pass"
+                else:
+                    status = "fail"
+            checks.append(schemas.HealthCheck(code=code, label=label, status=status, weight=weight))
+
+        score = 100 if applicable_weight == 0 else round(passed_weight / applicable_weight * 100)
+        classe = "saudavel" if score >= lim_saud else ("atencao" if score >= lim_aten else "critico")
+        return schemas.ProductHealth(
+            score=score, classe=classe,
+            applicable_weight=applicable_weight, passed_weight=passed_weight, checks=checks,
+        )
+
+    @staticmethod
     async def _processos_index(db: AsyncSession) -> dict:
         rows = await db.execute(select(Processo))
         return {pr.id: pr for pr in rows.scalars().all()}
@@ -173,11 +419,66 @@ class ProductService:
             ano_referencia=link.ano_referencia, automatizado=link.automatizado, is_active=link.is_active,
         )
 
+    @staticmethod
+    async def _stacks_map(db: AsyncSession, ids: list[uuid.UUID]) -> dict[uuid.UUID, schemas.StackMini]:
+        if not ids:
+            return {}
+        from app.modules.teamops.models import Stack, StackCategory
+        rows = await db.execute(
+            select(Stack, StackCategory.name)
+            .join(StackCategory, StackCategory.id == Stack.category_id)
+            .where(Stack.id.in_(ids))
+        )
+        return {
+            s.id: schemas.StackMini(id=s.id, name=s.name, category=cat)
+            for s, cat in rows.all()
+        }
+
+    @staticmethod
+    async def _resolve_stacks(db: AsyncSession, ids) -> list[schemas.StackMini]:
+        """Resolve a lista de ids de stack (JSONB do produto) em StackMini, preservando a ordem."""
+        if not ids:
+            return []
+        from app.modules.teamops.models import Stack, StackCategory
+        uuids: list[uuid.UUID] = []
+        for i in ids:
+            try:
+                uuids.append(uuid.UUID(str(i)))
+            except (ValueError, TypeError):
+                pass
+        if not uuids:
+            return []
+        rows = await db.execute(
+            select(Stack, StackCategory.name)
+            .join(StackCategory, StackCategory.id == Stack.category_id)
+            .where(Stack.id.in_(uuids))
+        )
+        by_id = {s.id: (s, cat) for s, cat in rows.all()}
+        out: list[schemas.StackMini] = []
+        for i in uuids:
+            if i in by_id:
+                s, cat = by_id[i]
+                out.append(schemas.StackMini(id=s.id, name=s.name, category=cat))
+        return out
+
+    @staticmethod
+    async def list_stacks(db: AsyncSession) -> list[schemas.StackMini]:
+        """Catálogo de stacks ativas (reusa team_stacks) — para o multi-select do produto."""
+        from app.modules.teamops.models import Stack, StackCategory
+        rows = await db.execute(
+            select(Stack, StackCategory.name)
+            .join(StackCategory, StackCategory.id == Stack.category_id)
+            .where(Stack.is_active.is_(True))
+            .order_by(StackCategory.name.asc(), Stack.name.asc())
+        )
+        return [schemas.StackMini(id=s.id, name=s.name, category=cat) for s, cat in rows.all()]
+
     @classmethod
     async def _to_response(cls, db: AsyncSession, p: Product) -> schemas.ProductResponse:
         today = date.today()
         index = await _areas_index(db)
         pidx = await cls._processos_index(db)
+        stacks_mini = await cls._resolve_stacks(db, p.stacks or [])
         area_ref = None
         setor = None
         if p.area is not None:
@@ -186,12 +487,18 @@ class ProductService:
         active_proc = [l for l in p.processos if l.is_active]
         support = next((s for s in p.supports if s.is_active), None)
         security = next((s for s in p.security if s.is_active), None)
+        tech_ref_ids = await cls._tech_reference_ids(db)
+        hw, hsaud, haten = await cls._load_health_params(db)
+        health = cls._health(p, today=today, has_active_contract=cls._has_active_contract(p, today),
+                             tech_ref_ids=tech_ref_ids, weights=hw, lim_saud=hsaud, lim_aten=haten)
         return schemas.ProductResponse(
             id=p.id, name=p.name, simbolo=p.simbolo, description=p.description, dominio_funcional=p.dominio_funcional,
             origem=_ev(p.origem), lifecycle=_ev(p.lifecycle), criticidade=_ev(p.criticidade),
             data_entrada_producao=p.data_entrada_producao,
             area=area_ref, setor_name=setor,
             responsavel=schemas.PersonMini(id=p.responsavel.id, full_name=p.responsavel.full_name) if p.responsavel else None,
+            responsavel_tecnico=schemas.PersonMini(id=p.responsavel_tecnico.id, full_name=p.responsavel_tecnico.full_name) if p.responsavel_tecnico else None,
+            stacks=stacks_mini,
             fornecedor=schemas.FornecedorResponse.model_validate(p.fornecedor) if p.fornecedor else None,
             origin_task_id=p.origin_task_id, is_active=p.is_active,
             requires_contract=cls._requires_contract(p), has_active_contract=cls._has_active_contract(p, today),
@@ -207,7 +514,10 @@ class ProductService:
             modelo_contratacao=_ev(p.modelo_contratacao) if p.modelo_contratacao else None,
             ambiente_tecnologico=p.ambiente_tecnologico, tecnologias=p.tecnologias,
             link_repositorio=p.link_repositorio, link_dev=p.link_dev, link_hml=p.link_hml, link_prd=p.link_prd,
-            servicos=[schemas.ServicoResponse.model_validate(s) for s in sorted(p.servicos, key=lambda x: x.order) if s.is_active],
+            login_idigital=p.login_idigital, corporativo=p.corporativo,
+            servicos=await ProcessPortfolioService.servicos_with_links(
+                db, [s for s in p.servicos if s.is_active],
+            ),
             documentos=[schemas.DocumentoResponse.model_validate(d) for d in sorted(p.documentos, key=lambda x: x.order) if d.is_active],
             processos=[cls._link_response(l, pidx) for l in active_proc],
             contratos=[cls._contrato_response(c, pidx_persons=None) for c in p.contratos if c.is_active],
@@ -215,6 +525,7 @@ class ProductService:
             documentations=[_doc_to_resp(d) for d in sorted(p.documentations, key=lambda x: x.created_at) if d.is_active],
             support=schemas.SupportResponse.model_validate(support) if support else None,
             security=schemas.SecurityResponse.model_validate(security) if security else None,
+            health=health,
         )
 
     @staticmethod
@@ -254,14 +565,63 @@ class ProductService:
         rows = await db.execute(select(Person).order_by(Person.full_name.asc()))
         return [schemas.PersonMini(id=p.id, full_name=p.full_name) for p in rows.scalars().all()]
 
+    @staticmethod
+    async def list_pos(db: AsyncSession) -> list[schemas.PersonMini]:
+        """Pessoas ativas cujo cargo é PO/Product Owner — para o campo Responsável."""
+        from app.modules.teamops.models import PersonStatus, Position
+        rows = await db.execute(
+            select(Person)
+            .join(Position, Position.id == Person.position_id)
+            .where(Position.slug.in_(["po", "product_owner"]), Person.status == PersonStatus.ATIVO)
+            .order_by(Person.full_name.asc())
+        )
+        return [schemas.PersonMini(id=p.id, full_name=p.full_name) for p in rows.scalars().all()]
+
+    @staticmethod
+    async def list_tech_references(db: AsyncSession) -> list[schemas.PersonMini]:
+        """Pessoas ativas cujo cargo é Referência Técnica — para o Responsável técnico.
+
+        Cobre o slug padrão (`tech_reference`) e variantes geradas a partir do nome
+        do cargo (ex.: `refer_ncia_t_cnica`), casando também pelo nome "Referência Técnica"."""
+        from sqlalchemy import or_
+        from app.modules.teamops.models import PersonStatus, Position
+        rows = await db.execute(
+            select(Person)
+            .join(Position, Position.id == Person.position_id)
+            .where(
+                Person.status == PersonStatus.ATIVO,
+                or_(
+                    Position.slug == "tech_reference",
+                    func.lower(Position.name).like("%refer%cnic%"),
+                ),
+            )
+            .order_by(Person.full_name.asc())
+        )
+        return [schemas.PersonMini(id=p.id, full_name=p.full_name) for p in rows.scalars().all()]
+
     # ── CRUD produto ──────────────────────────
     @classmethod
     async def list_products(cls, db: AsyncSession) -> list[schemas.ProductListItem]:
         today = date.today()
         index = await _areas_index(db)
+        tech_ref_ids = await cls._tech_reference_ids(db)
+        hw, hsaud, haten = await cls._load_health_params(db)
         res = await db.execute(select(Product).where(Product.is_active.is_(True)).order_by(Product.created_at.desc()))
+        products = list(res.scalars().all())
+        all_uuids: list[uuid.UUID] = []
+        per_product_uuids: list[list[uuid.UUID]] = []
+        for p in products:
+            uuids: list[uuid.UUID] = []
+            for i in p.stacks or []:
+                try:
+                    uuids.append(uuid.UUID(str(i)))
+                except (ValueError, TypeError):
+                    pass
+            per_product_uuids.append(uuids)
+            all_uuids.extend(uuids)
+        stack_map = await cls._stacks_map(db, list(dict.fromkeys(all_uuids)))
         out = []
-        for p in res.scalars().all():
+        for p, stack_uuids in zip(products, per_product_uuids):
             area_name = p.area.name if p.area else None
             setor = _setor_name(p.area, index) if p.area else None
             # contrato vigente (maior vigencia_fim entre os ativos)
@@ -276,11 +636,20 @@ class ProductService:
             docs_ativas = [d for d in p.documentations if d.is_active]
             ult_doc = max(docs_ativas, key=lambda d: d.created_at, default=None)
             tem_dp = any(d.dados_pessoais for d in p.documentos if d.is_active) or any(s.dados_pessoais for s in p.security if s.is_active)
+            has_active_contract = cls._has_active_contract(p, today)
+            alertas = cls._compute_alertas(
+                p, has_doc=len(docs_ativas) > 0, has_active_contract=has_active_contract,
+                tech_ref_ids=tech_ref_ids, today=today,
+            )
+            health = cls._health(p, today=today, has_active_contract=has_active_contract,
+                                 tech_ref_ids=tech_ref_ids, weights=hw, lim_saud=hsaud, lim_aten=haten)
+            servicos_count = sum(1 for s in p.servicos if s.is_active)
             out.append(schemas.ProductListItem(
                 id=p.id, name=p.name, simbolo=p.simbolo, origem=_ev(p.origem), lifecycle=_ev(p.lifecycle),
                 criticidade=_ev(p.criticidade), area_name=area_name, setor_name=setor,
                 responsavel_nome=p.responsavel.full_name if p.responsavel else None,
-                requires_contract=cls._requires_contract(p), has_active_contract=cls._has_active_contract(p, today),
+                responsavel_tecnico_nome=p.responsavel_tecnico.full_name if p.responsavel_tecnico else None,
+                requires_contract=cls._requires_contract(p), has_active_contract=has_active_contract,
                 is_active=p.is_active, created_at=p.created_at,
                 sigla=p.sigla, categoria=_ev(p.categoria) if p.categoria else None,
                 unidade=_ev(p.unidade) if p.unidade else None,
@@ -295,6 +664,11 @@ class ProductService:
                 has_documentation=len(docs_ativas) > 0,
                 tem_dados_pessoais=tem_dp,
                 is_critico=p.criticidade == ProductCriticidade.CRITICA,
+                corporativo=p.corporativo,
+                alertas=alertas,
+                score=health.score, classe=health.classe,
+                servicos_count=servicos_count,
+                stacks=[stack_map[i] for i in stack_uuids if i in stack_map],
             ))
         return out
 
@@ -304,10 +678,16 @@ class ProductService:
 
     @classmethod
     async def create(cls, db: AsyncSession, data: schemas.ProductCreate, user_id: Optional[uuid.UUID]) -> schemas.ProductResponse:
+        corporativo = bool(data.corporativo)
+        # Produto corporativo: o PO não fica no produto e sim nos serviços.
+        responsavel_id = None if corporativo else data.responsavel_person_id
         p = Product(
             name=data.name.strip(), simbolo=data.simbolo, description=data.description, dominio_funcional=data.dominio_funcional,
             origem=ProductOrigem(data.origem), lifecycle=ProductLifecycle(data.lifecycle), criticidade=ProductCriticidade(data.criticidade),
-            data_entrada_producao=data.data_entrada_producao, area_id=data.area_id, responsavel_person_id=data.responsavel_person_id,
+            data_entrada_producao=data.data_entrada_producao, area_id=data.area_id, responsavel_person_id=responsavel_id,
+            corporativo=corporativo,
+            responsavel_tecnico_person_id=data.responsavel_tecnico_person_id,
+            stacks=[str(s) for s in (data.stack_ids or [])],
             fornecedor_id=data.fornecedor_id, origin_task_id=data.origin_task_id, created_by=user_id,
             # campos novos "Produtos Digitais"
             sigla=data.sigla, link_descricao=data.link_descricao,
@@ -316,11 +696,13 @@ class ProductService:
             dono_negocio_person_id=data.dono_negocio_person_id, publico_alvo=data.publico_alvo,
             url_acesso=data.url_acesso, observacoes=data.observacoes,
             status_produto=ProductStatus(data.status_produto) if data.status_produto else None,
-            tipo_desenvolvimento=ProductTipoDesenvolvimento(data.tipo_desenvolvimento) if data.tipo_desenvolvimento else None,
+            # tipo_desenvolvimento é derivado da categoria (interno/externo) — não é mais campo de entrada
+            tipo_desenvolvimento=ProductTipoDesenvolvimento(_tipo_from_categoria(data.categoria)) if data.categoria else None,
             desenvolvido_por=data.desenvolvido_por, fornecedor_cnpj=data.fornecedor_cnpj,
             modelo_contratacao=ProductModeloContratacao(data.modelo_contratacao) if data.modelo_contratacao else None,
             ambiente_tecnologico=data.ambiente_tecnologico, tecnologias=data.tecnologias,
             link_repositorio=data.link_repositorio, link_dev=data.link_dev, link_hml=data.link_hml, link_prd=data.link_prd,
+            login_idigital=bool(data.login_idigital),
         )
         db.add(p)
         await db.commit()
@@ -332,13 +714,17 @@ class ProductService:
         p = await cls._get(db, product_id)
         payload = data.model_dump(exclude_unset=True)
         for field in ("name", "simbolo", "description", "dominio_funcional", "data_entrada_producao",
-                      "area_id", "responsavel_person_id", "fornecedor_id", "is_active",
+                      "area_id", "responsavel_person_id", "responsavel_tecnico_person_id", "fornecedor_id", "is_active",
                       "sigla", "link_descricao", "dono_negocio_person_id", "publico_alvo", "url_acesso",
                       "observacoes", "desenvolvido_por", "fornecedor_cnpj", "ambiente_tecnologico",
-                      "tecnologias", "link_repositorio", "link_dev", "link_hml", "link_prd"):
+                      "tecnologias", "link_repositorio", "link_dev", "link_hml", "link_prd", "login_idigital",
+                      "corporativo"):
             if field in payload:
                 val = payload[field]
                 setattr(p, field, val.strip() if isinstance(val, str) and field == "name" else val)
+        # Produto corporativo: o PO não fica no produto e sim nos serviços.
+        if p.corporativo:
+            p.responsavel_person_id = None
         if "origem" in payload and payload["origem"]:
             p.origem = ProductOrigem(payload["origem"])
         if "lifecycle" in payload and payload["lifecycle"]:
@@ -348,14 +734,17 @@ class ProductService:
         # enums opcionais novos (None limpa o campo)
         if "categoria" in payload:
             p.categoria = ProductCategoria(payload["categoria"]) if payload["categoria"] else None
+            # tipo_desenvolvimento é derivado da categoria (interno/externo)
+            tipo = _tipo_from_categoria(payload["categoria"])
+            p.tipo_desenvolvimento = ProductTipoDesenvolvimento(tipo) if tipo else None
         if "unidade" in payload:
             p.unidade = ProductUnidade(payload["unidade"]) if payload["unidade"] else None
         if "status_produto" in payload:
             p.status_produto = ProductStatus(payload["status_produto"]) if payload["status_produto"] else None
-        if "tipo_desenvolvimento" in payload:
-            p.tipo_desenvolvimento = ProductTipoDesenvolvimento(payload["tipo_desenvolvimento"]) if payload["tipo_desenvolvimento"] else None
         if "modelo_contratacao" in payload:
             p.modelo_contratacao = ProductModeloContratacao(payload["modelo_contratacao"]) if payload["modelo_contratacao"] else None
+        if "stack_ids" in payload:
+            p.stacks = [str(s) for s in (payload["stack_ids"] or [])]
         p.updated_by = user_id
         p.updated_at = _now()
         await db.commit()
@@ -372,20 +761,34 @@ class ProductService:
         await db.commit()
 
     # ── Serviços (append-only history) ────────
+    @staticmethod
+    def _servico_publicacao(
+        data: schemas.ServicoCreate | schemas.ServicoUpdate,
+        *,
+        fallback_ano: int | None = None,
+        fallback_pub: date | None = None,
+    ) -> tuple[date, int]:
+        pub = data.data_publicacao or fallback_pub or date.today()
+        ano = data.ano_referencia or pub.year or fallback_ano or date.today().year
+        return pub, ano
+
     @classmethod
     async def add_servico(cls, db, product_id, data: schemas.ServicoCreate, user_id) -> schemas.ServicoResponse:
         await cls._get(db, product_id)
         order = (await db.execute(select(func.coalesce(func.max(ProductServico.order), -1)).where(ProductServico.product_id == product_id))).scalar_one() + 1
+        pub, ano = cls._servico_publicacao(data)
         item = ProductServico(product_id=product_id, name=data.name.strip(), description=data.description,
-                              ano_referencia=data.ano_referencia or date.today().year, order=order, created_by=user_id,
+                              data_publicacao=pub, ano_referencia=ano, order=order, created_by=user_id,
+                              responsavel_person_id=data.responsavel_person_id,
                               area_usuaria=data.area_usuaria, processo_relacionado=data.processo_relacionado,
                               disponibilidade=data.disponibilidade, sla_atendimento=data.sla_atendimento,
                               tipo_suporte=ServicoTipoSuporte(data.tipo_suporte) if data.tipo_suporte else None,
-                              status_servico=ServicoStatus(data.status_servico) if data.status_servico else None)
+                              status_servico=ServicoStatus(data.status_servico))
         db.add(item)
         await db.commit()
         await db.refresh(item)
-        return schemas.ServicoResponse.model_validate(item)
+        links = await ProcessPortfolioService.list_service_links(db, item.id)
+        return schemas.ServicoResponse.model_validate(item).model_copy(update={"process_links": links})
 
     @classmethod
     async def update_servico(cls, db, product_id, servico_id, data: schemas.ServicoCreate, user_id) -> schemas.ServicoResponse:
@@ -397,16 +800,29 @@ class ProductService:
         old.is_active = False
         old.inactivated_by = user_id
         old.inactivated_at = _now()
+        pub, ano = cls._servico_publicacao(data, fallback_ano=old.ano_referencia, fallback_pub=old.data_publicacao)
         new = ProductServico(product_id=product_id, name=data.name.strip(), description=data.description,
-                             ano_referencia=data.ano_referencia or old.ano_referencia, order=old.order, created_by=user_id,
+                             data_publicacao=pub, ano_referencia=ano, order=old.order, created_by=user_id,
+                             responsavel_person_id=(data.responsavel_person_id
+                                                    if data.responsavel_person_id is not None
+                                                    else old.responsavel_person_id),
                              area_usuaria=data.area_usuaria, processo_relacionado=data.processo_relacionado,
                              disponibilidade=data.disponibilidade, sla_atendimento=data.sla_atendimento,
                              tipo_suporte=ServicoTipoSuporte(data.tipo_suporte) if data.tipo_suporte else None,
-                             status_servico=ServicoStatus(data.status_servico) if data.status_servico else None)
+                             status_servico=ServicoStatus(data.status_servico) if data.status_servico else old.status_servico)
         db.add(new)
+        await db.flush()
+        # Append-only cria uma nova linha de serviço; preserva os vínculos de sub-processo
+        # migrando-os do serviço antigo para o novo.
+        await db.execute(
+            update(ProcessServiceLink)
+            .where(ProcessServiceLink.servico_id == old.id, ProcessServiceLink.is_active.is_(True))
+            .values(servico_id=new.id)
+        )
         await db.commit()
         await db.refresh(new)
-        return schemas.ServicoResponse.model_validate(new)
+        links = await ProcessPortfolioService.list_service_links(db, new.id)
+        return schemas.ServicoResponse.model_validate(new).model_copy(update={"process_links": links})
 
     @classmethod
     async def delete_servico(cls, db, product_id, servico_id, user_id) -> None:
@@ -426,16 +842,25 @@ class ProductService:
         if not data.object_name and not data.external_link:
             raise HTTPException(status_code=400, detail="Envie um arquivo ou informe um link externo.")
         order = (await db.execute(select(func.coalesce(func.max(ProductDocumento.order), -1)).where(ProductDocumento.product_id == product_id))).scalar_one() + 1
-        item = ProductDocumento(product_id=product_id, name=data.name.strip(), ano_referencia=data.ano_referencia or date.today().year,
-                                object_name=data.object_name, filename=data.filename, content_type=data.content_type, size=data.size,
-                                category=data.category, external_link=data.external_link, uploaded_by=user_id, created_by=user_id, order=order,
-                                tipo_documento=DocumentoTipo(data.tipo_documento) if data.tipo_documento else None,
-                                is_nato_digital=data.is_nato_digital if data.is_nato_digital is not None else True,
-                                assinatura_digital=bool(data.assinatura_digital), trilha_auditoria=bool(data.trilha_auditoria),
-                                local_armazenamento=data.local_armazenamento, prazo_retencao=data.prazo_retencao,
-                                classificacao=ClassificacaoInformacao(data.classificacao) if data.classificacao else None,
-                                dados_pessoais=bool(data.dados_pessoais), dados_sensiveis=bool(data.dados_sensiveis),
-                                observacoes=data.observacoes)
+        data_doc = data.data_documento
+        ano = _documento_ano_referencia(data_doc, data.ano_referencia)
+        formato = data.formato or _detect_documento_formato(data.filename, data.content_type)
+        pessoais, sensiveis, nivel = _resolve_lgpd_fields(
+            data.nivel_dados_pessoais, data.dados_pessoais, data.dados_sensiveis,
+        )
+        item = ProductDocumento(
+            product_id=product_id, name=data.name.strip(), data_documento=data_doc, ano_referencia=ano,
+            object_name=data.object_name, filename=data.filename, content_type=data.content_type, size=data.size,
+            category=data.category, external_link=data.external_link, uploaded_by=user_id, created_by=user_id, order=order,
+            tipo_documento=DocumentoTipo(data.tipo_documento) if data.tipo_documento else None,
+            formato=formato, origem_sistema=(data.origem_sistema.strip() if data.origem_sistema else None),
+            is_nato_digital=data.is_nato_digital if data.is_nato_digital is not None else True,
+            assinatura_digital=bool(data.assinatura_digital), trilha_auditoria=bool(data.trilha_auditoria),
+            local_armazenamento=data.local_armazenamento, prazo_retencao=data.prazo_retencao,
+            classificacao=ClassificacaoInformacao(data.classificacao) if data.classificacao else None,
+            nivel_dados_pessoais=nivel, dados_pessoais=pessoais, dados_sensiveis=sensiveis,
+            observacoes=data.observacoes,
+        )
         db.add(item)
         await db.commit()
         await db.refresh(item)
@@ -448,14 +873,33 @@ class ProductService:
         if not item:
             raise HTTPException(status_code=404, detail="Documento não encontrado.")
         payload = data.model_dump(exclude_unset=True)
-        for f in ("name", "ano_referencia", "category", "external_link", "is_nato_digital", "assinatura_digital",
-                  "trilha_auditoria", "local_armazenamento", "prazo_retencao", "dados_pessoais", "dados_sensiveis", "observacoes"):
+        for f in ("name", "category", "external_link", "is_nato_digital", "assinatura_digital",
+                  "trilha_auditoria", "local_armazenamento", "prazo_retencao", "observacoes", "formato", "origem_sistema"):
             if f in payload:
-                setattr(item, f, payload[f].strip() if isinstance(payload[f], str) and f == "name" else payload[f])
+                val = payload[f]
+                if isinstance(val, str) and f in ("name", "origem_sistema"):
+                    val = val.strip() or None
+                setattr(item, f, val)
+        if "data_documento" in payload:
+            item.data_documento = payload["data_documento"]
+            if payload["data_documento"] is not None:
+                item.ano_referencia = payload["data_documento"].year
+        elif "ano_referencia" in payload and payload["ano_referencia"] is not None:
+            item.ano_referencia = payload["ano_referencia"]
         if "tipo_documento" in payload:
             item.tipo_documento = DocumentoTipo(payload["tipo_documento"]) if payload["tipo_documento"] else None
         if "classificacao" in payload:
             item.classificacao = ClassificacaoInformacao(payload["classificacao"]) if payload["classificacao"] else None
+        if "nivel_dados_pessoais" in payload or "dados_pessoais" in payload or "dados_sensiveis" in payload:
+            nivel_in = payload.get("nivel_dados_pessoais")
+            pessoais, sensiveis, nivel = _resolve_lgpd_fields(
+                nivel_in,
+                payload.get("dados_pessoais", item.dados_pessoais),
+                payload.get("dados_sensiveis", item.dados_sensiveis),
+            )
+            item.nivel_dados_pessoais = nivel
+            item.dados_pessoais = pessoais
+            item.dados_sensiveis = sensiveis
         item.updated_by = user_id
         item.updated_at = _now()
         await db.commit()
@@ -686,6 +1130,202 @@ class ProductService:
             sem_documentacao=sem_doc, criticos=criticos, com_dados_pessoais=com_dp,
             com_plano_contingencia=com_contingencia, releases_publicadas_mes=int(rel_mes),
         )
+
+    # ── Inteligência de portfólio ─────────────
+    _ALERT_LABELS = {
+        "producao_sem_servico": "Em produção sem serviços",
+        "tecnico_nao_referencia": "Responsável técnico não é Referência Técnica",
+        "sem_documentacao": "Sem documentação",
+        "externo_sem_contrato": "Externo sem contrato vigente",
+        "produto_parado": "Produto parado (sem releases ≥12m)",
+        "doc_desatualizada": "Documentação desatualizada",
+    }
+    _CRIT_WEIGHT = {"critica": 4, "alta": 3, "media": 2, "baixa": 1}
+
+    @classmethod
+    async def portfolio_intelligence(cls, db: AsyncSession) -> schemas.PortfolioInteligencia:
+        today = date.today()
+        tech_ref_ids = await cls._tech_reference_ids(db)
+        hw, hsaud, haten = await cls._load_health_params(db)
+        products = list((await db.execute(select(Product).where(Product.is_active.is_(True)))).scalars().all())
+
+        distribuicao = {"saudavel": 0, "atencao": 0, "critico": 0}
+        matriz: dict[tuple[str, str], int] = {}
+        pend_counts: dict[str, int] = {}
+        pend_meta: dict[str, str] = {}     # code -> nivel
+        parados: list[schemas.ProdutoParadoItem] = []
+        doc_debt: list[schemas.DocDebtItem] = []
+        scored: list[tuple] = []           # (Product, ProductHealth)
+        soma = 0
+
+        for p in products:
+            has_active_contract = cls._has_active_contract(p, today)
+            docs_ativas = [d for d in p.documentations if d.is_active]
+            health = cls._health(p, today=today, has_active_contract=has_active_contract,
+                                 tech_ref_ids=tech_ref_ids, weights=hw, lim_saud=hsaud, lim_aten=haten)
+            scored.append((p, health))
+            soma += health.score
+            distribuicao[health.classe] += 1
+            crit = _ev(p.criticidade)
+            matriz[(crit, health.classe)] = matriz.get((crit, health.classe), 0) + 1
+
+            for a in cls._compute_alertas(p, has_doc=len(docs_ativas) > 0,
+                                          has_active_contract=has_active_contract,
+                                          tech_ref_ids=tech_ref_ids, today=today):
+                pend_counts[a.code] = pend_counts.get(a.code, 0) + 1
+                pend_meta[a.code] = a.nivel
+
+            rel = [r for r in p.releases if r.is_active and r.data_release]
+            if _ev(p.lifecycle) == "producao" and rel:
+                ult = max(rel, key=lambda r: r.data_release)
+                if _months_ago(ult.data_release, today, 12):
+                    parados.append(schemas.ProdutoParadoItem(
+                        id=p.id, name=p.name, ultima_release_date=ult.data_release,
+                        meses=(today - ult.data_release).days // 30))
+
+            debt = [d for d in docs_ativas if _ev(d.status) in ("obsoleta", "necessita_atualizacao")]
+            if debt:
+                ult_doc = max(debt, key=lambda d: d.created_at)
+                doc_debt.append(schemas.DocDebtItem(id=p.id, name=p.name, doc_status=_ev(ult_doc.status)))
+
+        # top risco: maior (peso da criticidade × gap de score)
+        top = sorted(scored, key=lambda t: cls._CRIT_WEIGHT.get(_ev(t[0].criticidade), 1) * (100 - t[1].score), reverse=True)[:10]
+        top_risco = [
+            schemas.TopRiscoItem(
+                id=p.id, name=p.name, score=h.score, classe=h.classe, criticidade=_ev(p.criticidade),
+                principais_gaps=[c.label for c in sorted(
+                    [c for c in h.checks if c.status == "fail"], key=lambda c: c.weight, reverse=True)][:3],
+            )
+            for p, h in top if h.classe != "saudavel"
+        ]
+
+        parados.sort(key=lambda x: x.ultima_release_date or date.min)
+        return schemas.PortfolioInteligencia(
+            media_score=round(soma / len(products), 1) if products else 0.0,
+            distribuicao=distribuicao,
+            matriz_risco=[schemas.MatrizRiscoCell(criticidade=c, classe=cl, count=n)
+                          for (c, cl), n in sorted(matriz.items())],
+            top_risco=top_risco,
+            pendencias=[schemas.PendenciaAgg(code=code, nivel=pend_meta[code],
+                                             label=cls._ALERT_LABELS.get(code, code), count=n)
+                        for code, n in sorted(pend_counts.items(), key=lambda kv: -kv[1])],
+            produtos_parados=parados,
+            doc_debt=doc_debt,
+        )
+
+    @classmethod
+    async def contratos_intelligence(cls, db: AsyncSession) -> schemas.ContratosInteligencia:
+        today = date.today()
+        products = list((await db.execute(select(Product).where(Product.is_active.is_(True)))).scalars().all())
+
+        valor_total = 0.0
+        por_tipo: dict[str, float] = {}
+        tipos_vistos: set[str] = set()
+        forn: dict = {}
+        buckets = {"vencidos": 0, "ate_30": 0, "ate_60": 0, "ate_90": 0, "acima_90": 0}
+        sem_renov: list[schemas.ContratoAVencerItem] = []
+
+        for p in products:
+            for c in p.contratos:
+                if not c.is_active:
+                    continue
+                valor = float(c.valor) if c.valor is not None else None
+                tipo = _ev(c.tipo_valor) if c.tipo_valor else "indefinido"
+                if valor is not None:
+                    valor_total += valor
+                    por_tipo[tipo] = por_tipo.get(tipo, 0.0) + valor
+                    tipos_vistos.add(tipo)
+
+                dias = (c.vigencia_fim - today).days
+                if dias < 0:
+                    buckets["vencidos"] += 1
+                elif dias <= 30:
+                    buckets["ate_30"] += 1
+                elif dias <= 60:
+                    buckets["ate_60"] += 1
+                elif dias <= 90:
+                    buckets["ate_90"] += 1
+                else:
+                    buckets["acima_90"] += 1
+
+                if 0 <= dias <= 90 and not c.renovacao_automatica:
+                    sem_renov.append(schemas.ContratoAVencerItem(
+                        contrato_id=c.id, product_id=p.id, product_name=p.name,
+                        fornecedor_nome=c.fornecedor.nome if c.fornecedor else None,
+                        vigencia_fim=c.vigencia_fim, dias_para_vencer=dias, valor=valor))
+
+                fid = c.fornecedor_id
+                slot = forn.setdefault(fid, {
+                    "nome": c.fornecedor.nome if c.fornecedor else "—",
+                    "produtos": set(), "contratos": 0, "valor": 0.0, "prox": None})
+                slot["produtos"].add(p.id)
+                slot["contratos"] += 1
+                if valor is not None:
+                    slot["valor"] += valor
+                if slot["prox"] is None or c.vigencia_fim < slot["prox"]:
+                    slot["prox"] = c.vigencia_fim
+
+        valor_ambiguo = len({t for t in tipos_vistos if t in ("mensal", "anual", "global")}) > 1 or \
+            ("mensal" in tipos_vistos and "indefinido" in tipos_vistos)
+        por_fornecedor = sorted(
+            [schemas.FornecedorContratoAgg(
+                fornecedor_id=fid, fornecedor_nome=v["nome"],
+                produtos_count=len(v["produtos"]), contratos_count=v["contratos"],
+                valor_total=round(v["valor"], 2), proximo_vencimento=v["prox"])
+             for fid, v in forn.items()],
+            key=lambda x: -x.valor_total)
+        sem_renov.sort(key=lambda x: x.dias_para_vencer)
+
+        return schemas.ContratosInteligencia(
+            valor_total=round(valor_total, 2),
+            valor_total_por_tipo={k: round(v, 2) for k, v in por_tipo.items()},
+            valor_ambiguo=valor_ambiguo,
+            por_fornecedor=por_fornecedor,
+            buckets_vencimento=buckets,
+            sem_renovacao_avencer=sem_renov,
+        )
+
+
+class HealthConfigService:
+    """Configuração (por tenant) dos pesos e limiares do Índice de Saúde. Singleton lazy:
+    a linha só é criada na primeira gravação; até lá valem os padrões de `_HEALTH_CHECKS`."""
+
+    _VALID_CODES = {code for code, _l, _w in _HEALTH_CHECKS}
+
+    @staticmethod
+    async def get(db: AsyncSession) -> schemas.HealthConfigResponse:
+        cfg = (await db.execute(select(ProductHealthConfig).limit(1))).scalar_one_or_none()
+        weights = (cfg.weights or {}) if cfg else {}
+        return schemas.HealthConfigResponse(
+            checks=[
+                schemas.HealthConfigCheck(
+                    code=code, label=label,
+                    weight=int(weights.get(code, default_weight)),
+                    default_weight=default_weight,
+                    aplicabilidade=_HEALTH_APLICABILIDADE.get(code, ""),
+                )
+                for code, label, default_weight in _HEALTH_CHECKS
+            ],
+            limiar_saudavel=cfg.limiar_saudavel if cfg else _HEALTH_DEFAULT_LIMIAR_SAUDAVEL,
+            limiar_atencao=cfg.limiar_atencao if cfg else _HEALTH_DEFAULT_LIMIAR_ATENCAO,
+            is_customizado=cfg is not None,
+        )
+
+    @classmethod
+    async def update(cls, db: AsyncSession, data: schemas.HealthConfigUpdate,
+                     user_id: Optional[uuid.UUID]) -> schemas.HealthConfigResponse:
+        cfg = (await db.execute(select(ProductHealthConfig).limit(1))).scalar_one_or_none()
+        if cfg is None:
+            cfg = ProductHealthConfig()
+            db.add(cfg)
+        # mantém só os códigos conhecidos
+        cfg.weights = {c: int(w) for c, w in data.weights.items() if c in cls._VALID_CODES}
+        cfg.limiar_saudavel = data.limiar_saudavel
+        cfg.limiar_atencao = data.limiar_atencao
+        cfg.updated_by = user_id
+        cfg.updated_at = _now()
+        await db.commit()
+        return await cls.get(db)
 
 
 MARKDOWN_TEMPLATE = """# Nome do Produto
@@ -1188,8 +1828,8 @@ class AlertaService:
 _PP_ITEM_FIELDS = [
     "nivel", "codigo", "name", "description", "diretoria", "area", "analista", "dono", "order",
     "analista_person_id", "dono_person_id", "area_id",
-    "vigencia_inicio", "vigencia_fim", "documentado", "data_documentacao",
-    "doc_previsao_inicio", "doc_previsao_fim", "anexos",
+    "vigencia_inicio", "vigencia_fim", "data_documentacao",
+    "doc_previsao_inicio", "doc_previsao_fim", "passagem_para_ti", "anexos",
     "status_item", "criticidade", "objetivo", "nivel_maturidade",
     "tipo_documento", "versao_documento", "proxima_revisao",
     "link_externo", "frequencia", "entradas", "saidas",
@@ -1197,9 +1837,11 @@ _PP_ITEM_FIELDS = [
 
 
 _PP_DOC_FIELDS = (
-    "documentado", "data_documentacao", "doc_previsao_inicio", "doc_previsao_fim",
+    "data_documentacao", "doc_previsao_inicio", "doc_previsao_fim",
     "anexos", "tipo_documento", "versao_documento", "proxima_revisao",
 )
+
+_PP_SUBPROCESSO_FIELDS = _PP_DOC_FIELDS + ("passagem_para_ti",)
 
 
 _PP_VIGENCIA_FIELDS = ("vigencia_inicio", "vigencia_fim")
@@ -1242,10 +1884,8 @@ class ProcessPortfolioService:
     def _strip_doc_fields(payload: dict, nivel: ProcessItemNivel) -> None:
         if _ev(nivel) == "subprocesso":
             return
-        payload["documentado"] = False
+        payload["passagem_para_ti"] = False
         for field in _PP_DOC_FIELDS:
-            if field == "documentado":
-                continue
             payload[field] = None
 
     @staticmethod
@@ -1254,6 +1894,99 @@ class ProcessPortfolioService:
             return
         payload["vigencia_inicio"] = None
         payload["vigencia_fim"] = None
+
+    @staticmethod
+    def _strip_status_field(payload: dict, nivel: ProcessItemNivel) -> None:
+        """Status de processo/macro é calculado a partir dos sub processos."""
+        if _ev(nivel) != "subprocesso":
+            payload.pop("status_item", None)
+
+    @staticmethod
+    def _aggregate_status(values: list[str]) -> Optional[ProcessItemStatus]:
+        if not values:
+            return None
+        if all(v == "concluido" for v in values):
+            return ProcessItemStatus.CONCLUIDO
+        if any(v == "em_andamento" for v in values):
+            return ProcessItemStatus.EM_ANDAMENTO
+        if all(v == "planejado" for v in values):
+            return ProcessItemStatus.PLANEJADO
+        return ProcessItemStatus.EM_ANDAMENTO
+
+    @classmethod
+    def _status_for_processo(
+        cls,
+        processo: ProcessPortfolioItem,
+        children_by_parent: dict,
+    ) -> Optional[ProcessItemStatus]:
+        subs = cls._collect_subprocesso_items(processo.id, children_by_parent)
+        if not subs:
+            return None
+        return cls._aggregate_status([_ev(s.status_item) for s in subs])
+
+    @classmethod
+    def _compute_status(
+        cls,
+        item: ProcessPortfolioItem,
+        children_by_parent: dict,
+    ) -> Optional[ProcessItemStatus]:
+        nivel = _ev(item.nivel)
+        if nivel == "subprocesso":
+            return item.status_item
+        if nivel == "processo":
+            return cls._status_for_processo(item, children_by_parent)
+        if nivel == "macroprocesso":
+            processos = [c for c in children_by_parent.get(item.id, []) if _ev(c.nivel) == "processo"]
+            proc_statuses: list[str] = []
+            for p in processos:
+                st = cls._status_for_processo(p, children_by_parent)
+                if st:
+                    proc_statuses.append(_ev(st))
+            return cls._aggregate_status(proc_statuses)
+        return None
+
+    @classmethod
+    def _apply_status_to_ancestor(
+        cls,
+        ancestor: ProcessPortfolioItem,
+        children_by_parent: dict,
+    ) -> None:
+        agg = cls._compute_status(ancestor, children_by_parent)
+        if agg is not None:
+            ancestor.status_item = agg
+
+    @classmethod
+    async def _recalculate_status_for_ancestors(
+        cls,
+        db,
+        version_id,
+        *,
+        item_id=None,
+        parent_id=None,
+    ) -> None:
+        items = await cls._items_of(db, version_id)
+        if not items:
+            return
+        items_by_id = {it.id: it for it in items}
+        children_by_parent = cls._children_map(items)
+        start = parent_id
+        if item_id and item_id in items_by_id:
+            start = items_by_id[item_id].parent_id
+        while start and start in items_by_id:
+            ancestor = items_by_id[start]
+            if _ev(ancestor.nivel) in ("processo", "macroprocesso"):
+                cls._apply_status_to_ancestor(ancestor, children_by_parent)
+            start = ancestor.parent_id
+
+    @classmethod
+    async def _recalculate_status_all_parents(cls, db, version_id) -> None:
+        items = await cls._items_of(db, version_id)
+        if not items:
+            return
+        children_by_parent = cls._children_map(items)
+        for it in items:
+            if _ev(it.nivel) in ("processo", "macroprocesso"):
+                cls._apply_status_to_ancestor(it, children_by_parent)
 
     @staticmethod
     def _children_map(items: list[ProcessPortfolioItem]) -> dict:
@@ -1344,8 +2077,9 @@ class ProcessPortfolioService:
             area_id=item.area_id,
             area_nome=item.team_area.name if item.team_area else None,
             vigencia_inicio=item.vigencia_inicio, vigencia_fim=item.vigencia_fim,
-            documentado=item.documentado, data_documentacao=item.data_documentacao,
+            data_documentacao=item.data_documentacao,
             doc_previsao_inicio=item.doc_previsao_inicio, doc_previsao_fim=item.doc_previsao_fim,
+            passagem_para_ti=item.passagem_para_ti,
             anexos=item.anexos, status_item=_ev(item.status_item), criticidade=_ev(item.criticidade) if item.criticidade else None,
             objetivo=item.objetivo, nivel_maturidade=_ev(item.nivel_maturidade) if item.nivel_maturidade else None,
             tipo_documento=item.tipo_documento, versao_documento=item.versao_documento,
@@ -1356,6 +2090,8 @@ class ProcessPortfolioService:
     @classmethod
     def _tree(cls, items: list[ProcessPortfolioItem]) -> list[schemas.ProcessItemResponse]:
         by_id = {it.id: cls._item_to_response(it) for it in items}
+        items_by_id = {it.id: it for it in items}
+        children_by_parent = cls._children_map(items)
         roots = []
         for it in items:
             node = by_id[it.id]
@@ -1363,6 +2099,11 @@ class ProcessPortfolioService:
                 by_id[it.parent_id].children.append(node)
             else:
                 roots.append(node)
+        for it in items:
+            if _ev(it.nivel) in ("processo", "macroprocesso"):
+                agg = cls._compute_status(it, children_by_parent)
+                if agg is not None:
+                    by_id[it.id].status_item = _ev(agg)
         return roots
 
     # ── portfolios ────────────────────────────
@@ -1527,6 +2268,7 @@ class ProcessPortfolioService:
                     clone.parent_id = id_map[old.parent_id].id
             await cls._clear_item_codigos(db, new_v.id)
             await cls._recalculate_vigencia_all_parents(db, new_v.id)
+            await cls._recalculate_status_all_parents(db, new_v.id)
         await db.commit()
         return await cls.get_version_tree(db, new_v.id)
 
@@ -1547,6 +2289,7 @@ class ProcessPortfolioService:
         p.updated_by = user_id
         p.updated_at = _now()
         await cls._clear_item_codigos(db, version_id)
+        await cls._recalculate_status_all_parents(db, version_id)
         await db.commit()
         return await cls.get_version_tree(db, v.id)
 
@@ -1587,12 +2330,14 @@ class ProcessPortfolioService:
         payload["nivel"] = ProcessItemNivel(data.nivel)
         cls._strip_doc_fields(payload, payload["nivel"])
         cls._strip_vigencia_fields(payload, payload["nivel"])
+        cls._strip_status_field(payload, payload["nivel"])
         item = ProcessPortfolioItem(version_id=version_id, created_by=user_id, **payload)
         db.add(item)
         await db.flush()
         await cls._clear_item_codigos(db, version_id)
         if _ev(item.nivel) == "subprocesso":
             await cls._recalculate_vigencia_for_ancestors(db, version_id, item_id=item.id)
+            await cls._recalculate_status_for_ancestors(db, version_id, item_id=item.id)
         await db.commit()
         await db.refresh(item)
         return cls._item_to_response(item)
@@ -1615,11 +2360,11 @@ class ProcessPortfolioService:
             updates["dono_person_id"] = None
         if "anexos" in updates and data.anexos is not None:
             updates["anexos"] = [a.model_dump() if hasattr(a, "model_dump") else a for a in data.anexos]
-        doc_patch = {k: updates[k] for k in _PP_DOC_FIELDS if k in updates}
+        doc_patch = {k: updates[k] for k in _PP_SUBPROCESSO_FIELDS if k in updates}
         if doc_patch and _ev(item.nivel) != "subprocesso":
             raise HTTPException(
                 status_code=400,
-                detail="Documentação só pode ser gerenciada em sub processos.",
+                detail="Documentação e passagem para TI só podem ser gerenciadas em sub processos.",
             )
         vig_patch = {k: updates[k] for k in _PP_VIGENCIA_FIELDS if k in updates}
         if vig_patch and _ev(item.nivel) != "subprocesso":
@@ -1627,12 +2372,15 @@ class ProcessPortfolioService:
                 status_code=400,
                 detail="Vigência só pode ser gerenciada em sub processos.",
             )
+        if "status_item" in updates and _ev(item.nivel) != "subprocesso":
+            updates.pop("status_item")
         for k, v in updates.items():
             setattr(item, k, v.strip() if isinstance(v, str) and k == "name" else v)
         item.updated_by = user_id
         item.updated_at = _now()
         if _ev(item.nivel) == "subprocesso":
             await cls._recalculate_vigencia_for_ancestors(db, version_id, item_id=item.id)
+            await cls._recalculate_status_for_ancestors(db, version_id, item_id=item.id)
         await db.commit()
         await db.refresh(item)
         return cls._item_to_response(item)
@@ -1650,6 +2398,7 @@ class ProcessPortfolioService:
         await db.flush()
         await cls._clear_item_codigos(db, version_id)
         await cls._recalculate_vigencia_for_ancestors(db, version_id, parent_id=parent_id)
+        await cls._recalculate_status_for_ancestors(db, version_id, parent_id=parent_id)
         await db.commit()
 
     @classmethod
@@ -1674,32 +2423,78 @@ class ProcessPortfolioService:
 
     # ── vínculo serviço ↔ sub-processo ────────
     @classmethod
-    async def list_service_links(cls, db, servico_id) -> list[schemas.ServiceLinkItem]:
-        links = (await db.execute(select(ProcessServiceLink).where(
-            ProcessServiceLink.servico_id == servico_id, ProcessServiceLink.is_active.is_(True),
-        ))).scalars().all()
+    async def _resolve_link_items(cls, db, links: list[ProcessServiceLink]) -> list[schemas.ServiceLinkItem]:
         if not links:
             return []
-        lineage_ids = [lk.item_lineage_id for lk in links]
-        # resolve nome via item da versão consolidada de cada portfólio
+        portfolio_ids = list({lk.portfolio_id for lk in links})
+        lineage_ids = list({lk.item_lineage_id for lk in links})
         portfolios = {p.id: p for p in (await db.execute(
-            select(ProcessPortfolio).where(ProcessPortfolio.id.in_([lk.portfolio_id for lk in links]))
+            select(ProcessPortfolio).where(ProcessPortfolio.id.in_(portfolio_ids))
         )).scalars().all()}
+
+        items_by_key: dict[tuple, ProcessPortfolioItem] = {}
+
         cur_ids = [p.current_version_id for p in portfolios.values() if p.current_version_id]
-        items_by_lineage: dict = {}
         if cur_ids:
-            for it in (await db.execute(select(ProcessPortfolioItem).where(
-                ProcessPortfolioItem.version_id.in_(cur_ids), ProcessPortfolioItem.lineage_id.in_(lineage_ids),
-            ))).scalars().all():
-                items_by_lineage[it.lineage_id] = it
+            for it, pf_id in (await db.execute(
+                select(ProcessPortfolioItem, ProcessPortfolioVersion.portfolio_id)
+                .join(ProcessPortfolioVersion, ProcessPortfolioVersion.id == ProcessPortfolioItem.version_id)
+                .where(
+                    ProcessPortfolioItem.version_id.in_(cur_ids),
+                    ProcessPortfolioItem.lineage_id.in_(lineage_ids),
+                )
+            )).all():
+                items_by_key[(pf_id, it.lineage_id)] = it
+
+        # Fallback quando current_version_id ainda não aponta para versão consolidada.
+        for it, pf_id, _ver in (await db.execute(
+            select(ProcessPortfolioItem, ProcessPortfolioVersion.portfolio_id, ProcessPortfolioVersion.version)
+            .join(ProcessPortfolioVersion, ProcessPortfolioVersion.id == ProcessPortfolioItem.version_id)
+            .where(
+                ProcessPortfolioVersion.portfolio_id.in_(portfolio_ids),
+                ProcessPortfolioItem.lineage_id.in_(lineage_ids),
+            )
+            .order_by(ProcessPortfolioVersion.version.desc())
+        )).all():
+            key = (pf_id, it.lineage_id)
+            if key not in items_by_key:
+                items_by_key[key] = it
+
         out = []
         for lk in links:
-            it = items_by_lineage.get(lk.item_lineage_id)
+            it = items_by_key.get((lk.portfolio_id, lk.item_lineage_id))
             out.append(schemas.ServiceLinkItem(
                 item_lineage_id=lk.item_lineage_id, portfolio_id=lk.portfolio_id,
                 name=it.name if it else None, codigo=it.codigo if it else None,
             ))
         return out
+
+    @classmethod
+    async def servicos_with_links(cls, db, servicos: list[ProductServico]) -> list[schemas.ServicoResponse]:
+        active = sorted(servicos, key=lambda x: x.order)
+        if not active:
+            return []
+        ids = [s.id for s in active]
+        links = (await db.execute(select(ProcessServiceLink).where(
+            ProcessServiceLink.servico_id.in_(ids), ProcessServiceLink.is_active.is_(True),
+        ))).scalars().all()
+        links_by_servico: dict[uuid.UUID, list[schemas.ServiceLinkItem]] = defaultdict(list)
+        resolved = await cls._resolve_link_items(db, links)
+        for lk, item in zip(links, resolved):
+            links_by_servico[lk.servico_id].append(item)
+        return [
+            schemas.ServicoResponse.model_validate(s).model_copy(
+                update={"process_links": links_by_servico.get(s.id, [])},
+            )
+            for s in active
+        ]
+
+    @classmethod
+    async def list_service_links(cls, db, servico_id) -> list[schemas.ServiceLinkItem]:
+        links = (await db.execute(select(ProcessServiceLink).where(
+            ProcessServiceLink.servico_id == servico_id, ProcessServiceLink.is_active.is_(True),
+        ))).scalars().all()
+        return await cls._resolve_link_items(db, links)
 
     @classmethod
     async def set_service_links(cls, db, servico_id, data: schemas.ServiceLinkSetRequest, user_id) -> list[schemas.ServiceLinkItem]:

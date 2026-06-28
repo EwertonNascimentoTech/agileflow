@@ -23,7 +23,7 @@ function BarRow({ label, value, max, color }: { label: string; value: number; ma
 
 export default function IndicadoresPage() {
   const [ano, setAno] = useState(YEAR)
-  const [groupBy, setGroupBy] = useState<GroupBy>("area")
+  const [groupBy, setGroupBy] = useState<GroupBy>("produto")
   const [data, setData] = useState<IndicadorResponse | null>(null)
   const [series, setSeries] = useState<IndicadorSeriesPoint[]>([])
   const [cons, setCons] = useState<ProcessoConsolidacaoNode[]>([])
