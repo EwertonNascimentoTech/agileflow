@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react"
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"
 import { AuthProvider } from "@/contexts/AuthContext"
 import { ThemeProvider } from "@/contexts/ThemeContext"
@@ -6,125 +7,140 @@ import { ErrorBoundary } from "@/components/ErrorBoundary"
 import ProtectedRoute from "@/components/ProtectedRoute"
 import ModuleConfigGuard from "@/components/ModuleConfigGuard"
 
+// Todas as páginas/layouts abaixo são carregadas sob demanda (code splitting por
+// rota). Sem isto, o bundle inicial embute o JS de TODOS os módulos (~100 páginas,
+// incl. recharts/dnd-kit/telas de 1500-2000 linhas) antes do primeiro paint.
+
 // ── Auth ──────────────────────────────────────────────────────────────
-import LoginPage from "@/modules/auth/LoginPage"
-import ForgotPasswordPage from "@/modules/auth/ForgotPasswordPage"
+const LoginPage = lazy(() => import("@/modules/auth/LoginPage"))
+const ForgotPasswordPage = lazy(() => import("@/modules/auth/ForgotPasswordPage"))
+const FirstAccessPage = lazy(() => import("@/modules/auth/FirstAccessPage"))
 
 // ── Super Admin ───────────────────────────────────────────────────────
-import AdminLayout from "@/modules/super-admin/AdminLayout"
-import AdminDashboardPage from "@/modules/super-admin/DashboardPage"
-import TenantsPage from "@/modules/super-admin/TenantsPage"
-import TenantDetailPage from "@/modules/super-admin/TenantDetailPage"
-import AdminModulesPage from "@/modules/super-admin/ModulesPage"
-import AdminsPage from "@/modules/super-admin/AdminsPage"
+const AdminLayout = lazy(() => import("@/modules/super-admin/AdminLayout"))
+const AdminDashboardPage = lazy(() => import("@/modules/super-admin/DashboardPage"))
+const TenantsPage = lazy(() => import("@/modules/super-admin/TenantsPage"))
+const TenantDetailPage = lazy(() => import("@/modules/super-admin/TenantDetailPage"))
+const AdminModulesPage = lazy(() => import("@/modules/super-admin/ModulesPage"))
+const AdminsPage = lazy(() => import("@/modules/super-admin/AdminsPage"))
 
 // ── Company (admin do tenant, dentro de crm) ──────────────────────────
-import CompanyLayout from "@/modules/crm/AppLayout"
-import CompanyDashboardPage from "@/modules/crm/admin/DashboardPage"
-import SettingsLayout from "@/modules/crm/admin/SettingsLayout"
-import UsersPage from "@/modules/crm/admin/UsersPage"
-import RolesPage from "@/modules/crm/admin/RolesPage"
-import SettingsPage from "@/modules/crm/admin/SettingsPage"
+const CompanyLayout = lazy(() => import("@/modules/crm/AppLayout"))
+const CompanyDashboardPage = lazy(() => import("@/modules/crm/admin/DashboardPage"))
+const SettingsLayout = lazy(() => import("@/modules/crm/admin/SettingsLayout"))
+const UsersPage = lazy(() => import("@/modules/crm/admin/UsersPage"))
+const RolesPage = lazy(() => import("@/modules/crm/admin/RolesPage"))
+const SettingsPage = lazy(() => import("@/modules/crm/admin/SettingsPage"))
 
 // ── Pública (proposta com token sem auth) ─────────────────────────────
-import PublicProposalPage from "@/modules/crm/proposals/PublicProposalPage"
+const PublicProposalPage = lazy(() => import("@/modules/crm/proposals/PublicProposalPage"))
 
 // ── CRM (módulo unificado) ────────────────────────────────────────────
-import CrmLayout from "@/modules/crm/CrmLayout"
-import CrmKanbanPage from "@/modules/crm/KanbanPage"
-import CrmDashboardPage from "@/modules/crm/DashboardPage"
-import CrmClientsPage from "@/modules/crm/ClientsPage"
-import CrmClientDetailPage from "@/modules/crm/ClientDetailPage"
-import CrmAttendanceDetailPage from "@/modules/crm/AttendanceDetailPage"
-import CrmCompaniesPage from "@/modules/crm/CompaniesPage"
-import CrmCompanyDetailPage from "@/modules/crm/CompanyDetailPage"
-import CrmNewAttendanceOpenRedirect from "@/modules/crm/NewAttendanceOpenRedirect"
-import CrmConfigPage from "@/modules/crm/config/ConfigPage"
-import CrmFunnelsConfigPage from "@/modules/crm/config/FunnelsConfigPage"
-import CrmStatusConfigPage from "@/modules/crm/config/StatusConfigPage"
-import CrmChannelsConfigPage from "@/modules/crm/config/ChannelsConfigPage"
-import CrmAutomationsConfigPage from "@/modules/crm/config/AutomationsConfigPage"
-import CrmFollowUpConfigPage from "@/modules/crm/config/FollowUpConfigPage"
-import CrmReactivationConfigPage from "@/modules/crm/config/ReactivationConfigPage"
-import CrmProposalsListPage from "@/modules/crm/proposals/ProposalsListPage"
-import CrmNewProposalPage from "@/modules/crm/proposals/NewProposalPage"
-import CrmProposalDetailPage from "@/modules/crm/proposals/ProposalDetailPage"
-import CrmProposalPrintView from "@/modules/crm/proposals/ProposalPrintView"
-import CrmProposalsDashboardPage from "@/modules/crm/proposals/DashboardPage"
-import CrmProposalTemplatesPage from "@/modules/crm/proposals/ProposalTemplatesPage"
-import CrmContractsListPage from "@/modules/crm/proposals/ContractsListPage"
-import CrmContractDetailPage from "@/modules/crm/proposals/ContractDetailPage"
+const CrmLayout = lazy(() => import("@/modules/crm/CrmLayout"))
+const CrmKanbanPage = lazy(() => import("@/modules/crm/KanbanPage"))
+const CrmDashboardPage = lazy(() => import("@/modules/crm/DashboardPage"))
+const CrmClientsPage = lazy(() => import("@/modules/crm/ClientsPage"))
+const CrmClientDetailPage = lazy(() => import("@/modules/crm/ClientDetailPage"))
+const CrmAttendanceDetailPage = lazy(() => import("@/modules/crm/AttendanceDetailPage"))
+const CrmCompaniesPage = lazy(() => import("@/modules/crm/CompaniesPage"))
+const CrmCompanyDetailPage = lazy(() => import("@/modules/crm/CompanyDetailPage"))
+const CrmNewAttendanceOpenRedirect = lazy(() => import("@/modules/crm/NewAttendanceOpenRedirect"))
+const CrmConfigPage = lazy(() => import("@/modules/crm/config/ConfigPage"))
+const CrmFunnelsConfigPage = lazy(() => import("@/modules/crm/config/FunnelsConfigPage"))
+const CrmStatusConfigPage = lazy(() => import("@/modules/crm/config/StatusConfigPage"))
+const CrmChannelsConfigPage = lazy(() => import("@/modules/crm/config/ChannelsConfigPage"))
+const CrmAutomationsConfigPage = lazy(() => import("@/modules/crm/config/AutomationsConfigPage"))
+const CrmFollowUpConfigPage = lazy(() => import("@/modules/crm/config/FollowUpConfigPage"))
+const CrmReactivationConfigPage = lazy(() => import("@/modules/crm/config/ReactivationConfigPage"))
+const CrmProposalsListPage = lazy(() => import("@/modules/crm/proposals/ProposalsListPage"))
+const CrmNewProposalPage = lazy(() => import("@/modules/crm/proposals/NewProposalPage"))
+const CrmProposalDetailPage = lazy(() => import("@/modules/crm/proposals/ProposalDetailPage"))
+const CrmProposalPrintView = lazy(() => import("@/modules/crm/proposals/ProposalPrintView"))
+const CrmProposalsDashboardPage = lazy(() => import("@/modules/crm/proposals/DashboardPage"))
+const CrmProposalTemplatesPage = lazy(() => import("@/modules/crm/proposals/ProposalTemplatesPage"))
+const CrmContractsListPage = lazy(() => import("@/modules/crm/proposals/ContractsListPage"))
+const CrmContractDetailPage = lazy(() => import("@/modules/crm/proposals/ContractDetailPage"))
 
 // ── Estoque ───────────────────────────────────────────────────────────
-import EstoqueLayout from "@/modules/estoque/EstoqueLayout"
-import EstoqueDashboardPage from "@/modules/estoque/DashboardPage"
-import EstoqueProductsPage from "@/modules/estoque/ProductsPage"
-import EstoqueProductDetailPage from "@/modules/estoque/ProductDetailPage"
-import EstoqueProductTypesPage from "@/modules/estoque/ProductTypesPage"
-import EstoqueCategoriesPage from "@/modules/estoque/CategoriesPage"
-import EstoqueWarehousesPage from "@/modules/estoque/WarehousesPage"
-import EstoqueSuppliersPage from "@/modules/estoque/SuppliersPage"
-import EstoqueStockPage from "@/modules/estoque/StockPage"
-import EstoqueMovementsPage from "@/modules/estoque/MovementsPage"
-import EstoqueBatchesPage from "@/modules/estoque/BatchesPage"
-import EstoqueSerialsPage from "@/modules/estoque/SerialsPage"
-import EstoqueConfigPage from "@/modules/estoque/ConfigPage"
+const EstoqueLayout = lazy(() => import("@/modules/estoque/EstoqueLayout"))
+const EstoqueDashboardPage = lazy(() => import("@/modules/estoque/DashboardPage"))
+const EstoqueProductsPage = lazy(() => import("@/modules/estoque/ProductsPage"))
+const EstoqueProductDetailPage = lazy(() => import("@/modules/estoque/ProductDetailPage"))
+const EstoqueProductTypesPage = lazy(() => import("@/modules/estoque/ProductTypesPage"))
+const EstoqueCategoriesPage = lazy(() => import("@/modules/estoque/CategoriesPage"))
+const EstoqueWarehousesPage = lazy(() => import("@/modules/estoque/WarehousesPage"))
+const EstoqueSuppliersPage = lazy(() => import("@/modules/estoque/SuppliersPage"))
+const EstoqueStockPage = lazy(() => import("@/modules/estoque/StockPage"))
+const EstoqueMovementsPage = lazy(() => import("@/modules/estoque/MovementsPage"))
+const EstoqueBatchesPage = lazy(() => import("@/modules/estoque/BatchesPage"))
+const EstoqueSerialsPage = lazy(() => import("@/modules/estoque/SerialsPage"))
+const EstoqueConfigPage = lazy(() => import("@/modules/estoque/ConfigPage"))
 
 // ── PDV ───────────────────────────────────────────────────────────────
-import PdvLayout from "@/modules/pdv/PdvLayout"
-import PdvPosPage from "@/modules/pdv/PosPage"
-import PdvCashSessionPage from "@/modules/pdv/CashSessionPage"
-import PdvSalesHistoryPage from "@/modules/pdv/SalesHistoryPage"
-import PdvSaleDetailPage from "@/modules/pdv/SaleDetailPage"
-import PdvReceiptPrintView from "@/modules/pdv/ReceiptPrintView"
-import PdvDashboardPage from "@/modules/pdv/DashboardPage"
-import PdvPaymentMethodsConfigPage from "@/modules/pdv/PaymentMethodsConfigPage"
-import ProjetosLayout from "@/modules/projetos/ProjetosLayout"
-import ProjectBoardPage from "@/modules/projetos/ProjectBoardPage"
-import ProjectConfigHomePage from "@/modules/projetos/config/ProjectConfigHomePage"
-import ProjectDefaultFormConfigPage from "@/modules/projetos/config/ProjectDefaultFormConfigPage"
-import ProjectDemandTypesConfigPage from "@/modules/projetos/config/ProjectDemandTypesConfigPage"
-import ProjectDemandTypeFormEditorPage from "@/modules/projetos/config/ProjectDemandTypeFormEditorPage"
-import ProjectFunnelsConfigPage from "@/modules/projetos/config/ProjectFunnelsConfigPage"
-import ProjectStatusesConfigPage from "@/modules/projetos/config/ProjectStatusesConfigPage"
-import ProjectConfigPage from "@/modules/projetos/ProjectConfigPage"
-import BasicNewRequestPage from "@/modules/projetos/basic/BasicNewRequestPage"
-import BasicMyRequestsPage from "@/modules/projetos/basic/BasicMyRequestsPage"
-import GanttPage from "@/modules/projetos/GanttPage"
-import ProjectScheduleConfigPage from "@/modules/projetos/config/ProjectScheduleConfigPage"
-import ProjectAgentsConfigPage from "@/modules/projetos/config/ProjectAgentsConfigPage"
-import ProjectAgentLogsConfigPage from "@/modules/projetos/config/ProjectAgentLogsConfigPage"
-import ProjectPriorityMatrixPage from "@/modules/projetos/ProjectPriorityMatrixPage"
-import PMODashboardPage from "@/modules/projetos/PMODashboardPage"
-import StatusReportEditorPage from "@/modules/projetos/StatusReportEditorPage"
-import StatusReportViewPage from "@/modules/projetos/StatusReportViewPage"
-import ProjectPriorityConfigPage from "@/modules/projetos/config/ProjectPriorityConfigPage"
-import ProjectCardLayoutConfigPage from "@/modules/projetos/config/ProjectCardLayoutConfigPage"
-import ProjectAllTasksConfigPage from "@/modules/projetos/config/ProjectAllTasksConfigPage"
+const PdvLayout = lazy(() => import("@/modules/pdv/PdvLayout"))
+const PdvPosPage = lazy(() => import("@/modules/pdv/PosPage"))
+const PdvCashSessionPage = lazy(() => import("@/modules/pdv/CashSessionPage"))
+const PdvSalesHistoryPage = lazy(() => import("@/modules/pdv/SalesHistoryPage"))
+const PdvSaleDetailPage = lazy(() => import("@/modules/pdv/SaleDetailPage"))
+const PdvReceiptPrintView = lazy(() => import("@/modules/pdv/ReceiptPrintView"))
+const PdvDashboardPage = lazy(() => import("@/modules/pdv/DashboardPage"))
+const PdvPaymentMethodsConfigPage = lazy(() => import("@/modules/pdv/PaymentMethodsConfigPage"))
+const ProjetosLayout = lazy(() => import("@/modules/projetos/ProjetosLayout"))
+const ProjectBoardPage = lazy(() => import("@/modules/projetos/ProjectBoardPage"))
+const ProjectProgramsPage = lazy(() => import("@/modules/projetos/ProjectProgramsPage"))
+const ProjectConfigHomePage = lazy(() => import("@/modules/projetos/config/ProjectConfigHomePage"))
+const ProjectDefaultFormConfigPage = lazy(() => import("@/modules/projetos/config/ProjectDefaultFormConfigPage"))
+const ProjectDemandTypesConfigPage = lazy(() => import("@/modules/projetos/config/ProjectDemandTypesConfigPage"))
+const ProjectDemandTypeFormEditorPage = lazy(() => import("@/modules/projetos/config/ProjectDemandTypeFormEditorPage"))
+const ProjectFunnelsConfigPage = lazy(() => import("@/modules/projetos/config/ProjectFunnelsConfigPage"))
+const ProjectStatusesConfigPage = lazy(() => import("@/modules/projetos/config/ProjectStatusesConfigPage"))
+const ProjectConfigPage = lazy(() => import("@/modules/projetos/ProjectConfigPage"))
+const BasicNewRequestPage = lazy(() => import("@/modules/projetos/basic/BasicNewRequestPage"))
+const BasicMyRequestsPage = lazy(() => import("@/modules/projetos/basic/BasicMyRequestsPage"))
+const GanttPage = lazy(() => import("@/modules/projetos/GanttPage"))
+const ProjectScheduleConfigPage = lazy(() => import("@/modules/projetos/config/ProjectScheduleConfigPage"))
+const ProjectAgentsConfigPage = lazy(() => import("@/modules/projetos/config/ProjectAgentsConfigPage"))
+const ProjectAgentLogsConfigPage = lazy(() => import("@/modules/projetos/config/ProjectAgentLogsConfigPage"))
+const ProjectPriorityMatrixPage = lazy(() => import("@/modules/projetos/ProjectPriorityMatrixPage"))
+const PMODashboardPage = lazy(() => import("@/modules/projetos/PMODashboardPage"))
+const CapacityCockpitPage = lazy(() => import("@/modules/projetos/CapacityCockpitPage"))
+const StatusReportEditorPage = lazy(() => import("@/modules/projetos/StatusReportEditorPage"))
+const StatusReportViewPage = lazy(() => import("@/modules/projetos/StatusReportViewPage"))
+const ProjectPriorityConfigPage = lazy(() => import("@/modules/projetos/config/ProjectPriorityConfigPage"))
+const ProjectCardLayoutConfigPage = lazy(() => import("@/modules/projetos/config/ProjectCardLayoutConfigPage"))
+const ProjectAllTasksConfigPage = lazy(() => import("@/modules/projetos/config/ProjectAllTasksConfigPage"))
 
 // ── TeamOps ───────────────────────────────────────────────────────────
-import TeamopsLayout from "@/modules/teamops/TeamopsLayout"
-import TeamopsDashboardPage from "@/modules/teamops/DashboardPage"
-import TeamopsOrgPage from "@/modules/teamops/OrgPage"
-import TeamopsPeoplePage from "@/modules/teamops/PeoplePage"
-import TeamopsPersonDetailPage from "@/modules/teamops/PersonDetailPage"
-import TeamopsStacksPage from "@/modules/teamops/StacksPage"
-import TeamopsAbsencesPage from "@/modules/teamops/AbsencesPage"
-import TeamopsConfigPage from "@/modules/teamops/ConfigPage"
-import ProdutosLayout from "@/modules/produtos/ProdutosLayout"
-import ProdutosDashboardPage from "@/modules/produtos/DashboardPage"
-import ProdutosProductsPage from "@/modules/produtos/ProductsPage"
-import ProdutosProductDetailPage from "@/modules/produtos/ProductDetailPage"
-import ProdutosProcessPortfolioPage from "@/modules/produtos/ProcessPortfolioPage"
-import ProdutosIndicadoresPage from "@/modules/produtos/IndicadoresPage"
-import ProdutosInteligenciaPage from "@/modules/produtos/InteligenciaPage"
-import ProdutosFornecedoresPage from "@/modules/produtos/FornecedoresPage"
-import ProdutosConfigPage from "@/modules/produtos/config/ProdutosConfigPage"
-import IndicadoresLayout from "@/modules/indicadores/IndicadoresLayout"
-import IndicadoresDashboardPage from "@/modules/indicadores/DashboardPage"
-import IndicadoresListPage from "@/modules/indicadores/IndicadoresListPage"
-import IndicadorDetailPage from "@/modules/indicadores/IndicadorDetailPage"
-import IndicadoresConfigPage from "@/modules/indicadores/config/IndicadoresConfigPage"
+const TeamopsLayout = lazy(() => import("@/modules/teamops/TeamopsLayout"))
+const TeamopsDashboardPage = lazy(() => import("@/modules/teamops/DashboardPage"))
+const TeamopsOrgPage = lazy(() => import("@/modules/teamops/OrgPage"))
+const TeamopsPeoplePage = lazy(() => import("@/modules/teamops/PeoplePage"))
+const TeamopsPersonDetailPage = lazy(() => import("@/modules/teamops/PersonDetailPage"))
+const TeamopsStacksPage = lazy(() => import("@/modules/teamops/StacksPage"))
+const TeamopsAbsencesPage = lazy(() => import("@/modules/teamops/AbsencesPage"))
+const TeamopsConfigPage = lazy(() => import("@/modules/teamops/ConfigPage"))
+const ProdutosLayout = lazy(() => import("@/modules/produtos/ProdutosLayout"))
+const ProdutosDashboardPage = lazy(() => import("@/modules/produtos/DashboardPage"))
+const ProdutosProductsPage = lazy(() => import("@/modules/produtos/ProductsPage"))
+const ProdutosProductDetailPage = lazy(() => import("@/modules/produtos/ProductDetailPage"))
+const ProdutosProcessPortfolioPage = lazy(() => import("@/modules/produtos/ProcessPortfolioPage"))
+const ProdutosIndicadoresPage = lazy(() => import("@/modules/produtos/IndicadoresPage"))
+const ProdutosInteligenciaPage = lazy(() => import("@/modules/produtos/InteligenciaPage"))
+const ProdutosFornecedoresPage = lazy(() => import("@/modules/produtos/FornecedoresPage"))
+const ProdutosConfigPage = lazy(() => import("@/modules/produtos/config/ProdutosConfigPage"))
+const IndicadoresLayout = lazy(() => import("@/modules/indicadores/IndicadoresLayout"))
+const IndicadoresDashboardPage = lazy(() => import("@/modules/indicadores/DashboardPage"))
+const IndicadoresListPage = lazy(() => import("@/modules/indicadores/IndicadoresListPage"))
+const IndicadorDetailPage = lazy(() => import("@/modules/indicadores/IndicadorDetailPage"))
+const IndicadoresConfigPage = lazy(() => import("@/modules/indicadores/config/IndicadoresConfigPage"))
+
+function RouteFallback() {
+  return (
+    <div className="flex h-full min-h-[40vh] w-full items-center justify-center">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted border-t-primary" />
+    </div>
+  )
+}
 
 export default function App() {
   return (
@@ -133,10 +149,12 @@ export default function App() {
         <ThemeProvider>
           <AuthProvider>
             <ErrorBoundary>
+              <Suspense fallback={<RouteFallback />}>
               <Routes>
               {/* Público */}
               <Route path="/login" element={<LoginPage />} />
               <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+              <Route path="/primeiro-acesso" element={<FirstAccessPage />} />
               <Route path="/p/propostas/:token" element={<PublicProposalPage />} />
 
               {/* Super Admin */}
@@ -221,6 +239,7 @@ export default function App() {
                     <Route path="calendario" element={<ProjectBoardPage />} />
                     <Route path="gantt" element={<GanttPage />} />
                     <Route path="cronograma" element={<GanttPage />} />
+                    <Route path="capacidade" element={<CapacityCockpitPage />} />
                     <Route path="relatorios" element={<PMODashboardPage initialTab="relatorios" />} />
                     <Route path="matriz" element={<ProjectPriorityMatrixPage />} />
                     <Route path="painel-po" element={<PMODashboardPage />} />
@@ -230,6 +249,7 @@ export default function App() {
                     <Route path="status-reports/:id" element={<StatusReportViewPage />} />
                     <Route path="solicitacoes" element={<BasicNewRequestPage />} />
                     <Route path="minhas" element={<BasicMyRequestsPage />} />
+                    <Route path="programas" element={<ProjectProgramsPage />} />
                     <Route path=":projectId/board" element={<ProjectBoardPage />} />
                     <Route path=":projectId/lista" element={<ProjectBoardPage />} />
                     <Route path=":projectId/calendario" element={<ProjectBoardPage />} />
@@ -328,6 +348,7 @@ export default function App() {
               {/* Fallback */}
               <Route path="*" element={<RoleRedirect />} />
             </Routes>
+              </Suspense>
           </ErrorBoundary>
           <ToastContainer />
         </AuthProvider>

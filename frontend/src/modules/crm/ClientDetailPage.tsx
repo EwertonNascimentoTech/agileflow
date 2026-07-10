@@ -20,6 +20,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { nullableStr } from "@/lib/utils"
 import { useNewAttendanceModal } from "@/modules/crm/newAttendanceModal"
 
 const CLIENT_TYPE_LABELS: Record<ClientType, string> = {
@@ -114,7 +115,10 @@ export default function ClientDetailPage() {
     try {
       const payload = {
         ...data,
-        email: data.email || undefined,
+        email: nullableStr(data.email),
+        phone: nullableStr(data.phone),
+        document: nullableStr(data.document),
+        notes: nullableStr(data.notes),
         company_id: data.company_id && data.company_id !== NO_COMPANY ? data.company_id : null,
       }
       const updated = await clientsApi.update(id, payload)

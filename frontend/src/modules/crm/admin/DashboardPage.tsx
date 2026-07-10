@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import * as Icons from "lucide-react"
 import { Package, ArrowRight, Loader2, Users2, ClipboardList, CirclePlus } from "lucide-react"
+import { resolveModuleIcon } from "@/lib/moduleIcons"
 import { companyApi, type MyTenant, type ActiveModule } from "@/api/crm"
 import { useAuth } from "@/contexts/AuthContext"
 import type { Role } from "@/types"
@@ -10,11 +10,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/EmptyState"
 
-function resolveIcon(name: string | null | undefined): React.ElementType {
-  if (!name) return Package
-  const Comp = (Icons as unknown as Record<string, React.ElementType>)[name]
-  return Comp ?? Package
-}
+const resolveIcon = resolveModuleIcon
 
 function moduleHomePath(m: ActiveModule): string {
   return `/app/modules/${m.slug}`

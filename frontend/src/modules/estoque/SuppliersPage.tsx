@@ -11,6 +11,7 @@ import { Switch } from "@/components/ui/switch"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { EmptyState } from "@/components/EmptyState"
+import { nullableStr } from "@/lib/utils"
 
 function getApiError(err: unknown): string {
   const e = err as { response?: { data?: { detail?: unknown } } }
@@ -63,7 +64,15 @@ export default function SuppliersPage() {
     setSaving(true)
     try {
       if (editing) {
-        const updated = await suppliersApi.update(editing.id, form)
+        const updated = await suppliersApi.update(editing.id, {
+          name: form.name.trim(),
+          trade_name: nullableStr(form.trade_name),
+          document: nullableStr(form.document),
+          email: nullableStr(form.email),
+          phone: nullableStr(form.phone),
+          notes: nullableStr(form.notes),
+          is_active: form.is_active,
+        })
         setItems(prev => prev.map(x => x.id === updated.id ? updated : x))
       } else {
         const created = await suppliersApi.create(form)

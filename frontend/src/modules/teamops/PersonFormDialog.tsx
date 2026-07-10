@@ -59,6 +59,7 @@ export function PersonFormDialog({ person, areas, onClose, onSaved }: Props) {
   const [employmentType, setEmploymentType] = useState<EmploymentType>(person?.employment_type ?? "clt")
   const [dailyHours, setDailyHours] = useState<string>(String(person?.daily_hours ?? 8))
   const [weeklyHours, setWeeklyHours] = useState<string>(String(person?.weekly_hours ?? 40))
+  const [projectAllocationPct, setProjectAllocationPct] = useState<string>(String(person?.project_allocation_pct ?? 100))
   const [startDate, setStartDate] = useState<string>(person?.start_date ?? "")
   const [status, setStatus] = useState<PersonStatus>(person?.status ?? "ativo")
   const [notes, setNotes] = useState<string>(person?.notes ?? "")
@@ -108,6 +109,7 @@ export function PersonFormDialog({ person, areas, onClose, onSaved }: Props) {
         employment_type: employmentType,
         daily_hours: Number(dailyHours),
         weekly_hours: Number(weeklyHours),
+        project_allocation_pct: Number(projectAllocationPct),
         start_date: startDate || null,
         notes: notes || null,
         access_level: accessLevel,
@@ -135,6 +137,12 @@ export function PersonFormDialog({ person, areas, onClose, onSaved }: Props) {
   const needsNewPassword = accessLevel !== "none" && !hasLoginAlready
   const canResetPassword = hasLoginAlready && accessLevel !== "none"
   const absenceDriven = isAbsenceDrivenStatus(status)
+  const dailyHoursNum = parseFloat(dailyHours)
+  const allocationPctNum = parseFloat(projectAllocationPct)
+  const projectHoursPreview =
+    !isNaN(dailyHoursNum) && dailyHoursNum > 0 && !isNaN(allocationPctNum)
+      ? Math.round((dailyHoursNum * allocationPctNum / 100) * 10) / 10
+      : null
 
   return (
     <Dialog open onOpenChange={onClose}>
@@ -257,6 +265,22 @@ export function PersonFormDialog({ person, areas, onClose, onSaved }: Props) {
           <div>
             <Label>Horas/semana</Label>
             <Input type="number" min={0} max={168} step="0.5" value={weeklyHours} onChange={(e) => setWeeklyHours(e.target.value)} />
+          </div>
+          <div>
+            <Label>Alocação para projetos (%)</Label>
+            <Input
+              type="number"
+              min={0}
+              max={100}
+              step="0.5"
+              value={projectAllocationPct}
+              onChange={(e) => setProjectAllocationPct(e.target.value)}
+            />
+            {projectHoursPreview != null && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Com {dailyHoursNum}h/dia e {allocationPctNum}%, ficam <strong>{projectHoursPreview}h/dia</strong> disponíveis para projetos.
+              </p>
+            )}
           </div>
           <div>
             <Label>Data de entrada</Label>

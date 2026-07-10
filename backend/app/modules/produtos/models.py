@@ -89,6 +89,7 @@ class ProductCategoria(str, enum.Enum):
     SISTEMA_INTERNO_IA = "sistema_interno_ia"
     SISTEMA_EXTERNO_IA = "sistema_externo_ia"
     SISTEMA_EXTERNO_IMPLANTACAO = "sistema_externo_implantacao"
+    SISTEMA_EXTERNO_HIBRIDO = "sistema_externo_hibrido"
     SISTEMA_EXTERNO_DN = "sistema_externo_dn"
 
 
@@ -233,33 +234,6 @@ class SuporteTipo(str, enum.Enum):
     INTERNA = "interna"
     FORNECEDOR = "fornecedor"
     COMPARTILHADA = "compartilhada"
-
-
-class IntegracaoTipo(str, enum.Enum):
-    API = "api"
-    BANCO = "banco"
-    ARQUIVO = "arquivo"
-    ETL = "etl"
-    WEBHOOK = "webhook"
-    MANUAL = "manual"
-    OUTRO = "outro"
-
-
-class AutenticacaoTipo(str, enum.Enum):
-    ACTIVE_DIRECTORY = "active_directory"
-    ENTRA_ID = "entra_id"
-    LOGIN_LOCAL = "login_local"
-    SSO = "sso"
-    TOKEN = "token"
-    OAUTH = "oauth"
-    OUTRO = "outro"
-
-
-class RiscoIndisponibilidade(str, enum.Enum):
-    BAIXO = "baixo"
-    MEDIO = "medio"
-    ALTO = "alto"
-    CRITICO = "critico"
 
 
 # ── Portfólio de Processos (versionado) ──────────
@@ -435,9 +409,6 @@ class Product(TenantBase):
     supports: Mapped[list["ProductSupport"]] = relationship(
         back_populates="product", cascade="all, delete-orphan", lazy="selectin",
     )
-    security: Mapped[list["ProductSecurityIntegration"]] = relationship(
-        back_populates="product", cascade="all, delete-orphan", lazy="selectin",
-    )
 
 
 class ProductServico(TenantBase):
@@ -466,6 +437,9 @@ class ProductServico(TenantBase):
     status_servico: Mapped[Optional[ServicoStatus]] = mapped_column(
         SAEnum(ServicoStatus, native_enum=False, values_callable=_enum_values), nullable=True,
     )
+    # Quando não há sub-processo no portfólio para vincular — dispensa o critério de saúde (com justificativa).
+    sem_subprocesso_disponivel: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    justificativa_sem_subprocesso: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
@@ -754,6 +728,10 @@ class ProductSupport(TenantBase):
     escalonamento: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     link_base_conhecimento: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     observacoes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # n1 | n2 | n3 — um registro por nível de atendimento
+    nivel: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
+    # Config do nível: interno, person_ids, nomes_externos, sla_horas
+    niveis_atendimento: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -761,44 +739,6 @@ class ProductSupport(TenantBase):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     product: Mapped["Product"] = relationship(back_populates="supports")
-
-
-class ProductSecurityIntegration(TenantBase):
-    __tablename__ = "product_security_integrations"
-
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    product_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True,
-    )
-    possui_integracao: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    sistemas_integrados: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    tipo_integracao: Mapped[Optional[IntegracaoTipo]] = mapped_column(
-        SAEnum(IntegracaoTipo, native_enum=False, values_callable=_enum_values), nullable=True,
-    )
-    dados_tratados: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    dados_pessoais: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    dados_sensiveis: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    classificacao: Mapped[Optional[ClassificacaoInformacao]] = mapped_column(
-        SAEnum(ClassificacaoInformacao, native_enum=False, values_callable=_enum_values), nullable=True,
-    )
-    tipo_autenticacao: Mapped[Optional[AutenticacaoTipo]] = mapped_column(
-        SAEnum(AutenticacaoTipo, native_enum=False, values_callable=_enum_values), nullable=True,
-    )
-    perfis_acesso: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    logs_auditoria: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    backup: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    plano_contingencia: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    risco_indisponibilidade: Mapped[Optional[RiscoIndisponibilidade]] = mapped_column(
-        SAEnum(RiscoIndisponibilidade, native_enum=False, values_callable=_enum_values), nullable=True,
-    )
-    observacoes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    product: Mapped["Product"] = relationship(back_populates="security")
 
 
 # ─────────────────────────────────────────────

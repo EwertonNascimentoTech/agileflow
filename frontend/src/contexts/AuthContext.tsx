@@ -1,13 +1,14 @@
-import { createContext, useContext, useState, useEffect, useCallback } from "react"
+import { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react"
 import type { ReactNode } from "react"
 import { authApi } from "@/api/auth"
-import type { User } from "@/types"
+import type { User, TokenResponse } from "@/types"
 
 interface AuthContextValue {
   user: User | null
   isLoading: boolean
   isAuthenticated: boolean
   login: (email: string, password: string) => Promise<void>
+  establishSession: (data: TokenResponse) => void
   logout: () => void
 }
 
@@ -54,13 +55,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setIsLoading(false))
   }, [])
 
-  const login = useCallback(async (email: string, password: string) => {
-    const data = await authApi.login({ email, password })
+  const establishSession = useCallback((data: TokenResponse) => {
     localStorage.setItem("access_token", data.access_token)
     localStorage.setItem("refresh_token", data.refresh_token)
     localStorage.setItem("user", JSON.stringify(data.user))
     setUser(data.user)
   }, [])
+
+  const login = useCallback(async (email: string, password: string) => {
+    const data = await authApi.login({ email, password })
+    establishSession(data)
+  }, [establishSession])
 
   const logout = useCallback(() => {
     localStorage.removeItem("access_token")
@@ -69,13 +74,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
   }, [])
 
-  return (
-    <AuthContext.Provider
-      value={{ user, isLoading, isAuthenticated: !!user, login, logout }}
-    >
-      {children}
-    </AuthContext.Provider>
+  // Memoiza o value para não recriar o objeto a cada render do provider, o que
+  // forçaria re-render de toda a árvore que consome o contexto.
+  const value = useMemo<AuthContextValue>(
+    () => ({ user, isLoading, isAuthenticated: !!user, login, establishSession, logout }),
+    [user, isLoading, login, establishSession, logout],
   )
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+
 }
 
 export function useAuth(): AuthContextValue {

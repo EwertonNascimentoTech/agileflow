@@ -11,7 +11,7 @@ export type GroupBy = "produto" | "area" | "setor" | "portfolio"
 
 // ── Enums "Produtos Digitais" (spec TI corporativa) ──
 export type ProductStatus = "ideia" | "discovery" | "desenvolvimento" | "homologacao" | "producao" | "sustentacao" | "evolucao" | "suspenso" | "descontinuado"
-export type ProductCategoria = "sistema_interno_dev" | "sistema_interno_ia" | "sistema_externo_ia" | "sistema_externo_implantacao" | "sistema_externo_dn"
+export type ProductCategoria = "sistema_interno_dev" | "sistema_interno_ia" | "sistema_externo_ia" | "sistema_externo_implantacao" | "sistema_externo_hibrido" | "sistema_externo_dn"
 export type ProductUnidade = "sesi" | "senai" | "iel" | "fiea" | "corporativo"
 export type ProductTipoDev = "interno" | "externo" | "hibrido"
 export type ProductModeloContratacao = "licenca" | "saas" | "fabrica" | "servico_continuado" | "projeto_pontual" | "interno" | "outro"
@@ -33,10 +33,6 @@ export type ReleaseImpacto = "baixo" | "medio" | "alto"
 export type ReleaseAmbiente = "dev" | "hml" | "prd"
 export type DocumentacaoTipo = "usuario" | "tecnica" | "api" | "implantacao" | "sustentacao" | "arquitetura" | "seguranca" | "operacional"
 export type DocumentacaoStatus = "nao_iniciada" | "em_elaboracao" | "publicada" | "necessita_atualizacao" | "obsoleta"
-export type SuporteTipo = "interna" | "fornecedor" | "compartilhada"
-export type IntegracaoTipo = "api" | "banco" | "arquivo" | "etl" | "webhook" | "manual" | "outro"
-export type AutenticacaoTipo = "active_directory" | "entra_id" | "login_local" | "sso" | "token" | "oauth" | "outro"
-export type RiscoIndisponibilidade = "baixo" | "medio" | "alto" | "critico"
 
 export interface AnexoItem {
   object_name: string
@@ -75,11 +71,11 @@ export interface Fornecedor {
 
 export interface FornecedorCreate {
   nome: string
-  cnpj?: string
-  contato?: string
-  email?: string
-  telefone?: string
-  notes?: string
+  cnpj?: string | null
+  contato?: string | null
+  email?: string | null
+  telefone?: string | null
+  notes?: string | null
 }
 
 export type FornecedorUpdate = Partial<FornecedorCreate>
@@ -99,6 +95,8 @@ export interface Servico {
   responsavel_person_id: string | null
   responsavel: PersonMini | null
   process_links?: ServiceProcessLink[]
+  sem_subprocesso_disponivel: boolean
+  justificativa_sem_subprocesso: string | null
   is_active: boolean
   order: number
 }
@@ -115,6 +113,11 @@ export interface ServicoCreate {
   disponibilidade?: string | null
   sla_atendimento?: string | null
   tipo_suporte?: ServicoSuporte | null
+}
+
+export interface ServicoSubprocessoDispensa {
+  sem_subprocesso_disponivel: boolean
+  justificativa_sem_subprocesso?: string | null
 }
 
 export interface Documento {
@@ -254,12 +257,12 @@ export interface Contrato {
 
 export interface ContratoCreate {
   fornecedor_id: string
-  identificador?: string
+  identificador?: string | null
   vigencia_inicio: string
   vigencia_fim: string
   renovacao_automatica?: boolean
-  modelo_licenciamento?: string
-  gestor_person_id?: string
+  modelo_licenciamento?: string | null
+  gestor_person_id?: string | null
   sustentacao_n1?: Sustentacao
   sustentacao_n2?: Sustentacao
   sustentacao_n3?: Sustentacao
@@ -281,9 +284,15 @@ export interface ContratoCreate {
   observacoes?: string | null
 }
 
-export type ContratoUpdate = Partial<Omit<ContratoCreate, "fornecedor_id" | "vigencia_inicio" | "vigencia_fim">> & {
+export type ContratoUpdate = Partial<
+  Omit<ContratoCreate, "fornecedor_id" | "vigencia_inicio" | "vigencia_fim" | "object_name" | "filename" | "content_type" | "size">
+> & {
   vigencia_inicio?: string
   vigencia_fim?: string
+  object_name?: string | null
+  filename?: string | null
+  content_type?: string | null
+  size?: number | null
 }
 
 export type ProductAlertaCode =
@@ -346,6 +355,7 @@ export interface ProductListItem {
   alertas: ProductAlerta[]
   score: number
   classe: SaudeClasse
+  saude_gaps: string[]
   servicos_count: number
   stacks?: StackMini[]
 }
@@ -400,20 +410,19 @@ export interface Product {
   contratos: Contrato[]
   releases: Release[]
   documentations: Documentation[]
-  support: Support | null
-  security: SecurityIntegration | null
+  supports: Support[]
   health: ProductHealth | null
 }
 
 export interface ProductCreate {
   name: string
-  simbolo?: string
-  description?: string
-  dominio_funcional?: string
+  simbolo?: string | null
+  description?: string | null
+  dominio_funcional?: string | null
   origem?: ProductOrigem
   lifecycle?: ProductLifecycle
   criticidade?: ProductCriticidade
-  data_entrada_producao?: string
+  data_entrada_producao?: string | null
   area_id?: string | null
   responsavel_person_id?: string | null
   responsavel_tecnico_person_id?: string | null
@@ -490,7 +499,6 @@ export interface DashboardKpis {
   sem_documentacao: number
   criticos: number
   com_dados_pessoais: number
-  com_plano_contingencia: number
   releases_publicadas_mes: number
 }
 
@@ -564,41 +572,31 @@ export interface DocumentationCreate {
 
 export type DocumentationUpdate = Partial<DocumentationCreate>
 
+export type SupportNivel = "n1" | "n2" | "n3"
+
 export interface Support {
   id: string
-  tipo: SuporteTipo | null
   canal_atendimento: string | null
-  sla_critico: string | null
-  sla_medio: string | null
-  sla_solicitacao: string | null
-  equipe_responsavel: string | null
-  horario_suporte: string | null
-  escalonamento: string | null
-  link_base_conhecimento: string | null
+  nivel: SupportNivel
+  interno: boolean
+  person_ids: string[]
+  nomes_externos: string[]
+  sla_horas: number | null
+  responsaveis: PersonMini[]
   observacoes: string | null
 }
 
-export type SupportUpsert = Partial<Omit<Support, "id">>
-
-export interface SecurityIntegration {
-  id: string
-  possui_integracao: boolean | null
-  sistemas_integrados: string | null
-  tipo_integracao: IntegracaoTipo | null
-  dados_tratados: string | null
-  dados_pessoais: boolean | null
-  dados_sensiveis: boolean | null
-  classificacao: ClassificacaoInformacao | null
-  tipo_autenticacao: AutenticacaoTipo | null
-  perfis_acesso: string | null
-  logs_auditoria: boolean | null
-  backup: boolean | null
-  plano_contingencia: boolean | null
-  risco_indisponibilidade: RiscoIndisponibilidade | null
-  observacoes: string | null
+export interface SupportCreate {
+  canal_atendimento?: string | null
+  nivel: SupportNivel
+  interno: boolean
+  person_ids: string[]
+  nomes_externos: string[]
+  sla_horas?: number | null
+  observacoes?: string | null
 }
 
-export type SecurityUpsert = Partial<Omit<SecurityIntegration, "id">>
+export type SupportUpdate = Partial<SupportCreate>
 
 export interface AlertaContrato {
   tipo: string
@@ -970,6 +968,11 @@ export const produtosApi = {
   updateProduct: (id: string, data: ProductUpdate) =>
     api.patch<Product>(`/produtos/${id}`, data).then((r) => r.data),
 
+  definirFornecedor: (productId: string, fornecedorId: string | null) =>
+    api
+      .patch<Product>(`/produtos/${productId}/fornecedor`, { fornecedor_id: fornecedorId })
+      .then((r) => r.data),
+
   deleteProduct: (id: string) =>
     api.delete<void>(`/produtos/${id}`).then((r) => r.data),
 
@@ -981,6 +984,11 @@ export const produtosApi = {
 
   deleteServico: (productId: string, servicoId: string) =>
     api.delete<void>(`/produtos/${productId}/servicos/${servicoId}`).then((r) => r.data),
+
+  setServicoSubprocessoDispensa: (productId: string, servicoId: string, data: ServicoSubprocessoDispensa) =>
+    api
+      .patch<Servico>(`/produtos/${productId}/servicos/${servicoId}/subprocesso-dispensa`, data)
+      .then((r) => r.data),
 
   addDocumento: (productId: string, data: DocumentoCreate) =>
     api.post<Documento>(`/produtos/${productId}/documentos`, data).then((r) => r.data),
@@ -1032,16 +1040,14 @@ export const produtosApi = {
     api.delete<void>(`/produtos/${productId}/documentations/${docId}`).then((r) => r.data),
 
   // ── Sustentação / SLA ──
-  getSupport: (productId: string) =>
-    api.get<Support | null>(`/produtos/${productId}/support`).then((r) => r.data),
-  upsertSupport: (productId: string, data: SupportUpsert) =>
-    api.put<Support>(`/produtos/${productId}/support`, data).then((r) => r.data),
-
-  // ── Integrações / Segurança ──
-  getSecurity: (productId: string) =>
-    api.get<SecurityIntegration | null>(`/produtos/${productId}/security`).then((r) => r.data),
-  upsertSecurity: (productId: string, data: SecurityUpsert) =>
-    api.put<SecurityIntegration>(`/produtos/${productId}/security`, data).then((r) => r.data),
+  listSupports: (productId: string) =>
+    api.get<Support[]>(`/produtos/${productId}/supports`).then((r) => r.data),
+  createSupport: (productId: string, data: SupportCreate) =>
+    api.post<Support>(`/produtos/${productId}/supports`, data).then((r) => r.data),
+  updateSupport: (productId: string, supportId: string, data: SupportUpdate) =>
+    api.patch<Support>(`/produtos/${productId}/supports/${supportId}`, data).then((r) => r.data),
+  deleteSupport: (productId: string, supportId: string) =>
+    api.delete<void>(`/produtos/${productId}/supports/${supportId}`).then((r) => r.data),
 
   // ── Portfólio de Processos ──
   listProcessPortfolios: () =>

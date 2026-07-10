@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 
@@ -18,27 +19,43 @@ from app.modules.produtos.api.routes import router as produtos_router
 from app.modules.indicadores.api.routes import router as indicadores_router
 
 
+# Chave arbitrária (int64) para o advisory lock de startup. Com múltiplos workers
+# uvicorn/gunicorn, cada processo roda o lifespan; sem serializar, todos executam
+# as migrations de tenant / seed concorrentemente → corrida de DDL. O lock faz o
+# primeiro worker rodar tudo e os demais esperarem; como os steps são idempotentes,
+# a re-execução dos outros vira no-op rápido.
+_STARTUP_LOCK_KEY = 748291043
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    try:
-        await sync_permissions()
-    except Exception as e:  # noqa: BLE001
-        print(f"[permissions] sync skipped: {e}")
+    from sqlalchemy import text as _text
+    from app.core.database import AsyncSessionLocal
 
-    try:
-        await upgrade_all_tenants()
-    except Exception as e:  # noqa: BLE001
-        print(f"[tenant_migrations] skipped: {e}")
+    async with AsyncSessionLocal() as _lock_db:
+        await _lock_db.execute(_text("SELECT pg_advisory_lock(:k)"), {"k": _STARTUP_LOCK_KEY})
+        try:
+            try:
+                await sync_permissions()
+            except Exception as e:  # noqa: BLE001
+                print(f"[permissions] sync skipped: {e}")
 
-    try:
-        await _seed_known_modules()
-    except Exception as e:  # noqa: BLE001
-        print(f"[modules_seed] skipped: {e}")
+            try:
+                await upgrade_all_tenants()
+            except Exception as e:  # noqa: BLE001
+                print(f"[tenant_migrations] skipped: {e}")
 
-    try:
-        await _deactivate_removed_modules()
-    except Exception as e:  # noqa: BLE001
-        print(f"[modules_cleanup] skipped: {e}")
+            try:
+                await _seed_known_modules()
+            except Exception as e:  # noqa: BLE001
+                print(f"[modules_seed] skipped: {e}")
+
+            try:
+                await _deactivate_removed_modules()
+            except Exception as e:  # noqa: BLE001
+                print(f"[modules_cleanup] skipped: {e}")
+        finally:
+            await _lock_db.execute(_text("SELECT pg_advisory_unlock(:k)"), {"k": _STARTUP_LOCK_KEY})
 
     yield
 
@@ -134,6 +151,9 @@ app = FastAPI(
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Comprime respostas JSON grandes (listagens de kanban, portfólio, indicadores).
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 app.add_middleware(
     CORSMiddleware,

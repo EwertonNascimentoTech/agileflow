@@ -28,18 +28,42 @@ function cellStyle(allocated: number, capacity: number): CSSProperties {
   return {}
 }
 
-export function WorkloadView({ projectId, users }: { projectId: string; users: User[] }) {
-  const [cells, setCells] = useState<WorkloadCell[]>([])
-  const [loading, setLoading] = useState(true)
+/**
+ * Heatmap carga×capacidade por pessoa×dia. Dois modos:
+ *  - Não-controlado: recebe `projectId` (+ `users`) e busca o workload do projeto (usado no Gantt).
+ *  - Controlado: recebe `cells` já calculadas (+ `nameForUser`) — usado pelo Cockpit de capacidade cross-project.
+ */
+export function WorkloadView({
+  projectId,
+  users,
+  cells: cellsProp,
+  nameForUser,
+  loading: loadingProp,
+}: {
+  projectId?: string
+  users?: User[]
+  cells?: WorkloadCell[]
+  nameForUser?: (id: string) => string
+  loading?: boolean
+}) {
+  const controlled = cellsProp !== undefined
+  const [fetched, setFetched] = useState<WorkloadCell[]>([])
+  const [fetching, setFetching] = useState(!controlled)
 
   useEffect(() => {
-    if (!projectId) return
-    setLoading(true)
+    if (controlled || !projectId) return
+    setFetching(true)
     projetosApi.getWorkload(projectId, { unit: "day" })
-      .then((r) => setCells(r.cells))
-      .catch(() => setCells([]))
-      .finally(() => setLoading(false))
-  }, [projectId])
+      .then((r) => setFetched(r.cells))
+      .catch(() => setFetched([]))
+      .finally(() => setFetching(false))
+  }, [controlled, projectId])
+
+  const cells = controlled ? cellsProp! : fetched
+  const loading = controlled ? Boolean(loadingProp) : fetching
+
+  // Tooltip customizado (position: fixed → não é cortado pelo overflow da tabela).
+  const [hover, setHover] = useState<{ c: WorkloadCell; name: string; date: string; x: number; y: number } | null>(null)
 
   const { dates, byUser, userIds, overCount } = useMemo(() => {
     const dateSet = new Set<string>()
@@ -57,7 +81,8 @@ export function WorkloadView({ projectId, users }: { projectId: string; users: U
     return { dates: ds, byUser: map, userIds: uids, overCount: over }
   }, [cells])
 
-  const userName = (id: string) => users.find((u) => u.id === id)?.full_name ?? "Usuário"
+  const userName = (id: string) =>
+    nameForUser?.(id) ?? users?.find((u) => u.id === id)?.full_name ?? "Usuário"
 
   if (loading) {
     return <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground"><Loader2 size={16} className="animate-spin" /> Calculando carga…</div>
@@ -118,7 +143,9 @@ export function WorkloadView({ projectId, users }: { projectId: string; users: U
                         key={d}
                         className="border-l px-1 py-1.5 text-center"
                         style={cellStyle(allocated, capacity)}
-                        title={c ? `${userName(uid)} · ${d}\n${allocated.toFixed(1)}h / ${capacity}h${c.overallocated ? " — superlotado" : ""}` : undefined}
+                        onMouseEnter={c ? (e) => setHover({ c, name: userName(uid), date: d, x: e.clientX, y: e.clientY }) : undefined}
+                        onMouseMove={c ? (e) => setHover((h) => (h ? { ...h, x: e.clientX, y: e.clientY } : h)) : undefined}
+                        onMouseLeave={() => setHover(null)}
                       >
                         {allocated > 0 ? allocated.toFixed(allocated % 1 === 0 ? 0 : 1) : ""}
                       </td>
@@ -130,6 +157,35 @@ export function WorkloadView({ projectId, users }: { projectId: string; users: U
           </tbody>
         </table>
       </div>
+
+      {hover && (
+        <div
+          className="pointer-events-none fixed z-50 w-64 rounded-md border bg-popover px-3 py-2 text-[11px] text-popover-foreground shadow-lg"
+          style={{ left: Math.min(hover.x + 14, (typeof window !== "undefined" ? window.innerWidth : 1200) - 272), top: hover.y + 14 }}
+        >
+          <div className="font-semibold">{hover.name} · {hover.date}</div>
+          <div className="mb-1.5 text-muted-foreground">
+            {hover.c.allocated_hours.toFixed(1)}h / {hover.c.capacity_hours}h
+            {hover.c.overallocated ? <span className="text-destructive"> — superlotado</span> : null}
+          </div>
+          {hover.c.items && hover.c.items.length > 0 ? (
+            <ul className="space-y-1 border-t pt-1.5">
+              {hover.c.items.map((it, i) => (
+                <li key={i} className="flex items-start justify-between gap-2">
+                  <span className="min-w-0">
+                    <span className="text-muted-foreground">{it.project_name}</span>
+                    <span className="mx-1">·</span>
+                    <span>{it.task_title}</span>
+                  </span>
+                  <span className="shrink-0 tabular-nums font-medium">{it.hours}h</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="border-t pt-1.5 text-muted-foreground">Sem detalhamento de demandas.</div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

@@ -260,6 +260,7 @@ class PersonCreate(BaseModel):
     employment_type: EmploymentType = EmploymentType.CLT
     daily_hours: float = Field(8.0, ge=0, le=24)
     weekly_hours: float = Field(40.0, ge=0, le=168)
+    project_allocation_pct: float = Field(100.0, ge=0, le=100)
     start_date: Optional[date] = None
     status: PersonStatus = PersonStatus.ATIVO
     visible_in_org_chart: bool = True
@@ -283,6 +284,7 @@ class PersonUpdate(BaseModel):
     employment_type: Optional[EmploymentType] = None
     daily_hours: Optional[float] = Field(None, ge=0, le=24)
     weekly_hours: Optional[float] = Field(None, ge=0, le=168)
+    project_allocation_pct: Optional[float] = Field(None, ge=0, le=100)
     start_date: Optional[date] = None
     status: Optional[PersonStatus] = None
     visible_in_org_chart: Optional[bool] = None
@@ -317,6 +319,7 @@ class PersonResponse(BaseModel):
     employment_type: EmploymentType
     daily_hours: float
     weekly_hours: float
+    project_allocation_pct: float
     start_date: Optional[date]
     status: PersonStatus
     visible_in_org_chart: bool = True

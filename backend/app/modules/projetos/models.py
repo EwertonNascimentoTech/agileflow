@@ -139,6 +139,9 @@ class ProjectStatusConfig(TenantBase):
     priority_mode: Mapped[str] = mapped_column(String(10), nullable=False, default="edit")
     # OBRIG.: exige a demanda pontuada (Impacto × Esforço) para sair desta etapa.
     priority_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # OBRIG.: exige classificar o card (e vincular produto/release do portfólio) para
+    # sair desta etapa. Aplica-se à etapa inicial (backlog, is_initial=True).
+    classification_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # Controle de baseline: quando o card-raiz de planejamento entra nesta etapa, o cronograma
     # do projeto é "comprometido" e passa a exigir baseline + justificativa para alterar
     # (ver ScheduleBaselineService). Marca tipicamente a etapa "Em Desenvolvimento".
@@ -192,6 +195,15 @@ class ProjectTask(TenantBase):
     assigned_to: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)  # public.users.id
     # Classificação do item de planejamento criado por conversão: 'projeto' | 'programa' | NULL.
     planning_kind: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    # Referência (somente etiqueta) a um Programa existente, escolhida na conversão. UUID sem FK.
+    linked_program_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # Classificação obrigatória ao sair do backlog: 'desenvolvimento' | 'implantacao' |
+    # 'melhoria' | NULL. Define o vínculo exigido com o portfólio de PRODUTOS.
+    card_classification: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    # Vínculos cross-módulo com PRODUTOS — UUID SEM FK (padrão origin_task_id), preserva
+    # o desacoplamento entre módulos. Produtos vive no mesmo schema de tenant.
+    linked_product_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    linked_release_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     diretoria: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     area: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     start_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -202,6 +214,15 @@ class ProjectTask(TenantBase):
     # Horas realizadas e percentual de conclusão (0–100). Não afetam o agendamento.
     actual_hours: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2), nullable=True)
     percent_complete: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Checklist de execução (somente User Story): [{id, label, done, order}, ...].
+    # O percent_complete é derivado dos itens marcados.
+    us_checklist: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    # Rollup de impedimento: True quando alguma US filha está numa etapa "Impedimento".
+    # Mantido pela automação de reconcile (a Feature não tem coluna de Impedimento, então
+    # sinaliza-se com um selo no card ao invés de mover).
+    us_impediment_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Rollup: True quando alguma US filha está numa etapa "Code Review" (selo no card).
+    us_codereview_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -372,6 +393,11 @@ class ProjectFunnel(TenantBase):
     # Função ausente do mapa = "manage" (sem restrição, retrocompatível).
     # super_admin/company_admin sempre têm "manage". NULL/vazio = sem restrição.
     access_control: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    # Quando True + etapa inicial com classification_required, bloqueia saída do backlog
+    # sem classificar. Desligado por padrão para permitir classificar projetos legados.
+    classification_enforcement_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -596,6 +622,9 @@ class ProjectStageAgentBinding(TenantBase):
     gateway_client_secret: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     continue_thread: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     add_comment_on_success: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Raia de destino ao concluir (classify_and_advance). NULL = avança para a próxima etapa
+    # do funil (comportamento padrão). UUID sem FK rígida para tolerar etapa removida.
+    advance_to_status_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -888,3 +917,23 @@ class ProjectStatusReport(TenantBase):
     generated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+
+
+class ProjectProgram(TenantBase):
+    """Cadastro próprio de Programas (catálogo do tenant), independente do kanban.
+    Cards podem referenciar um programa via ProjectTask.linked_program_id."""
+
+    __tablename__ = "project_programs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Responsável (PO) — pessoa do TeamOps.
+    responsavel_person_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("team_persons.id", ondelete="SET NULL"), nullable=True,
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

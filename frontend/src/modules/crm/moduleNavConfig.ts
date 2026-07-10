@@ -51,6 +51,8 @@ export const moduleNavConfig: Record<string, ModuleNavItem[]> = {
   projetos: [
     { to: "/app/modules/projetos/solicitacoes", icon: CirclePlus, label: "Nova Solicitação" },
     { to: "/app/modules/projetos/minhas", icon: ClipboardList, label: "Minhas Solicitações" },
+    { to: "/app/modules/projetos/programas", icon: Layers, label: "Programa" },
+    { to: "/app/modules/projetos/capacidade", icon: Gauge, label: "Capacidade" },
     { to: "/app/modules/projetos/relatorios", icon: BarChart3, label: "Relatórios" },
     { to: "/app/modules/projetos/config", icon: Settings2, label: "Configurações" },
   ],

@@ -60,9 +60,40 @@ def test_hours_per_day():
 # ── Motor ────────────────────────────────────────────────────────────────────
 
 def _root_with(children):
+    """children: (id, hours) ou (id, hours, assignee_id)."""
     nodes = [EngineNode("R", None, 0, None)]
-    nodes += [EngineNode(c[0], "R", i, c[1]) for i, c in enumerate(children)]
+    for i, c in enumerate(children):
+        if len(c) >= 3:
+            nodes.append(EngineNode(c[0], "R", i, c[1], assignee_id=c[2]))
+        else:
+            nodes.append(EngineNode(c[0], "R", i, c[1]))
     return nodes
+
+
+def test_siblings_different_assignees_start_in_parallel():
+    cal = WorkingCalendar()
+    nodes = _root_with([("A", 8.0, "RD"), ("B", 8.0, "AR")])
+    r = schedule_tree(nodes, [], "R", MON, cal)
+    assert r["A"] == (datetime(2026, 7, 6, 8, 0), datetime(2026, 7, 6, 17, 0))
+    assert r["B"] == (datetime(2026, 7, 6, 8, 0), datetime(2026, 7, 6, 17, 0))
+    assert r["R"] == (datetime(2026, 7, 6, 8, 0), datetime(2026, 7, 6, 17, 0))
+
+
+def test_siblings_same_assignee_remain_sequential():
+    cal = WorkingCalendar()
+    nodes = _root_with([("A", 8.0, "RD"), ("B", 8.0, "RD")])
+    r = schedule_tree(nodes, [], "R", MON, cal)
+    assert r["A"] == (datetime(2026, 7, 6, 8, 0), datetime(2026, 7, 6, 17, 0))
+    assert r["B"] == (datetime(2026, 7, 7, 8, 0), datetime(2026, 7, 7, 17, 0))
+
+
+def test_siblings_mixed_assignees_third_follows_first_same_person():
+    cal = WorkingCalendar()
+    nodes = _root_with([("A", 8.0, "RD"), ("B", 8.0, "AR"), ("C", 8.0, "RD")])
+    r = schedule_tree(nodes, [], "R", MON, cal)
+    assert r["A"][0] == datetime(2026, 7, 6, 8, 0)
+    assert r["B"][0] == datetime(2026, 7, 6, 8, 0)
+    assert r["C"][0] == datetime(2026, 7, 7, 8, 0)
 
 
 def test_siblings_cascade_by_order():

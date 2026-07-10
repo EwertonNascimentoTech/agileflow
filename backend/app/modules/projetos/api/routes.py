@@ -78,8 +78,13 @@ from app.modules.projetos.schemas import (
     ScheduleRevisionCloseIn,
     ScheduleStageCreate,
     TaskImportResult,
+    ProjectRefMini,
+    ProjectProgramCreate,
+    ProjectProgramUpdate,
+    ProjectProgramResponse,
     ProjectTaskResponse,
     ProjectTaskUpdate,
+    PlanningClassificationUpdate,
     ProjectTaskReorder,
     ProjectTaskWithContextResponse,
     ProjectMyRequestResponse,
@@ -89,6 +94,15 @@ from app.modules.projetos.schemas import (
     TaskDependencyCreate,
     TaskDependencyResponse,
     WorkloadResponse,
+    CapacityHeatmapResponse,
+    CapacityByProjectResponse,
+    CapacityGapsResponse,
+    FreePeopleResponse,
+    SimTasksResponse,
+    ScenarioRequest,
+    ScenarioResult,
+    ScenarioSuggestionsResponse,
+    CrossTeamResponse,
     AssigneeAbsenceItem,
     AssigneeAbsencesResponse,
     PoPortfolioResponse,
@@ -119,6 +133,7 @@ from app.modules.projetos.service import (
     ProjectScheduleBindingService,
     ProjectStageAgentService,
     ProjectService,
+    ProjectProgramService,
     ProjectStatusService,
     ProjectTaskCommentService,
     ProjectTaskService,
@@ -126,6 +141,7 @@ from app.modules.projetos.service import (
     ProjectStatusSectionLinkService,
     StatusReportService,
     TaskDependencyService,
+    CapacityService,
 )
 from app.modules.super_admin.models import Role, RolePermission, UserRole
 
@@ -548,6 +564,17 @@ async def list_funnels(
     return await ProjectFunnelService.list(ctx.db, project_id, active_only=active_only, current_user=ctx.user)
 
 
+@router.get("/projects/{project_id}/funnels/{funnel_id}/unclassified-count")
+async def unclassified_past_backlog_count(
+    project_id: uuid.UUID,
+    funnel_id: uuid.UUID,
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Quantos cards já saíram do backlog neste funil e ainda não têm classificação."""
+    count = await ProjectTaskService.count_unclassified_past_backlog(ctx.db, project_id, funnel_id)
+    return {"count": count}
+
+
 @router.post("/projects/{project_id}/funnels", response_model=ProjectFunnelResponse, status_code=201)
 async def create_funnel(
     project_id: uuid.UUID,
@@ -778,6 +805,33 @@ async def list_tasks(
     )
 
 
+@router.get("/projects/{project_id}/programs", response_model=list[ProjectRefMini])
+async def list_programs(project_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+    """Programas do cadastro (para vincular na conversão)."""
+    return await ProjectTaskService.list_programs(ctx.db, project_id)
+
+
+# ── Cadastro próprio de Programas (catálogo do tenant) ──
+@router.get("/programs", response_model=list[ProjectProgramResponse])
+async def list_program_catalog(active_only: bool = Query(False), ctx: ModuleContext = Depends(_ctx)):
+    return await ProjectProgramService.list(ctx.db, active_only=active_only)
+
+
+@router.post("/programs", response_model=ProjectProgramResponse, status_code=201)
+async def create_program(data: ProjectProgramCreate, ctx: ModuleContext = Depends(_ctx)):
+    return await ProjectProgramService.create(ctx.db, data, user_id=ctx.user.id)
+
+
+@router.patch("/programs/{program_id}", response_model=ProjectProgramResponse)
+async def update_program(program_id: uuid.UUID, data: ProjectProgramUpdate, ctx: ModuleContext = Depends(_ctx)):
+    return await ProjectProgramService.update(ctx.db, program_id, data, user_id=ctx.user.id)
+
+
+@router.delete("/programs/{program_id}", status_code=204)
+async def delete_program(program_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+    await ProjectProgramService.delete(ctx.db, program_id)
+
+
 @router.post("/projects/{project_id}/tasks", response_model=ProjectTaskResponse, status_code=201)
 async def create_task(
     project_id: uuid.UUID,
@@ -891,6 +945,32 @@ async def update_task(
     return await ProjectTaskService.update(ctx.db, project_id, task_id, data, current_user=ctx.user)
 
 
+@router.patch(
+    "/projects/{project_id}/tasks/{task_id}/planning-classification",
+    response_model=ProjectTaskResponse,
+)
+async def set_planning_classification(
+    project_id: uuid.UUID,
+    task_id: uuid.UUID,
+    data: PlanningClassificationUpdate,
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Edita Projeto/Programa a partir do card (ex.: "Concluído" da prospecção) e
+    propaga ao card de planejamento convertido nos demais kanbans."""
+    if not await _has_permission(ctx, "projetos.task.manage"):
+        raise HTTPException(status_code=403, detail="Sem permissão para classificar Projeto/Programa.")
+    return await ProjectTaskService.set_planning_classification(
+        ctx.db,
+        project_id,
+        task_id,
+        kind=data.kind,
+        program_id=data.program_id,
+        new_program_name=data.new_program_name,
+        new_program_desc=data.new_program_desc,
+        current_user_id=ctx.user.id,
+    )
+
+
 @router.delete("/projects/{project_id}/tasks/{task_id}", status_code=204)
 async def delete_task(
     project_id: uuid.UUID,
@@ -993,6 +1073,152 @@ async def get_assignee_absences(
         ]
         for uid, items in mapping.items()
     })
+
+
+# ─────────────────────────────────────────────
+# Cockpit de planejamento de capacidade (cross-project)
+# ─────────────────────────────────────────────
+
+
+@router.get("/capacity/heatmap", response_model=CapacityHeatmapResponse)
+async def get_capacity_heatmap(
+    date_from: str = Query(..., alias="from"),
+    date_to: str = Query(..., alias="to"),
+    unit: str = Query("week"),
+    area: Optional[uuid.UUID] = Query(None, description="Filtra pelas pessoas desta área"),
+    position: Optional[str] = Query(None, description="Filtra pelo slug do cargo (ex.: dev_backend)"),
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Lente por pessoa: heatmap de sobrecarga pessoa×dia cruzando TODO o portfólio.
+    Gated pelo acesso ao módulo projetos (mesmo padrão de /po-sync)."""
+    from datetime import date as _date
+
+    return await CapacityService.compute_capacity_heatmap(
+        ctx.db,
+        _date.fromisoformat(date_from),
+        _date.fromisoformat(date_to),
+        unit=unit,
+        area_id=area,
+        position_slug=position,
+    )
+
+
+@router.get("/capacity/by-project", response_model=CapacityByProjectResponse)
+async def get_capacity_by_project(
+    date_from: str = Query(..., alias="from"),
+    date_to: str = Query(..., alias="to"),
+    area: Optional[uuid.UUID] = Query(None, description="Filtra pelas pessoas desta área"),
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Lente por projeto (viabilidade): demanda × capacidade das pessoas alocadas."""
+    from datetime import date as _date
+
+    return await CapacityService.compute_capacity_by_project(
+        ctx.db,
+        _date.fromisoformat(date_from),
+        _date.fromisoformat(date_to),
+        area_id=area,
+    )
+
+
+@router.get("/capacity/gaps", response_model=CapacityGapsResponse)
+async def get_capacity_gaps(
+    date_from: str = Query(..., alias="from"),
+    date_to: str = Query(..., alias="to"),
+    group_by: str = Query("position", pattern="^(position|area)$"),
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Gargalos por cargo/área e reforço (headcount) sugerido para cobrir o pico de déficit."""
+    from datetime import date as _date
+
+    return await CapacityService.detect_bottlenecks(
+        ctx.db,
+        _date.fromisoformat(date_from),
+        _date.fromisoformat(date_to),
+        group_by=group_by,
+    )
+
+
+@router.get("/capacity/available-people", response_model=FreePeopleResponse)
+async def get_available_people(
+    date_from: str = Query(..., alias="from"),
+    date_to: str = Query(..., alias="to"),
+    position: Optional[str] = Query(None, description="Slug do cargo"),
+    area: Optional[uuid.UUID] = Query(None),
+    stack: Optional[uuid.UUID] = Query(None, description="ID da competência (skill)"),
+    min_level: Optional[str] = Query(None, description="Nível mínimo na skill (basico..referencia)"),
+    min_free_hours: float = Query(0.0, description="Folga total mínima no período (h)"),
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Pessoas com folga de capacidade no período (finder cross-team por skill/cargo)."""
+    from datetime import date as _date
+    from app.modules.teamops.models import StackLevel
+
+    level = StackLevel(min_level) if min_level else None
+    return await CapacityService.find_available_people(
+        ctx.db,
+        _date.fromisoformat(date_from),
+        _date.fromisoformat(date_to),
+        position_slug=position,
+        area_id=area,
+        stack_id=stack,
+        min_level=level,
+        min_free_hours=min_free_hours,
+    )
+
+
+@router.get("/capacity/tasks", response_model=SimTasksResponse)
+async def get_capacity_tasks(
+    date_from: str = Query(..., alias="from"),
+    date_to: str = Query(..., alias="to"),
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Tarefas agendadas na janela — alimenta o construtor de mutações do simulador."""
+    from datetime import date as _date
+
+    return await CapacityService.list_simulatable_tasks(
+        ctx.db, _date.fromisoformat(date_from), _date.fromisoformat(date_to)
+    )
+
+
+@router.post("/capacity/simulate", response_model=ScenarioResult)
+async def post_capacity_simulate(
+    payload: ScenarioRequest,
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Simulador what-if efêmero: aplica mutações em memória e devolve o antes/depois. Nada é persistido."""
+    return await CapacityService.simulate(
+        ctx.db, payload.date_from, payload.date_to, payload.mutations
+    )
+
+
+@router.get("/capacity/suggest-scenarios", response_model=ScenarioSuggestionsResponse)
+async def get_capacity_suggestions(
+    date_from: str = Query(..., alias="from"),
+    date_to: str = Query(..., alias="to"),
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Cenários prontos para resolver a sobrecarga (realocar/freela/adiar), com impacto já medido."""
+    from datetime import date as _date
+
+    return await CapacityService.suggest_scenarios(
+        ctx.db, _date.fromisoformat(date_from), _date.fromisoformat(date_to)
+    )
+
+
+@router.get("/capacity/cross-team", response_model=CrossTeamResponse)
+async def get_capacity_cross_team(
+    date_from: str = Query(..., alias="from"),
+    date_to: str = Query(..., alias="to"),
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Vazamento entre times: por pessoa, horas no próprio time vs em projetos de outros times
+    (time dono = área do PO do card-raiz). Risco quando away > home."""
+    from datetime import date as _date
+
+    return await CapacityService.analyze_cross_team(
+        ctx.db, _date.fromisoformat(date_from), _date.fromisoformat(date_to)
+    )
 
 
 @router.get("/projects/{project_id}/critical-path", response_model=list[CriticalPathItem])

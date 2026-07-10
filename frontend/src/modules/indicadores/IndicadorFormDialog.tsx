@@ -20,6 +20,13 @@ import {
 
 const NONE = "__none__"
 const num = (s: string): number | null => (s.trim() === "" ? null : Number(s))
+const toId = (id?: string | null) => (id ? String(id) : NONE)
+
+function usesPortfolio(ind?: Indicador | null): boolean {
+  if (!ind) return false
+  if (ind.fonte === "portfolio" || ind.fonte_metrica || ind.fonte_corte) return true
+  return (ind.acompanhamentos ?? []).some((a) => a.fonte === "portfolio")
+}
 
 export function IndicadorFormDialog({ open, onOpenChange, indicador, onSaved }: {
   open: boolean; onOpenChange: (v: boolean) => void; indicador?: Indicador | null; onSaved: (i: Indicador) => void
@@ -47,6 +54,8 @@ export function IndicadorFormDialog({ open, onOpenChange, indicador, onSaved }: 
   const [tolerancia, setTolerancia] = useState("20")
   const [status, setStatus] = useState<"ativo" | "inativo">("ativo")
   const [anos, setAnos] = useState<number[]>([new Date().getFullYear()])
+  const [anosExistentes, setAnosExistentes] = useState<number[]>([])
+  const [refsReady, setRefsReady] = useState(false)
   // Origem dos dados (manual × portfólio)
   const [origem, setOrigem] = useState<FonteDados>("manual")
   const [metrica, setMetrica] = useState<FonteMetrica>("servicos_publicados")
@@ -54,44 +63,83 @@ export function IndicadorFormDialog({ open, onOpenChange, indicador, onSaved }: 
   const [corteAno, setCorteAno] = useState<number>(new Date().getFullYear())
 
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      setRefsReady(false)
+      return
+    }
+
+    let cancelled = false
+    setRefsReady(false)
+
     Promise.all([
       indicadoresApi.listAreas().catch(() => []),
       indicadoresApi.listPersons().catch(() => []),
-    ]).then(([a, p]) => { setAreas(a); setPersons(p) })
+    ]).then(([a, p]) => {
+      if (cancelled) return
 
-    setCodigo(indicador?.codigo ?? "")
-    setNome(indicador?.nome ?? "")
-    setCategoria(indicador?.categoria ?? "estrategico")
-    setDescricao(indicador?.descricao ?? "")
-    setObjetivo(indicador?.objetivo_estrategico ?? "")
-    setAreaId(indicador?.area?.id ?? NONE)
-    setResponsavelId(indicador?.responsavel?.id ?? NONE)
-    setUnidade(indicador?.unidade_medida ?? "")
-    setFormula(indicador?.formula_calculo ?? "")
-    setFonte(indicador?.fonte_dados ?? "")
-    setGranularidade(indicador?.granularidade ?? "mensal")
-    setPeriodicidade(indicador?.periodicidade_atualizacao ?? "")
-    setSentido(indicador?.sentido ?? "maior_melhor")
-    setMetaMin(indicador?.meta_min != null ? String(indicador.meta_min) : "")
-    setMetaMax(indicador?.meta_max != null ? String(indicador.meta_max) : "")
-    setTolerancia(indicador?.tolerancia_pct != null ? String(indicador.tolerancia_pct) : "20")
-    setStatus(indicador?.status ?? "ativo")
-    setAnos([new Date().getFullYear()])
-    setOrigem(indicador?.fonte ?? "manual")
-    setMetrica(indicador?.fonte_metrica ?? "servicos_publicados")
-    if (indicador?.fonte_corte) {
-      const [y, m] = indicador.fonte_corte.split("-").map(Number)
-      setCorteAno(y); setCorteMes(m)
-    } else {
-      setCorteAno(new Date().getFullYear()); setCorteMes(new Date().getMonth() + 1)
-    }
+      let areasList = a
+      let personsList = p
+      if (indicador?.area && !a.some((x) => String(x.id) === String(indicador.area!.id))) {
+        areasList = [indicador.area, ...a]
+      }
+      if (indicador?.responsavel && !p.some((x) => String(x.id) === String(indicador.responsavel!.id))) {
+        personsList = [indicador.responsavel, ...p]
+      }
+      setAreas(areasList)
+      setPersons(personsList)
 
-    // Novo indicador: pré-preenche responsável com a pessoa logada
-    if (!indicador) {
-      loadLoggedPersonAutoFill().then((me) => { if (me?.personId) setResponsavelId(me.personId) }).catch(() => {})
-    }
-  }, [open, indicador])
+      setCodigo(indicador?.codigo ?? "")
+      setNome(indicador?.nome ?? "")
+      setCategoria(indicador?.categoria ?? "estrategico")
+      setDescricao(indicador?.descricao ?? "")
+      setObjetivo(indicador?.objetivo_estrategico ?? "")
+      setAreaId(toId(indicador?.area?.id))
+      setResponsavelId(toId(indicador?.responsavel?.id))
+      setUnidade(indicador?.unidade_medida ?? "")
+      setFormula(indicador?.formula_calculo ?? "")
+      setFonte(indicador?.fonte_dados ?? "")
+      setGranularidade(indicador?.granularidade ?? "mensal")
+      setPeriodicidade(indicador?.periodicidade_atualizacao ?? "")
+      setSentido(indicador?.sentido ?? "maior_melhor")
+      setMetaMin(indicador?.meta_min != null ? String(indicador.meta_min) : "")
+      setMetaMax(indicador?.meta_max != null ? String(indicador.meta_max) : "")
+      setTolerancia(indicador?.tolerancia_pct != null ? String(indicador.tolerancia_pct) : "20")
+      setStatus(indicador?.status ?? "ativo")
+
+      const existentes = indicador?.anos?.length ? [...indicador.anos].sort((x, y) => y - x) : []
+      setAnosExistentes(existentes)
+      setAnos(editing ? [] : [new Date().getFullYear()])
+
+      setOrigem(usesPortfolio(indicador) ? "portfolio" : (indicador?.fonte ?? "manual"))
+      setMetrica(indicador?.fonte_metrica ?? "servicos_publicados")
+      if (indicador?.fonte_corte) {
+        const [y, m] = indicador.fonte_corte.split("-").map(Number)
+        setCorteAno(y); setCorteMes(m)
+      } else if (usesPortfolio(indicador)) {
+        const firstPortfolio = (indicador?.acompanhamentos ?? [])
+          .filter((a) => a.fonte === "portfolio")
+          .sort((a, b) => a.periodo_inicio.localeCompare(b.periodo_inicio))[0]
+        if (firstPortfolio) {
+          const [y, m] = firstPortfolio.periodo_inicio.split("-").map(Number)
+          setCorteAno(y); setCorteMes(m)
+        } else {
+          setCorteAno(new Date().getFullYear()); setCorteMes(new Date().getMonth() + 1)
+        }
+      } else {
+        setCorteAno(new Date().getFullYear()); setCorteMes(new Date().getMonth() + 1)
+      }
+
+      setRefsReady(true)
+
+      if (!indicador) {
+        loadLoggedPersonAutoFill()
+          .then((me) => { if (!cancelled && me?.personId) setResponsavelId(String(me.personId)) })
+          .catch(() => {})
+      }
+    })
+
+    return () => { cancelled = true }
+  }, [open, indicador, editing])
 
   async function save() {
     if (!codigo.trim() || !nome.trim()) return
@@ -114,15 +162,23 @@ export function IndicadorFormDialog({ open, onOpenChange, indicador, onSaved }: 
       meta_max: sentido === "faixa_ideal" ? num(metaMax) : null,
       tolerancia_pct: num(tolerancia) ?? 20,
       status,
-      anos_referencia: anos,
       fonte: origem,
       fonte_metrica: origem === "portfolio" ? metrica : null,
       fonte_corte: origem === "portfolio" ? `${corteAno}-${String(corteMes).padStart(2, "0")}-01` : null,
     }
+    if (!editing) base.anos_referencia = anos
     try {
-      const saved = editing
+      let saved = editing
         ? await indicadoresApi.update(indicador!.id, base)
-        : await indicadoresApi.create(base)
+        : await indicadoresApi.create({ ...base, anos_referencia: anos })
+      if (editing && anos.length > 0) {
+        for (const y of anos) {
+          if (!anosExistentes.includes(y)) {
+            await indicadoresApi.gerarAcompanhamentos(saved.id, y)
+          }
+        }
+        saved = await indicadoresApi.get(saved.id)
+      }
       toast.success(editing ? "Indicador atualizado." : "Indicador criado.")
       onSaved(saved)
     } catch (e) {
@@ -135,6 +191,11 @@ export function IndicadorFormDialog({ open, onOpenChange, indicador, onSaved }: 
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle>{editing ? "Editar indicador" : "Novo indicador"}</DialogTitle></DialogHeader>
+        {!refsReady ? (
+          <div className="flex items-center justify-center py-12 text-muted-foreground">
+            <Loader2 size={20} className="mr-2 animate-spin" /> Carregando formulário…
+          </div>
+        ) : (
         <div className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="space-y-1.5"><Label>Código</Label><Input value={codigo} onChange={(e) => setCodigo(e.target.value)} placeholder="Ex.: IND-001" /></div>
@@ -160,7 +221,7 @@ export function IndicadorFormDialog({ open, onOpenChange, indicador, onSaved }: 
                 <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value={NONE}>—</SelectItem>
-                  {areas.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
+                  {areas.map((a) => <SelectItem key={a.id} value={String(a.id)}>{a.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -170,7 +231,7 @@ export function IndicadorFormDialog({ open, onOpenChange, indicador, onSaved }: 
                 <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value={NONE}>—</SelectItem>
-                  {persons.map((p) => <SelectItem key={p.id} value={p.id}>{p.full_name}</SelectItem>)}
+                  {persons.map((p) => <SelectItem key={p.id} value={String(p.id)}>{p.full_name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -220,7 +281,7 @@ export function IndicadorFormDialog({ open, onOpenChange, indicador, onSaved }: 
             </div>
           )}
 
-          {!editing && (
+          {!editing ? (
             <div className="space-y-1.5">
               <Label>Gerar acompanhamentos dos anos</Label>
               <div className="flex flex-wrap gap-2">
@@ -243,11 +304,44 @@ export function IndicadorFormDialog({ open, onOpenChange, indicador, onSaved }: 
                 Selecione um ou mais anos — indicadores plurianuais geram os períodos de cada ano. Outros anos podem ser gerados depois na tela do indicador.
               </p>
             </div>
+          ) : (
+            <div className="space-y-1.5">
+              <Label>Gerar períodos de anos adicionais</Label>
+              {anosExistentes.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {anosExistentes.map((y) => (
+                    <span key={y} className="rounded-md border bg-muted/40 px-2.5 py-1 text-xs text-muted-foreground">
+                      {y} — já gerado
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2">
+                {ANOS.filter((y) => !anosExistentes.includes(y)).map((y) => {
+                  const on = anos.includes(y)
+                  return (
+                    <button
+                      key={y}
+                      type="button"
+                      onClick={() => setAnos((prev) => prev.includes(y) ? prev.filter((x) => x !== y) : [...prev, y].sort((a, b) => a - b))}
+                      className={`rounded-md border px-3 py-1.5 text-sm transition ${on ? "border-primary bg-primary/10 font-medium text-primary" : "text-muted-foreground hover:bg-muted"}`}
+                      aria-pressed={on}
+                    >
+                      {y}
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Selecione anos ainda sem períodos. Ao salvar, os acompanhamentos serão gerados automaticamente.
+              </p>
+            </div>
           )}
         </div>
+        )}
         <DialogFooter className="gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button onClick={() => void save()} disabled={saving || !codigo.trim() || !nome.trim()}>
+          <Button onClick={() => void save()} disabled={saving || !refsReady || !codigo.trim() || !nome.trim()}>
             {saving && <Loader2 size={14} className="mr-1.5 animate-spin" />}{editing ? "Salvar" : "Criar"}
           </Button>
         </DialogFooter>

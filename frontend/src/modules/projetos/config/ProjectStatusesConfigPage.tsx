@@ -75,6 +75,7 @@ export default function ProjectStatusesConfigPage() {
   const [statusDraftName, setStatusDraftName] = useState("")
   const [statusDraftColor, setStatusDraftColor] = useState("#6B7280")
   const [statusDraftActive, setStatusDraftActive] = useState(true)
+  const [unclassifiedCount, setUnclassifiedCount] = useState(0)
 
   const selectedFunnel = useMemo(
     () => funnels.find((f) => f.id === selectedFunnelId) ?? null,
@@ -173,6 +174,39 @@ export default function ProjectStatusesConfigPage() {
       priority_required: next.required,
     })
     setStatuses((prev) => prev.map((s) => (s.id === updated.id ? updated : s)))
+  }
+
+  async function handleSetClassificationRequired(status: ProjectStatus, required: boolean) {
+    if (!selectedProjectId || !selectedFunnelId) return
+    const updated = await projetosApi.updateStatus(selectedProjectId, selectedFunnelId, status.id, {
+      classification_required: required,
+    })
+    setStatuses((prev) => prev.map((s) => (s.id === updated.id ? updated : s)))
+  }
+
+  useEffect(() => {
+    if (!selectedProjectId || !selectedFunnelId) {
+      setUnclassifiedCount(0)
+      return
+    }
+    projetosApi.getUnclassifiedPastBacklogCount(selectedProjectId, selectedFunnelId)
+      .then((r) => setUnclassifiedCount(r.count))
+      .catch(() => setUnclassifiedCount(0))
+  }, [selectedProjectId, selectedFunnelId])
+
+  async function handleSetClassificationEnforcement(enabled: boolean) {
+    if (!selectedProjectId || !selectedFunnelId) return
+    if (enabled && unclassifiedCount > 0) {
+      const ok = window.confirm(
+        `Ainda há ${unclassifiedCount} projeto(s) fora do backlog sem classificação. ` +
+        "Ative o bloqueio somente depois de classificar todos, ou continue para exigir classificação apenas em novos cards.",
+      )
+      if (!ok) return
+    }
+    const updated = await projetosApi.updateFunnel(selectedProjectId, selectedFunnelId, {
+      classification_enforcement_enabled: enabled,
+    })
+    setFunnels((prev) => prev.map((f) => (f.id === updated.id ? updated : f)))
   }
 
   useEffect(() => {
@@ -964,6 +998,41 @@ export default function ProjectStatusesConfigPage() {
                     </label>
                   ))}
                 </div>
+                {status.is_initial && (
+                  <div className="mt-2 space-y-2 rounded-md border bg-muted/30 p-2">
+                    <label className="flex cursor-pointer items-center gap-2" title="Marca a etapa backlog como exigindo classificação ao sair">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 cursor-pointer rounded border-input accent-primary"
+                        checked={status.classification_required}
+                        onChange={(e) => void handleSetClassificationRequired(status, e.target.checked)}
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        Exigir classificação + vínculo ao portfólio de Produtos para sair do backlog
+                      </span>
+                    </label>
+                    {status.classification_required && selectedFunnel && (
+                      <div className="space-y-2 border-t border-border/60 pt-2 pl-6">
+                        <label className="flex cursor-pointer items-center gap-2" title="Quando ativo, cards não saem do backlog sem classificar">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 cursor-pointer rounded border-input accent-primary"
+                            checked={selectedFunnel.classification_enforcement_enabled}
+                            onChange={(e) => void handleSetClassificationEnforcement(e.target.checked)}
+                          />
+                          <span className="text-xs text-muted-foreground">
+                            Bloquear saída do backlog sem classificação (ativar após classificar projetos legados)
+                          </span>
+                        </label>
+                        {unclassifiedCount > 0 && (
+                          <p className="text-[11px] text-amber-700">
+                            {unclassifiedCount} projeto(s) fora do backlog ainda sem classificação — classifique antes de ativar o bloqueio.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="mt-2 rounded-md border bg-muted/30 p-2 space-y-2">
                   <p className="text-xs font-medium">Formulário nesta etapa</p>
                   <div className="space-y-3">

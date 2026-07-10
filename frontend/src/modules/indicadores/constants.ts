@@ -46,8 +46,9 @@ export const FONTE_OPTS: FonteDados[] = ["manual", "portfolio"]
 
 export const METRICA_LABEL: Record<FonteMetrica, string> = {
   servicos_publicados: "Serviços digitais — % publicados (prod. produção) sobre publicados (prod. produção + desenvolvimento)",
+  documentos_natos_digitais: "Documentos nato-digital — % cadastrados (prod. produção) sobre cadastrados (prod. produção + desenvolvimento); data = publicação do serviço",
 }
-export const METRICA_OPTS: FonteMetrica[] = ["servicos_publicados"]
+export const METRICA_OPTS: FonteMetrica[] = ["servicos_publicados", "documentos_natos_digitais"]
 
 export const ACOMP_STATUS_LABEL: Record<AcompStatus, string> = {
   pendente: "Pendente",

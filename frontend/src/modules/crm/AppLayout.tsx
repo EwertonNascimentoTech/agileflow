@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react"
 import { Outlet, useNavigate, useLocation, useSearchParams } from "react-router-dom"
-import * as Icons from "lucide-react"
 import {
-  LayoutDashboard, Package, Menu, Settings, Search, Moon, Sun, ChevronRight, ClipboardList, CirclePlus,
+  LayoutDashboard, Menu, Settings, Search, Moon, Sun, ChevronRight, ClipboardList, CirclePlus,
 } from "lucide-react"
+import { resolveModuleIcon } from "@/lib/moduleIcons"
 import { useAuth } from "@/contexts/AuthContext"
 import { useTheme } from "@/contexts/ThemeContext"
 import { companyApi, type ActiveModule } from "@/api/crm"
@@ -24,11 +24,7 @@ const homeSections: SidebarSection[] = [
   { to: "/app/dashboard", icon: LayoutDashboard, label: "Dashboard", end: true },
 ]
 
-function resolveIcon(name: string | null | undefined): React.ElementType {
-  if (!name) return Package
-  const Comp = (Icons as unknown as Record<string, React.ElementType>)[name]
-  return Comp ?? Package
-}
+const resolveIcon = resolveModuleIcon
 
 // Slug do registry (crm/estoque/…) → prefixos de módulo nos códigos de permissão.
 // crm é servido por dois módulos de permissão (atendimento + propostas_contratos).

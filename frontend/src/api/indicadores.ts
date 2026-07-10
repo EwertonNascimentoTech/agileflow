@@ -7,7 +7,7 @@ export type Granularidade = "mensal" | "bimestral" | "trimestral" | "semestral" 
 export type Sentido = "maior_melhor" | "menor_melhor" | "faixa_ideal"
 export type IndicadorStatus = "ativo" | "inativo"
 export type FonteDados = "manual" | "portfolio"
-export type FonteMetrica = "servicos_publicados"
+export type FonteMetrica = "servicos_publicados" | "documentos_natos_digitais"
 export type AcompStatus = "pendente" | "atingido" | "em_atencao" | "nao_atingido"
 
 export interface AreaRefMini {
@@ -39,6 +39,17 @@ export interface PortfolioServicoRef {
   novo_no_mes?: boolean
 }
 
+export interface PortfolioDocumentoRef {
+  product_id: string
+  product_name: string
+  documento_id: string
+  documento_name: string
+  lifecycle: string
+  data_documento: string | null
+  em_producao: boolean
+  novo_no_mes?: boolean
+}
+
 export interface PortfolioLinkRef {
   label: string
   url: string
@@ -50,6 +61,8 @@ export interface AcompanhamentoEvidenciasPayload {
   evidencias_novos: AnexoItem[]
   portfolio_servicos: PortfolioServicoRef[]
   portfolio_servicos_novos: PortfolioServicoRef[]
+  portfolio_documentos: PortfolioDocumentoRef[]
+  portfolio_documentos_novos: PortfolioDocumentoRef[]
   portfolio_links: PortfolioLinkRef[]
   portfolio_links_novos: PortfolioLinkRef[]
 }
@@ -67,10 +80,13 @@ export interface Acompanhamento {
   percentual_atingimento: number | null
   status: AcompStatus
   fonte: FonteDados
+  bloqueado: boolean
   observacao: string | null
   evidencias?: AnexoItem[] | null
   portfolio_servicos?: PortfolioServicoRef[] | null
   portfolio_servicos_novos?: PortfolioServicoRef[] | null
+  portfolio_documentos?: PortfolioDocumentoRef[] | null
+  portfolio_documentos_novos?: PortfolioDocumentoRef[] | null
   portfolio_links?: PortfolioLinkRef[] | null
   portfolio_links_novos?: PortfolioLinkRef[] | null
   created_at: string
@@ -178,6 +194,29 @@ export interface DashboardKpis {
   por_area: Record<string, number>
 }
 
+export interface DashboardChartPeriodo {
+  competencia: string
+  ordem: number
+  meta: number | null
+  realizado: number | null
+  percentual_atingimento: number | null
+  status: AcompStatus
+}
+
+export interface DashboardChartIndicador {
+  id: string
+  codigo: string
+  nome: string
+  categoria: Categoria
+  unidade_medida: string | null
+  area_name: string | null
+  periodos: DashboardChartPeriodo[]
+}
+
+export interface DashboardCharts {
+  indicadores: DashboardChartIndicador[]
+}
+
 export interface AcompanhamentoUpdate {
   meta?: number | null
   realizado?: number | null
@@ -186,6 +225,7 @@ export interface AcompanhamentoUpdate {
   fonte?: FonteDados
   limpar_meta?: boolean
   limpar_realizado?: boolean
+  bloqueado?: boolean
 }
 
 export interface IndicadorUpload {
@@ -206,6 +246,9 @@ export const indicadoresApi = {
 
   getDashboard: (filters: DashboardFilters) =>
     api.get<DashboardKpis>("/indicadores/dashboard", { params: filters }).then((r) => r.data),
+
+  getDashboardGraficos: (filters: DashboardFilters) =>
+    api.get<DashboardCharts>("/indicadores/dashboard/graficos", { params: filters }).then((r) => r.data),
 
   list: (filters: DashboardFilters) =>
     api.get<IndicadorListItem[]>("/indicadores", { params: filters }).then((r) => r.data),
@@ -229,6 +272,9 @@ export const indicadoresApi = {
 
   atualizarPortfolio: (indicadorId: string) =>
     api.post<Indicador>(`/indicadores/${indicadorId}/portfolio/atualizar`).then((r) => r.data),
+
+  atualizarAcompanhamentoPortfolio: (acompId: string) =>
+    api.post<Acompanhamento>(`/indicadores/acompanhamentos/${acompId}/portfolio/atualizar`).then((r) => r.data),
 
   updateAcompanhamento: (acompId: string, data: AcompanhamentoUpdate) =>
     api.patch<Acompanhamento>(`/indicadores/acompanhamentos/${acompId}`, data).then((r) => r.data),

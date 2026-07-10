@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom"
-import { ArrowUpRight, BarChart3, CalendarRange, Check, ChevronDown, ChevronLeft, ChevronRight, GitBranch, KanbanSquare, List as ListIcon, Loader2, Plus, Search, X } from "lucide-react"
+import { AlertTriangle, ArrowUpRight, BarChart3, Bot, CalendarRange, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Eye, GitBranch, KanbanSquare, List as ListIcon, Loader2, Plus, Search, X } from "lucide-react"
 import {
   DndContext,
   PointerSensor,
@@ -14,7 +14,7 @@ import {
 import { CSS } from "@dnd-kit/utilities"
 
 import { teamopsApi, type Person } from "@/api/teamops"
-import { projetosApi, type Project, type ProjectCardField, type ProjectDefaultFormField, type ProjectDemandFormField, type ProjectDemandFormSection, type ProjectDemandType, type ProjectFunnel, type ProjectStatus, type ProjectStatusSectionLink, type ProjectTask, type PriorityQuadrant, type QuadrantCode } from "@/api/projetos"
+import { projetosApi, type CardClassification, type Project, type ProjectCardField, type ProjectDefaultFormField, type ProjectDemandFormField, type ProjectDemandFormSection, type ProjectDemandType, type ProjectFunnel, type ProjectStatus, type ProjectStatusSectionLink, type ProjectTask, type PriorityQuadrant, type QuadrantCode } from "@/api/projetos"
 import {
   formatCardCustomFieldValue,
   formatDiretoriaAreaLabel,
@@ -46,11 +46,22 @@ import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ProjectTaskDrawer } from "@/modules/projetos/ProjectTaskDrawer"
+import { BacklogClassificationDialog } from "@/modules/projetos/BacklogClassificationDialog"
 import { FormFieldRenderer, applyAutoFillCurrentFields } from "@/modules/projetos/FormFieldRenderer"
 import { formatMissingFieldsMessage, resolveFieldMode, resolveSectionMode, validateRequiredFields } from "@/modules/projetos/validation"
 import { getRowBreak, groupIntoRows } from "@/modules/projetos/layout"
 import { toast } from "@/lib/toast"
 import { funnelAccessLevel } from "@/lib/permissions"
+import {
+  buildTaskProgressById,
+  fmtEstimatedHours,
+  isFeatureKanbanFunnel,
+  isFeatureOrUsKanbanFunnel,
+  isUserStoryKanbanFunnel,
+  shouldShowUsChecklistProgress,
+  usChecklistProgressPct,
+} from "@/modules/projetos/kanbanDisplay"
+import { UsCardProgressBar } from "@/modules/projetos/UsChecklistSection"
 import { canEditTaskOnBoard, canMoveTaskOnBoard } from "@/modules/projetos/taskMovePermissions"
 
 function personToUser(p: Person): User {
@@ -90,6 +101,32 @@ function resolveRequesterField(meta: Map<string, ProjectDemandFormField>): Proje
   return null
 }
 
+const CLASSIFICATION_LABELS: Record<NonNullable<ProjectTask["card_classification"]>, string> = {
+  desenvolvimento: "Desenvolvimento",
+  implantacao: "Implantação",
+  melhoria: "Melhoria",
+}
+
+const CLASSIFICATION_COLORS: Record<NonNullable<ProjectTask["card_classification"]>, { bg: string; color: string }> = {
+  desenvolvimento: { bg: "#2563eb", color: "#fff" },
+  implantacao: { bg: "#0891b2", color: "#fff" },
+  melhoria: { bg: "#7c3aed", color: "#fff" },
+}
+
+function ClassificationChip({ value }: { value: ProjectTask["card_classification"] }) {
+  if (!value) return null
+  const colors = CLASSIFICATION_COLORS[value]
+  return (
+    <span
+      className="chip"
+      style={{ background: colors.bg, color: colors.color }}
+      title="Classificação do portfólio de produtos"
+    >
+      {CLASSIFICATION_LABELS[value]}
+    </span>
+  )
+}
+
 function SlaChip({ state }: { state: ProjectTask["sla_state"] }) {
   if (state === "warning") return <span className="chip warning">SLA: alerta</span>
   if (state === "breached") return <span className="chip destructive">SLA: atrasado</span>
@@ -113,6 +150,18 @@ type CardCtx = {
   formValuesByTask: Record<string, Record<string, unknown>>
   formFieldMeta: Map<string, ProjectDemandFormField>
   defaultFormFields: ProjectDefaultFormField[]
+  /** Kanban Feature/US: exibe horas estimadas no lugar de SLA/cronograma. */
+  useEstimatedHoursOnCard: boolean
+  /** Kanban User Story: exibe barra de progresso do checklist. */
+  isUsKanban: boolean
+  /** Kanban Feature: barra de progresso agregada das US filhas. */
+  isFeatureKanban: boolean
+  featureUsProgress: (taskId: string) => { pct: number; total: number } | null
+  /** Nome do programa vinculado (planning_kind = 'programa'). */
+  programName: (id: string | null) => string | null
+  /** Etiqueta Projeto/Programa efetiva do card: próprio (planning_kind) ou herdada do card
+   * convertido a partir dele (origin_task_id). Ex.: card "Concluído" da prospecção. */
+  planningTag: (task: ProjectTask) => { kind: "projeto" | "programa"; programName: string | null } | null
 }
 
 function BoardCard({
@@ -143,7 +192,20 @@ function BoardCard({
           <span className="chip" style={{ background: q.color, color: "#fff" }}>{q.label}</span>
         ) : null
       }
+      case "card_classification":
+        return task.card_classification ? (
+          <ClassificationChip value={task.card_classification} />
+        ) : null
       case "schedule_sla": {
+        if (ctx.useEstimatedHoursOnCard) {
+          const text = fmtEstimatedHours(task.estimated_hours)
+          return (
+            <span className="chip muted" title="Horas estimadas">
+              <Clock size={10} />
+              {text ?? "—"}
+            </span>
+          )
+        }
         if (task.completed_at) return <span className="chip success"><Check size={10} /> Concluída</span>
         if (task.sla_state === "breached") return <span className="chip destructive">Atrasado</span>
         if (task.sla_state === "warning") return <span className="chip warning">Alerta</span>
@@ -234,10 +296,12 @@ function BoardCard({
   // Indicador de Programa/agrupador: sempre visível quando o card tem itens-filhos.
   const childAgg = ctx.childrenProgress(task.id)
   const childDates = ctx.childrenDates(task.id)
-  const groupLabel = task.planning_kind === "programa" ? "Programa" : null
   const lastDelivery = childDates?.due
     ? new Date(childDates.due).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" })
     : null
+  // Etiqueta Projeto/Programa: do próprio card-raiz ou herdada do card convertido
+  // a partir desta origem (ex.: card "Concluído" do kanban de prospecção).
+  const planningTag = ctx.planningTag(task)
 
   return (
     <article
@@ -248,14 +312,31 @@ function BoardCard({
       {...attributes}
       {...listeners}
     >
-      {childAgg && (
+      {planningTag && (
+        <div style={{ marginBottom: 4, display: "flex", flexWrap: "wrap", gap: 4 }}>
+          <span
+            className="chip"
+            style={
+              planningTag.kind === "programa"
+                ? { background: "#7c3aed", color: "#fff" }
+                : { background: "#0ea5e9", color: "#fff" }
+            }
+          >
+            {planningTag.kind === "programa" ? "Programa" : "Projeto"}
+          </span>
+          {planningTag.kind === "programa" && planningTag.programName && (
+            <span className="chip muted" title="Programa vinculado">{planningTag.programName}</span>
+          )}
+        </div>
+      )}
+      {childAgg && !ctx.isFeatureKanban && (
         <div style={{ marginBottom: 4, display: "flex", flexWrap: "wrap", gap: 4 }}>
           <span
             className="chip"
             style={{ background: "var(--af-primary, #2563eb)", color: "#fff" }}
             title="Abra o card para ver/gerenciar os itens"
           >
-            {groupLabel ? `${groupLabel} · ` : ""}{childAgg.total} {childAgg.total === 1 ? "item" : "itens"} · {childAgg.pct}%
+            {childAgg.total} {childAgg.total === 1 ? "item" : "itens"} · {childAgg.pct}%
           </span>
           {lastDelivery && <span className="chip muted">Última entrega: {lastDelivery}</span>}
         </div>
@@ -269,6 +350,33 @@ function BoardCard({
           ))
           : <h4 className="title" style={{ width: "100%" }}>{task.title}</h4>}
       </div>
+      {shouldShowUsChecklistProgress(task, ctx.isUsKanban) && (
+        <UsCardProgressBar percent={usChecklistProgressPct(task)} />
+      )}
+      {ctx.isFeatureKanban && (() => {
+        const fp = ctx.featureUsProgress(task.id)
+        if (!fp) return null
+        const usLabel = `${fp.total} User ${fp.total === 1 ? "Story" : "Stories"}`
+        return <UsCardProgressBar percent={fp.pct} label={usLabel} />
+      })()}
+      {ctx.isFeatureKanban && task.us_impediment_active && (
+        <span
+          className="chip"
+          title="Alguma User Story desta Feature está com impedimento"
+          style={{ color: "#b91c1c", borderColor: "#fecaca", background: "#fef2f2" }}
+        >
+          <AlertTriangle size={10} /> Impedimento
+        </span>
+      )}
+      {ctx.isFeatureKanban && task.us_codereview_active && (
+        <span
+          className="chip"
+          title="Alguma User Story desta Feature está em Code Review"
+          style={{ color: "#6d28d9", borderColor: "#ddd6fe", background: "#f5f3ff" }}
+        >
+          <Eye size={10} /> Code Review
+        </span>
+      )}
     </article>
   )
 }
@@ -278,11 +386,13 @@ function BoardColumn({
   status,
   tasks,
   ctx,
+  hasAgent,
   onOpen,
 }: {
   status: ProjectStatus
   tasks: ProjectTask[]
   ctx: CardCtx
+  hasAgent?: boolean
   onOpen: (task: ProjectTask) => void
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `column-${status.id}` })
@@ -292,6 +402,14 @@ function BoardColumn({
       <header className="column-head">
         <div className="left">
           <h3>{status.name}</h3>
+          {hasAgent && (
+            <span
+              className="inline-flex items-center text-violet-600"
+              title="Esta raia é executada por um agente de IA"
+            >
+              <Bot size={15} />
+            </span>
+          )}
           <span className="col-count">{tasks.length}</span>
         </div>
       </header>
@@ -354,6 +472,7 @@ function ListView({
   canSendToDev,
   childrenProgress,
   childrenDates,
+  useEstimatedHoursOnCard,
 }: {
   statuses: ProjectStatus[]
   tasks: ProjectTask[]
@@ -364,6 +483,7 @@ function ListView({
   canSendToDev: boolean
   childrenProgress: (taskId: string) => { done: number; total: number; pct: number } | null
   childrenDates: (taskId: string) => { start: string | null; due: string | null } | null
+  useEstimatedHoursOnCard: boolean
 }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const toggle = (k: string) => setCollapsed((c) => ({ ...c, [k]: !c[k] }))
@@ -376,7 +496,7 @@ function ListView({
         <span>Tipo</span>
         <span>Status</span>
         <span>Responsável</span>
-        <span>SLA</span>
+        <span>{useEstimatedHoursOnCard ? "Horas est." : "SLA"}</span>
         <span>Prazo</span>
       </div>
       {statuses.map((s) => {
@@ -411,6 +531,7 @@ function ListView({
                     {lastDue && (
                       <span className="chip muted">Última entrega: {new Date(lastDue).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" })}</span>
                     )}
+                    {t.card_classification && <ClassificationChip value={t.card_classification} />}
                     {canSendToDev && t.parent_task_id && (
                       <button
                         type="button"
@@ -435,7 +556,16 @@ function ListView({
                     </span>
                     <span style={{ fontSize: 12 }}>{a?.full_name?.split(" ")[0] ?? "—"}</span>
                   </span>
-                  <span><SlaChip state={t.sla_state} /></span>
+                  <span>
+                    {useEstimatedHoursOnCard ? (
+                      <span className="chip muted" title="Horas estimadas">
+                        <Clock size={10} />
+                        {fmtEstimatedHours(t.estimated_hours) ?? "—"}
+                      </span>
+                    ) : (
+                      <SlaChip state={t.sla_state} />
+                    )}
+                  </span>
                   <span>{due && (
                     <span className={`due-pill ${overdue ? "overdue" : ""}`}>
                       <span className="dot" />{due.toLocaleDateString("pt-BR")}
@@ -561,6 +691,8 @@ export default function ProjectBoardPage() {
   const [projects, setProjects] = useState<Project[]>([])
   const [funnels, setFunnels] = useState<ProjectFunnel[]>([])
   const [statuses, setStatuses] = useState<ProjectStatus[]>([])
+  // status_ids que têm um agente de IA ativo vinculado (ícone de robô na raia).
+  const [agentStatusIds, setAgentStatusIds] = useState<Set<string>>(new Set())
   const [demandTypes, setDemandTypes] = useState<ProjectDemandType[]>([])
   const [formSections, setFormSections] = useState<ProjectDemandFormSection[]>([])
   const [fieldsBySection, setFieldsBySection] = useState<Record<string, ProjectDemandFormField[]>>({})
@@ -599,8 +731,20 @@ export default function ProjectBoardPage() {
     description: string
     assignedTo: string
     items: Array<{ title: string; description: string; start_date: string; due_date: string }>
+    // Programa (obrigatório): selecionar um existente ou cadastrar um novo inline.
+    programMode: "select" | "new"
+    programId: string
+    newProgramName: string
+    newProgramDesc: string
   } | null>(null)
+  const [programs, setPrograms] = useState<{ id: string; name: string }[]>([])
   const [savingConversion, setSavingConversion] = useState(false)
+  // Gate de saída do backlog: classificar o card + vincular ao portfólio de Produtos.
+  const [classificationPrompt, setClassificationPrompt] = useState<{
+    task: ProjectTask
+    toStatusId?: string
+    mode: "backlog_exit" | "late"
+  } | null>(null)
 
   const selectedProject = useMemo(
     () => projects.find((p) => p.id === projectId) ?? null,
@@ -818,6 +962,28 @@ export default function ProjectBoardPage() {
       .sort((a, b) => a.full_name.localeCompare(b.full_name, "pt-BR"))
   }, [tasks, resolveAssignee])
 
+  const selectedFunnelName = funnels.find((f) => f.id === selectedFunnelId)?.name ?? null
+
+  const taskProgressById = useMemo(() => buildTaskProgressById(tasks), [tasks])
+
+  const programNameById = useMemo(
+    () => new Map(programs.map((p) => [p.id, p.name])),
+    [programs],
+  )
+
+  // Card de planejamento (projeto/programa) criado por conversão, indexado pela origem.
+  // Permite exibir a etiqueta Projeto/Programa também no card de origem (ex.: "Concluído"
+  // do kanban de prospecção), que não carrega planning_kind próprio.
+  const plannedByOrigin = useMemo(() => {
+    const m = new Map<string, ProjectTask>()
+    for (const t of tasks) {
+      if (t.origin_task_id && (t.planning_kind === "projeto" || t.planning_kind === "programa")) {
+        m.set(t.origin_task_id, t)
+      }
+    }
+    return m
+  }, [tasks])
+
   const cardCtx = useMemo<CardCtx>(() => ({
     fields: visibleCardFields,
     demandTypeName,
@@ -830,6 +996,27 @@ export default function ProjectBoardPage() {
     formValuesByTask,
     formFieldMeta,
     defaultFormFields,
+    useEstimatedHoursOnCard: isFeatureOrUsKanbanFunnel(selectedFunnelName),
+    isUsKanban: isUserStoryKanbanFunnel(selectedFunnelName),
+    isFeatureKanban: isFeatureKanbanFunnel(selectedFunnelName),
+    featureUsProgress: (taskId: string) => {
+      const total = tasks.filter((t) => t.parent_task_id === taskId).length
+      if (total === 0) return null
+      return { pct: taskProgressById.get(taskId) ?? 0, total }
+    },
+    programName: (id: string | null) => (id ? programNameById.get(id) ?? null : null),
+    planningTag: (task: ProjectTask) => {
+      const src =
+        task.planning_kind === "projeto" || task.planning_kind === "programa"
+          ? task
+          : plannedByOrigin.get(task.id) ?? null
+      if (!src) return null
+      const kind = src.planning_kind as "projeto" | "programa"
+      return {
+        kind,
+        programName: kind === "programa" ? (src.linked_program_id ? programNameById.get(src.linked_program_id) ?? null : null) : null,
+      }
+    },
   }), [
     visibleCardFields,
     demandTypeName,
@@ -842,6 +1029,11 @@ export default function ProjectBoardPage() {
     formValuesByTask,
     formFieldMeta,
     defaultFormFields,
+    selectedFunnelName,
+    taskProgressById,
+    tasks,
+    programNameById,
+    plannedByOrigin,
   ])
   const userRoleName = (user?.role_name ?? "").trim().toLowerCase()
   const isBasicUser =
@@ -905,8 +1097,16 @@ export default function ProjectBoardPage() {
       .catch(() => setQuadrantByTask({}))
     // Mapa status→funil de TODOS os funis (para agrupar filhos pelo funil do pai).
     projetosApi.listStatuses(projectId)
-      .then((all) => setStatusFunnel(Object.fromEntries(all.map((s) => [s.id, s.funnel_id]))))
-      .catch(() => setStatusFunnel({}))
+      .then((all) => {
+        setStatusFunnel(Object.fromEntries(all.map((s) => [s.id, s.funnel_id])))
+      })
+      .catch(() => {
+        setStatusFunnel({})
+      })
+    // Catálogo de programas — resolve o nome exibido nos cards do tipo "Programa".
+    projetosApi.listPrograms(projectId)
+      .then(setPrograms)
+      .catch(() => setPrograms([]))
     Promise.all([
       projetosApi.listFunnels(projectId, true),
       projetosApi.listTasks(projectId),
@@ -931,6 +1131,14 @@ export default function ProjectBoardPage() {
       setStatuses([...ss].sort((a, b) => a.order - b.order))
     })
   }, [projectId, selectedFunnelId])
+
+  // Raias com agente de IA ativo (para exibir o ícone de robô no cabeçalho da coluna).
+  useEffect(() => {
+    if (!projectId) { setAgentStatusIds(new Set()); return }
+    projetosApi.listStageAgents(projectId)
+      .then((ags) => setAgentStatusIds(new Set(ags.filter((a) => a.is_active).map((a) => a.status_id))))
+      .catch(() => setAgentStatusIds(new Set()))
+  }, [projectId])
 
   // Layout do card é por kanban: recarrega ao trocar de funil.
   useEffect(() => {
@@ -1110,6 +1318,12 @@ export default function ProjectBoardPage() {
       toast.error("Você não tem permissão para mover este card para essa etapa.")
       return
     }
+    const moveFunnelName = funnels.find((f) => f.id === (fromStatus?.funnel_id ?? selectedFunnelId))?.name ?? selectedFunnelName
+    if (isFeatureOrUsKanbanFunnel(moveFunnelName) && !task.assigned_to) {
+      toast.error("Defina um responsável no card antes de movê-lo.")
+      setSelectedTask(task)
+      return
+    }
     const isForward = !!(fromStatus && toStatus && toStatus.order > fromStatus.order)
     if (task.demand_type_id && isForward) {
       try {
@@ -1134,13 +1348,28 @@ export default function ProjectBoardPage() {
         // Falha ao carregar metadados de validação — segue para o backend decidir.
       }
     }
+    // Saída do backlog: exige classificar quando enforcement ativo no funil.
+    const activeFunnel = funnels.find((f) => f.id === (fromStatus?.funnel_id ?? selectedFunnelId))
+    if (
+      fromStatus?.is_initial
+      && fromStatus?.classification_required
+      && activeFunnel?.classification_enforcement_enabled
+      && isForward
+    ) {
+      setClassificationPrompt({ task, toStatusId, mode: "backlog_exit" })
+      return
+    }
     if (toStatus?.creates_demand_type_id) {
       const typeName = demandTypes.find((d) => d.id === toStatus.creates_demand_type_id)?.name ?? "Projeto"
+      if (projectId) {
+        projetosApi.listPrograms(projectId).then(setPrograms).catch(() => setPrograms([]))
+      }
       setConversionPrompt({
         task, toStatusId, typeName, name: stripProjectPrefix(task.title),
         kind: "projeto", description: task.description ?? "",
         assignedTo: poUsers.some((u) => u.id === task.assigned_to) ? (task.assigned_to ?? "") : "",
         items: [{ title: "", description: "", start_date: "", due_date: "" }],
+        programMode: "select", programId: "", newProgramName: "", newProgramDesc: "",
       })
       return
     }
@@ -1156,26 +1385,25 @@ export default function ProjectBoardPage() {
       description: string
       assignedTo: string
       items: Array<{ title: string; description: string; start_date: string; due_date: string }>
+      programId?: string | null
     },
+    classification?: { value: CardClassification; productId: string; releaseId: string | null },
   ) {
     if (!projectId) return
     try {
       const payload: Parameters<typeof projetosApi.updateTask>[2] = { status_id: toStatusId }
+      if (classification) {
+        payload.card_classification = classification.value
+        payload.linked_product_id = classification.productId
+        payload.linked_release_id = classification.releaseId
+      }
       if (conversionTitle !== undefined) payload.conversion_title = conversionTitle
       if (conversion) {
-        payload.conversion_kind = conversion.kind
+        // A conversão sempre cria um Projeto; opcionalmente vincula a um programa do cadastro.
+        payload.conversion_kind = "projeto"
         payload.conversion_description = conversion.description.trim() || null
         payload.conversion_assigned_to = conversion.assignedTo || null
-        if (conversion.kind === "programa") {
-          payload.conversion_items = conversion.items
-            .filter((i) => i.title.trim())
-            .map((i) => ({
-              title: i.title.trim(),
-              description: i.description.trim() || null,
-              start_date: i.start_date || null,
-              due_date: i.due_date || null,
-            }))
-        }
+        payload.conversion_program_id = conversion.programId || null
       }
       const updated = await projetosApi.updateTask(projectId, task.id, payload)
       formValuesCache.current.delete(task.id)
@@ -1203,22 +1431,68 @@ export default function ProjectBoardPage() {
       toast.error("Informe um nome com ao menos 2 caracteres.")
       return
     }
-    if (conversionPrompt.kind === "programa" && !conversionPrompt.items.some((i) => i.title.trim())) {
-      toast.error("Adicione ao menos um item ao programa.")
+    // Programa só é OBRIGATÓRIO quando o tipo escolhido é "Programa".
+    const requiresProgram = conversionPrompt.kind === "programa"
+    if (requiresProgram && conversionPrompt.programMode === "select" && !conversionPrompt.programId) {
+      toast.error("Vincule a um programa (selecione um existente ou cadastre um novo).")
+      return
+    }
+    if (requiresProgram && conversionPrompt.programMode === "new" && conversionPrompt.newProgramName.trim().length < 2) {
+      toast.error("Informe o nome do novo programa (mín. 2 caracteres).")
       return
     }
     setSavingConversion(true)
     try {
+      let programId = conversionPrompt.programId
+      if (requiresProgram && conversionPrompt.programMode === "new") {
+        const created = await projetosApi.createProgram({
+          name: conversionPrompt.newProgramName.trim(),
+          description: conversionPrompt.newProgramDesc.trim() || null,
+          responsavel_person_id: conversionPrompt.assignedTo || null,
+        })
+        programId = created.id
+        setPrograms((prev) => [...prev, { id: created.id, name: created.name }])
+      }
       await performMove(conversionPrompt.task, conversionPrompt.toStatusId, name, {
-        kind: conversionPrompt.kind,
+        kind: "projeto",
         description: conversionPrompt.description,
         assignedTo: conversionPrompt.assignedTo,
         items: conversionPrompt.items,
+        programId: requiresProgram ? (programId || null) : null,
       })
       setConversionPrompt(null)
+    } catch {
+      toast.error("Não foi possível concluir (verifique o programa).")
     } finally {
       setSavingConversion(false)
     }
+  }
+
+  async function confirmClassification(result: { classification: CardClassification; productId: string; releaseId: string | null }) {
+    if (!classificationPrompt) return
+    if (classificationPrompt.mode === "late" || !classificationPrompt.toStatusId) {
+      if (!projectId) return
+      try {
+        const updated = await projetosApi.updateTask(projectId, classificationPrompt.task.id, {
+          card_classification: result.classification,
+          linked_product_id: result.productId,
+          linked_release_id: result.releaseId,
+        })
+        setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+        if (selectedTask?.id === updated.id) setSelectedTask(updated)
+        toast.success("Projeto classificado.")
+      } catch (err) {
+        toast.error(getApiError(err))
+      }
+      setClassificationPrompt(null)
+      return
+    }
+    await performMove(classificationPrompt.task, classificationPrompt.toStatusId, undefined, undefined, {
+      value: result.classification,
+      productId: result.productId,
+      releaseId: result.releaseId,
+    })
+    setClassificationPrompt(null)
   }
 
   function initialStatusOf(list: ProjectStatus[]): string {
@@ -1504,6 +1778,7 @@ export default function ProjectBoardPage() {
                     status={status}
                     tasks={columnTasks}
                     ctx={cardCtx}
+                    hasAgent={agentStatusIds.has(status.id)}
                     onOpen={(t) => setSelectedTask(t)}
                   />
                 )
@@ -1520,7 +1795,7 @@ export default function ProjectBoardPage() {
 
       {view === "list" && (
         <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-          <ListView statuses={statuses} tasks={funnelTasks} resolveAssignee={resolveAssignee} demandTypeName={demandTypeName} onOpen={(t) => setSelectedTask(t)} onSendToDev={(t) => void sendToDev(t)} canSendToDev={!!devMoveStageId} childrenProgress={childrenProgress} childrenDates={childrenDates} />
+          <ListView statuses={statuses} tasks={funnelTasks} resolveAssignee={resolveAssignee} demandTypeName={demandTypeName} onOpen={(t) => setSelectedTask(t)} onSendToDev={(t) => void sendToDev(t)} canSendToDev={!!devMoveStageId} childrenProgress={childrenProgress} childrenDates={childrenDates} useEstimatedHoursOnCard={cardCtx.useEstimatedHoursOnCard} />
         </div>
       )}
 
@@ -1671,6 +1946,7 @@ export default function ProjectBoardPage() {
         task={selectedTask}
         isBasicUser={isBasicUser}
         canEditTask={canEditSelectedTask}
+        kanbanFunnelName={selectedFunnelName}
         onSaved={(updated) => {
           setTasks((prev) => prev.map((t) => t.id === updated.id ? updated : t))
           void reloadTasks()
@@ -1678,6 +1954,14 @@ export default function ProjectBoardPage() {
         onDeleted={(taskId) => {
           setTasks((prev) => prev.filter((t) => t.id !== taskId))
         }}
+      />
+
+      <BacklogClassificationDialog
+        open={!!classificationPrompt}
+        task={classificationPrompt?.task ?? null}
+        mode={classificationPrompt?.mode ?? "backlog_exit"}
+        onCancel={() => setClassificationPrompt(null)}
+        onConfirm={confirmClassification}
       />
 
       <Dialog open={!!conversionPrompt} onOpenChange={(v) => { if (!v) setConversionPrompt(null) }}>
@@ -1691,7 +1975,7 @@ export default function ProjectBoardPage() {
               <strong>{conversionPrompt?.typeName}</strong> no kanban de destino.
             </p>
 
-            {/* Projeto x Programa */}
+            {/* Tipo: Projeto x Programa — em "Programa" é obrigatório vincular a um programa. */}
             <div className="space-y-1.5">
               <Label>Tipo</Label>
               <div className="flex gap-2">
@@ -1700,7 +1984,7 @@ export default function ProjectBoardPage() {
                     key={k}
                     type="button"
                     onClick={() => setConversionPrompt((p) => (p ? { ...p, kind: k } : p))}
-                    className={`flex-1 rounded-md border px-3 py-2 text-sm font-medium capitalize transition ${
+                    className={`flex-1 rounded-md border px-3 py-2 text-sm font-medium transition ${
                       conversionPrompt?.kind === k ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted"
                     }`}
                   >
@@ -1709,16 +1993,12 @@ export default function ProjectBoardPage() {
                 ))}
               </div>
               <p className="text-[11px] text-muted-foreground">
-                {conversionPrompt?.kind === "programa"
-                  ? "Um programa agrupa vários itens — cada item vira um card filho."
-                  : "Um projeto cria um único card com título e descrição."}
+                Em <strong>Programa</strong>, é obrigatório vincular o card a um programa existente (ou cadastrar um novo).
               </p>
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="conversion-name">
-                Nome do {conversionPrompt?.kind === "programa" ? "Programa" : "Projeto"}
-              </Label>
+              <Label htmlFor="conversion-name">Nome do Projeto</Label>
               <Input
                 id="conversion-name"
                 value={conversionPrompt?.name ?? ""}
@@ -1749,79 +2029,73 @@ export default function ProjectBoardPage() {
               )}
             </div>
 
-            {conversionPrompt?.kind === "projeto" ? (
-              <div className="space-y-1.5">
-                <Label htmlFor="conversion-desc">Descrição</Label>
-                <Textarea
-                  id="conversion-desc"
-                  value={conversionPrompt?.description ?? ""}
-                  onChange={(e) => setConversionPrompt((p) => (p ? { ...p, description: e.target.value } : p))}
-                  rows={3}
-                />
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <Label>Itens do programa</Label>
-                <div className="max-h-64 space-y-2 overflow-y-auto">
-                  {conversionPrompt?.items.map((it, i) => (
-                    <div key={i} className="space-y-1 rounded-md border p-2">
-                      <div className="flex items-center gap-2">
-                        <Input
-                          placeholder={`Título do item ${i + 1}`}
-                          value={it.title}
-                          onChange={(e) => setConversionPrompt((p) => (p ? { ...p, items: p.items.map((x, idx) => (idx === i ? { ...x, title: e.target.value } : x)) } : p))}
-                          maxLength={200}
-                          className="h-8 text-sm"
-                        />
-                        {(conversionPrompt?.items.length ?? 0) > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => setConversionPrompt((p) => (p ? { ...p, items: p.items.filter((_, idx) => idx !== i) } : p))}
-                            className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-destructive"
-                            title="Remover item"
-                          >
-                            <X size={14} />
-                          </button>
-                        )}
-                      </div>
-                      <Textarea
-                        placeholder="Descrição (opcional)"
-                        value={it.description}
-                        onChange={(e) => setConversionPrompt((p) => (p ? { ...p, items: p.items.map((x, idx) => (idx === i ? { ...x, description: e.target.value } : x)) } : p))}
-                        rows={2}
-                        className="text-sm"
-                      />
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <span className="text-[11px] text-muted-foreground">Início</span>
-                          <Input
-                            type="date"
-                            value={it.start_date}
-                            onChange={(e) => setConversionPrompt((p) => (p ? { ...p, items: p.items.map((x, idx) => (idx === i ? { ...x, start_date: e.target.value } : x)) } : p))}
-                            className="h-8 text-sm"
-                          />
-                        </div>
-                        <div>
-                          <span className="text-[11px] text-muted-foreground">Prazo</span>
-                          <Input
-                            type="date"
-                            value={it.due_date}
-                            onChange={(e) => setConversionPrompt((p) => (p ? { ...p, items: p.items.map((x, idx) => (idx === i ? { ...x, due_date: e.target.value } : x)) } : p))}
-                            className="h-8 text-sm"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="conversion-desc">Descrição</Label>
+              <Textarea
+                id="conversion-desc"
+                value={conversionPrompt?.description ?? ""}
+                onChange={(e) => setConversionPrompt((p) => (p ? { ...p, description: e.target.value } : p))}
+                rows={3}
+              />
+            </div>
+
+            {/* Vínculo de programa — obrigatório só no tipo Programa; UI estilo vínculo de produto */}
+            {conversionPrompt?.kind === "programa" && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Label>Programa</Label>
                 <button
                   type="button"
-                  onClick={() => setConversionPrompt((p) => (p ? { ...p, items: [...p.items, { title: "", description: "", start_date: "", due_date: "" }] } : p))}
+                  onClick={() => setConversionPrompt((p) => (p ? { ...p, programMode: p.programMode === "new" ? "select" : "new" } : p))}
                   className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
                 >
-                  <Plus size={13} /> Adicionar item
+                  {conversionPrompt?.programMode === "new" ? (<><X size={13} /> Usar existente</>) : (<><Plus size={13} /> Novo programa</>)}
                 </button>
               </div>
+
+              {conversionPrompt?.programMode === "select" ? (
+                <>
+                  <Select
+                    value={conversionPrompt?.programId || "__none__"}
+                    onValueChange={(v) => setConversionPrompt((p) => (p ? { ...p, programId: v === "__none__" ? "" : v } : p))}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Selecione um programa" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Selecione um programa</SelectItem>
+                      {programs.map((pr) => <SelectItem key={pr.id} value={pr.id}>{pr.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  {programs.length === 0 && (
+                    <p className="text-[11px] text-muted-foreground">Nenhum programa cadastrado — use “Novo programa”.</p>
+                  )}
+                </>
+              ) : (
+                <div className="space-y-2 rounded-md border p-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="conversion-new-program">Nome do programa</Label>
+                    <Input
+                      id="conversion-new-program"
+                      value={conversionPrompt?.newProgramName ?? ""}
+                      onChange={(e) => setConversionPrompt((p) => (p ? { ...p, newProgramName: e.target.value } : p))}
+                      maxLength={200}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="conversion-new-program-desc">Descrição do programa</Label>
+                    <Textarea
+                      id="conversion-new-program-desc"
+                      value={conversionPrompt?.newProgramDesc ?? ""}
+                      onChange={(e) => setConversionPrompt((p) => (p ? { ...p, newProgramDesc: e.target.value } : p))}
+                      rows={2}
+                    />
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    O programa será cadastrado (menu “Programa”) e vinculado a este projeto. O PO acima é herdado.
+                  </p>
+                </div>
+              )}
+              <p className="text-[11px] text-muted-foreground">Obrigatório — vincule este projeto a um programa.</p>
+            </div>
             )}
           </div>
           <DialogFooter>

@@ -4,13 +4,13 @@ from datetime import datetime
 from typing import Optional, List
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, func, text
 from sqlalchemy.orm import selectinload
 from fastapi import HTTPException, status
 
 from app.core.database import create_tenant_schema, create_tenant_tables
 from app.core.tenant_migrations import upgrade_tenant_schema
-from app.core.security import get_password_hash, verify_password
+from app.core.security import get_password_hash, verify_password, create_first_access_token, decode_first_access_token
 from app.modules.super_admin.models import (
     Plan, PlanModule, Tenant, TenantModule, User, Module,
     ModulePermission, Role, RolePermission,
@@ -71,6 +71,8 @@ class ModuleService:
         m.updated_at = datetime.utcnow()
         await db.commit()
         await db.refresh(m)
+        from app.core.cache import invalidate_module_registry
+        await invalidate_module_registry(m.slug)
         return m
 
     @staticmethod
@@ -320,6 +322,10 @@ class TenantService:
         if data.plan_id and data.plan_id != old_plan_id:
             await TenantService._activate_plan_modules(db, tenant)
 
+        # is_active/plan_expires_at/módulos do tenant afetam a validação cacheada
+        from app.core.cache import invalidate_tenant_modules
+        await invalidate_tenant_modules(tenant_id)
+
         result = await db.execute(
             select(Tenant)
             .options(selectinload(Tenant.active_modules))
@@ -354,6 +360,8 @@ class TenantService:
 
         await db.commit()
         await db.refresh(module)
+        from app.core.cache import invalidate_tenant_modules
+        await invalidate_tenant_modules(tenant_id)
         return module
 
     @staticmethod
@@ -373,6 +381,8 @@ class TenantService:
         module.is_active = False
         await db.commit()
         await db.refresh(module)
+        from app.core.cache import invalidate_tenant_modules
+        await invalidate_tenant_modules(tenant_id)
         return module
 
 
@@ -384,7 +394,10 @@ class UserService:
 
     @staticmethod
     async def get_by_email(db: AsyncSession, email: str) -> Optional[User]:
-        result = await db.execute(select(User).where(User.email == email))
+        normalized = email.strip().lower()
+        result = await db.execute(
+            select(User).where(func.lower(User.email) == normalized)
+        )
         return result.scalar_one_or_none()
 
     @staticmethod
@@ -443,6 +456,8 @@ class UserService:
         user.updated_at = datetime.utcnow()
         await db.commit()
         await db.refresh(user)
+        from app.core.cache import invalidate_user
+        await invalidate_user(user_id)
         return user
 
     @staticmethod
@@ -450,6 +465,8 @@ class UserService:
         user = await UserService.get_user(db, user_id)
         await db.delete(user)
         await db.commit()
+        from app.core.cache import invalidate_user
+        await invalidate_user(user_id)
 
     @staticmethod
     async def create_company_user(
@@ -487,6 +504,135 @@ class UserService:
         user.last_login = datetime.utcnow()
         await db.commit()
         return user
+
+    @staticmethod
+    async def _find_person_by_email(
+        db: AsyncSession, email: str,
+    ) -> Optional[tuple[Tenant, dict]]:
+        """Busca colaborador (team_persons) por e-mail em todos os tenants ativos."""
+        normalized = email.strip().lower()
+        tenants = (
+            await db.execute(select(Tenant).where(Tenant.is_active.is_(True)))
+        ).scalars().all()
+        for tenant in tenants:
+            schema = tenant.schema_name
+            has_table = (await db.execute(
+                text("SELECT to_regclass(:fqn) IS NOT NULL"),
+                {"fqn": f"{schema}.team_persons"},
+            )).scalar()
+            if not has_table:
+                continue
+            row = (await db.execute(
+                text(
+                    f'SELECT id, user_id, full_name, email, status '
+                    f'FROM "{schema}".team_persons WHERE lower(email) = :email LIMIT 1'
+                ),
+                {"email": normalized},
+            )).mappings().first()
+            if row:
+                return tenant, dict(row)
+        return None
+
+    @staticmethod
+    async def check_first_access(db: AsyncSession, email: str) -> dict:
+        """Verifica se o e-mail está cadastrado e ainda não realizou o primeiro acesso."""
+        normalized = email.strip().lower()
+        result = await db.execute(
+            select(User).where(func.lower(User.email) == normalized)
+        )
+        user = result.scalar_one_or_none()
+
+        if not user:
+            person_match = await UserService._find_person_by_email(db, normalized)
+            if not person_match:
+                raise HTTPException(status_code=404, detail="E-mail não cadastrado.")
+            tenant, person = person_match
+            if person.get("status") != "ativo":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Colaborador inativo. Contate o administrador da sua empresa.",
+                )
+            if person.get("user_id"):
+                user = await UserService.get_user(db, uuid.UUID(str(person["user_id"])))
+            else:
+                return {
+                    "setup_token": create_first_access_token(
+                        person_id=uuid.UUID(str(person["id"])),
+                        tenant_id=tenant.id,
+                    ),
+                    "full_name": person["full_name"],
+                    "email": person["email"],
+                    "message": "Primeiro acesso confirmado. Defina sua senha para continuar.",
+                }
+
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Usuário inativo. Contate o administrador da sua empresa.",
+            )
+        if user.last_login is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="Este e-mail já realizou o primeiro acesso. Faça login ou recupere a senha.",
+            )
+        return {
+            "setup_token": create_first_access_token(user_id=user.id),
+            "full_name": user.full_name,
+            "email": user.email,
+            "message": "Primeiro acesso confirmado. Defina sua senha para continuar.",
+        }
+
+    @staticmethod
+    async def complete_first_access(db: AsyncSession, token: str, password: str) -> User:
+        """Define a senha no primeiro acesso e autentica o usuário."""
+        from app.core.database import AsyncSessionLocal
+        from app.modules.teamops.service import PersonService
+
+        payload = decode_first_access_token(token)
+        user_id = payload.get("sub")
+        person_id = payload.get("person_id")
+        tenant_id = payload.get("tenant_id")
+
+        if user_id:
+            user = await UserService.get_user(db, uuid.UUID(user_id))
+            if not user.is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Usuário inativo. Contate o administrador da sua empresa.",
+                )
+            if user.last_login is not None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Primeiro acesso já concluído. Faça login com sua senha.",
+                )
+            user.hashed_password = get_password_hash(password)
+            user.last_login = datetime.utcnow()
+            user.updated_at = datetime.utcnow()
+            await db.commit()
+            await db.refresh(user)
+            return user
+
+        if person_id and tenant_id:
+            tenant = (
+                await db.execute(select(Tenant).where(Tenant.id == uuid.UUID(tenant_id)))
+            ).scalar_one_or_none()
+            if not tenant:
+                raise HTTPException(status_code=404, detail="Empresa não encontrada.")
+            async with AsyncSessionLocal() as tenant_db:
+                try:
+                    await tenant_db.execute(
+                        text(f"SET search_path TO {tenant.schema_name}, public")
+                    )
+                    return await PersonService.provision_login_from_first_access(
+                        tenant_db,
+                        uuid.UUID(person_id),
+                        password,
+                        uuid.UUID(tenant_id),
+                    )
+                finally:
+                    await tenant_db.execute(text("SET search_path TO public"))
+
+        raise HTTPException(status_code=400, detail="Token inválido.")
 
 
 # ══════════════════════════════════════════════
@@ -535,12 +681,21 @@ class RoleService:
     async def list_roles(db: AsyncSession, tenant_id: uuid.UUID) -> List[dict]:
         result = await db.execute(
             select(Role)
-            .options(selectinload(Role.permissions), selectinload(Role.users))
+            .options(selectinload(Role.permissions))
             .where(Role.tenant_id == tenant_id)
             .order_by(Role.name)
         )
         roles = list(result.scalars().all())
-        return [RoleService._to_response(r, len(r.users)) for r in roles]
+        # Contagem de usuários por role numa única query agregada, em vez de
+        # materializar a coleção Role.users de cada role só para contar.
+        counts: dict = {}
+        if roles:
+            counts = dict((await db.execute(
+                select(User.role_id, func.count(User.id))
+                .where(User.role_id.in_([r.id for r in roles]))
+                .group_by(User.role_id)
+            )).all())
+        return [RoleService._to_response(r, counts.get(r.id, 0)) for r in roles]
 
     @staticmethod
     async def get_role(db: AsyncSession, tenant_id: uuid.UUID, role_id: uuid.UUID) -> dict:
@@ -636,6 +791,8 @@ class RoleService:
         role.updated_at = datetime.utcnow()
         await db.commit()
         await db.refresh(role, ["permissions", "users"])
+        from app.core.cache import invalidate_role_permissions
+        await invalidate_role_permissions(role.id)
         return RoleService._to_response(role, len(role.users))
 
     @staticmethod
@@ -652,6 +809,8 @@ class RoleService:
             )
         await db.delete(role)
         await db.commit()
+        from app.core.cache import invalidate_role_permissions
+        await invalidate_role_permissions(role_id)
 
     @staticmethod
     async def user_has_permission(

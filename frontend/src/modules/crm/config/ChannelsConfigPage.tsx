@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Skeleton } from "@/components/ui/skeleton"
+import { nullableStr } from "@/lib/utils"
 
 const CHANNEL_LABELS: Record<ChannelType, string> = {
   whatsapp: "WhatsApp", instagram: "Instagram",
@@ -132,7 +133,9 @@ export default function ChannelsConfigPage() {
     if (webhook_verify_token) config.webhook_verify_token = webhook_verify_token
     if (instagram_account_id) config.instagram_account_id = instagram_account_id
 
-    const payload = { name, channel, webhook_url: webhook_url || undefined, is_active, credentials, config }
+    const payload = editing
+      ? { name, channel, webhook_url: nullableStr(webhook_url), is_active, credentials, config }
+      : { name, channel, webhook_url: webhook_url || undefined, is_active, credentials, config }
 
     try {
       if (editing) {

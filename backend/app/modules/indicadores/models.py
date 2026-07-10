@@ -77,6 +77,9 @@ class FontePortfolioMetrica(str, enum.Enum):
     """Métrica do portfólio de Produtos usada quando fonte = portfolio (extensível)."""
     # % de serviços de produtos publicados (lifecycle=producao) sobre publicados + em desenvolvimento.
     SERVICOS_PUBLICADOS = "servicos_publicados"
+    # % de documentos nato-digital cadastrados (prod. produção) sobre cadastrados (prod. + desenv.).
+    # data_documento é sincronizada com data_publicacao dos serviços do produto.
+    DOCUMENTOS_NATOS_DIGITAIS = "documentos_natos_digitais"
 
 
 # ─────────────────────────────────────────────
@@ -183,6 +186,9 @@ class IndicadorAcompanhamento(TenantBase):
     observacao: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # Evidências/anexos: [{object_name, filename, content_type, size}, ...]
     evidencias: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    # Mês fechado: quando True, o registro fica congelado e não pode ser editado
+    # (apenas desbloqueado). Trava de fechamento da competência.
+    bloqueado: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

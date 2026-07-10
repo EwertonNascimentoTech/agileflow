@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { ArrowUpRight, CalendarRange, Check, ChevronDown, FileText, Link as LinkIcon, Loader2, Pencil, Plus, Trash2, X } from "lucide-react"
+import { ArrowUpRight, CalendarRange, Check, ChevronDown, Clock, FileText, Link as LinkIcon, Loader2, Pencil, Plus, Trash2, X } from "lucide-react"
 
-import { projetosApi, type PriorityMode, type ProjectDemandFormField, type ProjectDemandFormSection, type ProjectDemandType, type ProjectStatus, type ProjectStatusDefaultFormLink, type ProjectStatusSectionLink, type ProjectTask, type ProjectTaskComment, type ProjectUpload, type ScheduleLockState } from "@/api/projetos"
+import { projetosApi, type CardClassification, type PriorityMode, type ProjectDemandFormField, type ProjectDemandFormSection, type ProjectDemandType, type ProjectFunnel, type ProjectStatus, type ProjectStatusDefaultFormLink, type ProjectStatusSectionLink, type ProjectTask, type ProjectTaskComment, type ProjectUpload, type ScheduleLockState, type UsChecklistItem } from "@/api/projetos"
 import { ScheduleLockBanner } from "@/modules/projetos/ScheduleLockBanner"
+import { produtosApi } from "@/api/produtos"
 import { Badge } from "@/components/ui/badge"
 import { teamopsApi } from "@/api/teamops"
 import type { User } from "@/types"
@@ -22,12 +23,56 @@ import { defaultDateToIso, isoToDefaultDateInput, normalizeDefaultFieldType } fr
 import { useDefaultFormConfig } from "@/modules/projetos/useDefaultFormConfig"
 import { getRowBreak, groupIntoRows } from "@/modules/projetos/layout"
 import { formatMissingFieldsMessage, validateRequiredFields } from "@/modules/projetos/validation"
+import { BacklogClassificationDialog } from "@/modules/projetos/BacklogClassificationDialog"
 import { ProjectPriorityWidget } from "@/modules/projetos/priority/ProjectPriorityWidget"
 import { CommentBody, CommentComposer, commentHasContent } from "@/modules/projetos/CommentComposer"
 import { useAuth } from "@/contexts/AuthContext"
 import { toast } from "@/lib/toast"
+import { UsChecklistSection } from "@/modules/projetos/UsChecklistSection"
+import { fmtEstimatedHours, isFeatureOrUsKanbanFunnel, isPlanningRootTask, isProjectOrProgramKanbanFunnel, isUserStoryDemandType, isUserStoryKanbanFunnel } from "@/modules/projetos/kanbanDisplay"
 
 const NO_ASSIGNEE = "__none__"
+const EMPTY_US_CHECKLIST: UsChecklistItem[] = []
+
+const CLASSIFICATION_LABELS: Record<CardClassification, string> = {
+  desenvolvimento: "Desenvolvimento",
+  implantacao: "Implantação",
+  melhoria: "Melhoria",
+}
+
+function ClassificationReadonlyField({
+  label,
+  value,
+  href,
+  onOpen,
+}: {
+  label: string
+  value: string | null
+  href?: string | null
+  onOpen?: (href: string) => void
+}) {
+  const canOpen = !!href && !!value
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs font-medium">{label}</Label>
+      <div className="flex items-center gap-1 rounded-md border bg-muted/30 pl-3 pr-1 py-1 text-sm text-foreground">
+        <span className="min-w-0 flex-1 truncate py-1">{value ?? "—"}</span>
+        {canOpen && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 shrink-0 text-muted-foreground hover:text-primary"
+            title={`Abrir ${label.toLowerCase()}`}
+            onClick={() => onOpen?.(href!)}
+          >
+            <ArrowUpRight size={14} />
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+}
 
 function initials(name: string): string {
   const p = name.trim().split(/\s+/).filter(Boolean)
@@ -43,6 +88,7 @@ export function ProjectTaskDrawer({
   task,
   isBasicUser,
   canEditTask = true,
+  kanbanFunnelName = null,
   onSaved,
   onDeleted,
 }: {
@@ -53,13 +99,19 @@ export function ProjectTaskDrawer({
   isBasicUser: boolean
   /** false = somente leitura (funil view sem permissão na etapa). */
   canEditTask?: boolean
+  /** Funil de origem no quadro (Feature/US → horas no lugar do ícone de cronograma). */
+  kanbanFunnelName?: string | null
   onSaved: (task: ProjectTask) => void
   onDeleted: (taskId: string) => void
 }) {
   const readOnly = isBasicUser || !canEditTask
+  const showEstimatedHoursHeader = isFeatureOrUsKanbanFunnel(kanbanFunnelName)
   const navigate = useNavigate()
   const { user: authUser } = useAuth()
   const [users, setUsers] = useState<User[]>([])
+  // Rótulos do vínculo com o portfólio de Produtos (resolução tolerante a falha).
+  const [linkedProductName, setLinkedProductName] = useState<string | null>(null)
+  const [linkedReleaseVersao, setLinkedReleaseVersao] = useState<string | null>(null)
   const [comments, setComments] = useState<ProjectTaskComment[]>([])
   const [selectedDemandTypeId, setSelectedDemandTypeId] = useState("")
   const [formSections, setFormSections] = useState<ProjectDemandFormSection[]>([])
@@ -79,16 +131,28 @@ export function ProjectTaskDrawer({
   const [parentTaskId, setParentTaskId] = useState<string>(NO_ASSIGNEE)
   const [demandTypes, setDemandTypes] = useState<ProjectDemandType[]>([])
   const [allTasks, setAllTasks] = useState<ProjectTask[]>([])
+  const [programs, setPrograms] = useState<{ id: string; name: string }[]>([])
+  // Editor de classificação Projeto/Programa (propaga ao card convertido).
+  const [planningEditOpen, setPlanningEditOpen] = useState(false)
+  const [planningKindDraft, setPlanningKindDraft] = useState<"projeto" | "programa">("projeto")
+  const [planningProgramMode, setPlanningProgramMode] = useState<"select" | "new">("select")
+  const [planningProgramId, setPlanningProgramId] = useState("")
+  const [planningNewProgramName, setPlanningNewProgramName] = useState("")
+  const [planningNewProgramDesc, setPlanningNewProgramDesc] = useState("")
+  const [savingPlanning, setSavingPlanning] = useState(false)
   const [children, setChildren] = useState<ProjectTask[]>([])
   const [childTitle, setChildTitle] = useState("")
   const [childTypeId, setChildTypeId] = useState("")
   const [statusMap, setStatusMap] = useState<Record<string, { name: string; color: string; priority_mode: PriorityMode }>>({})
   const [allStatuses, setAllStatuses] = useState<ProjectStatus[]>([])
+  const [funnels, setFunnels] = useState<ProjectFunnel[]>([])
   const [statusId, setStatusId] = useState("")
   const [changingStatus, setChangingStatus] = useState(false)
+  const [classifyOpen, setClassifyOpen] = useState(false)
   const [statusConvPrompt, setStatusConvPrompt] = useState<{ newStatusId: string; typeName: string; name: string } | null>(null)
   const [assigneeMenuOpen, setAssigneeMenuOpen] = useState(false)
   const [assigneeSearch, setAssigneeSearch] = useState("")
+  const [savingChecklist, setSavingChecklist] = useState(false)
   const [statusMenuOpen, setStatusMenuOpen] = useState(false)
   const [linkMenuOpen, setLinkMenuOpen] = useState(false)
   const [linkDialogOpen, setLinkDialogOpen] = useState(false)
@@ -133,6 +197,25 @@ export function ProjectTaskDrawer({
       setStatusId(task.status_id)
     }, 0)
 
+    // Vínculo com o portfólio de Produtos — resolução tolerante (módulo pode estar inativo).
+    setLinkedProductName(null)
+    setLinkedReleaseVersao(null)
+    if (task.linked_product_id) {
+      const productId = task.linked_product_id
+      const releaseId = task.linked_release_id
+      produtosApi.getProduct(productId)
+        .then((p) => setLinkedProductName(p.name))
+        .catch(() => setLinkedProductName(`Produto #${productId.slice(0, 8)}`))
+      if (releaseId) {
+        produtosApi.listReleases(productId)
+          .then((rs) => {
+            const r = rs.find((x) => x.id === releaseId)
+            setLinkedReleaseVersao(r ? (r.nome ? `${r.versao} · ${r.nome}` : r.versao) : `Release #${releaseId.slice(0, 8)}`)
+          })
+          .catch(() => setLinkedReleaseVersao(`Release #${releaseId.slice(0, 8)}`))
+      }
+    }
+
     // Responsável = Pessoa do teamops (todas, inclusive sem login).
     teamopsApi.listPersons()
       .then((ps) => setUsers(ps.map((p) => ({ id: p.id, full_name: p.full_name, email: p.email })) as unknown as User[]))
@@ -142,7 +225,9 @@ export function ProjectTaskDrawer({
       setFormValues(submission?.values ?? {})
     }).catch(() => setFormValues({}))
     projetosApi.listDemandTypes().then(setDemandTypes).catch(() => setDemandTypes([]))
+    projetosApi.listFunnels(projectId, true).then(setFunnels).catch(() => setFunnels([]))
     projetosApi.listTasks(projectId).then(setAllTasks).catch(() => setAllTasks([]))
+    projetosApi.listPrograms(projectId).then(setPrograms).catch(() => setPrograms([]))
     projetosApi.listTaskChildren(projectId, task.id).then(setChildren).catch(() => setChildren([]))
     projetosApi.listStatuses(projectId).then((sts) => {
       setAllStatuses(sts)
@@ -202,11 +287,80 @@ export function ProjectTaskDrawer({
   const assignedUser = assignedTo !== NO_ASSIGNEE ? users.find((u) => u.id === assignedTo) ?? null : null
   const assigneeLabel = assignedUser?.full_name ?? "Sem responsável"
   const currentStatus = statusMap[statusId]
+  const currentStatusConfig = allStatuses.find((s) => s.id === statusId)
+  const canLateClassify =
+    !readOnly &&
+    !task?.card_classification &&
+    !!currentStatusConfig &&
+    !currentStatusConfig.is_initial &&
+    isPlanningRootTask(task?.planning_kind) &&
+    isProjectOrProgramKanbanFunnel(kanbanFunnelName)
   const statusLabel = currentStatus?.name ?? "Sem etapa"
   const assigneeCandidates = users.filter((u) => {
     const q = assigneeSearch.trim().toLowerCase()
     return !q || u.full_name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)
   })
+
+  // Card de planejamento associado: o próprio (raiz) ou o card convertido a partir desta
+  // origem (ex.: card "Concluído" da prospecção que gerou um Projeto/Programa).
+  const planningTarget = useMemo<ProjectTask | null>(() => {
+    if (!task) return null
+    if (task.planning_kind === "projeto" || task.planning_kind === "programa") return task
+    return allTasks.find(
+      (t) => t.origin_task_id === task.id && (t.planning_kind === "projeto" || t.planning_kind === "programa"),
+    ) ?? null
+  }, [task, allTasks])
+  const planningProgramName = planningTarget?.linked_program_id
+    ? programs.find((p) => p.id === planningTarget.linked_program_id)?.name ?? null
+    : null
+  const canEditPlanning = !readOnly && !!planningTarget
+
+  function openPlanningEditor() {
+    if (!planningTarget) return
+    const kind = (planningTarget.planning_kind === "programa" ? "programa" : "projeto") as "projeto" | "programa"
+    setPlanningKindDraft(kind)
+    setPlanningProgramMode("select")
+    setPlanningProgramId(planningTarget.linked_program_id ?? "")
+    setPlanningNewProgramName("")
+    setPlanningNewProgramDesc("")
+    setPlanningEditOpen(true)
+  }
+
+  async function handleSavePlanning() {
+    if (!task || !planningTarget) return
+    if (planningKindDraft === "programa") {
+      if (planningProgramMode === "select" && !planningProgramId) {
+        toast.error("Selecione um programa ou cadastre um novo.")
+        return
+      }
+      if (planningProgramMode === "new" && planningNewProgramName.trim().length < 2) {
+        toast.error("Informe o nome do novo programa.")
+        return
+      }
+    }
+    setSavingPlanning(true)
+    try {
+      const updated = await projetosApi.setPlanningClassification(projectId, task.id, {
+        kind: planningKindDraft,
+        program_id: planningKindDraft === "programa" && planningProgramMode === "select" ? planningProgramId : null,
+        new_program_name: planningKindDraft === "programa" && planningProgramMode === "new" ? planningNewProgramName.trim() : null,
+        new_program_desc: planningKindDraft === "programa" && planningProgramMode === "new" ? (planningNewProgramDesc.trim() || null) : null,
+      })
+      // Atualiza a lista local (o card convertido) e a lista de programas se criou um novo.
+      setAllTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+      if (updated.linked_program_id && !programs.some((p) => p.id === updated.linked_program_id)) {
+        try { setPrograms(await projetosApi.listPrograms(projectId)) } catch { /* mantém */ }
+      }
+      onSaved(updated)
+      setPlanningEditOpen(false)
+      toast.success("Classificação atualizada e propagada aos demais kanbans.")
+    } catch (err) {
+      const e = err as { response?: { data?: { detail?: unknown } } }
+      toast.error(typeof e.response?.data?.detail === "string" ? e.response.data.detail : "Não foi possível atualizar a classificação.")
+    } finally {
+      setSavingPlanning(false)
+    }
+  }
 
   async function handleSelectAssignee(uid: string | null) {
     if (!task || readOnly) return
@@ -226,6 +380,22 @@ export function ProjectTaskDrawer({
 
   const demandTypeName = (id: string | null | undefined) =>
     id ? (demandTypes.find((t) => t.id === id)?.name ?? null) : null
+  const currentDemandType = demandTypes.find((d) => d.id === task?.demand_type_id) ?? null
+  const taskFunnelName = (() => {
+    if (!task) return kanbanFunnelName
+    const st = allStatuses.find((s) => s.id === task.status_id)
+    const fromStatus = st ? funnels.find((f) => f.id === st.funnel_id)?.name ?? null : null
+    return kanbanFunnelName ?? fromStatus
+  })()
+  const isUserStoryCard =
+    isUserStoryDemandType(
+      currentDemandType?.name ?? demandTypeName(task?.demand_type_id),
+      currentDemandType?.slug,
+    ) || isUserStoryKanbanFunnel(taskFunnelName)
+  const checklistItems = useMemo(
+    () => task?.us_checklist ?? EMPTY_US_CHECKLIST,
+    [task?.us_checklist],
+  )
 
   // Candidatos a pai: tasks cujo tipo aceita o tipo desta task como filho (exclui a própria).
   const parentCandidates = (() => {
@@ -604,6 +774,28 @@ export function ProjectTaskDrawer({
     }
   }
 
+  async function confirmLateClassification(result: {
+    classification: CardClassification
+    productId: string
+    releaseId: string | null
+  }) {
+    if (!task) return
+    try {
+      const updated = await projetosApi.updateTask(projectId, task.id, {
+        card_classification: result.classification,
+        linked_product_id: result.productId,
+        linked_release_id: result.releaseId,
+      })
+      onSaved(updated)
+      setClassifyOpen(false)
+      toast.success("Projeto classificado.")
+    } catch (err) {
+      const e = err as { response?: { data?: { detail?: unknown } } }
+      const d = e.response?.data?.detail
+      toast.error(typeof d === "string" ? d : "Não foi possível classificar o projeto.")
+    }
+  }
+
   async function handleComment() {
     if (!task || !commentHasContent(newComment)) return
     setSendingComment(true)
@@ -613,6 +805,30 @@ export function ProjectTaskDrawer({
       setNewComment("")
     } finally {
       setSendingComment(false)
+    }
+  }
+
+  async function handleChecklistSave(next: UsChecklistItem[]) {
+    if (!task) return
+    if (readOnly) {
+      toast.error("Você não tem permissão para editar este card.")
+      throw new Error("read-only")
+    }
+    setSavingChecklist(true)
+    try {
+      const updated = await projetosApi.updateTask(projectId, task.id, {
+        us_checklist: next.length > 0 ? next : null,
+      })
+      onSaved(updated)
+    } catch (err) {
+      const e = err as { response?: { data?: { detail?: unknown } } }
+      const d = e.response?.data?.detail
+      if ((err as Error).message !== "read-only") {
+        toast.error(typeof d === "string" ? d : "Não foi possível salvar o checklist.")
+      }
+      throw err
+    } finally {
+      setSavingChecklist(false)
     }
   }
 
@@ -627,13 +843,23 @@ export function ProjectTaskDrawer({
               <span className="muted">{demandTypeName(task.demand_type_id) ?? "Card"}</span>
             </div>
             <span className="spacer" />
-            <button
-              className="icon-btn"
-              title="Abrir no cronograma"
-              onClick={() => { const id = task.id; onOpenChange(false); navigate(`/app/modules/projetos/cronograma?root=${id}`) }}
-            >
-              <CalendarRange size={15} />
-            </button>
+            {showEstimatedHoursHeader ? (
+              <span
+                className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 text-xs text-muted-foreground"
+                title="Horas estimadas"
+              >
+                <Clock size={14} />
+                {fmtEstimatedHours(task.estimated_hours) ?? "—"}
+              </span>
+            ) : (
+              <button
+                className="icon-btn"
+                title="Abrir no cronograma"
+                onClick={() => { const id = task.id; onOpenChange(false); navigate(`/app/modules/projetos/cronograma?root=${id}`) }}
+              >
+                <CalendarRange size={15} />
+              </button>
+            )}
             {!readOnly && (
               <button className="icon-btn" title="Excluir" onClick={handleDelete} disabled={removing}>
                 {removing ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
@@ -663,6 +889,41 @@ export function ProjectTaskDrawer({
                 {task.sla_state && task.sla_state !== "none" && (
                   <Badge variant={task.sla_state === "breached" ? "destructive" : "secondary"} className="text-[10px]">
                     {task.sla_state === "breached" ? "SLA estourado" : task.sla_state === "warning" ? "SLA em alerta" : "No prazo"}
+                  </Badge>
+                )}
+                {task.card_classification && (
+                  <Badge variant="secondary" className="text-[10px]">
+                    {CLASSIFICATION_LABELS[task.card_classification]}
+                  </Badge>
+                )}
+                {planningTarget && (
+                  <span className="inline-flex items-center gap-1">
+                    <Badge
+                      className="text-[10px] text-white"
+                      style={{ backgroundColor: planningTarget.planning_kind === "programa" ? "#7c3aed" : "#0ea5e9" }}
+                    >
+                      {planningTarget.planning_kind === "programa" ? "Programa" : "Projeto"}
+                    </Badge>
+                    {planningTarget.planning_kind === "programa" && planningProgramName && (
+                      <Badge variant="outline" className="text-[10px]">{planningProgramName}</Badge>
+                    )}
+                    {canEditPlanning && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 text-muted-foreground hover:text-primary"
+                        title="Editar Projeto/Programa"
+                        onClick={openPlanningEditor}
+                      >
+                        <Pencil size={12} />
+                      </Button>
+                    )}
+                  </span>
+                )}
+                {isUserStoryCard && (task.us_checklist?.length || task.percent_complete > 0) && (
+                  <Badge variant="outline" className="text-[10px] tabular-nums">
+                    {task.percent_complete}% concluído
                   </Badge>
                 )}
                 <span className="ml-auto text-[11px] text-muted-foreground">
@@ -828,13 +1089,25 @@ export function ProjectTaskDrawer({
               </div>
             </div>
 
+            {isUserStoryCard && task && (
+              <UsChecklistSection
+                items={checklistItems}
+                percentComplete={task.percent_complete}
+                readOnly={readOnly}
+                saving={savingChecklist}
+                onSave={handleChecklistSave}
+              />
+            )}
+
             {(() => {
               const planningFields = defaultFormPlanningFields(defaultFormFields, defaultFormLinks)
               const descriptionField = defaultFieldsByKey.get("description")
               const showDescription = descriptionField && isDefaultFieldShown(descriptionField, defaultFormLinks)
               const anexosField = defaultFieldsByKey.get("anexos")
               const showAnexos = anexosField && isDefaultFieldShown(anexosField, defaultFormLinks)
-              if (planningFields.length === 0 && !showDescription && !showAnexos) return null
+              const classification = task.card_classification
+              const hasClassification = !!classification
+              if (planningFields.length === 0 && !showDescription && !showAnexos && !hasClassification && !canLateClassify) return null
               const defaultValues: DefaultFormValues = {
                 title,
                 description,
@@ -862,6 +1135,54 @@ export function ProjectTaskDrawer({
                     </p>
                   </div>
                   <div className="space-y-4">
+                    {canLateClassify && (
+                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300/60 bg-amber-50 px-3 py-2">
+                        <p className="text-xs text-amber-900">
+                          Este projeto ainda não foi classificado no portfólio de Produtos.
+                        </p>
+                        <Button type="button" size="sm" variant="outline" className="h-8" onClick={() => setClassifyOpen(true)}>
+                          Classificar agora
+                        </Button>
+                      </div>
+                    )}
+                    {hasClassification && classification && (
+                      <div className="space-y-3">
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <ClassificationReadonlyField
+                            label="Tipo"
+                            value={CLASSIFICATION_LABELS[classification]}
+                          />
+                          {(classification === "desenvolvimento" || classification === "implantacao") && (
+                            <ClassificationReadonlyField
+                              label="Produto vinculado"
+                              value={linkedProductName}
+                              href={task.linked_product_id ? `/app/modules/produtos/produtos/${task.linked_product_id}` : null}
+                              onOpen={(path) => navigate(path)}
+                            />
+                          )}
+                        </div>
+                        {classification === "melhoria" && (
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <ClassificationReadonlyField
+                              label="Produto"
+                              value={linkedProductName}
+                              href={task.linked_product_id ? `/app/modules/produtos/produtos/${task.linked_product_id}` : null}
+                              onOpen={(path) => navigate(path)}
+                            />
+                            <ClassificationReadonlyField
+                              label="Release"
+                              value={linkedReleaseVersao}
+                              href={
+                                task.linked_product_id && task.linked_release_id
+                                  ? `/app/modules/produtos/produtos/${task.linked_product_id}?tab=releases`
+                                  : null
+                              }
+                              onOpen={(path) => navigate(path)}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
                     {groupDefaultFormFieldsIntoRows(planningFields, defaultFormLinks).map((row, rowIdx) => {
                       if (row.length === 1) {
                         const key = row[0].field_key
@@ -1295,6 +1616,106 @@ export function ProjectTaskDrawer({
           <Button type="button" onClick={() => void confirmStatusConversion()} disabled={changingStatus || !statusConvPrompt?.name.trim()}>
             {changingStatus && <Loader2 size={13} className="animate-spin mr-1.5" />}
             Aprovar e criar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <BacklogClassificationDialog
+      open={classifyOpen}
+      task={task}
+      mode="late"
+      onCancel={() => setClassifyOpen(false)}
+      onConfirm={confirmLateClassification}
+    />
+
+    <Dialog open={planningEditOpen} onOpenChange={setPlanningEditOpen}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Editar Projeto / Programa</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            A alteração é aplicada ao card de Projeto/Programa e propagada aos demais kanbans.
+          </p>
+          <div className="space-y-2">
+            <Label>Tipo</Label>
+            <div className="grid grid-cols-2 gap-2">
+              {(["projeto", "programa"] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setPlanningKindDraft(k)}
+                  className={`rounded-md border px-3 py-2 text-sm font-medium transition ${
+                    planningKindDraft === k ? "border-primary bg-primary/10 text-primary" : "border-border text-foreground"
+                  }`}
+                >
+                  {k === "projeto" ? "Projeto" : "Programa"}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Em <strong>Programa</strong>, é obrigatório vincular a um programa existente (ou cadastrar um novo).
+            </p>
+          </div>
+
+          {planningKindDraft === "programa" && (
+            <div className="space-y-2">
+              <Label>Programa</Label>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPlanningProgramMode("select")}
+                  className={`rounded-md border px-3 py-1.5 text-xs font-medium ${planningProgramMode === "select" ? "border-primary bg-primary/10 text-primary" : "border-border"}`}
+                >
+                  Vincular existente
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPlanningProgramMode("new")}
+                  className={`rounded-md border px-3 py-1.5 text-xs font-medium ${planningProgramMode === "new" ? "border-primary bg-primary/10 text-primary" : "border-border"}`}
+                >
+                  Cadastrar novo
+                </button>
+              </div>
+              {planningProgramMode === "select" ? (
+                <>
+                  <Select value={planningProgramId} onValueChange={setPlanningProgramId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione um programa" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {programs.map((pr) => <SelectItem key={pr.id} value={pr.id}>{pr.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  {programs.length === 0 && (
+                    <p className="text-[11px] text-muted-foreground">Nenhum programa cadastrado ainda — use “Cadastrar novo”.</p>
+                  )}
+                </>
+              ) : (
+                <div className="space-y-2">
+                  <Input
+                    placeholder="Nome do programa"
+                    value={planningNewProgramName}
+                    onChange={(e) => setPlanningNewProgramName(e.target.value)}
+                  />
+                  <Textarea
+                    placeholder="Descrição (opcional)"
+                    value={planningNewProgramDesc}
+                    onChange={(e) => setPlanningNewProgramDesc(e.target.value)}
+                    rows={2}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => setPlanningEditOpen(false)} disabled={savingPlanning}>
+            Cancelar
+          </Button>
+          <Button type="button" onClick={() => void handleSavePlanning()} disabled={savingPlanning}>
+            {savingPlanning ? <Loader2 size={14} className="animate-spin" /> : "Salvar"}
           </Button>
         </DialogFooter>
       </DialogContent>

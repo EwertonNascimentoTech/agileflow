@@ -16,6 +16,9 @@ node_modules/
 frontend/dist
 dist/
 
+# Exports gerados (planilhas, dumps)
+*.xlsx
+
 # Ferramentas / SO
 .DS_Store
 .idea/

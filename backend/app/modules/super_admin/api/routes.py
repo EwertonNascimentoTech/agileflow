@@ -123,6 +123,20 @@ class _ResetPasswordRequest(_BaseModel):
         return validate_password_strength(v)
 
 
+class _FirstAccessCheckRequest(_BaseModel):
+    email: str
+
+
+class _FirstAccessCompleteRequest(_BaseModel):
+    token: str
+    password: str
+
+    @field_validator("password")
+    @classmethod
+    def _password_strong(cls, v: str) -> str:
+        return validate_password_strength(v)
+
+
 @auth_router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(data: _RefreshRequest, db: AsyncSession = Depends(get_db)):
     """Troca refresh token por novos access + refresh tokens."""
@@ -173,6 +187,31 @@ async def reset_password(data: _ResetPasswordRequest, db: AsyncSession = Depends
     user.updated_at = __import__("datetime").datetime.utcnow()
     await db.commit()
     return {"message": "Senha atualizada com sucesso."}
+
+
+@auth_router.post("/first-access/check")
+@limiter.limit("10/minute")
+async def first_access_check(
+    request: Request, data: _FirstAccessCheckRequest, db: AsyncSession = Depends(get_db),
+):
+    """Verifica e-mail cadastrado e elegível para primeiro acesso (nunca logou)."""
+    return await UserService.check_first_access(db, data.email)
+
+
+@auth_router.post("/first-access/complete", response_model=TokenResponse)
+@limiter.limit("10/minute")
+async def first_access_complete(
+    request: Request, data: _FirstAccessCompleteRequest, db: AsyncSession = Depends(get_db),
+):
+    """Define senha no primeiro acesso e retorna tokens de autenticação."""
+    user = await UserService.complete_first_access(db, data.token, data.password)
+    await _attach_role_name(db, user)
+    access_token, refresh_token = create_tokens(user)
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        user=user,
+    )
 
 
 # ─────────────────────────────────────────────

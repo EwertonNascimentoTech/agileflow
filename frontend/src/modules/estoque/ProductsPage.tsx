@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { EmptyState } from "@/components/EmptyState"
 import { PageHeader } from "@/components/PageHeader"
 import CustomFieldsRenderer from "./CustomFieldsRenderer"
+import { nullableStr } from "@/lib/utils"
 
 const fmtBRL = (v: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v)
@@ -144,7 +145,18 @@ export default function ProductsPage() {
             : undefined,
       }
       if (editing) {
-        const { type_id: _t, ...update } = cleaned
+        const { type_id: _t, ...rest } = cleaned
+        const update = {
+          ...rest,
+          description: nullableStr(form.description),
+          barcode: nullableStr(form.barcode),
+          category_id: form.category_id,
+          max_stock: form.max_stock,
+          custom_fields:
+            form.custom_fields && Object.keys(form.custom_fields).length > 0
+              ? form.custom_fields
+              : null,
+        }
         const updated = await productsApi.update(editing.id, update)
         setItems(prev => prev.map(x => x.id === updated.id ? updated : x))
       } else {

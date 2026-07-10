@@ -1,23 +1,147 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { Target, TrendingUp, CheckCircle2, AlertTriangle, XCircle, Clock, Gauge, ListChecks } from "lucide-react"
+import { BarChart3 } from "lucide-react"
+import {
+  Bar, BarChart, CartesianGrid, Cell, LabelList, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis,
+} from "recharts"
+import type { TooltipProps } from "recharts"
 
-import { indicadoresApi, type AreaRefMini, type DashboardFilters, type DashboardKpis, type PersonMini } from "@/api/indicadores"
-import { KpiCard } from "@/components/KpiCard"
+import {
+  indicadoresApi,
+  type AcompStatus,
+  type AreaRefMini,
+  type DashboardChartIndicador,
+  type DashboardCharts,
+  type DashboardFilters,
+  type PersonMini,
+} from "@/api/indicadores"
+import { EmptyState } from "@/components/EmptyState"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
-  ANOS, CATEGORIA_LABEL, CATEGORIA_OPTS, GRANULARIDADE_LABEL, GRANULARIDADE_OPTS, STATUS_LABEL, STATUS_OPTS,
+  ACOMP_STATUS_LABEL,
+  ANOS, CATEGORIA_LABEL, CATEGORIA_OPTS, GRANULARIDADE_LABEL, GRANULARIDADE_OPTS, MESES, STATUS_LABEL, STATUS_OPTS,
 } from "@/modules/indicadores/constants"
 
 const ALL = "__all__"
+const META_COLOR = "#6366f1"
+
+const STATUS_BAR_COLOR: Record<AcompStatus, string> = {
+  atingido: "#059669",
+  em_atencao: "#d97706",
+  nao_atingido: "#dc2626",
+  pendente: "#94a3b8",
+}
+
+type ChartRow = {
+  label: string
+  meta: number | null
+  realizado: number | null
+  percentual_atingimento: number | null
+  status: AcompStatus
+}
+
+function periodoLabel(competencia: string): string {
+  const m = competencia.match(/^(\d{2})\/(\d{4})$/)
+  if (!m) return competencia
+  const mes = MESES.find(([n]) => n === Number(m[1]))
+  return mes ? mes[1].slice(0, 3) : competencia
+}
+
+function formatValor(value: number | null | undefined, unit: string): string {
+  if (value == null) return "—"
+  const formatted = Number.isInteger(value) ? String(value) : value.toFixed(2)
+  return unit ? `${formatted} ${unit}` : formatted
+}
+
+function metaBateuLabel(status: AcompStatus): string {
+  if (status === "atingido") return "✓ Meta"
+  if (status === "em_atencao") return "⚠ Atenção"
+  if (status === "nao_atingido") return "✗ Meta"
+  return "Pendente"
+}
+
+function chartData(ind: DashboardChartIndicador): ChartRow[] {
+  return ind.periodos.map((p) => ({
+    label: periodoLabel(p.competencia),
+    meta: p.meta,
+    realizado: p.realizado,
+    percentual_atingimento: p.percentual_atingimento,
+    status: p.status,
+  }))
+}
+
+function ChartTooltip({ active, payload, label, unit }: TooltipProps<number, string> & { unit: string }) {
+  if (!active || !payload?.length) return null
+  const row = payload[0]?.payload as ChartRow
+
+  return (
+    <div className="rounded-lg border bg-background px-3 py-2.5 text-sm shadow-md">
+      <p className="mb-2 font-semibold">Período: {label}</p>
+      <div className="space-y-1 text-muted-foreground">
+        <p className="flex items-center gap-2">
+          <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: META_COLOR }} />
+          Meta: <span className="font-medium text-foreground">{formatValor(row.meta, unit)}</span>
+        </p>
+        <p className="flex items-center gap-2">
+          <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: STATUS_BAR_COLOR[row.status] }} />
+          Realizado: <span className="font-medium text-foreground">{formatValor(row.realizado, unit)}</span>
+        </p>
+        <p className="border-t pt-1.5">
+          Atingimento:{" "}
+          <span className="font-semibold" style={{ color: STATUS_BAR_COLOR[row.status] }}>
+            {row.percentual_atingimento != null ? `${row.percentual_atingimento.toFixed(1)}%` : "—"}
+          </span>
+          {" · "}
+          {ACOMP_STATUS_LABEL[row.status]}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function MetaBarLabel(props: { x?: number; y?: number; width?: number; value?: number | string }) {
+  const { x = 0, y = 0, width = 0, value } = props
+  if (value == null || value === "") return null
+  return (
+    <text x={x + width / 2} y={y - 4} textAnchor="middle" fontSize={9} fontWeight={600} fill="#6366f1">
+      {Number(value) % 1 === 0 ? Number(value) : Number(value).toFixed(1)}
+    </text>
+  )
+}
+
+function RealizadoBarLabel(props: {
+  x?: number
+  y?: number
+  width?: number
+  index?: number
+  payload?: ChartRow
+}) {
+  const { x = 0, y = 0, width = 0, payload } = props
+  if (!payload || payload.realizado == null) return null
+
+  const color = STATUS_BAR_COLOR[payload.status]
+  const cx = x + width / 2
+  const pct = payload.percentual_atingimento
+
+  return (
+    <g>
+      <text x={cx} y={y - 16} textAnchor="middle" fontSize={10} fontWeight={700} fill={color}>
+        {pct != null ? `${pct.toFixed(0)}%` : "—"}
+      </text>
+      <text x={cx} y={y - 5} textAnchor="middle" fontSize={8} fontWeight={600} fill={color}>
+        {metaBateuLabel(payload.status)}
+      </text>
+    </g>
+  )
+}
 
 export default function IndicadoresDashboardPage() {
   const navigate = useNavigate()
-  const [data, setData] = useState<DashboardKpis | null>(null)
+  const [data, setData] = useState<DashboardCharts | null>(null)
   const [areas, setAreas] = useState<AreaRefMini[]>([])
   const [persons, setPersons] = useState<PersonMini[]>([])
   const [loading, setLoading] = useState(true)
@@ -46,7 +170,7 @@ export default function IndicadoresDashboardPage() {
 
   useEffect(() => {
     setLoading(true)
-    indicadoresApi.getDashboard(filters).then(setData).catch(() => setData(null)).finally(() => setLoading(false))
+    indicadoresApi.getDashboardGraficos(filters).then(setData).catch(() => setData(null)).finally(() => setLoading(false))
   }, [filters])
 
   return (
@@ -54,12 +178,11 @@ export default function IndicadoresDashboardPage() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-lg font-bold">Painel de Indicadores</h2>
-          <p className="text-sm text-muted-foreground">Visão geral de atingimento das metas.</p>
+          <p className="text-sm text-muted-foreground">Meta vs. realizado por período.</p>
         </div>
         <Button onClick={() => navigate("/app/modules/indicadores/indicadores")}>Ver indicadores</Button>
       </div>
 
-      {/* Filtros */}
       <Card className="p-3">
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
           <FilterSelect label="Ano" value={String(ano)} onChange={(v) => setAno(Number(v))}
@@ -77,28 +200,73 @@ export default function IndicadoresDashboardPage() {
         </div>
       </Card>
 
-      {loading || !data ? (
-        <Skeleton className="h-40 w-full" />
+      {loading ? (
+        <div className="grid gap-4 xl:grid-cols-2">
+          <Skeleton className="h-72 w-full" />
+          <Skeleton className="h-72 w-full" />
+          <Skeleton className="h-72 w-full" />
+          <Skeleton className="h-72 w-full" />
+        </div>
+      ) : !data || data.indicadores.length === 0 ? (
+        <EmptyState icon={BarChart3} title="Nenhum indicador encontrado" description="Ajuste os filtros ou cadastre indicadores para o ano selecionado." />
       ) : (
-        <>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
-            <KpiCard label="Total de indicadores" value={data.total} icon={ListChecks} />
-            <KpiCard label="Estratégicos" value={data.total_estrategicos} icon={Target} />
-            <KpiCard label="Táticos" value={data.total_taticos} icon={TrendingUp} />
-            <KpiCard label="% geral de atingimento" value={`${data.percentual_geral_atingimento.toFixed(1)}%`} icon={Gauge} />
-            <KpiCard label="Atingidos" value={data.atingidos} icon={CheckCircle2} />
-            <KpiCard label="Em atenção" value={data.em_atencao} icon={AlertTriangle} />
-            <KpiCard label="Não atingidos" value={data.nao_atingidos} icon={XCircle} />
-            <KpiCard label="Pendentes de atualização" value={data.pendentes_atualizacao} icon={Clock} />
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            <BreakdownCard title="Por categoria" data={data.por_categoria} labelMap={CATEGORIA_LABEL as Record<string, string>} />
-            <BreakdownCard title="Por área" data={data.por_area} />
-          </div>
-        </>
+        <div className="grid gap-4 xl:grid-cols-2">
+          {data.indicadores.map((ind) => (
+            <IndicadorChartCard key={ind.id} ind={ind} onOpen={() => navigate(`/app/modules/indicadores/indicadores/${ind.id}`)} />
+          ))}
+        </div>
       )}
     </div>
+  )
+}
+
+function IndicadorChartCard({ ind, onOpen }: { ind: DashboardChartIndicador; onOpen: () => void }) {
+  const rows = chartData(ind)
+  const unit = ind.unidade_medida?.trim() || ""
+
+  return (
+    <Card className="flex flex-col p-4">
+      <div className="mb-3 min-w-0">
+        <button type="button" onClick={onOpen} className="text-left hover:text-primary">
+          <p className="line-clamp-2 text-sm font-bold leading-tight">{ind.codigo} — {ind.nome}</p>
+        </button>
+        <p className="mt-0.5 truncate text-xs text-muted-foreground">
+          {CATEGORIA_LABEL[ind.categoria]}
+          {ind.area_name ? ` · ${ind.area_name}` : ""}
+          {unit ? ` · ${unit}` : ""}
+        </p>
+      </div>
+
+      {rows.length === 0 ? (
+        <p className="flex flex-1 items-center justify-center py-10 text-center text-sm text-muted-foreground">
+          Sem acompanhamentos para o ano selecionado.
+        </p>
+      ) : (
+        <div className="h-72 w-full min-w-0">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={rows} margin={{ top: 28, right: 4, left: -8, bottom: 0 }} barGap={2} barCategoryGap="16%">
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+              <XAxis dataKey="label" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+              <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={40} />
+              <Tooltip content={<ChartTooltip unit={unit} />} cursor={{ fill: "hsl(var(--muted) / 0.4)" }} />
+              <Legend
+                formatter={(value) => (value === "meta" ? "Meta" : "Realizado")}
+                wrapperStyle={{ fontSize: 12, paddingTop: 4 }}
+              />
+              <Bar dataKey="meta" name="meta" fill={META_COLOR} radius={[3, 3, 0, 0]} maxBarSize={24}>
+                <LabelList dataKey="meta" content={<MetaBarLabel />} />
+              </Bar>
+              <Bar dataKey="realizado" name="realizado" radius={[3, 3, 0, 0]} maxBarSize={24}>
+                {rows.map((row) => (
+                  <Cell key={row.label} fill={STATUS_BAR_COLOR[row.status]} />
+                ))}
+                <LabelList content={<RealizadoBarLabel />} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </Card>
   )
 }
 
@@ -116,32 +284,5 @@ function FilterSelect({ label, value, onChange, options, allowAll = true }: {
         </SelectContent>
       </Select>
     </div>
-  )
-}
-
-function BreakdownCard({ title, data, labelMap }: { title: string; data: Record<string, number>; labelMap?: Record<string, string> }) {
-  const entries = Object.entries(data).sort((a, b) => b[1] - a[1])
-  const max = Math.max(1, ...entries.map(([, v]) => v))
-  return (
-    <Card className="p-4">
-      <p className="mb-3 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">{title}</p>
-      {entries.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Sem dados.</p>
-      ) : (
-        <div className="space-y-2">
-          {entries.map(([k, v]) => (
-            <div key={k} className="space-y-1">
-              <div className="flex items-center justify-between gap-2 text-sm">
-                <span className="truncate">{labelMap?.[k] ?? k}</span>
-                <span className="shrink-0 tabular-nums text-muted-foreground">{v}</span>
-              </div>
-              <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                <div className="h-full rounded-full bg-primary" style={{ width: `${Math.max(3, Math.round((v / max) * 100))}%` }} />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </Card>
   )
 }

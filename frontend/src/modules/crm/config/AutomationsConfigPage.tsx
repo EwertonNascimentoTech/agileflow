@@ -19,6 +19,7 @@ import { Switch } from "@/components/ui/switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { nullableStr } from "@/lib/utils"
 import { EmptyState } from "@/components/EmptyState"
 
 const NO_FUNNEL = "__none__"
@@ -153,7 +154,7 @@ export default function AutomationsConfigPage() {
 
     const payload = {
       name: data.name,
-      description: data.description,
+      description: editing ? nullableStr(data.description) : (data.description || undefined),
       trigger: data.trigger,
       action: data.action,
       funnel_id: data.funnel_id && data.funnel_id !== NO_FUNNEL ? data.funnel_id : null,

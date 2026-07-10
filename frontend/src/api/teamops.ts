@@ -143,6 +143,7 @@ export interface Person {
   employment_type: EmploymentType
   daily_hours: number
   weekly_hours: number
+  project_allocation_pct: number
   start_date: string | null
   status: PersonStatus
   notes: string | null
@@ -397,7 +398,7 @@ export const teamopsApi = {
     is_critical?: boolean
     is_active?: boolean
   }) => api.post<Stack>("/teamops/stacks", data).then((r) => r.data),
-  updateStack: (id: string, data: Partial<Stack>) =>
+  updateStack: (id: string, data: Partial<Pick<Stack, "category_id" | "name" | "is_critical" | "is_active">> & { slug?: string | null }) =>
     api.patch<Stack>(`/teamops/stacks/${id}`, data).then((r) => r.data),
   deleteStack: (id: string) => api.delete<void>(`/teamops/stacks/${id}`).then((r) => r.data),
 

@@ -19,7 +19,6 @@ from app.modules.produtos.service import (
     ProcessPortfolioService,
     ProductService,
     ReleaseService,
-    SecurityIntegrationService,
     SupportService,
 )
 
@@ -312,6 +311,16 @@ async def update_product(product_id: uuid.UUID, data: schemas.ProductUpdate, ctx
     return await ProductService.update(ctx.db, product_id, data, ctx.user.id)
 
 
+@router.patch("/{product_id}/fornecedor", response_model=schemas.ProductResponse)
+async def definir_fornecedor(
+    product_id: uuid.UUID,
+    data: schemas.DefinirFornecedorRequest,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_manage),
+):
+    return await ProductService.definir_fornecedor(ctx.db, product_id, data.fornecedor_id, ctx.user.id)
+
+
 @router.delete("/{product_id}", status_code=204)
 async def delete_product(product_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
     await ProductService.delete(ctx.db, product_id, ctx.user.id)
@@ -326,6 +335,17 @@ async def add_servico(product_id: uuid.UUID, data: schemas.ServicoCreate, ctx: M
 @router.patch("/{product_id}/servicos/{servico_id}", response_model=schemas.ServicoResponse)
 async def update_servico(product_id: uuid.UUID, servico_id: uuid.UUID, data: schemas.ServicoCreate, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
     return await ProductService.update_servico(ctx.db, product_id, servico_id, data, ctx.user.id)
+
+
+@router.patch("/{product_id}/servicos/{servico_id}/subprocesso-dispensa", response_model=schemas.ServicoResponse)
+async def set_servico_subprocesso_dispensa(
+    product_id: uuid.UUID,
+    servico_id: uuid.UUID,
+    data: schemas.ServicoSubprocessoDispensa,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_manage),
+):
+    return await ProductService.set_servico_subprocesso_dispensa(ctx.db, product_id, servico_id, data, ctx.user.id)
 
 
 @router.delete("/{product_id}/servicos/{servico_id}", status_code=204)
@@ -424,22 +444,22 @@ async def delete_documentation(product_id: uuid.UUID, doc_id: uuid.UUID, ctx: Mo
 
 
 # ── Sustentação / SLA ─────────────────────────
-@router.get("/{product_id}/support", response_model=Optional[schemas.SupportResponse])
-async def get_support(product_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
-    return await SupportService.get(ctx.db, product_id)
+# ── Sustentação / SLA ─────────────────────────
+@router.get("/{product_id}/supports", response_model=list[schemas.SupportResponse])
+async def list_supports(product_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+    return await SupportService.list(ctx.db, product_id)
 
 
-@router.put("/{product_id}/support", response_model=schemas.SupportResponse)
-async def upsert_support(product_id: uuid.UUID, data: schemas.SupportUpsert, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
-    return await SupportService.upsert(ctx.db, product_id, data, ctx.user.id)
+@router.post("/{product_id}/supports", response_model=schemas.SupportResponse)
+async def create_support(product_id: uuid.UUID, data: schemas.SupportCreate, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    return await SupportService.create(ctx.db, product_id, data, ctx.user.id)
 
 
-# ── Integrações, dados e segurança ────────────
-@router.get("/{product_id}/security", response_model=Optional[schemas.SecurityResponse])
-async def get_security(product_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
-    return await SecurityIntegrationService.get(ctx.db, product_id)
+@router.patch("/{product_id}/supports/{support_id}", response_model=schemas.SupportResponse)
+async def update_support(product_id: uuid.UUID, support_id: uuid.UUID, data: schemas.SupportUpdate, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    return await SupportService.update(ctx.db, product_id, support_id, data, ctx.user.id)
 
 
-@router.put("/{product_id}/security", response_model=schemas.SecurityResponse)
-async def upsert_security(product_id: uuid.UUID, data: schemas.SecurityUpsert, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
-    return await SecurityIntegrationService.upsert(ctx.db, product_id, data, ctx.user.id)
+@router.delete("/{product_id}/supports/{support_id}", status_code=204)
+async def delete_support(product_id: uuid.UUID, support_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    await SupportService.delete(ctx.db, product_id, support_id, ctx.user.id)

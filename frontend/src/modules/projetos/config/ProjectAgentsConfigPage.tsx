@@ -68,13 +68,10 @@ type AgentForm = {
   agent_kind: ProjectStageAgentKind
   name: string
   agent_id: string
-  usuario: string
   prompt_template: string
-  gateway_url: string
-  gateway_client_id: string
-  gateway_client_secret: string
   continue_thread: boolean
   add_comment_on_success: boolean
+  advance_to_status_id: string
   is_active: boolean
 }
 
@@ -82,13 +79,10 @@ const emptyForm = (kind: ProjectStageAgentKind = "classify_and_advance"): AgentF
   agent_kind: kind,
   name: "",
   agent_id: "",
-  usuario: "",
   prompt_template: kind === "classify_and_advance" ? DEFAULT_CLASSIFY_PROMPT : DEFAULT_PROMPT,
-  gateway_url: "",
-  gateway_client_id: "",
-  gateway_client_secret: "",
   continue_thread: false,
   add_comment_on_success: true,
+  advance_to_status_id: "",
   is_active: true,
 })
 
@@ -161,13 +155,10 @@ export default function ProjectAgentsConfigPage() {
       agent_kind: agent.agent_kind ?? "ask",
       name: agent.name,
       agent_id: agent.agent_id,
-      usuario: agent.usuario,
       prompt_template: agent.prompt_template,
-      gateway_url: agent.gateway_url ?? "",
-      gateway_client_id: agent.gateway_client_id ?? "",
-      gateway_client_secret: "",
       continue_thread: agent.continue_thread,
       add_comment_on_success: agent.add_comment_on_success,
+      advance_to_status_id: agent.advance_to_status_id ?? "",
       is_active: agent.is_active,
     })
     setDialogOpen(true)
@@ -175,20 +166,8 @@ export default function ProjectAgentsConfigPage() {
 
   async function handleSave() {
     if (!targetStatus || !projectId) return
-    if (!form.name.trim() || !form.agent_id.trim() || !form.usuario.trim() || !form.prompt_template.trim()) {
-      toast.error("Preencha nome, ID do agente, usuário e prompt.")
-      return
-    }
-    const clientId = form.gateway_client_id.trim()
-    const secretInput = form.gateway_client_secret.trim()
-    const hasStoredSecret = Boolean(editing?.has_gateway_client_secret)
-    const needsSecret = !editing || !hasStoredSecret || !editing.gateway_client_id
-    if (!clientId) {
-      toast.error("Informe o X-Client-ID (credencial do gateway IDCortex).")
-      return
-    }
-    if (needsSecret && !secretInput) {
-      toast.error("Informe o X-Client-Secret (credencial do gateway IDCortex).")
+    if (!form.name.trim() || !form.agent_id.trim() || !form.prompt_template.trim()) {
+      toast.error("Preencha nome, ID do agente e prompt.")
       return
     }
     setSaving(true)
@@ -198,16 +177,11 @@ export default function ProjectAgentsConfigPage() {
           agent_kind: form.agent_kind,
           name: form.name.trim(),
           agent_id: form.agent_id.trim(),
-          usuario: form.usuario.trim(),
           prompt_template: form.prompt_template,
           continue_thread: form.continue_thread,
           add_comment_on_success: form.add_comment_on_success,
+          advance_to_status_id: form.agent_kind === "classify_and_advance" ? (form.advance_to_status_id || null) : null,
           is_active: form.is_active,
-          gateway_url: form.gateway_url.trim() || null,
-          gateway_client_id: clientId,
-        }
-        if (secretInput) {
-          payload.gateway_client_secret = secretInput
         }
         await projetosApi.updateStageAgent(editing.id, payload)
         toast.success("Agente atualizado.")
@@ -219,14 +193,11 @@ export default function ProjectAgentsConfigPage() {
           agent_kind: form.agent_kind,
           name: form.name.trim(),
           agent_id: form.agent_id.trim(),
-          usuario: form.usuario.trim(),
           prompt_template: form.prompt_template,
           continue_thread: form.continue_thread,
           add_comment_on_success: form.add_comment_on_success,
+          advance_to_status_id: form.agent_kind === "classify_and_advance" ? (form.advance_to_status_id || null) : null,
           is_active: form.is_active,
-          gateway_url: form.gateway_url.trim() || null,
-          gateway_client_id: clientId,
-          gateway_client_secret: secretInput,
         }
         await projetosApi.createStageAgent(payload)
         toast.success("Agente vinculado à etapa.")
@@ -253,8 +224,8 @@ export default function ProjectAgentsConfigPage() {
         <div>
           <h1 className="text-xl font-bold">Agentes por etapa</h1>
           <p className="text-sm text-muted-foreground">
-            Vincule um agente IDCortex a uma raia do kanban. Quando um card entrar na etapa,
-            o sistema chamará o gateway com o prompt configurado.
+            Vincule um agente do Azure AI Foundry a uma raia do kanban. Quando um card entrar na
+            etapa, o sistema chama o agente (Azure) com o prompt configurado.
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -324,13 +295,7 @@ export default function ProjectAgentsConfigPage() {
                               </div>
                               {agent && (
                                 <p className="text-xs text-muted-foreground mt-1 truncate">
-                                  Agente {agent.agent_id} · {agent.usuario}
-                                  {!agent.gateway_client_id && (
-                                    <span className="text-destructive ml-1">· falta X-Client-ID</span>
-                                  )}
-                                  {agent.gateway_client_id && !agent.has_gateway_client_secret && (
-                                    <span className="text-destructive ml-1">· falta X-Client-Secret</span>
-                                  )}
+                                  Agente {agent.agent_id}
                                 </p>
                               )}
                             </div>
@@ -401,73 +366,49 @@ export default function ProjectAgentsConfigPage() {
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="classify_and_advance">Classificação (matriz Impacto × Esforço + avançar)</SelectItem>
-                  <SelectItem value="ask">Pergunta livre ao IDCortex</SelectItem>
+                  <SelectItem value="ask">Pergunta livre (Azure)</SelectItem>
                 </SelectContent>
               </Select>
               {form.agent_kind === "classify_and_advance" && (
                 <p className="text-[11px] text-muted-foreground">
-                  Lê todos os dados do card, classifica na matriz e move automaticamente para a próxima raia do funil.
+                  Lê todos os dados do card, classifica na matriz e move o card para a raia escolhida abaixo.
                 </p>
               )}
             </div>
+
+            {form.agent_kind === "classify_and_advance" && (
+              <div className="space-y-1">
+                <Label>Avançar para a raia</Label>
+                <Select
+                  value={form.advance_to_status_id || "__next__"}
+                  onValueChange={(v) => setForm((f) => ({ ...f, advance_to_status_id: v === "__next__" ? "" : v }))}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__next__">Automático (próxima raia do funil)</SelectItem>
+                    {(statusesByFunnel.get(targetStatus?.funnel_id ?? "") ?? [])
+                      .filter((s) => s.id !== targetStatus?.id)
+                      .map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">
+                  Para onde o card vai depois que o agente classifica. Padrão: a próxima etapa do funil.
+                </p>
+              </div>
+            )}
             <div className="space-y-1">
               <Label>Nome (identificação interna)</Label>
               <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Ex.: Triagem automática" />
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label>ID do agente (IDCortex)</Label>
-                <p className="text-[11px] text-muted-foreground">Body → id_agente</p>
-                <Input value={form.agent_id} onChange={(e) => setForm((f) => ({ ...f, agent_id: e.target.value }))} placeholder="asst_..." />
-              </div>
-              <div className="space-y-1">
-                <Label>E-mail do usuário</Label>
-                <p className="text-[11px] text-muted-foreground">Body → usuario</p>
-                <Input type="email" value={form.usuario} onChange={(e) => setForm((f) => ({ ...f, usuario: e.target.value }))} />
-              </div>
-            </div>
-
-            <div className="rounded-md border p-3 space-y-3 bg-muted/20">
-              <p className="text-sm font-medium">Credenciais do gateway IDCortex</p>
+            <div className="space-y-1">
+              <Label>ID do agente (Azure AI Foundry)</Label>
               <p className="text-[11px] text-muted-foreground">
-                Fornecidas pelo time IDCortex. Enviadas nos headers de cada chamada ao gateway.
+                ID do agente no Azure AI Foundry (ex.: asst_...). O endpoint e as credenciais
+                Entra ID (service principal) são globais e ficam no .env — <code>AZURE_AI_ENDPOINT</code>,
+                <code>AZURE_AI_TENANT_ID</code>, <code>AZURE_AI_CLIENT_ID</code>, <code>AZURE_AI_CLIENT_SECRET</code>.
               </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label>X-Client-ID</Label>
-                  <p className="text-[11px] text-muted-foreground">Header → X-Client-ID</p>
-                  <Input
-                    value={form.gateway_client_id}
-                    onChange={(e) => setForm((f) => ({ ...f, gateway_client_id: e.target.value }))}
-                    placeholder="Client ID do gateway"
-                    autoComplete="off"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label>X-Client-Secret</Label>
-                  <p className="text-[11px] text-muted-foreground">Header → X-Client-Secret</p>
-                  <Input
-                    type="password"
-                    value={form.gateway_client_secret}
-                    onChange={(e) => setForm((f) => ({ ...f, gateway_client_secret: e.target.value }))}
-                    placeholder={
-                      editing?.has_gateway_client_secret && editing.gateway_client_id
-                        ? "•••••• (deixe vazio para manter)"
-                        : "Client Secret do gateway"
-                    }
-                    autoComplete="new-password"
-                  />
-                </div>
-              </div>
+              <Input value={form.agent_id} onChange={(e) => setForm((f) => ({ ...f, agent_id: e.target.value }))} placeholder="asst_..." />
             </div>
-
-            <details className="rounded-md border p-3 text-sm">
-              <summary className="cursor-pointer font-medium">URL do gateway (opcional)</summary>
-              <p className="text-xs text-muted-foreground mt-2 mb-2">
-                Padrão: https://idcortex-dev.sistemafiea.com.br/gateway/ask (ou IDCORTEX_GATEWAY_URL no .env)
-              </p>
-              <Input value={form.gateway_url} onChange={(e) => setForm((f) => ({ ...f, gateway_url: e.target.value }))} placeholder="https://.../gateway/ask" />
-            </details>
 
             <div className="space-y-1">
               <Label>Prompt (mensagem enviada ao agente)</Label>

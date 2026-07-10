@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react"
-import { ExternalLink, Loader2, Sparkles } from "lucide-react"
+import { Loader2, Sparkles } from "lucide-react"
 
 import {
   indicadoresApi,
   type Acompanhamento,
   type AcompanhamentoEvidenciasPayload,
   type AnexoItem,
+  type FonteMetrica,
+  type PortfolioDocumentoRef,
   type PortfolioServicoRef,
 } from "@/api/indicadores"
 import { AttachmentField, type Attachment } from "@/components/AttachmentField"
@@ -15,18 +17,16 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { toast } from "@/lib/toast"
 
 function evidenciasCount(data: {
-  evidencias?: AnexoItem[] | null
-  evidencias_novos?: AnexoItem[] | null
-  portfolio_links?: { url: string }[] | null
-  portfolio_links_novos?: { url: string }[] | null
+  portfolio_servicos?: PortfolioServicoRef[] | null
   portfolio_servicos_novos?: PortfolioServicoRef[] | null
+  portfolio_documentos?: PortfolioDocumentoRef[] | null
+  portfolio_documentos_novos?: PortfolioDocumentoRef[] | null
 }) {
   return (
     (data.portfolio_servicos_novos?.length ?? 0)
-    + (data.evidencias_novos?.length ?? 0)
-    + (data.portfolio_links_novos?.length ?? 0)
-    + (data.evidencias?.length ?? 0)
-    + (data.portfolio_links?.length ?? 0)
+    + (data.portfolio_servicos?.length ?? 0)
+    + (data.portfolio_documentos_novos?.length ?? 0)
+    + (data.portfolio_documentos?.length ?? 0)
   )
 }
 
@@ -66,37 +66,55 @@ function ServicosTable({ rows, highlight }: { rows: PortfolioServicoRef[]; highl
   )
 }
 
-function LinksList({ links }: { links: { label: string; url: string }[] }) {
-  if (!links.length) return null
+function DocumentosTable({ rows, highlight }: { rows: PortfolioDocumentoRef[]; highlight?: boolean }) {
+  if (!rows.length) return null
   return (
-    <ul className="space-y-1">
-      {links.map((link) => (
-        <li key={link.url}>
-          <a
-            href={link.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
-          >
-            <ExternalLink size={13} />
-            {link.label}
-          </a>
-        </li>
-      ))}
-    </ul>
+    <div className="overflow-hidden rounded-md border">
+      <table className="w-full text-sm">
+        <thead className="bg-muted/50 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+          <tr>
+            <th className="px-3 py-2 font-semibold">Produto</th>
+            <th className="px-3 py-2 font-semibold">Documento</th>
+            <th className="px-3 py-2 font-semibold">Data</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((d) => (
+            <tr
+              key={d.documento_id}
+              className={`border-t ${highlight || d.novo_no_mes ? "bg-primary/5" : ""}`}
+            >
+              <td className="px-3 py-2">
+                <span className="flex items-center gap-1.5">
+                  {d.product_name}
+                  {(highlight || d.novo_no_mes) && (
+                    <Badge variant="secondary" className="h-4 px-1 text-[9px] font-normal">Novo</Badge>
+                  )}
+                </span>
+              </td>
+              <td className="px-3 py-2">{d.documento_name}</td>
+              <td className="px-3 py-2 text-muted-foreground">{d.data_documento ?? "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
 export function AcompanhamentoEvidenciasDialog({
   acomp,
+  fonteMetrica,
   onClose,
   onSaved,
 }: {
   acomp: Acompanhamento
+  fonteMetrica?: FonteMetrica | null
   onClose: () => void
   onSaved: (updated: Acompanhamento) => void
 }) {
   const isPortfolio = acomp.fonte === "portfolio"
+  const isDocumentos = fonteMetrica === "documentos_natos_digitais"
   const [loading, setLoading] = useState(isPortfolio)
   const [payload, setPayload] = useState<AcompanhamentoEvidenciasPayload | null>(
     isPortfolio
@@ -107,6 +125,8 @@ export function AcompanhamentoEvidenciasDialog({
           evidencias_novos: [],
           portfolio_servicos: [],
           portfolio_servicos_novos: [],
+          portfolio_documentos: [],
+          portfolio_documentos_novos: [],
           portfolio_links: [],
           portfolio_links_novos: [],
         },
@@ -131,8 +151,9 @@ export function AcompanhamentoEvidenciasDialog({
       })
       toast.success("Evidências salvas.")
       onSaved(updated)
-    } catch {
-      toast.error("Não foi possível salvar as evidências.")
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      toast.error(typeof detail === "string" ? detail : "Não foi possível salvar as evidências.")
     } finally {
       setSaving(false)
     }
@@ -144,11 +165,27 @@ export function AcompanhamentoEvidenciasDialog({
       evidencias: data.evidencias,
       portfolio_servicos: data.portfolio_servicos,
       portfolio_servicos_novos: data.portfolio_servicos_novos,
+      portfolio_documentos: data.portfolio_documentos,
+      portfolio_documentos_novos: data.portfolio_documentos_novos,
       portfolio_links: data.portfolio_links,
     }
   }
 
-  const acumuladoSemNovos = (payload?.portfolio_servicos ?? []).filter((s) => !s.novo_no_mes)
+  const servicosNovos = payload?.portfolio_servicos_novos ?? []
+  const servicosAcum = payload?.portfolio_servicos ?? []
+  const documentosNovos = payload?.portfolio_documentos_novos ?? []
+  const documentosAcum = payload?.portfolio_documentos ?? []
+  const servicosAcumSemNovos = servicosAcum.filter((s) => !s.novo_no_mes)
+  const documentosAcumSemNovos = documentosAcum.filter((d) => !d.novo_no_mes)
+  const itemLabel = isDocumentos ? "documento" : "serviço"
+  const novoLabel = isDocumentos ? "Cadastrados" : "Publicados"
+  const vazioNovos = isDocumentos
+    ? "Nenhum documento nato-digital novo cadastrado neste mês."
+    : "Nenhum serviço novo publicado neste mês."
+  const vazioAcum = isDocumentos
+    ? "Nenhum documento nato-digital de produto em produção no numerador."
+    : "Nenhum serviço de produto em produção no numerador."
+  const acumuladoCount = isDocumentos ? documentosAcum.length : servicosAcum.length
 
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose() }}>
@@ -166,57 +203,42 @@ export function AcompanhamentoEvidenciasDialog({
           </div>
         ) : isPortfolio && payload ? (
           <div className="space-y-5">
-            {/* Novos no mês — destaque */}
             <section className="space-y-2 rounded-lg border border-primary/30 bg-primary/5 p-3">
               <p className="flex items-center gap-1.5 text-sm font-medium">
                 <Sparkles size={15} className="text-primary" />
-                Publicados em {acomp.competencia}
+                {novoLabel} em {acomp.competencia}
                 <span className="font-normal text-muted-foreground">
                   ({acomp.periodo_inicio} a {acomp.periodo_fim})
                 </span>
               </p>
-              {payload.portfolio_servicos_novos.length > 0 ? (
-                <ServicosTable rows={payload.portfolio_servicos_novos} highlight />
+              {isDocumentos ? (
+                documentosNovos.length > 0 ? (
+                  <DocumentosTable rows={documentosNovos} highlight />
+                ) : (
+                  <p className="text-sm text-muted-foreground">{vazioNovos}</p>
+                )
+              ) : servicosNovos.length > 0 ? (
+                <ServicosTable rows={servicosNovos} highlight />
               ) : (
-                <p className="text-sm text-muted-foreground">Nenhum serviço novo publicado neste mês.</p>
-              )}
-              {payload.portfolio_links_novos.length > 0 && (
-                <div className="space-y-1 pt-1">
-                  <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Links do mês</p>
-                  <LinksList links={payload.portfolio_links_novos} />
-                </div>
-              )}
-              {(payload.evidencias_novos.length > 0) && (
-                <div className="space-y-1 pt-1">
-                  <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Anexos do mês</p>
-                  <AttachmentField value={payload.evidencias_novos} onChange={() => {}} disabled getUrl={indicadoresApi.getUploadUrl} />
-                </div>
+                <p className="text-sm text-muted-foreground">{vazioNovos}</p>
               )}
             </section>
 
-            {/* Acumulado no numerador */}
             <section className="space-y-2">
               <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
-                Acumulado no numerador até {acomp.periodo_fim} ({payload.portfolio_servicos.length} serviço(s))
+                Acumulado no numerador até {acomp.periodo_fim} ({acumuladoCount} {itemLabel}(s))
               </p>
-              {acumuladoSemNovos.length > 0 ? (
-                <ServicosTable rows={acumuladoSemNovos} />
-              ) : payload.portfolio_servicos_novos.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Nenhum serviço de produto em produção no numerador.</p>
+              {isDocumentos ? (
+                documentosAcumSemNovos.length > 0 ? (
+                  <DocumentosTable rows={documentosAcumSemNovos} />
+                ) : documentosNovos.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">{vazioAcum}</p>
+                ) : null
+              ) : servicosAcumSemNovos.length > 0 ? (
+                <ServicosTable rows={servicosAcumSemNovos} />
+              ) : servicosNovos.length === 0 ? (
+                <p className="text-sm text-muted-foreground">{vazioAcum}</p>
               ) : null}
-
-              {payload.portfolio_links.length > 0 && (
-                <div className="space-y-1">
-                  <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Links (acumulado)</p>
-                  <LinksList links={payload.portfolio_links} />
-                </div>
-              )}
-              {payload.evidencias.length > 0 && (
-                <div className="space-y-1">
-                  <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Anexos (acumulado)</p>
-                  <AttachmentField value={payload.evidencias} onChange={() => {}} disabled getUrl={indicadoresApi.getUploadUrl} />
-                </div>
-              )}
             </section>
           </div>
         ) : (

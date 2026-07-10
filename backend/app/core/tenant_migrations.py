@@ -3395,6 +3395,85 @@ async def _step_089_produtos_corporativo(conn: AsyncConnection, schema: str) -> 
     })
 
 
+async def _step_098_produtos_servico_subprocesso_dispensa(conn: AsyncConnection, schema: str) -> None:
+    """Flag + justificativa quando não há sub-processo disponível para vincular ao serviço."""
+    if not await _table_exists(conn, schema, "product_servicos"):
+        return
+    await _add_columns(conn, schema, "product_servicos", {
+        "sem_subprocesso_disponivel": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "justificativa_sem_subprocesso": "TEXT",
+    })
+
+
+async def _step_099_produtos_support_niveis(conn: AsyncConnection, schema: str) -> None:
+    """Sustentação por níveis (N1/N2/N3) com responsáveis e SLA em horas."""
+    if not await _table_exists(conn, schema, "product_supports"):
+        return
+    await _add_columns(conn, schema, "product_supports", {
+        "niveis_atendimento": "JSONB",
+    })
+
+
+async def _step_100_produtos_support_entries(conn: AsyncConnection, schema: str) -> None:
+    """Um registro de sustentação por nível (n1/n2/n3), com config flat em niveis_atendimento."""
+    import json
+
+    if not await _table_exists(conn, schema, "product_supports"):
+        return
+    await _add_columns(conn, schema, "product_supports", {"nivel": "VARCHAR(2)"})
+
+    rows = (await conn.execute(text(f"""
+        SELECT id, product_id, canal_atendimento, niveis_atendimento, observacoes,
+               is_active, created_by, created_at, updated_by, updated_at
+        FROM {schema}.product_supports
+        WHERE niveis_atendimento IS NOT NULL AND nivel IS NULL
+    """))).mappings().all()
+
+    for row in rows:
+        na = row["niveis_atendimento"]
+        if not isinstance(na, dict):
+            continue
+        if any(k in na for k in ("n1", "n2", "n3")):
+            keys = [k for k in ("n1", "n2", "n3") if na.get(k)]
+            if not keys:
+                continue
+            first = keys[0]
+            await conn.execute(
+                text(f"""
+                    UPDATE {schema}.product_supports
+                    SET nivel = :nivel, niveis_atendimento = CAST(:config AS jsonb)
+                    WHERE id = :id
+                """),
+                {"nivel": first, "config": json.dumps(na[first]), "id": row["id"]},
+            )
+            for key in keys[1:]:
+                await conn.execute(
+                    text(f"""
+                        INSERT INTO {schema}.product_supports
+                        (id, product_id, canal_atendimento, nivel, niveis_atendimento, observacoes,
+                         is_active, created_by, created_at, updated_by, updated_at)
+                        VALUES (gen_random_uuid(), :product_id, :canal, :nivel, CAST(:config AS jsonb),
+                                :obs, :active, :cb, :ca, :ub, :ua)
+                    """),
+                    {
+                        "product_id": row["product_id"],
+                        "canal": row["canal_atendimento"],
+                        "nivel": key,
+                        "config": json.dumps(na[key]),
+                        "obs": row["observacoes"],
+                        "active": row["is_active"],
+                        "cb": row["created_by"],
+                        "ca": row["created_at"],
+                        "ub": row["updated_by"],
+                        "ua": row["updated_at"],
+                    },
+                )
+        else:
+            await conn.execute(
+                text(f"UPDATE {schema}.product_supports SET nivel = 'n1' WHERE id = :id"),
+                {"id": row["id"]},
+            )
+
 async def _step_084_produtos_health_config(conn: AsyncConnection, schema: str) -> None:
     """Tabela singleton de configuração do Índice de Saúde do portfólio (pesos + limiares)."""
     if not await _table_exists(conn, schema, "produto_health_config"):
@@ -3499,6 +3578,104 @@ async def _step_092_indicadores_fonte(conn: AsyncConnection, schema: str) -> Non
     })
 
 
+async def _step_093_projetos_card_classification(conn: AsyncConnection, schema: str) -> None:
+    """Gate de classificação no backlog (flag por etapa) + vínculo cross-módulo do card
+    com o portfólio de PRODUTOS (produto/release, UUID sem FK). Idempotente."""
+    await _add_columns(conn, schema, "project_status_configs", {
+        "classification_required": "BOOLEAN NOT NULL DEFAULT FALSE",
+    })
+    await _add_columns(conn, schema, "project_tasks", {
+        "card_classification": "VARCHAR(20)",
+        "linked_product_id": "UUID",
+        "linked_release_id": "UUID",
+    })
+
+
+async def _step_094_indicadores_acomp_bloqueado(conn: AsyncConnection, schema: str) -> None:
+    """Trava de fechamento da competência: congela o acompanhamento do mês contra edição."""
+    await _add_columns(conn, schema, "indicador_acompanhamentos", {
+        "bloqueado": "BOOLEAN NOT NULL DEFAULT FALSE",
+    })
+
+
+async def _step_095_projetos_agent_advance_to(conn: AsyncConnection, schema: str) -> None:
+    """Raia de destino configurável quando o agente (classify_and_advance) conclui."""
+    await _add_columns(conn, schema, "project_stage_agent_bindings", {
+        "advance_to_status_id": "UUID",
+    })
+
+
+async def _step_096_projetos_linked_program(conn: AsyncConnection, schema: str) -> None:
+    """Referência a um Programa existente, escolhida na conversão (só etiqueta, UUID sem FK)."""
+    await _add_columns(conn, schema, "project_tasks", {
+        "linked_program_id": "UUID",
+    })
+
+
+async def _step_097_projetos_programas(conn: AsyncConnection, schema: str) -> None:
+    """Cadastro próprio de Programas (catálogo do tenant). Idempotente."""
+    if not await _table_exists(conn, schema, "project_programs"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_programs (
+                id          UUID PRIMARY KEY,
+                name        VARCHAR(200) NOT NULL,
+                description TEXT,
+                responsavel_person_id UUID REFERENCES {schema}.team_persons(id) ON DELETE SET NULL,
+                is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+                created_by  UUID, created_at TIMESTAMP DEFAULT now(),
+                updated_by  UUID, updated_at TIMESTAMP DEFAULT now()
+            )
+        """))
+
+
+async def _step_101_projetos_classification_enforcement(conn: AsyncConnection, schema: str) -> None:
+    """Bloqueio configurável na saída do backlog (desligado por padrão)."""
+    await _add_columns(conn, schema, "project_funnels", {
+        "classification_enforcement_enabled": "BOOLEAN NOT NULL DEFAULT FALSE",
+    })
+
+
+async def _step_102_projetos_us_checklist(conn: AsyncConnection, schema: str) -> None:
+    """Checklist de execução em cards User Story (JSONB + percentual derivado)."""
+    await _add_columns(conn, schema, "project_tasks", {
+        "us_checklist": "JSONB",
+    })
+
+
+async def _step_103_indicadores_responsavel_index(conn: AsyncConnection, schema: str) -> None:
+    """Índice para filtro de indicadores por responsável (evita seq scan)."""
+    if await _table_exists(conn, schema, "indicadores"):
+        await conn.execute(text(
+            f"CREATE INDEX IF NOT EXISTS ix_{schema}_indicadores_responsavel "
+            f"ON {schema}.indicadores(responsavel_person_id)"
+        ))
+
+
+async def _step_104_projetos_us_impediment(conn: AsyncConnection, schema: str) -> None:
+    """Selo de impedimento na Feature: rollup de US filhas em etapa de Impedimento.
+    Mantido pela automação de reconcile Feature ← User Stories."""
+    await _add_columns(conn, schema, "project_tasks", {
+        "us_impediment_active": "BOOLEAN NOT NULL DEFAULT FALSE",
+    })
+
+
+async def _step_105_projetos_us_codereview(conn: AsyncConnection, schema: str) -> None:
+    """Selo de Code Review na Feature: rollup de US filhas em etapa de Code Review.
+    Mantido pela automação de reconcile Feature ← User Stories."""
+    await _add_columns(conn, schema, "project_tasks", {
+        "us_codereview_active": "BOOLEAN NOT NULL DEFAULT FALSE",
+    })
+
+
+async def _step_106_team_person_project_allocation_pct(conn: AsyncConnection, schema: str) -> None:
+    """Percentual da jornada diária reservado para projetos (por pessoa)."""
+    if not await _table_exists(conn, schema, "team_persons"):
+        return
+    await _add_columns(conn, schema, "team_persons", {
+        "project_allocation_pct": "NUMERIC(5,2) NOT NULL DEFAULT 100.0",
+    })
+
+
 # Lista ordenada de steps. Adicionar novos no final.
 STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("001_funnels", _step_001_funnels),
@@ -3593,6 +3770,20 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("090_indicadores", _step_090_indicadores),
     ("091_indicadores_drop_datas", _step_091_indicadores_drop_datas),
     ("092_indicadores_fonte", _step_092_indicadores_fonte),
+    ("093_projetos_card_classification", _step_093_projetos_card_classification),
+    ("094_indicadores_acomp_bloqueado", _step_094_indicadores_acomp_bloqueado),
+    ("095_projetos_agent_advance_to", _step_095_projetos_agent_advance_to),
+    ("096_projetos_linked_program", _step_096_projetos_linked_program),
+    ("097_projetos_programas", _step_097_projetos_programas),
+    ("098_produtos_servico_subprocesso_dispensa", _step_098_produtos_servico_subprocesso_dispensa),
+    ("099_produtos_support_niveis", _step_099_produtos_support_niveis),
+    ("100_produtos_support_entries", _step_100_produtos_support_entries),
+    ("101_projetos_classification_enforcement", _step_101_projetos_classification_enforcement),
+    ("102_projetos_us_checklist", _step_102_projetos_us_checklist),
+    ("103_indicadores_responsavel_index", _step_103_indicadores_responsavel_index),
+    ("104_projetos_us_impediment", _step_104_projetos_us_impediment),
+    ("105_projetos_us_codereview", _step_105_projetos_us_codereview),
+    ("106_team_person_project_allocation_pct", _step_106_team_person_project_allocation_pct),
 ]
 
 

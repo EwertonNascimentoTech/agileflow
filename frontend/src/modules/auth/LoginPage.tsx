@@ -138,7 +138,14 @@ export default function LoginPage() {
             </Button>
           </form>
 
-          <p className="mt-6 text-center text-xs text-muted-foreground">
+          <p className="mt-6 text-center text-sm text-muted-foreground">
+            Primeiro acesso?{" "}
+            <a href="/primeiro-acesso" className="font-medium text-primary hover:underline">
+              Ative sua conta
+            </a>
+          </p>
+
+          <p className="mt-2 text-center text-xs text-muted-foreground">
             Plataforma multi-tenant — sua empresa, seus dados.
           </p>
         </div>

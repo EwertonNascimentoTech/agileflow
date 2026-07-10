@@ -16,6 +16,7 @@ const isCustomKey = (key: string) => key.startsWith(CUSTOM_PREFIX)
 const HINTS: Record<string, string> = {
   demand_type: "Etiqueta do tipo da demanda",
   priority_quadrant: "Badge do quadrante (Quick Win, Big Bet, …)",
+  card_classification: "Desenvolvimento, Implantação ou Melhoria (portfólio de produtos)",
   schedule_sla: "Em dia / Alerta / Atrasado (prazo + SLA da etapa)",
   code: "Código curto do card",
   title: "Título da demanda",

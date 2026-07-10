@@ -17,6 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { nullableStr } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { EmptyState } from "@/components/EmptyState"
 
@@ -124,8 +125,18 @@ export default function ProductTypesPage() {
             : undefined,
       }
       if (editing) {
-        const { slug: _slug, ...update } = payload
-        const updated = await productTypesApi.update(editing.id, update)
+        const { slug: _slug, ...rest } = payload
+        const updated = await productTypesApi.update(editing.id, {
+          name: rest.name,
+          description: nullableStr(rest.description),
+          icon: nullableStr(rest.icon),
+          field_schema: rest.field_schema ?? null,
+          tracks_stock: rest.tracks_stock,
+          tracks_batch: rest.tracks_batch,
+          tracks_expiry: rest.tracks_expiry,
+          tracks_serial: rest.tracks_serial,
+          is_active: rest.is_active,
+        })
         setTypes(prev => prev.map(t => t.id === updated.id ? updated : t))
       } else {
         const created = await productTypesApi.create(payload)

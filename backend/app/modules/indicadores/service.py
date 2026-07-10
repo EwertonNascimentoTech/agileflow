@@ -54,6 +54,17 @@ def _f(val) -> Optional[float]:
     return float(val)
 
 
+def _as_date(val) -> Optional[date]:
+    """Normaliza datetime/date para comparação de período (documentos usam created_at)."""
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        return val.date()
+    if isinstance(val, date):
+        return val
+    return None
+
+
 async def _areas_index(db: AsyncSession) -> dict[uuid.UUID, Area]:
     rows = (await db.execute(select(Area))).scalars().all()
     return {a.id: a for a in rows}
@@ -83,11 +94,44 @@ async def _portfolio_servicos_rows(
     return [(dp, lc) for dp, lc in rows]
 
 
+async def _portfolio_documentos_rows(
+    db: AsyncSession, metrica: Optional[FontePortfolioMetrica] = None,
+) -> list[tuple]:
+    """Carrega (data_documento, lifecycle) dos documentos nato-digital ATIVOS de produtos em produção/desenvolvimento."""
+    from app.modules.produtos.models import Product, ProductDocumento, ProductLifecycle
+
+    rows = (await db.execute(
+        select(ProductDocumento.data_documento, Product.lifecycle)
+        .join(Product, Product.id == ProductDocumento.product_id)
+        .where(
+            ProductDocumento.is_active.is_(True),
+            ProductDocumento.is_nato_digital.is_(True),
+            Product.is_active.is_(True),
+            Product.lifecycle.in_([ProductLifecycle.PRODUCAO, ProductLifecycle.DESENVOLVIMENTO]),
+        )
+    )).all()
+    return [(dd, lc) for dd, lc in rows]
+
+
+async def _portfolio_rows(
+    db: AsyncSession, metrica: Optional[FontePortfolioMetrica] = None,
+) -> list[tuple]:
+    """Dataset base para cálculo de % conforme a métrica do indicador."""
+    m = metrica or FontePortfolioMetrica.SERVICOS_PUBLICADOS
+    if m == FontePortfolioMetrica.DOCUMENTOS_NATOS_DIGITAIS:
+        return await _portfolio_documentos_rows(db, metrica)
+    return await _portfolio_servicos_rows(db, metrica)
+
+
 def _pct_ate(rows: list[tuple], ate: date) -> tuple[int, int, Optional[float]]:
-    """% acumulado de serviços publicados (prod. produção) sobre publicados (prod. + desenv.)."""
-    elegiveis = [(dp, lc) for dp, lc in rows if dp is not None and dp <= ate]
-    den = len(elegiveis)
-    num = sum(1 for _, lc in elegiveis if _ev(lc) == "producao")
+    """% em produção cadastrados/publicados até `ate` sobre o total cadastrado/publicado (prod. + desenv.).
+
+    Numerador: acumula por data (itens em produção até `ate`).
+    Denominador: total com data preenchida, FIXO — não filtra por data.
+    """
+    com_data = [(d, lc) for d, lc in rows if d is not None]
+    den = len(com_data)
+    num = sum(1 for d, lc in com_data if d <= ate and _ev(lc) == "producao")
     pct = round(num / den * 100, 2) if den else None
     return num, den, pct
 
@@ -212,6 +256,43 @@ async def _portfolio_servicos_detalhe(
     return (await db.execute(q)).all()
 
 
+async def _portfolio_documentos_detalhe(
+    db: AsyncSession,
+    metrica: Optional[FontePortfolioMetrica],
+    ate: date,
+    *,
+    de: Optional[date] = None,
+    numerador_only: bool = False,
+) -> list[tuple]:
+    """Documentos nato-digital cadastrados no intervalo [de, ate]. Numerador: só prod. produção."""
+    from app.modules.produtos.models import Product, ProductDocumento, ProductLifecycle
+
+    lifecycles = [ProductLifecycle.PRODUCAO] if numerador_only else [
+        ProductLifecycle.PRODUCAO, ProductLifecycle.DESENVOLVIMENTO,
+    ]
+    q = (
+        select(
+            Product.id, Product.name, Product.lifecycle,
+            ProductDocumento.id, ProductDocumento.name, ProductDocumento.data_documento,
+            ProductDocumento.object_name, ProductDocumento.filename,
+            ProductDocumento.content_type, ProductDocumento.size,
+        )
+        .join(Product, Product.id == ProductDocumento.product_id)
+        .where(
+            ProductDocumento.is_active.is_(True),
+            ProductDocumento.is_nato_digital.is_(True),
+            Product.is_active.is_(True),
+            Product.lifecycle.in_(lifecycles),
+            ProductDocumento.data_documento.isnot(None),
+            ProductDocumento.data_documento <= ate,
+        )
+    )
+    if de is not None:
+        q = q.where(ProductDocumento.data_documento >= de)
+    q = q.order_by(Product.name.asc(), ProductDocumento.name.asc())
+    return (await db.execute(q)).all()
+
+
 async def _portfolio_anexos_e_links(
     db: AsyncSession,
     product_ids: list[uuid.UUID],
@@ -280,10 +361,19 @@ async def _portfolio_anexos_e_links(
 
 
 def _servico_ref(row: tuple, *, novo_no_mes: bool = False) -> schemas.PortfolioServicoRef:
-    pid, pname, plc, sid, sname, dp = row
+    pid, pname, plc, sid, sname, dp = row[:6]
     return schemas.PortfolioServicoRef(
         product_id=pid, product_name=pname, servico_id=sid, servico_name=sname,
         lifecycle=_ev(plc), data_publicacao=dp, em_producao=_ev(plc) == "producao",
+        novo_no_mes=novo_no_mes,
+    )
+
+
+def _documento_ref(row: tuple, *, novo_no_mes: bool = False) -> schemas.PortfolioDocumentoRef:
+    pid, pname, plc, did, dname, dd = row[:6]
+    return schemas.PortfolioDocumentoRef(
+        product_id=pid, product_name=pname, documento_id=did, documento_name=dname,
+        lifecycle=_ev(plc), data_documento=dd, em_producao=_ev(plc) == "producao",
         novo_no_mes=novo_no_mes,
     )
 
@@ -299,7 +389,37 @@ def _dedupe_servicos(items: list[schemas.PortfolioServicoRef]) -> list[schemas.P
     return out
 
 
-async def _portfolio_evidencias(
+def _dedupe_documentos(items: list[schemas.PortfolioDocumentoRef]) -> list[schemas.PortfolioDocumentoRef]:
+    seen: set[uuid.UUID] = set()
+    out: list[schemas.PortfolioDocumentoRef] = []
+    for d in items:
+        if d.documento_id in seen:
+            continue
+        seen.add(d.documento_id)
+        out.append(d)
+    return out
+
+
+def _anexos_from_documento_rows(rows: list[tuple]) -> list[schemas.AnexoItem]:
+    """Extrai anexos dos documentos nato-digital (object_name/filename)."""
+    anexos: list[schemas.AnexoItem] = []
+    seen: set[str] = set()
+    for row in rows:
+        if len(row) < 8:
+            continue
+        on, fn = row[6], row[7]
+        if not on or not fn or on in seen:
+            continue
+        seen.add(on)
+        anexos.append(schemas.AnexoItem(
+            object_name=on, filename=fn,
+            content_type=row[8] if len(row) > 8 else None,
+            size=row[9] if len(row) > 9 else None,
+        ))
+    return anexos
+
+
+async def _portfolio_evidencias_servicos(
     db: AsyncSession,
     periodo_inicio: date,
     periodo_fim: date,
@@ -331,6 +451,214 @@ async def _portfolio_evidencias(
     return servicos_novos, servicos_acum, anexos_novos, anexos_acum, links_novos, links_acum
 
 
+async def _portfolio_evidencias_documentos(
+    db: AsyncSession,
+    periodo_inicio: date,
+    periodo_fim: date,
+    metrica: Optional[FontePortfolioMetrica],
+) -> tuple[
+    list[schemas.PortfolioDocumentoRef],
+    list[schemas.PortfolioDocumentoRef],
+    list[schemas.AnexoItem],
+    list[schemas.AnexoItem],
+    list[schemas.PortfolioLinkRef],
+    list[schemas.PortfolioLinkRef],
+]:
+    """Evidências do numerador: documentos nato-digital novos no mês + acumulado."""
+    novos_rows = await _portfolio_documentos_detalhe(
+        db, metrica, periodo_fim, de=periodo_inicio, numerador_only=True,
+    )
+    acum_rows = await _portfolio_documentos_detalhe(db, metrica, periodo_fim, numerador_only=True)
+    novos_ids = {r[3] for r in novos_rows}
+
+    documentos_novos = _dedupe_documentos([_documento_ref(r, novo_no_mes=True) for r in novos_rows])
+    documentos_acum = _dedupe_documentos([
+        _documento_ref(r, novo_no_mes=r[3] in novos_ids) for r in acum_rows
+    ])
+
+    anexos_novos = _anexos_from_documento_rows(novos_rows)
+    anexos_acum = _anexos_from_documento_rows(acum_rows)
+    return documentos_novos, documentos_acum, anexos_novos, anexos_acum, [], []
+
+
+async def _portfolio_evidencias(
+    db: AsyncSession,
+    periodo_inicio: date,
+    periodo_fim: date,
+    metrica: Optional[FontePortfolioMetrica],
+) -> tuple[
+    list[schemas.PortfolioServicoRef],
+    list[schemas.PortfolioServicoRef],
+    list[schemas.PortfolioDocumentoRef],
+    list[schemas.PortfolioDocumentoRef],
+    list[schemas.AnexoItem],
+    list[schemas.AnexoItem],
+    list[schemas.PortfolioLinkRef],
+    list[schemas.PortfolioLinkRef],
+]:
+    m = metrica or FontePortfolioMetrica.SERVICOS_PUBLICADOS
+    if m == FontePortfolioMetrica.DOCUMENTOS_NATOS_DIGITAIS:
+        doc_novos, doc_acum, anexos_novos, anexos_acum, links_novos, links_acum = (
+            await _portfolio_evidencias_documentos(db, periodo_inicio, periodo_fim, metrica)
+        )
+        return [], [], doc_novos, doc_acum, anexos_novos, anexos_acum, links_novos, links_acum
+    serv_novos, serv_acum, anexos_novos, anexos_acum, links_novos, links_acum = (
+        await _portfolio_evidencias_servicos(db, periodo_inicio, periodo_fim, metrica)
+    )
+    return serv_novos, serv_acum, [], [], anexos_novos, anexos_acum, links_novos, links_acum
+
+
+# ── Preload de portfólio (evita N+1 em to_response) ──────────────────────
+# _portfolio_evidencias faz ~6 queries por acompanhamento sobre o MESMO dataset
+# base (serviços/docs/releases de produtos em produção), variando só o corte de
+# datas. Em to_response, que itera todos os acompanhamentos, isso vira 6×N queries.
+# Aqui o dataset é carregado UMA vez e cada período é calculado em memória.
+
+async def _portfolio_preload(
+    db: AsyncSession, metrica: Optional[FontePortfolioMetrica] = None,
+) -> tuple:
+    from app.modules.produtos.models import (
+        Product, ProductDocumento, ProductLifecycle, ProductRelease, ProductServico,
+    )
+    m = metrica or FontePortfolioMetrica.SERVICOS_PUBLICADOS
+    if m == FontePortfolioMetrica.DOCUMENTOS_NATOS_DIGITAIS:
+        drows = (await db.execute(
+            select(
+                Product.id, Product.name, Product.lifecycle,
+                ProductDocumento.id, ProductDocumento.name, ProductDocumento.data_documento,
+                ProductDocumento.object_name, ProductDocumento.filename,
+                ProductDocumento.content_type, ProductDocumento.size,
+            )
+            .join(Product, Product.id == ProductDocumento.product_id)
+            .where(
+                ProductDocumento.is_active.is_(True),
+                ProductDocumento.is_nato_digital.is_(True),
+                Product.is_active.is_(True),
+                Product.lifecycle == ProductLifecycle.PRODUCAO,
+                ProductDocumento.data_documento.isnot(None),
+            )
+            .order_by(Product.name.asc(), ProductDocumento.name.asc())
+        )).all()
+        return ("documentos", drows)
+
+    srows = (await db.execute(
+        select(
+            Product.id, Product.name, Product.lifecycle,
+            ProductServico.id, ProductServico.name, ProductServico.data_publicacao,
+        )
+        .join(Product, Product.id == ProductServico.product_id)
+        .where(
+            ProductServico.is_active.is_(True),
+            Product.is_active.is_(True),
+            Product.lifecycle == ProductLifecycle.PRODUCAO,
+            ProductServico.data_publicacao.isnot(None),
+        )
+        .order_by(Product.name.asc(), ProductServico.name.asc())
+    )).all()
+    pids = list({r[0] for r in srows})
+    docs_by_pid: dict = {}
+    releases_by_pid: dict = {}
+    if pids:
+        docs = (await db.execute(select(ProductDocumento).where(
+            ProductDocumento.product_id.in_(pids), ProductDocumento.is_active.is_(True),
+        ))).scalars().all()
+        for d in docs:
+            docs_by_pid.setdefault(d.product_id, []).append(d)
+        rels = (await db.execute(select(ProductRelease).where(
+            ProductRelease.product_id.in_(pids), ProductRelease.is_active.is_(True),
+        ))).scalars().all()
+        for r in rels:
+            releases_by_pid.setdefault(r.product_id, []).append(r)
+    return ("servicos", srows, docs_by_pid, releases_by_pid)
+
+
+def _portfolio_anexos_e_links_mem(
+    docs_by_pid: dict, releases_by_pid: dict, product_ids: list, ate: date, *, de: Optional[date] = None,
+) -> tuple[list[schemas.AnexoItem], list[schemas.PortfolioLinkRef]]:
+    """Versão em memória de _portfolio_anexos_e_links (mesmas regras de período/dedup)."""
+    if not product_ids:
+        return [], []
+
+    def _in_periodo(d: Optional[date]) -> bool:
+        if d is None:
+            return de is None
+        if d > ate:
+            return False
+        if de is not None and d < de:
+            return False
+        return True
+
+    anexos: list[schemas.AnexoItem] = []
+    links: list[schemas.PortfolioLinkRef] = []
+    seen_on: set[str] = set()
+    seen_urls: set[str] = set()
+
+    for pid in product_ids:
+        for d in docs_by_pid.get(pid, []):
+            if not _in_periodo(d.data_documento):
+                continue
+            if d.object_name and d.filename and d.object_name not in seen_on:
+                seen_on.add(d.object_name)
+                anexos.append(schemas.AnexoItem(
+                    object_name=d.object_name, filename=d.filename,
+                    content_type=d.content_type, size=d.size,
+                ))
+            elif d.external_link and d.external_link not in seen_urls:
+                seen_urls.add(d.external_link)
+                links.append(schemas.PortfolioLinkRef(label=d.name, url=d.external_link))
+
+    for pid in product_ids:
+        for r in releases_by_pid.get(pid, []):
+            if not _in_periodo(r.data_release):
+                continue
+            for raw in (r.evidencia_anexos or []):
+                item = _anexo_from_raw(raw)
+                if item and item.object_name not in seen_on:
+                    seen_on.add(item.object_name)
+                    anexos.append(item)
+            if r.evidencia_link and r.evidencia_link not in seen_urls:
+                seen_urls.add(r.evidencia_link)
+                label = f"Homologação {r.versao}" + (f" — {r.nome}" if r.nome else "")
+                links.append(schemas.PortfolioLinkRef(label=label.strip(), url=r.evidencia_link))
+
+    return anexos, links
+
+
+def _portfolio_evidencias_mem(cache: tuple, periodo_inicio: date, periodo_fim: date):
+    """Versão em memória de _portfolio_evidencias a partir do dataset pré-carregado."""
+    kind = cache[0]
+    if kind == "documentos":
+        doc_rows = cache[1]
+        novos_rows = [r for r in doc_rows if r[5] is not None and periodo_inicio <= r[5] <= periodo_fim]
+        acum_rows = [r for r in doc_rows if r[5] is not None and r[5] <= periodo_fim]
+        novos_ids = {r[3] for r in novos_rows}
+        documentos_novos = _dedupe_documentos([_documento_ref(r, novo_no_mes=True) for r in novos_rows])
+        documentos_acum = _dedupe_documentos([
+            _documento_ref(r, novo_no_mes=r[3] in novos_ids) for r in acum_rows
+        ])
+        anexos_novos = _anexos_from_documento_rows(novos_rows)
+        anexos_acum = _anexos_from_documento_rows(acum_rows)
+        return [], [], documentos_novos, documentos_acum, anexos_novos, anexos_acum, [], []
+
+    _, servico_rows, docs_by_pid, releases_by_pid = cache
+    novos_rows = [r for r in servico_rows if r[5] is not None and periodo_inicio <= r[5] <= periodo_fim]
+    acum_rows = [r for r in servico_rows if r[5] is not None and r[5] <= periodo_fim]
+    novos_ids = {r[3] for r in novos_rows}
+
+    servicos_novos = _dedupe_servicos([_servico_ref(r, novo_no_mes=True) for r in novos_rows])
+    servicos_acum = _dedupe_servicos([_servico_ref(r, novo_no_mes=r[3] in novos_ids) for r in acum_rows])
+
+    pids_novos = list({r[0] for r in novos_rows})
+    pids_acum = list({r[0] for r in acum_rows})
+    anexos_novos, links_novos = _portfolio_anexos_e_links_mem(
+        docs_by_pid, releases_by_pid, pids_novos, periodo_fim, de=periodo_inicio,
+    )
+    anexos_acum, links_acum = _portfolio_anexos_e_links_mem(
+        docs_by_pid, releases_by_pid, pids_acum, periodo_fim,
+    )
+    return servicos_novos, servicos_acum, [], [], anexos_novos, anexos_acum, links_novos, links_acum
+
+
 async def _get(db: AsyncSession, indicador_id: uuid.UUID) -> Indicador:
     obj = (await db.execute(select(Indicador).where(Indicador.id == indicador_id))).scalar_one_or_none()
     if not obj or not obj.is_active:
@@ -355,19 +683,32 @@ class IndicadorService:
     @classmethod
     async def _acompanhamento_out(
         cls, db: AsyncSession, ac: IndicadorAcompanhamento, ind: Indicador,
+        portfolio_cache: Optional[tuple] = None,
     ) -> schemas.AcompanhamentoResponse:
         base = schemas.AcompanhamentoResponse.model_validate(ac)
         if ac.fonte != FonteDados.PORTFOLIO:
             return base.model_copy(update={"evidencias": cls._anexos_out(ac.evidencias)})
-        (
-            servicos_novos, servicos_acum,
-            anexos_novos, anexos_acum,
-            links_novos, links_acum,
-        ) = await _portfolio_evidencias(db, ac.periodo_inicio, ac.periodo_fim, ind.fonte_metrica)
+        if portfolio_cache is not None:
+            # Caminho sem N+1: dataset pré-carregado, cálculo em memória por período.
+            (
+                servicos_novos, servicos_acum,
+                documentos_novos, documentos_acum,
+                anexos_novos, anexos_acum,
+                links_novos, links_acum,
+            ) = _portfolio_evidencias_mem(portfolio_cache, ac.periodo_inicio, ac.periodo_fim)
+        else:
+            (
+                servicos_novos, servicos_acum,
+                documentos_novos, documentos_acum,
+                anexos_novos, anexos_acum,
+                links_novos, links_acum,
+            ) = await _portfolio_evidencias(db, ac.periodo_inicio, ac.periodo_fim, ind.fonte_metrica)
         return base.model_copy(update={
             "evidencias": anexos_acum or None,
             "portfolio_servicos": servicos_acum or None,
             "portfolio_servicos_novos": servicos_novos or None,
+            "portfolio_documentos": documentos_acum or None,
+            "portfolio_documentos_novos": documentos_novos or None,
             "portfolio_links": links_acum or None,
             "portfolio_links_novos": links_novos or None,
         })
@@ -383,6 +724,7 @@ class IndicadorService:
         if ac.fonte == FonteDados.PORTFOLIO:
             (
                 servicos_novos, servicos_acum,
+                documentos_novos, documentos_acum,
                 anexos_novos, anexos_acum,
                 links_novos, links_acum,
             ) = await _portfolio_evidencias(db, ac.periodo_inicio, ac.periodo_fim, ind.fonte_metrica)
@@ -392,6 +734,8 @@ class IndicadorService:
                 evidencias_novos=anexos_novos,
                 portfolio_servicos=servicos_acum,
                 portfolio_servicos_novos=servicos_novos,
+                portfolio_documentos=documentos_acum,
+                portfolio_documentos_novos=documentos_novos,
                 portfolio_links=links_acum,
                 portfolio_links_novos=links_novos,
             )
@@ -441,9 +785,11 @@ class IndicadorService:
         alvo = [a for a in acomps if a.fonte == FonteDados.PORTFOLIO]
         if not alvo:
             return 0
-        rows = await _portfolio_servicos_rows(db, ind.fonte_metrica)
+        rows = await _portfolio_rows(db, ind.fonte_metrica)
         mudou = 0
         for ac in alvo:
+            if ac.bloqueado:
+                continue
             _num, _den, pct = _pct_ate(rows, ac.periodo_fim)
             novo = float(pct) if pct is not None else None
             atual = _f(ac.realizado)
@@ -645,6 +991,23 @@ class IndicadorService:
         ind = await _get(db, ac.indicador_id)
         payload = data.model_dump(exclude_unset=True)
 
+        # Mês fechado (bloqueado): congelado contra edição. A única operação permitida é
+        # desbloquear (bloqueado=False), sem nenhuma outra alteração no mesmo request.
+        if ac.bloqueado:
+            outros = {k for k in payload if k != "bloqueado"}
+            desbloqueando = payload.get("bloqueado") is False
+            if outros or not desbloqueando:
+                raise HTTPException(
+                    status_code=423,
+                    detail="Este mês está bloqueado. Desbloqueie antes de editar.",
+                )
+            ac.bloqueado = False
+            ac.updated_by = user_id
+            ac.updated_at = _now()
+            await db.commit()
+            await db.refresh(ac)
+            return schemas.AcompanhamentoResponse.model_validate(ac)
+
         if data.fonte is not None:
             ac.fonte = FonteDados(data.fonte)
 
@@ -654,7 +1017,7 @@ class IndicadorService:
             ac.meta = data.meta
 
         if ac.fonte == FonteDados.PORTFOLIO:
-            rows = await _portfolio_servicos_rows(db, ind.fonte_metrica)
+            rows = await _portfolio_rows(db, ind.fonte_metrica)
             _num, _den, pct = _pct_ate(rows, ac.periodo_fim)
             ac.realizado = float(pct) if pct is not None else None
         elif data.limpar_realizado:
@@ -673,6 +1036,10 @@ class IndicadorService:
         )
         ac.percentual_atingimento = pct
         ac.status = st
+        # Fechamento da competência: aplica a trava por último (permite editar e bloquear
+        # no mesmo save). Já o desbloqueio de um mês fechado é tratado no topo.
+        if "bloqueado" in payload:
+            ac.bloqueado = bool(data.bloqueado)
         ac.updated_by = user_id
         ac.updated_at = _now()
         await db.commit()
@@ -691,12 +1058,20 @@ class IndicadorService:
         anos = sorted({a.ano_referencia for a in ind.acompanhamentos})
         p_num = p_den = p_pct = None
         if ind.fonte == FonteDados.PORTFOLIO:
-            rows = await _portfolio_servicos_rows(db, ind.fonte_metrica)
+            rows = await _portfolio_rows(db, ind.fonte_metrica)
             p_num, p_den, p_pct = _pct_ate(rows, date.today())
+
+        # Pré-carrega o dataset de portfólio uma vez SE algum acompanhamento for
+        # PORTFOLIO. ac.fonte é por-acompanhamento e independe de ind.fonte — um
+        # indicador MANUAL pode ter acompanhamentos PORTFOLIO, que sem isto cairiam
+        # no caminho DB (6 queries cada = N+1).
+        portfolio_cache = None
+        if any(a.fonte == FonteDados.PORTFOLIO for a in ind.acompanhamentos):
+            portfolio_cache = await _portfolio_preload(db, ind.fonte_metrica)
 
         acomps_out = []
         for a in ind.acompanhamentos:
-            acomps_out.append(await cls._acompanhamento_out(db, a, ind))
+            acomps_out.append(await cls._acompanhamento_out(db, a, ind, portfolio_cache))
 
         return schemas.IndicadorResponse(
             id=ind.id,
@@ -744,12 +1119,38 @@ class IndicadorService:
     async def atualizar_portfolio(
         cls, db: AsyncSession, indicador_id: uuid.UUID, user_id: uuid.UUID,
     ) -> schemas.IndicadorResponse:
-        """Botão 'Atualizar do portfólio' — força o recálculo dos meses portfólio."""
+        """Botão 'Atualizar do portfólio' — recalcula meses portfólio não bloqueados."""
         ind = await _get(db, indicador_id)
         await cls.recompute_portfolio(db, ind, user_id)
         await db.commit()
         await db.refresh(ind)
         return await cls.to_response(db, ind)
+
+    @classmethod
+    async def atualizar_acompanhamento_portfolio(
+        cls, db: AsyncSession, acomp_id: uuid.UUID, user_id: uuid.UUID,
+    ) -> schemas.AcompanhamentoResponse:
+        """Recalcula o realizado de um único mês (fonte=portfolio). Respeita bloqueio."""
+        ac = (await db.execute(
+            select(IndicadorAcompanhamento).where(IndicadorAcompanhamento.id == acomp_id)
+        )).scalar_one_or_none()
+        if not ac:
+            raise HTTPException(status_code=404, detail="Registro de acompanhamento não encontrado.")
+        if ac.bloqueado:
+            raise HTTPException(
+                status_code=423,
+                detail="Este mês está bloqueado. Desbloqueie antes de atualizar do portfólio.",
+            )
+        if ac.fonte != FonteDados.PORTFOLIO:
+            raise HTTPException(
+                status_code=400,
+                detail="Somente acompanhamentos com origem Portfólio podem ser atualizados automaticamente.",
+            )
+        ind = await _get(db, ac.indicador_id)
+        await cls.recompute_portfolio(db, ind, user_id, acomps=[ac])
+        await db.commit()
+        await db.refresh(ac)
+        return schemas.AcompanhamentoResponse.model_validate(ac)
 
     @classmethod
     async def list_indicadores(
@@ -778,15 +1179,20 @@ class IndicadorService:
         rows = (await db.execute(q)).scalars().all()
         index = await _areas_index(db)
 
-        portfolio_rows = None
-        if any(ind.fonte == FonteDados.PORTFOLIO for ind in rows):
-            portfolio_rows = await _portfolio_servicos_rows(db)
+        portfolio_cache: dict[Optional[FontePortfolioMetrica], list[tuple]] = {}
 
         out: list[schemas.IndicadorListItem] = []
         for ind in rows:
             acs = ind.acompanhamentos
             if ano is not None:
                 acs = [a for a in acs if a.ano_referencia == ano]
+
+            portfolio_rows = None
+            if ind.fonte == FonteDados.PORTFOLIO or any(a.fonte == FonteDados.PORTFOLIO for a in acs):
+                m = ind.fonte_metrica or FontePortfolioMetrica.SERVICOS_PUBLICADOS
+                if m not in portfolio_cache:
+                    portfolio_cache[m] = await _portfolio_rows(db, m)
+                portfolio_rows = portfolio_cache[m]
 
             eff = [cls._effective(a, ind, portfolio_rows) for a in acs]
             preenchidos = [(a, r, p, s) for a, (r, p, s) in zip(acs, eff) if r is not None]
@@ -867,3 +1273,70 @@ class IndicadorService:
             por_categoria=por_categoria,
             por_area=por_area,
         )
+
+    @classmethod
+    async def dashboard_graficos(
+        cls,
+        db: AsyncSession,
+        *,
+        categoria: Optional[str] = None,
+        area_id: Optional[uuid.UUID] = None,
+        responsavel_id: Optional[uuid.UUID] = None,
+        granularidade: Optional[str] = None,
+        status: Optional[str] = None,
+        ano: Optional[int] = None,
+    ) -> schemas.DashboardCharts:
+        q = select(Indicador).where(Indicador.is_active.is_(True))
+        if categoria:
+            q = q.where(Indicador.categoria == IndicadorCategoria(categoria))
+        if area_id:
+            q = q.where(Indicador.area_id == area_id)
+        if responsavel_id:
+            q = q.where(Indicador.responsavel_person_id == responsavel_id)
+        if granularidade:
+            q = q.where(Indicador.granularidade == IndicadorGranularidade(granularidade))
+        if status:
+            q = q.where(Indicador.status == IndicadorStatus(status))
+        q = q.order_by(Indicador.codigo.asc())
+        rows = (await db.execute(q)).scalars().all()
+        index = await _areas_index(db)
+
+        portfolio_cache: dict[Optional[FontePortfolioMetrica], list[tuple]] = {}
+        indicadores: list[schemas.DashboardChartIndicador] = []
+
+        for ind in rows:
+            acs = ind.acompanhamentos
+            if ano is not None:
+                acs = [a for a in acs if a.ano_referencia == ano]
+            acs = sorted(acs, key=lambda a: a.ordem)
+
+            portfolio_rows = None
+            if ind.fonte == FonteDados.PORTFOLIO or any(a.fonte == FonteDados.PORTFOLIO for a in acs):
+                m = ind.fonte_metrica or FontePortfolioMetrica.SERVICOS_PUBLICADOS
+                if m not in portfolio_cache:
+                    portfolio_cache[m] = await _portfolio_rows(db, m)
+                portfolio_rows = portfolio_cache[m]
+
+            periodos = []
+            for ac in acs:
+                realizado, pct, st = cls._effective(ac, ind, portfolio_rows)
+                periodos.append(schemas.DashboardChartPeriodo(
+                    competencia=ac.competencia,
+                    ordem=ac.ordem,
+                    meta=_f(ac.meta),
+                    realizado=realizado,
+                    percentual_atingimento=pct,
+                    status=_ev(st),
+                ))
+
+            indicadores.append(schemas.DashboardChartIndicador(
+                id=ind.id,
+                codigo=ind.codigo,
+                nome=ind.nome,
+                categoria=_ev(ind.categoria),
+                unidade_medida=ind.unidade_medida,
+                area_name=index[ind.area_id].name if ind.area_id and ind.area_id in index else None,
+                periodos=periodos,
+            ))
+
+        return schemas.DashboardCharts(indicadores=indicadores)

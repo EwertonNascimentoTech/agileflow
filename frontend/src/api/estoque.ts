@@ -37,9 +37,9 @@ export interface ProductType {
 export interface ProductTypeCreate {
   slug: string
   name: string
-  description?: string
-  icon?: string
-  field_schema?: ProductTypeFieldSchema
+  description?: string | null
+  icon?: string | null
+  field_schema?: ProductTypeFieldSchema | null
   tracks_stock?: boolean
   tracks_batch?: boolean
   tracks_expiry?: boolean
@@ -59,7 +59,7 @@ export interface ProductCategory {
 }
 export interface ProductCategoryCreate {
   name: string
-  description?: string
+  description?: string | null
   parent_id?: string | null
   product_type_id?: string | null
   is_active?: boolean
@@ -88,14 +88,14 @@ export interface ProductCreate {
   category_id?: string | null
   sku: string
   name: string
-  description?: string
-  barcode?: string
+  description?: string | null
+  barcode?: string | null
   unit?: string
   cost_price?: number
   sale_price?: number
   min_stock?: number
   max_stock?: number | null
-  custom_fields?: Record<string, unknown>
+  custom_fields?: Record<string, unknown> | null
   is_active?: boolean
 }
 export type ProductUpdate = Partial<Omit<ProductCreate, "type_id">>
@@ -113,8 +113,8 @@ export interface Warehouse {
 export interface WarehouseCreate {
   code: string
   name: string
-  description?: string
-  address?: Record<string, unknown>
+  description?: string | null
+  address?: Record<string, unknown> | null
   is_default?: boolean
   is_active?: boolean
 }
@@ -134,12 +134,12 @@ export interface Supplier {
 }
 export interface SupplierCreate {
   name: string
-  trade_name?: string
-  document?: string
-  email?: string
-  phone?: string
-  address?: Record<string, unknown>
-  notes?: string
+  trade_name?: string | null
+  document?: string | null
+  email?: string | null
+  phone?: string | null
+  address?: Record<string, unknown> | null
+  notes?: string | null
   is_active?: boolean
 }
 export type SupplierUpdate = Partial<SupplierCreate>

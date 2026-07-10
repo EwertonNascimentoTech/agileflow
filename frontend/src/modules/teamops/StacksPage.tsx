@@ -20,6 +20,7 @@ import {
   type Stack,
   type StackCategory,
 } from "@/api/teamops"
+import { nullableStr } from "@/lib/utils"
 
 export default function StacksPage() {
   return (
@@ -249,15 +250,23 @@ function StackDialog({
     setSaving(true)
     setError(null)
     try {
-      const payload = {
-        category_id: categoryId,
-        name,
-        slug: slug || undefined,
-        is_critical: critical,
-        is_active: active,
+      if (isEdit) {
+        await teamopsApi.updateStack(stack!.id, {
+          category_id: categoryId,
+          name,
+          slug: nullableStr(slug),
+          is_critical: critical,
+          is_active: active,
+        })
+      } else {
+        await teamopsApi.createStack({
+          category_id: categoryId,
+          name,
+          slug: slug || undefined,
+          is_critical: critical,
+          is_active: active,
+        })
       }
-      if (isEdit) await teamopsApi.updateStack(stack!.id, payload as any)
-      else await teamopsApi.createStack(payload)
       onSaved()
     } catch (err: any) {
       setError(err?.response?.data?.detail ?? "Erro ao salvar.")

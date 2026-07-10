@@ -162,14 +162,14 @@ export interface CompanySummary {
 
 export interface CompanyCreate {
   name: string
-  trade_name?: string
-  document?: string
-  email?: string
-  phone?: string
-  website?: string
-  industry?: string
-  address?: Record<string, unknown>
-  notes?: string
+  trade_name?: string | null
+  document?: string | null
+  email?: string | null
+  phone?: string | null
+  website?: string | null
+  industry?: string | null
+  address?: Record<string, unknown> | null
+  notes?: string | null
 }
 
 export type CompanyUpdate = Partial<CompanyCreate> & { is_active?: boolean }
@@ -216,7 +216,7 @@ export interface AutomationRule {
 
 export interface AutomationRuleCreate {
   name: string
-  description?: string
+  description?: string | null
   trigger: AutomationTrigger
   funnel_id?: string | null
   stage_id?: string | null
@@ -821,7 +821,7 @@ export interface ProposalItem {
 export interface ProposalItemCreate {
   description: string
   quantity: number
-  unit?: string
+  unit?: string | null
   unit_price: number
   order?: number
   custom_data?: Record<string, unknown>
@@ -879,19 +879,19 @@ export interface ProposalSummary {
 
 export interface ProposalCreate {
   title: string
-  description?: string
+  description?: string | null
   attendance_id?: string
   client_id?: string
   company_id?: string
-  client_name?: string
-  client_email?: string
-  client_phone?: string
-  client_document?: string
+  client_name?: string | null
+  client_email?: string | null
+  client_phone?: string | null
+  client_document?: string | null
   discount?: number
-  payment_terms?: string
-  delivery_terms?: string
-  notes?: string
-  valid_until?: string
+  payment_terms?: string | null
+  delivery_terms?: string | null
+  notes?: string | null
+  valid_until?: string | null
   items: ProposalItemCreate[]
   custom_data?: Record<string, unknown>
 }
@@ -939,21 +939,21 @@ export interface ProposalTemplate {
 export interface ProposalTemplateItemCreate {
   description: string
   quantity: number
-  unit?: string
+  unit?: string | null
   unit_price: number
   order?: number
 }
 
 export interface ProposalTemplateCreate {
   name: string
-  description?: string
-  title?: string
-  body?: string
-  payment_terms?: string
-  delivery_terms?: string
-  notes?: string
+  description?: string | null
+  title?: string | null
+  body?: string | null
+  payment_terms?: string | null
+  delivery_terms?: string | null
+  notes?: string | null
   discount?: number
-  validity_days?: number
+  validity_days?: number | null
   is_active?: boolean
   items?: ProposalTemplateItemCreate[]
 }

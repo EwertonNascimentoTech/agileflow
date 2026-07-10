@@ -14,6 +14,7 @@ import { Switch } from "@/components/ui/switch"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { EmptyState } from "@/components/EmptyState"
+import { nullableStr } from "@/lib/utils"
 
 interface DraftItem {
   description: string
@@ -108,7 +109,7 @@ export default function ProposalTemplatesPage() {
     if (!form.name.trim()) { setServerError("Nome obrigatório."); return }
 
     const validItems = items.filter(i => i.description.trim() && Number(i.quantity) > 0)
-    const payload = {
+    const createPayload = {
       name: form.name.trim(),
       description: form.description || undefined,
       title: form.title || undefined,
@@ -127,14 +128,33 @@ export default function ProposalTemplatesPage() {
         order: idx,
       })),
     }
+    const updatePayload = {
+      name: form.name.trim(),
+      description: nullableStr(form.description),
+      title: nullableStr(form.title),
+      body: nullableStr(form.body),
+      payment_terms: nullableStr(form.payment_terms),
+      delivery_terms: nullableStr(form.delivery_terms),
+      notes: nullableStr(form.notes),
+      discount: Number(form.discount) || 0,
+      validity_days: form.validity_days ? Number(form.validity_days) : null,
+      is_active: form.is_active,
+      items: validItems.map<ProposalTemplateItemCreate>((i, idx) => ({
+        description: i.description.trim(),
+        quantity: Number(i.quantity),
+        unit: nullableStr(i.unit),
+        unit_price: Number(i.unit_price),
+        order: idx,
+      })),
+    }
 
     setSaving(true)
     try {
       if (editing) {
-        const updated = await proposalTemplatesApi.update(editing.id, payload)
+        const updated = await proposalTemplatesApi.update(editing.id, updatePayload)
         setTemplates(prev => prev.map(t => t.id === updated.id ? updated : t))
       } else {
-        const created = await proposalTemplatesApi.create(payload)
+        const created = await proposalTemplatesApi.create(createPayload)
         setTemplates(prev => [...prev, created])
       }
       setOpen(false)

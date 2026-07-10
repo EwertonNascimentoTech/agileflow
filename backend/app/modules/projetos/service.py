@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import math
+import time
 import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
@@ -16,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
+from app.core.anonymize import anonymize_text
 from app.modules.projetos.models import (
     ProjectAgentExecution,
     ProjectAutomationAction,
@@ -36,6 +39,7 @@ from app.modules.projetos.models import (
     ProjectPriorityScore,
     ProjectPriorityScoreHistory,
     ProjectPrioritySettings,
+    ProjectProgram,
     ProjectScheduleBaseline,
     ProjectScheduleBinding,
     ProjectStageAgentBinding,
@@ -51,6 +55,9 @@ from app.modules.projetos.schemas import (
     ProjectAutomationRuleCreate,
     ProjectAutomationRuleUpdate,
     ProjectCreate,
+    ProjectProgramCreate,
+    ProjectProgramUpdate,
+    ProjectProgramResponse,
     ProjectDefaultFormFieldUpdateItem,
     ProjectDefaultFormFieldsUpdate,
     ProjectDemandFormFieldCreate,
@@ -77,6 +84,26 @@ from app.modules.projetos.schemas import (
     ScheduleStageCreate,
     TaskDependencyCreate,
     WorkloadCell,
+    WorkloadCellItem,
+    CapacityPersonMeta,
+    CapacitySummary,
+    CapacityHeatmapResponse,
+    CapacityProjectRow,
+    CapacityByProjectResponse,
+    CapacityGapRow,
+    CapacityGapsResponse,
+    FreePersonRow,
+    FreePeopleResponse,
+    SimTaskMeta,
+    SimTasksResponse,
+    ScenarioMutation,
+    ScenarioDiff,
+    ScenarioResult,
+    CrossTeamAwayItem,
+    CrossTeamPersonRow,
+    CrossTeamResponse,
+    SuggestedScenario,
+    ScenarioSuggestionsResponse,
     ProjectStatusCreate,
     ProjectStatusUpdate,
     ProjectTaskCommentCreate,
@@ -87,8 +114,19 @@ from app.modules.projetos.schemas import (
 )
 from sqlalchemy import text as _sa_text
 from app.modules.super_admin.models import User, UserRole
-from app.modules.teamops.calendar import load_calendar
-from app.modules.teamops.models import Absence, AbsenceStatus, AbsenceType, Person
+from app.modules.teamops.calendar import load_calendar, project_hours_per_day
+from app.modules.teamops.models import (
+    Absence,
+    AbsenceStatus,
+    AbsenceType,
+    Area,
+    Person,
+    PersonStack,
+    PersonStatus,
+    Position,
+    StackLevel,
+    team_person_areas,
+)
 from app.modules.projetos.schedule_engine import (
     EngineEdge,
     EngineNode,
@@ -96,6 +134,10 @@ from app.modules.projetos.schedule_engine import (
     compute_cpm,
     schedule_tree,
 )
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _to_naive_utc(value: Optional[datetime]) -> Optional[datetime]:
@@ -1490,6 +1532,17 @@ class ProjectTaskService:
                 cursor = nxt.scalar_one_or_none()
 
     @staticmethod
+    async def list_programs(db: AsyncSession, project_id: uuid.UUID) -> list[dict]:
+        """Programas do cadastro próprio (ProjectProgram) ativos — para o seletor
+        'vincular a um programa' na conversão."""
+        rows = await db.execute(
+            select(ProjectProgram.id, ProjectProgram.name)
+            .where(ProjectProgram.is_active == True)  # noqa: E712
+            .order_by(ProjectProgram.name.asc())
+        )
+        return [{"id": r[0], "name": r[1]} for r in rows.all()]
+
+    @staticmethod
     async def _maybe_convert_on_status(
         db: AsyncSession,
         project_id: uuid.UUID,
@@ -1500,15 +1553,13 @@ class ProjectTaskService:
         conversion_description: Optional[str] = None,
         conversion_items: Optional[list] = None,
         conversion_assigned_to: Optional[uuid.UUID] = None,
+        conversion_program_id: Optional[uuid.UUID] = None,
     ) -> None:
         """Se a fase de destino dispara conversão, cria um novo card do tipo configurado
         vinculado à task de origem (origin_task_id). O nome vem de `conversion_title`.
 
-        `conversion_kind`:
-        - 'projeto' (padrão): cria 1 card (título + descrição).
-        - 'programa': cria o card do Programa + 1 card FILHO por item de
-          `conversion_items` (cada um com título + descrição), sob o Programa.
-        Idempotente."""
+        `conversion_kind` ('projeto' | 'programa') é apenas a classificação (planning_kind)
+        do card — em ambos os casos cria UM único card (título + descrição + PO). Idempotente."""
         if not status_obj or not status_obj.creates_demand_type_id:
             return
         target_type_id = status_obj.creates_demand_type_id
@@ -1572,36 +1623,13 @@ class ProjectTaskService:
             created_by=task.created_by,
             origin_task_id=task.id,
             planning_kind=kind,
+            # Vínculo (etiqueta) a um programa do cadastro, se escolhido na conversão.
+            linked_program_id=conversion_program_id,
         )
         db.add(main)
-        # Programa: cria um card FILHO por item informado (título + descrição). Cada filho
-        # também herda diretoria/área (e datas, se não informadas) do card de origem.
+        # 'projeto' e 'programa' são apenas classificações do card: a conversão cria UM
+        # único card (sem cards filhos/extras).
         children: list[ProjectTask] = []
-        if kind == "programa" and conversion_items:
-            for item in conversion_items:
-                title = ((item.get("title") if isinstance(item, dict) else getattr(item, "title", None)) or "").strip()
-                if not title:
-                    continue
-                desc = item.get("description") if isinstance(item, dict) else getattr(item, "description", None)
-                istart = item.get("start_date") if isinstance(item, dict) else getattr(item, "start_date", None)
-                idue = item.get("due_date") if isinstance(item, dict) else getattr(item, "due_date", None)
-                child = ProjectTask(
-                    project_id=project_id,
-                    status_id=init_status.id,
-                    demand_type_id=ttype.id,
-                    title=title[:200],
-                    description=desc or None,
-                    diretoria=task.diretoria,
-                    area=task.area,
-                    start_date=_to_naive_utc(istart) or task.start_date,
-                    due_date=_to_naive_utc(idue) or task.due_date,
-                    assigned_to=assignee,
-                    created_by=task.created_by,
-                    parent_task_id=None,  # definido após flush de main
-                    planning_kind="projeto",
-                )
-                children.append(child)
-                db.add(child)
         # Um único flush resolve os ids de main e filhos para vincular hierarquia + submissions.
         await db.flush()
         for child in children:
@@ -1785,6 +1813,115 @@ class ProjectTaskService:
         return row.scalar_one_or_none()
 
     @staticmethod
+    def _is_user_story_type(slug: Optional[str], name: Optional[str]) -> bool:
+        s = (slug or "").strip().lower()
+        n = (name or "").strip().lower()
+        if s in ("us", "user_story", "user-story", "historia", "história"):
+            return True
+        return (
+            n == "us"
+            or "user story" in n
+            or "história" in n
+            or "historia" in n
+        )
+
+    @staticmethod
+    def _normalize_us_checklist(raw) -> list[dict]:
+        if not raw:
+            return []
+        items: list[dict] = []
+        for i, item in enumerate(raw):
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("label") or "").strip()
+            if not label:
+                continue
+            item_id = str(item.get("id") or uuid.uuid4())
+            items.append({
+                "id": item_id,
+                "label": label[:300],
+                "done": bool(item.get("done")),
+                "order": int(item.get("order", i)),
+            })
+        items.sort(key=lambda x: x["order"])
+        for idx, it in enumerate(items):
+            it["order"] = idx
+        return items
+
+    @staticmethod
+    def _percent_from_us_checklist(items: list) -> Optional[int]:
+        if not items:
+            return 0
+        done = sum(1 for x in items if x.get("done"))
+        return round(done * 100 / len(items))
+
+    @staticmethod
+    async def _is_user_story_task(db: AsyncSession, task: ProjectTask) -> bool:
+        if not task.demand_type_id:
+            return False
+        row = await db.execute(
+            select(ProjectDemandType.slug, ProjectDemandType.name).where(
+                ProjectDemandType.id == task.demand_type_id,
+            )
+        )
+        dt = row.one_or_none()
+        if not dt:
+            return False
+        return ProjectTaskService._is_user_story_type(dt.slug, dt.name)
+
+    @staticmethod
+    def _is_user_story_funnel_name(name: Optional[str]) -> bool:
+        if not name or not str(name).strip():
+            return False
+        n = str(name).lower()
+        if "feature" in n:
+            return False
+        return bool(re.search(r"\bus\b|user story|user-story|hist[oó]ria", n))
+
+    @staticmethod
+    async def _can_use_us_checklist(db: AsyncSession, task: ProjectTask) -> bool:
+        if await ProjectTaskService._is_user_story_task(db, task):
+            return True
+        funnel_id = await ProjectTaskService._funnel_id_of_status(db, task.status_id)
+        if not funnel_id:
+            return False
+        row = await db.execute(
+            select(ProjectFunnel.name).where(ProjectFunnel.id == funnel_id)
+        )
+        funnel_name = row.scalar_one_or_none()
+        return ProjectTaskService._is_user_story_funnel_name(funnel_name)
+
+    @staticmethod
+    def _is_feature_or_us_funnel_name(name: Optional[str]) -> bool:
+        if not name or not str(name).strip():
+            return False
+        n = str(name).lower()
+        return "feature" in n or ProjectTaskService._is_user_story_funnel_name(name)
+
+    @staticmethod
+    async def _check_assignee_for_feature_us_kanban_move(
+        db: AsyncSession,
+        source_status: Optional[ProjectStatusConfig],
+        task: ProjectTask,
+        payload: dict,
+    ) -> None:
+        """No kanban de Feature/US, cards sem responsável não podem mudar de etapa."""
+        if not source_status:
+            return
+        funnel_row = await db.execute(
+            select(ProjectFunnel.name).where(ProjectFunnel.id == source_status.funnel_id)
+        )
+        funnel_name = funnel_row.scalar_one_or_none()
+        if not ProjectTaskService._is_feature_or_us_funnel_name(funnel_name):
+            return
+        effective = payload.get("assigned_to") if "assigned_to" in payload else task.assigned_to
+        if not effective:
+            raise HTTPException(
+                status_code=400,
+                detail="Defina um responsável no card antes de movê-lo no kanban de Feature ou User Story.",
+            )
+
+    @staticmethod
     async def _validate_type_allowed_in_funnel(
         db: AsyncSession,
         funnel_id: uuid.UUID,
@@ -1802,6 +1939,240 @@ class ProjectTaskService:
                 status_code=400,
                 detail="Este tipo de card não é permitido neste kanban.",
             )
+
+    # ------------------------------------------------------------------
+    # Reconcile Feature ← User Stories
+    # A cada mudança de status de uma US, a Feature-pai é reconciliada a partir do
+    # agregado das suas US filhas: a coluna-alvo é decidida por precedência e a Feature
+    # é movida (respeitando as travas de governança), além do selo de impedimento.
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _norm_col(name: Optional[str]) -> str:
+        """lower + remove acentos, para casar nomes de coluna entre os dois kanbans."""
+        import unicodedata
+        if not name:
+            return ""
+        s = str(name).strip().lower()
+        return "".join(
+            c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn"
+        )
+
+    @staticmethod
+    async def _is_feature_task(
+        db: AsyncSession, task: ProjectTask, funnel_name: Optional[str] = None
+    ) -> bool:
+        """Reconhece um card 'Feature' por tipo de demanda ou pelo nome do funil."""
+        if task.demand_type_id:
+            row = await db.execute(
+                select(ProjectDemandType.slug, ProjectDemandType.name).where(
+                    ProjectDemandType.id == task.demand_type_id,
+                )
+            )
+            dt = row.one_or_none()
+            if dt and "feature" in f"{dt.slug or ''} {dt.name or ''}".lower():
+                return True
+        if funnel_name is None:
+            fid = await ProjectTaskService._funnel_id_of_status(db, task.status_id)
+            if fid:
+                r = await db.execute(select(ProjectFunnel.name).where(ProjectFunnel.id == fid))
+                funnel_name = r.scalar_one_or_none()
+        return "feature" in (funnel_name or "").lower()
+
+    @staticmethod
+    async def _us_children(db: AsyncSession, feature_id: uuid.UUID) -> list[ProjectTask]:
+        """US filhas de uma Feature (ignora sub-tarefas de cronograma sem demand_type)."""
+        res = await db.execute(
+            select(ProjectTask).where(ProjectTask.parent_task_id == feature_id)
+        )
+        out: list[ProjectTask] = []
+        for child in res.scalars().all():
+            if await ProjectTaskService._is_user_story_task(db, child):
+                out.append(child)
+        return out
+
+    @staticmethod
+    async def _statuses_by_id(
+        db: AsyncSession, ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, ProjectStatusConfig]:
+        uniq = list({i for i in ids if i is not None})
+        if not uniq:
+            return {}
+        res = await db.execute(
+            select(ProjectStatusConfig).where(ProjectStatusConfig.id.in_(uniq))
+        )
+        return {s.id: s for s in res.scalars().all()}
+
+    @staticmethod
+    async def _funnel_statuses(
+        db: AsyncSession, funnel_id: Optional[uuid.UUID]
+    ) -> list[ProjectStatusConfig]:
+        if not funnel_id:
+            return []
+        res = await db.execute(
+            select(ProjectStatusConfig)
+            .where(
+                ProjectStatusConfig.funnel_id == funnel_id,
+                ProjectStatusConfig.is_active == True,  # noqa: E712
+            )
+            .order_by(ProjectStatusConfig.order.asc())
+        )
+        return list(res.scalars().all())
+
+    @staticmethod
+    def _feature_target_status(
+        feature_cols: list[ProjectStatusConfig],
+        us_statuses: list[ProjectStatusConfig],
+    ) -> Optional[ProjectStatusConfig]:
+        """Decide a coluna-alvo da Feature a partir do agregado das US (precedência).
+        Retorna None quando nenhuma regra casa ou a coluna correspondente não existe."""
+        if not us_statuses or not feature_cols:
+            return None
+        N = lambda s: ProjectTaskService._norm_col(getattr(s, "name", None))
+
+        def col(pred):
+            for c in feature_cols:
+                if pred(c):
+                    return c
+            return None
+
+        def col_last(pred):
+            found = None
+            for c in feature_cols:
+                if pred(c):
+                    found = c
+            return found
+
+        is_final = lambda s: bool(getattr(s, "is_final", False))
+        is_initial = lambda s: bool(getattr(s, "is_initial", False))
+        has_concluido = lambda s: "conclu" in N(s)
+        has_ajustar = lambda s: "ajustar" in N(s)
+        has_homolog = lambda s: "homolog" in N(s)
+        has_dev = lambda s: "desenvolvimento" in N(s)
+        # "Concluída" no sentido de negócio: coluna final OU nomeada "Concluído". Isso torna
+        # a regra robusta a funis onde o nome e a flag is_final não estão perfeitamente alinhados.
+        is_done = lambda s: is_final(s) or has_concluido(s)
+
+        # 1. todas as US Concluídas → Feature Concluída.
+        # Alvo por NOME primeiro ("Concluído"); só então cai para is_final. Usa-se a ÚLTIMA
+        # coluna is_final (maior order) para não casar por engano uma etapa intermediária
+        # marcada is_final indevidamente (ex.: "Em Desenvolvimento" com is_final=true).
+        if all(is_done(s) for s in us_statuses):
+            return col(has_concluido) or col_last(is_final)
+        # 2. alguma US em Ajustar (retrabalho) → Feature em Ajustar
+        if any(has_ajustar(s) for s in us_statuses):
+            return col(has_ajustar)
+        # 3. todas as US em Homologação → Feature em Homologação
+        if all(has_homolog(s) for s in us_statuses):
+            return col(has_homolog)
+        # 4. alguma US fora do backlog → Feature em Desenvolvimento
+        if any(not is_initial(s) for s in us_statuses):
+            return col(has_dev)
+        # 5. todas as US no backlog → Feature no backlog
+        if all(is_initial(s) for s in us_statuses):
+            return col(is_initial)
+        return None
+
+    @staticmethod
+    async def _maybe_reconcile_parent_feature(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        us_task: ProjectTask,
+        current_user: Optional[User],
+    ) -> None:
+        """Reconcilia a Feature-pai a partir do agregado das US filhas (movimento + selo
+        de impedimento). Respeita as travas de governança; se alguma barrar, apenas
+        registra em log e mantém a Feature onde está — sem nunca desfazer o move da US."""
+        if not us_task.parent_task_id:
+            return
+        if not await ProjectTaskService._is_user_story_task(db, us_task):
+            return
+        feature = await db.get(ProjectTask, us_task.parent_task_id)
+        if feature is None or feature.project_id != project_id:
+            return
+        feature_funnel_id = await ProjectTaskService._funnel_id_of_status(db, feature.status_id)
+        feature_funnel_name = None
+        if feature_funnel_id:
+            row = await db.execute(
+                select(ProjectFunnel.name).where(ProjectFunnel.id == feature_funnel_id)
+            )
+            feature_funnel_name = row.scalar_one_or_none()
+        if not await ProjectTaskService._is_feature_task(db, feature, feature_funnel_name):
+            return
+
+        us_children = await ProjectTaskService._us_children(db, feature.id)
+        if not us_children:
+            return
+        status_map = await ProjectTaskService._statuses_by_id(
+            db, [c.status_id for c in us_children]
+        )
+        us_statuses = [status_map[c.status_id] for c in us_children if c.status_id in status_map]
+        if not us_statuses:
+            return
+
+        # (a) selos informativos — sempre recalculados (independem de mover a Feature).
+        imped = any(
+            "impediment" in ProjectTaskService._norm_col(s.name) for s in us_statuses
+        )
+        codereview = any(
+            "code review" in ProjectTaskService._norm_col(s.name) for s in us_statuses
+        )
+        if bool(feature.us_impediment_active) != imped:
+            feature.us_impediment_active = imped
+            feature.updated_at = datetime.utcnow()
+        if bool(feature.us_codereview_active) != codereview:
+            feature.us_codereview_active = codereview
+            feature.updated_at = datetime.utcnow()
+
+        # (b) movimento da Feature.
+        feature_cols = await ProjectTaskService._funnel_statuses(db, feature_funnel_id)
+        target = ProjectTaskService._feature_target_status(feature_cols, us_statuses)
+        if target is None or target.id == feature.status_id:
+            return
+
+        source_status = await db.get(ProjectStatusConfig, feature.status_id)
+        try:
+            ProjectTaskService._check_move_out_permission(source_status, current_user)
+            ProjectTaskService._check_move_permission(target, current_user)
+            if source_status is not None:
+                await ProjectTaskService._check_funnel_access_for_move(
+                    db, source_status, target, current_user, feature
+                )
+            await ProjectTaskService._check_assignee_for_feature_us_kanban_move(
+                db, source_status, feature, {}
+            )
+            # Campos obrigatórios da etapa de origem só valem ao AVANÇAR de raia.
+            if await ProjectTaskService._is_forward_status_move(
+                db, feature.status_id, target.id
+            ):
+                sub_row = await db.execute(
+                    select(ProjectDemandFormSubmission).where(
+                        ProjectDemandFormSubmission.task_id == feature.id
+                    )
+                )
+                sub = sub_row.scalar_one_or_none()
+                await ProjectTaskService._validate_form_values_for_status(
+                    db,
+                    demand_type_id=feature.demand_type_id,
+                    status_id=feature.status_id,
+                    form_values=(sub.values if sub else None) or {},
+                )
+        except HTTPException as exc:
+            logger.info(
+                "reconcile Feature %s: movimento para '%s' barrado por trava (%s); "
+                "mantendo etapa atual",
+                feature.id,
+                getattr(target, "name", "?"),
+                getattr(exc, "detail", exc),
+            )
+            return
+
+        # Aplica o movimento espelhando o mini-bloco de entrada, SEM re-invocar o pipeline
+        # completo (evita loop de volta nas US), no padrão de _maybe_move_to_funnel.
+        feature.status_id = target.id
+        feature.completed_at = datetime.utcnow() if target.is_final else None
+        feature.status_entered_at = datetime.utcnow()
+        feature.sla_state = ProjectTaskService._sla_initial(target)
+        feature.updated_at = datetime.utcnow()
 
     @staticmethod
     async def _maybe_move_to_funnel(
@@ -2118,6 +2489,66 @@ class ProjectTaskService:
         return chain
 
     @staticmethod
+    async def _collect_request_chains_batch(
+        db: AsyncSession,
+        origins: list[ProjectTask],
+        extra_by_origin: dict[uuid.UUID, list[ProjectTask]],
+    ) -> dict[uuid.UUID, list[ProjectTask]]:
+        """Versão batcheada de _collect_request_chain_roots para múltiplas origens.
+
+        BFS por origin_task_id em UMA query por nível (profundidade), não por origem
+        (era N×profundidade). Cada card raiz tem um único origin_task_id, então
+        pertence a exatamente uma cadeia — o `seen` global equivale ao `seen`
+        por-origem do método single. A ordem interna não importa: os consumidores
+        (`_map_tasks_to_funnels`) reordenam por updated_at.
+        """
+        task_opts = (
+            selectinload(ProjectTask.project),
+            selectinload(ProjectTask.status).selectinload(ProjectStatusConfig.funnel),
+            selectinload(ProjectTask.demand_type),
+        )
+        chains: dict[uuid.UUID, list[ProjectTask]] = {}
+        owner: dict[uuid.UUID, uuid.UUID] = {}   # task_id -> origem raiz da cadeia
+        seen: set[uuid.UUID] = set()
+        frontier: list[uuid.UUID] = []
+
+        for origin in origins:
+            chains[origin.id] = [origin]
+            owner[origin.id] = origin.id
+            seen.add(origin.id)
+            frontier.append(origin.id)
+            for t in extra_by_origin.get(origin.id, []):
+                if t.id not in seen:
+                    seen.add(t.id)
+                    owner[t.id] = origin.id
+                    chains[origin.id].append(t)
+                    frontier.append(t.id)
+
+        while frontier:
+            rows = list((await db.execute(
+                select(ProjectTask)
+                .where(
+                    ProjectTask.origin_task_id.in_(frontier),
+                    ProjectTask.parent_task_id.is_(None),
+                )
+                .options(*task_opts)
+            )).scalars().all())
+            next_frontier: list[uuid.UUID] = []
+            for task in rows:
+                if task.id in seen:
+                    continue
+                origin_id = owner.get(task.origin_task_id)
+                if origin_id is None:
+                    continue
+                seen.add(task.id)
+                owner[task.id] = origin_id
+                chains[origin_id].append(task)
+                next_frontier.append(task.id)
+            frontier = next_frontier
+
+        return chains
+
+    @staticmethod
     def _map_tasks_to_funnels(tasks: list[ProjectTask]) -> dict[uuid.UUID, ProjectTask]:
         by_funnel: dict[uuid.UUID, ProjectTask] = {}
         for task in sorted(tasks, key=lambda row: row.updated_at):
@@ -2297,10 +2728,27 @@ class ProjectTaskService:
             if child.parent_task_id:
                 by_parent.setdefault(child.parent_task_id, []).append(child)
 
+        # Funnels de todos os projetos numa única query (era 1 por projeto).
+        # O order_by global preserva a ordem por-projeto ao agrupar.
         funnels_by_project: dict[uuid.UUID, list[ProjectFunnel]] = {}
         project_ids = {r.project_id for r in visible_roots}
-        for pid in project_ids:
-            funnels_by_project[pid] = await ProjectTaskService._load_project_funnels(db, pid)
+        if project_ids:
+            fres = await db.execute(
+                select(ProjectFunnel)
+                .where(
+                    ProjectFunnel.project_id.in_(project_ids),
+                    ProjectFunnel.is_active == True,  # noqa: E712
+                )
+                .order_by(ProjectFunnel.order.asc(), ProjectFunnel.name.asc())
+            )
+            for f in fres.scalars().all():
+                funnels_by_project.setdefault(f.project_id, []).append(f)
+
+        # Coleta as cadeias de conversão de TODAS as origens de uma vez (era 1 BFS
+        # por origem = N+1). Equivalente por origem — ver _collect_request_chains_batch.
+        chains_by_origin = await ProjectTaskService._collect_request_chains_batch(
+            db, visible_roots, converted_by_origin
+        )
 
         out: list[dict] = []
         for origin in visible_roots:
@@ -2311,9 +2759,7 @@ class ProjectTaskService:
                 else origin
             )
 
-            chain_tasks = await ProjectTaskService._collect_request_chain_roots(
-                db, origin, extra=converted
-            )
+            chain_tasks = chains_by_origin.get(origin.id, [origin])
             funnels = funnels_by_project.get(origin.project_id, [])
             stages = ProjectTaskService._build_funnel_stages(
                 funnels,
@@ -2371,6 +2817,70 @@ class ProjectTaskService:
         if not task:
             raise HTTPException(status_code=404, detail="Tarefa não encontrada.")
         return task
+
+    @staticmethod
+    async def set_planning_classification(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        task_id: uuid.UUID,
+        kind: str,
+        program_id: Optional[uuid.UUID] = None,
+        new_program_name: Optional[str] = None,
+        new_program_desc: Optional[str] = None,
+        current_user_id: Optional[uuid.UUID] = None,
+    ) -> ProjectTask:
+        """Edita a classificação de planejamento (projeto/programa) e propaga ao card de
+        planejamento convertido a partir desta origem (ou ao próprio card, se já for raiz).
+        Em 'programa', vincula a um programa do catálogo (existente ou recém-criado)."""
+        origin = await ProjectTaskService.get(db, project_id, task_id)
+        if origin.planning_kind in ("projeto", "programa"):
+            target = origin
+        else:
+            res = await db.execute(
+                select(ProjectTask)
+                .where(
+                    ProjectTask.origin_task_id == origin.id,
+                    ProjectTask.planning_kind.isnot(None),
+                )
+                .limit(1)
+            )
+            target = res.scalar_one_or_none()
+            if not target:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Este card ainda não gerou um card de Projeto/Programa para classificar.",
+                )
+        if kind == "programa":
+            if program_id is None:
+                name = (new_program_name or "").strip()
+                if len(name) < 2:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Informe um programa existente ou o nome do novo programa.",
+                    )
+                prog = ProjectProgram(
+                    name=name,
+                    description=(new_program_desc or None),
+                    created_by=current_user_id,
+                )
+                db.add(prog)
+                await db.flush()
+                program_id = prog.id
+            else:
+                prog = await db.get(ProjectProgram, program_id)
+                if not prog or not prog.is_active:
+                    raise HTTPException(status_code=400, detail="Programa inválido ou inativo.")
+            target.planning_kind = "programa"
+            target.linked_program_id = program_id
+        elif kind == "projeto":
+            target.planning_kind = "projeto"
+            target.linked_program_id = None
+        else:
+            raise HTTPException(status_code=400, detail="Classificação inválida.")
+        target.updated_at = datetime.utcnow()
+        await db.commit()
+        await db.refresh(target)
+        return target
 
     @staticmethod
     async def create(
@@ -2443,7 +2953,8 @@ class ProjectTaskService:
         task.sla_state = ProjectTaskService._sla_initial(status_obj)
         # Horas + início sem prazo explícito → deriva o prazo (dias úteis).
         if task.due_date is None:
-            ProjectTaskService._apply_hours(task)
+            hpd = await ProjectTaskService._project_hours_per_day_for_task(db, task)
+            ProjectTaskService._apply_hours(task, hpd)
         db.add(task)
         await db.flush()
         await ProjectTaskService._upsert_form_submission(db, task.id, form_values, current_user_id)
@@ -2505,6 +3016,66 @@ class ProjectTaskService:
             )
 
     @staticmethod
+    def _validate_card_classification(
+        classification: Optional[str],
+        product_id: Optional[uuid.UUID],
+        release_id: Optional[uuid.UUID],
+    ) -> None:
+        """Valida tipo + vínculos obrigatórios ao portfólio de produtos."""
+        if classification not in ("desenvolvimento", "implantacao", "melhoria"):
+            raise HTTPException(
+                status_code=400,
+                detail="Classifique o card (desenvolvimento, implantação ou melhoria).",
+            )
+        if classification in ("desenvolvimento", "implantacao") and not product_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Vincule um produto ao card.",
+            )
+        if classification == "melhoria" and (not product_id or not release_id):
+            raise HTTPException(
+                status_code=400,
+                detail="Para 'melhoria', vincule um produto e uma release.",
+            )
+
+    @staticmethod
+    async def count_unclassified_past_backlog(
+        db: AsyncSession, project_id: uuid.UUID, funnel_id: uuid.UUID,
+    ) -> int:
+        """Cards no funil que já saíram do backlog e ainda não foram classificados."""
+        res = await db.execute(
+            select(func.count(ProjectTask.id))
+            .join(ProjectStatusConfig, ProjectStatusConfig.id == ProjectTask.status_id)
+            .where(
+                ProjectTask.project_id == project_id,
+                ProjectStatusConfig.funnel_id == funnel_id,
+                ProjectStatusConfig.is_initial.is_(False),
+                ProjectTask.card_classification.is_(None),
+            )
+        )
+        return int(res.scalar() or 0)
+
+    @staticmethod
+    async def _enforce_backlog_classification_gate(
+        db: AsyncSession, task: ProjectTask, payload: dict
+    ) -> None:
+        """Bloqueia a saída do backlog quando enforcement está ativo na etapa/funil."""
+        source_status = await db.get(ProjectStatusConfig, task.status_id)
+        if (
+            not source_status
+            or not source_status.is_initial
+            or not getattr(source_status, "classification_required", False)
+        ):
+            return
+        funnel = await db.get(ProjectFunnel, source_status.funnel_id)
+        if not funnel or not getattr(funnel, "classification_enforcement_enabled", False):
+            return
+        classification = payload.get("card_classification", task.card_classification)
+        product_id = payload.get("linked_product_id", task.linked_product_id)
+        release_id = payload.get("linked_release_id", task.linked_release_id)
+        ProjectTaskService._validate_card_classification(classification, product_id, release_id)
+
+    @staticmethod
     async def update(
         db: AsyncSession,
         project_id: uuid.UUID,
@@ -2534,6 +3105,7 @@ class ProjectTaskService:
         conversion_description = payload.pop("conversion_description", None)
         conversion_items = payload.pop("conversion_items", None)
         conversion_assigned_to = payload.pop("conversion_assigned_to", None)
+        conversion_program_id = payload.pop("conversion_program_id", None)
 
         target_demand_type_id = payload.get("demand_type_id", task.demand_type_id)
         if target_demand_type_id:
@@ -2612,14 +3184,48 @@ class ProjectTaskService:
                 await ProjectTaskService._check_funnel_access_for_move(
                     db, source_status, target_status, current_user, task,
                 )
+                await ProjectTaskService._check_assignee_for_feature_us_kanban_move(
+                    db, source_status, task, payload,
+                )
+                # Guard-rail: uma Feature só pode ser concluída manualmente quando todas as
+                # User Stories filhas estiverem concluídas. (O auto-move do reconcile não passa
+                # por aqui, então este guard vale apenas para o movimento manual/API.)
+                if target_status.is_final and await ProjectTaskService._is_feature_task(db, task):
+                    us_children = await ProjectTaskService._us_children(db, task.id)
+                    if us_children:
+                        smap = await ProjectTaskService._statuses_by_id(
+                            db, [c.status_id for c in us_children]
+                        )
+                        pendentes = sum(
+                            1
+                            for c in us_children
+                            if not (smap.get(c.status_id) and smap[c.status_id].is_final)
+                        )
+                        if pendentes:
+                            raise HTTPException(
+                                status_code=400,
+                                detail=(
+                                    f"Não é possível concluir a Feature: {pendentes} "
+                                    f"User Story(s) ainda não concluída(s)."
+                                ),
+                            )
 
         # O card mudou de etapa? (calculado antes do setattr)
         status_changed = bool(payload.get("status_id")) and payload["status_id"] != task.status_id
 
-        # Cronograma / priorização: gates só ao avançar de etapa.
+        class_fields = ("card_classification", "linked_product_id", "linked_release_id")
+        if any(k in payload for k in class_fields):
+            merged_cls = payload.get("card_classification", task.card_classification)
+            merged_pid = payload.get("linked_product_id", task.linked_product_id)
+            merged_rid = payload.get("linked_release_id", task.linked_release_id)
+            if merged_cls:
+                ProjectTaskService._validate_card_classification(merged_cls, merged_pid, merged_rid)
+
+        # Cronograma / priorização / classificação: gates só ao avançar de etapa.
         if status_changed and is_forward:
             await ProjectTaskService._enforce_schedule_gate(db, task, payload)
             await ProjectTaskService._enforce_priority_gate(db, task)
+            await ProjectTaskService._enforce_backlog_classification_gate(db, task, payload)
 
         # "Mudou de fato" — compara com o valor atual. Assim um save de título/etc. que reenvia
         # as mesmas datas (ex.: drawer) NÃO é tratado como alteração de cronograma.
@@ -2635,13 +3241,32 @@ class ProjectTaskService:
         prev_hours = task.estimated_hours
         hours_changed = "estimated_hours" in payload and payload["estimated_hours"] != prev_hours
 
+        if "us_checklist" in payload:
+            raw_checklist = payload.pop("us_checklist")
+            if not await ProjectTaskService._can_use_us_checklist(db, task):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Checklist disponível apenas em cards User Story.",
+                )
+            normalized = ProjectTaskService._normalize_us_checklist(raw_checklist)
+            task.us_checklist = normalized or None
+            task.percent_complete = ProjectTaskService._percent_from_us_checklist(normalized) or 0
+            payload.pop("percent_complete", None)
+
+        if task.us_checklist and "percent_complete" in payload:
+            payload.pop("percent_complete")
+
         for key, value in payload.items():
             setattr(task, key, value)
 
+        if task.us_checklist:
+            task.percent_complete = ProjectTaskService._percent_from_us_checklist(task.us_checklist) or 0
+
         # Horas estimadas + início → recalcula o prazo (dias úteis), a menos que o
         # prazo tenha sido informado explicitamente nesta mesma edição.
-        if ("estimated_hours" in payload or "start_date" in payload) and "due_date" not in payload:
-            ProjectTaskService._apply_hours(task)
+        if ("estimated_hours" in payload or "start_date" in payload or "assigned_to" in payload) and "due_date" not in payload:
+            hpd = await ProjectTaskService._project_hours_per_day_for_task(db, task)
+            ProjectTaskService._apply_hours(task, hpd)
 
         # Gatilhos de "entrada na etapa" — só quando o card realmente muda de fase.
         if status_changed:
@@ -2670,6 +3295,7 @@ class ProjectTaskService:
                 conversion_description=conversion_description,
                 conversion_items=conversion_items,
                 conversion_assigned_to=conversion_assigned_to,
+                conversion_program_id=conversion_program_id,
             )
             # Gatilho de transição: se a fase de destino move o card para outro kanban.
             await ProjectTaskService._maybe_move_to_funnel(db, project_id, task, status_obj)
@@ -2677,6 +3303,8 @@ class ProjectTaskService:
             await ProjectTaskService._maybe_send_children_to_funnel(db, project_id, task, status_obj)
             # Sincroniza card de origem (ex.: Planejamento concluído → Triagem avança).
             await ProjectTaskService._maybe_update_origin_on_status(db, project_id, task, status_obj)
+            # Reconcilia a Feature-pai a partir do agregado das US filhas (movimento + selo).
+            await ProjectTaskService._maybe_reconcile_parent_feature(db, project_id, task, current_user)
 
         task.updated_at = datetime.utcnow()
         await ProjectTaskService._upsert_form_submission(db, task.id, form_values, None)
@@ -2819,13 +3447,30 @@ class ProjectTaskService:
         return list(current.values())
 
     @staticmethod
-    def _apply_hours(task: ProjectTask) -> None:
+    def _apply_hours(task: ProjectTask, hours_per_day: float = HOURS_PER_DAY) -> None:
         """Deriva due_date a partir de estimated_hours + start_date (dias úteis).
         Não faz nada se faltar horas ou início. A barra cobre [start, due] inclusive."""
-        duration = _duration_days_from_hours(task.estimated_hours)
+        duration = _duration_days_from_hours(task.estimated_hours, hours_per_day)
         if duration is None or task.start_date is None:
             return
         task.due_date = _add_business_days(task.start_date, duration - 1)
+
+    @staticmethod
+    async def _project_hours_per_day_for_task(
+        db: AsyncSession,
+        task: ProjectTask,
+        calendar=None,
+        persons_by_id: Optional[dict[uuid.UUID, Person]] = None,
+    ) -> float:
+        """Taxa efetiva de horas de projeto/dia para a tarefa (conforme alocação do responsável)."""
+        if calendar is None:
+            calendar = await load_calendar(db)
+        if not task.assigned_to:
+            return calendar.hours_per_day()
+        person = (persons_by_id or {}).get(task.assigned_to)
+        if person is None:
+            person = await db.get(Person, task.assigned_to)
+        return project_hours_per_day(person, calendar)
 
     @staticmethod
     async def _reschedule_dependents(
@@ -2913,8 +3558,8 @@ class ProjectTaskService:
 
         Critérios:
         - Âncora = Project.start_date (alinhada em dia útil); se ausente, hoje.
-        - Irmãos (mesmo pai) são sequenciais pela ordem: cada um começa no próximo dia útil
-          após o término do irmão anterior.
+        - Irmãos (mesmo pai) são sequenciais pela ordem quando compartilham o mesmo
+          responsável; com responsáveis diferentes, iniciam em paralelo na data-base.
         - Predecessoras explícitas (FS, dias úteis + lag) empurram a sucessora para frente —
           vence a data mais tarde entre a sequência e as predecessoras.
         - Pais herdam start = menor início e due = maior término dos filhos agendados (rollup).
@@ -2937,10 +3582,22 @@ class ProjectTaskService:
         rows = await db.execute(select(ProjectTask).where(ProjectTask.project_id == project_id))
         by_id: dict[uuid.UUID, ProjectTask] = {t.id: t for t in rows.scalars().all()}
 
-        # Duração planejada em HORAS: horas estimadas, ou a duração atual (se já houver datas).
+        assignee_ids = {t.assigned_to for t in by_id.values() if t.assigned_to}
+        persons_by_id: dict[uuid.UUID, Person] = {}
+        if assignee_ids:
+            person_rows = await db.execute(select(Person).where(Person.id.in_(assignee_ids)))
+            persons_by_id = {p.id: p for p in person_rows.scalars().all()}
+
+        cal_hpd = calendar.hours_per_day()
+
+        # Duração planejada em HORAS de calendário: escala horas de projeto conforme
+        # alocação do responsável (ex.: 10h projeto @ 5h/dia → 16h calendário = 2 dias).
         def duration_hours(t: ProjectTask) -> Optional[float]:
             if t.estimated_hours is not None and float(t.estimated_hours) > 0:
-                return float(t.estimated_hours)
+                raw = float(t.estimated_hours)
+                person = persons_by_id.get(t.assigned_to) if t.assigned_to else None
+                phpd = project_hours_per_day(person, calendar)
+                return raw * (cal_hpd / phpd)
             if t.start_date is not None and t.due_date is not None:
                 return calendar.working_hours_between(t.start_date, t.due_date)
             return None
@@ -2952,6 +3609,7 @@ class ProjectTaskService:
                 order=t.order,
                 duration_hours=duration_hours(t),
                 tiebreak=t.created_at.isoformat() if t.created_at else "",
+                assignee_id=t.assigned_to,
             )
             for t in by_id.values()
         ]
@@ -3069,6 +3727,7 @@ class ProjectTaskService:
             EngineNode(
                 id=t.id, parent_id=t.parent_task_id, order=t.order, duration_hours=None,
                 tiebreak=t.created_at.isoformat() if t.created_at else "",
+                assignee_id=t.assigned_to,
             )
             for t in by_id.values()
         ]
@@ -3500,7 +4159,10 @@ class TaskDependencyService:
         """Distribui as horas estimadas pelos DIAS ÚTEIS do calendário corporativo (pula
         fim de semana e feriados) e agrega por (responsável, dia). A capacidade por dia vem da
         jornada da Pessoa (Person.daily_hours) e é reduzida pelas Ausências aprovadas que afetam
-        a capacidade (dia inteiro → 0, ou menos as horas parciais). Superlotação = alocado > capacidade."""
+        a capacidade (dia inteiro → 0, ou menos as horas parciais). Superlotação = alocado > capacidade.
+
+        A matemática vive em CapacityService (reutilizada pelo cockpit cross-project e pelo
+        futuro simulador what-if). Esta rota apenas restringe ao projeto."""
         calendar = await load_calendar(db)
         result = await db.execute(
             select(ProjectTask).where(
@@ -3512,70 +4174,9 @@ class TaskDependencyService:
             )
         )
         tasks = list(result.scalars().all())
-        acc: dict[tuple[uuid.UUID, date], float] = {}
-        user_ids: set[uuid.UUID] = set()
-        for t in tasks:
-            hours = float(t.estimated_hours or 0)
-            if hours <= 0:
-                continue
-            # Dias úteis (calendário) cobertos pela tarefa.
-            work_days: list[date] = []
-            cur = t.start_date
-            while cur.date() <= t.due_date.date():
-                if calendar.is_working_day(cur.date()):
-                    work_days.append(cur.date())
-                cur = cur + timedelta(days=1)
-            if not work_days:
-                continue
-            per_day = hours / len(work_days)
-            for d in work_days:
-                if (date_from is None or d >= date_from) and (date_to is None or d <= date_to):
-                    acc[(t.assigned_to, d)] = acc.get((t.assigned_to, d), 0.0) + per_day
-            user_ids.add(t.assigned_to)
-
-        # Jornada e ausências por Pessoa (assigned_to == Person.id — responsável é Pessoa do teamops).
-        default_cap = calendar.hours_per_day()
-        daily_by_user: dict[uuid.UUID, float] = {}
-        absences_by_user: dict[uuid.UUID, list[tuple[date, date, Optional[float]]]] = {}
-        if user_ids:  # na prática person_ids (assigned_to == Person.id)
-            persons = (await db.execute(select(Person).where(Person.id.in_(user_ids)))).scalars().all()
-            for p in persons:
-                daily_by_user[p.id] = float(p.daily_hours) if p.daily_hours else default_cap
-            person_ids = [p.id for p in persons]
-            if person_ids:
-                abs_rows = (await db.execute(
-                    select(Absence, AbsenceType.affects_capacity)
-                    .join(AbsenceType, Absence.absence_type_id == AbsenceType.id)
-                    .where(
-                        Absence.person_id.in_(person_ids),
-                        Absence.status == AbsenceStatus.APROVADA,
-                        AbsenceType.affects_capacity.is_(True),
-                    )
-                )).all()
-                for ab, _affects in abs_rows:
-                    partial = float(ab.partial_hours) if ab.partial_hours is not None else None
-                    absences_by_user.setdefault(ab.person_id, []).append((ab.start_date, ab.end_date, partial))
-
-        def capacity_for(user_id: uuid.UUID, d: date) -> float:
-            if not calendar.is_working_day(d):
-                return 0.0
-            cap = daily_by_user.get(user_id, default_cap)
-            for s, e, partial in absences_by_user.get(user_id, []):
-                if s <= d <= e:
-                    cap = max(0.0, cap - partial) if partial is not None else 0.0
-            return cap
-
-        cells: list[WorkloadCell] = []
-        for (user_id, d), allocated in sorted(acc.items(), key=lambda kv: (str(kv[0][0]), kv[0][1])):
-            capacity = capacity_for(user_id, d)
-            cells.append(WorkloadCell(
-                user_id=user_id,
-                date=d,
-                allocated_hours=round(allocated, 2),
-                capacity_hours=round(capacity, 2),
-                overallocated=allocated > capacity + 1e-6,
-            ))
-        return cells
+        acc, _by_project, user_ids = CapacityService._distribute_hours(tasks, calendar, date_from, date_to)
+        capacity_for = await CapacityService._capacity_resolver(db, user_ids, calendar)
+        return CapacityService._build_cells(acc, capacity_for)
 
     @staticmethod
     async def assignee_absences(
@@ -3612,6 +4213,1032 @@ class TaskDependencyService:
             status = ab.status.value if hasattr(ab.status, "value") else str(ab.status)
             out.setdefault(ab.person_id, []).append((ab.start_date, ab.end_date, type_name, partial, status))
         return out
+
+
+class CapacityService:
+    """Cockpit de planejamento de capacidade: cruza a demanda estimada de TODO o portfólio
+    do tenant (schema atual) com a capacidade real das pessoas, descontando ausências e
+    feriados. Reaproveita a mesma matemática do workload por-projeto
+    (TaskDependencyService.compute_workload delega para os helpers daqui)."""
+
+    # ── Núcleo reutilizável (também alimentará o simulador what-if) ──
+    @staticmethod
+    def _distribute_hours(
+        tasks: list[ProjectTask],
+        calendar,
+        date_from: Optional[date],
+        date_to: Optional[date],
+    ) -> tuple[
+        dict[tuple[uuid.UUID, date], float],
+        dict[tuple[uuid.UUID, uuid.UUID, date], float],
+        set[uuid.UUID],
+    ]:
+        """Espalha estimated_hours de cada tarefa pelos dias úteis cobertos, agregando por
+        (pessoa, dia) e por (projeto, pessoa, dia). Recorta pela janela [date_from, date_to].
+        Retorna (acc_por_pessoa_dia, acc_por_projeto_pessoa_dia, person_ids)."""
+        acc: dict[tuple[uuid.UUID, date], float] = {}
+        by_project: dict[tuple[uuid.UUID, uuid.UUID, date], float] = {}
+        user_ids: set[uuid.UUID] = set()
+        for t in tasks:
+            hours = float(t.estimated_hours or 0)
+            if hours <= 0:
+                continue
+            # Dias úteis (calendário) cobertos pela tarefa.
+            work_days: list[date] = []
+            cur = t.start_date
+            while cur.date() <= t.due_date.date():
+                if calendar.is_working_day(cur.date()):
+                    work_days.append(cur.date())
+                cur = cur + timedelta(days=1)
+            if not work_days:
+                continue
+            per_day = hours / len(work_days)
+            for d in work_days:
+                if (date_from is None or d >= date_from) and (date_to is None or d <= date_to):
+                    acc[(t.assigned_to, d)] = acc.get((t.assigned_to, d), 0.0) + per_day
+                    key = (t.project_id, t.assigned_to, d)
+                    by_project[key] = by_project.get(key, 0.0) + per_day
+            user_ids.add(t.assigned_to)
+        return acc, by_project, user_ids
+
+    @staticmethod
+    async def _capacity_resolver(db: AsyncSession, user_ids: set[uuid.UUID], calendar):
+        """Monta capacity_for(person_id, dia) → horas de capacidade de projeto no dia,
+        descontando ausências APROVADAS que afetam capacidade. person_id == assigned_to
+        (responsável é Pessoa do teamops); assignees sem Person caem na jornada padrão."""
+        default_cap = calendar.hours_per_day()
+        daily_by_user: dict[uuid.UUID, float] = {}
+        absences_by_user: dict[uuid.UUID, list[tuple[date, date, Optional[float]]]] = {}
+        if user_ids:
+            persons = (await db.execute(select(Person).where(Person.id.in_(user_ids)))).scalars().all()
+            for p in persons:
+                daily_by_user[p.id] = project_hours_per_day(p, calendar)
+            person_ids = [p.id for p in persons]
+            if person_ids:
+                abs_rows = (await db.execute(
+                    select(Absence, AbsenceType.affects_capacity)
+                    .join(AbsenceType, Absence.absence_type_id == AbsenceType.id)
+                    .where(
+                        Absence.person_id.in_(person_ids),
+                        Absence.status == AbsenceStatus.APROVADA,
+                        AbsenceType.affects_capacity.is_(True),
+                    )
+                )).all()
+                for ab, _affects in abs_rows:
+                    partial = float(ab.partial_hours) if ab.partial_hours is not None else None
+                    absences_by_user.setdefault(ab.person_id, []).append((ab.start_date, ab.end_date, partial))
+
+        def capacity_for(user_id: uuid.UUID, d: date) -> float:
+            if not calendar.is_working_day(d):
+                return 0.0
+            cap = daily_by_user.get(user_id, default_cap)
+            for s, e, partial in absences_by_user.get(user_id, []):
+                if s <= d <= e:
+                    cap = max(0.0, cap - partial) if partial is not None else 0.0
+            return cap
+
+        return capacity_for
+
+    @staticmethod
+    def _build_cells(acc: dict[tuple[uuid.UUID, date], float], capacity_for) -> list[WorkloadCell]:
+        cells: list[WorkloadCell] = []
+        for (user_id, d), allocated in sorted(acc.items(), key=lambda kv: (str(kv[0][0]), kv[0][1])):
+            capacity = capacity_for(user_id, d)
+            cells.append(WorkloadCell(
+                user_id=user_id,
+                date=d,
+                allocated_hours=round(allocated, 2),
+                capacity_hours=round(capacity, 2),
+                overallocated=allocated > capacity + 1e-6,
+            ))
+        return cells
+
+    @staticmethod
+    async def _select_tasks_in_window(
+        db: AsyncSession,
+        date_from: date,
+        date_to: date,
+        person_ids: Optional[list[uuid.UUID]] = None,
+    ) -> list[ProjectTask]:
+        """Todas as tarefas agendadas do tenant que cruzam a janela. O filtro de datas é
+        empurrado para o SQL (importa quando se varre o portfólio inteiro)."""
+        lower = datetime.combine(date_from, datetime.min.time())
+        upper = datetime.combine(date_to, datetime.min.time()) + timedelta(days=1)
+        q = select(ProjectTask).where(
+            ProjectTask.assigned_to.isnot(None),
+            ProjectTask.start_date.isnot(None),
+            ProjectTask.due_date.isnot(None),
+            ProjectTask.estimated_hours.isnot(None),
+            ProjectTask.due_date >= lower,
+            ProjectTask.start_date < upper,
+        )
+        if person_ids:
+            q = q.where(ProjectTask.assigned_to.in_(person_ids))
+        return list((await db.execute(q)).scalars().all())
+
+    @staticmethod
+    async def _root_index(db: AsyncSession):
+        """Grafo de cards → (root_of, root_title). O 'projeto' de verdade (no kanban) é o card-raiz
+        de planejamento: sobe `parent_task_id` até `planning_kind in ('projeto','programa')`
+        (senão o ancestral mais alto). NÃO é a entidade Project ('TD'), que é só o container."""
+        graph = (await db.execute(
+            select(ProjectTask.id, ProjectTask.parent_task_id, ProjectTask.planning_kind, ProjectTask.title)
+        )).all()
+        parent: dict[uuid.UUID, Optional[uuid.UUID]] = {}
+        kind: dict[uuid.UUID, Optional[str]] = {}
+        title: dict[uuid.UUID, str] = {}
+        for tid, pid, pk, ttl in graph:
+            parent[tid] = pid
+            kind[tid] = pk
+            title[tid] = ttl
+        ROOT_KINDS = ("projeto", "programa")
+        cache: dict[uuid.UUID, uuid.UUID] = {}
+
+        def root_of(tid: uuid.UUID) -> uuid.UUID:
+            seen: list[uuid.UUID] = []
+            cur: Optional[uuid.UUID] = tid
+            r = tid
+            while cur is not None:
+                if cur in cache:
+                    r = cache[cur]
+                    break
+                seen.append(cur)
+                if kind.get(cur) in ROOT_KINDS:
+                    r = cur
+                    break
+                nxt = parent.get(cur)
+                if nxt is None or nxt == cur or nxt in seen:
+                    r = cur
+                    break
+                cur = nxt
+            for s in seen:
+                cache[s] = r
+            return r
+
+        def root_title(rid: uuid.UUID) -> str:
+            return title.get(rid) or "—"
+
+        return root_of, root_title
+
+    @staticmethod
+    def _distribute_detail(tasks, calendar, date_from: Optional[date], date_to: Optional[date]):
+        """Como _distribute_hours, mas guarda por (pessoa, dia) a lista de (tarefa, horas_no_dia) —
+        base para o detalhamento do tooltip e para agregar por card-raiz (projeto/programa)."""
+        from collections import defaultdict
+
+        detail: dict[tuple[uuid.UUID, date], list[tuple]] = defaultdict(list)
+        acc: dict[tuple[uuid.UUID, date], float] = defaultdict(float)
+        user_ids: set[uuid.UUID] = set()
+        for t in tasks:
+            hours = float(t.estimated_hours or 0)
+            if hours <= 0:
+                continue
+            work_days: list[date] = []
+            cur = t.start_date
+            while cur.date() <= t.due_date.date():
+                if calendar.is_working_day(cur.date()):
+                    work_days.append(cur.date())
+                cur = cur + timedelta(days=1)
+            if not work_days:
+                continue
+            per_day = hours / len(work_days)
+            for d in work_days:
+                if (date_from is None or d >= date_from) and (date_to is None or d <= date_to):
+                    detail[(t.assigned_to, d)].append((t, per_day))
+                    acc[(t.assigned_to, d)] += per_day
+            user_ids.add(t.assigned_to)
+        return detail, dict(acc), user_ids
+
+    # ── Lente por PESSOA (heatmap cross-project) ──
+    @staticmethod
+    async def compute_capacity_heatmap(
+        db: AsyncSession,
+        date_from: date,
+        date_to: date,
+        unit: str = "week",
+        area_id: Optional[uuid.UUID] = None,
+        position_slug: Optional[str] = None,
+        person_ids: Optional[list[uuid.UUID]] = None,
+    ) -> CapacityHeatmapResponse:
+        calendar = await load_calendar(db)
+        tasks = await CapacityService._select_tasks_in_window(db, date_from, date_to, person_ids)
+        acc, _by_project, all_ids = CapacityService._distribute_hours(tasks, calendar, date_from, date_to)
+
+        # Resolve pessoas (+ áreas) e aplica filtros de área/cargo. Assignees sem Person = "unmapped".
+        persons_by_id: dict[uuid.UUID, Person] = {}
+        if all_ids:
+            persons = (await db.execute(
+                select(Person).options(selectinload(Person.areas)).where(Person.id.in_(all_ids))
+            )).scalars().all()
+            persons_by_id = {p.id: p for p in persons}
+        unmapped = sorted(str(uid) for uid in all_ids if uid not in persons_by_id)
+
+        def person_allowed(uid: uuid.UUID) -> bool:
+            p = persons_by_id.get(uid)
+            if p is None:
+                return False  # sem Person nunca casa filtro de área/cargo
+            if position_slug and (p.position is None or p.position.slug != position_slug):
+                return False
+            if area_id and area_id not in {a.id for a in p.areas}:
+                return False
+            return True
+
+        if position_slug or area_id:
+            acc = {k: v for k, v in acc.items() if person_allowed(k[0])}
+
+        present_ids = {k[0] for k in acc}
+        capacity_for = await CapacityService._capacity_resolver(db, present_ids, calendar)
+        cells = CapacityService._build_cells(acc, capacity_for)
+        await CapacityService._attach_breakdown(db, cells, tasks, calendar, date_from, date_to)
+        return CapacityService._assemble_heatmap(cells, persons_by_id, unmapped)
+
+    @staticmethod
+    async def _attach_breakdown(db, cells, tasks, calendar, date_from: date, date_to: date) -> None:
+        """Anexa a cada célula a lista de demandas (projeto · tarefa · horas no dia) que compõem
+        a carga — alimenta o tooltip do heatmap. 'Projeto' = card-raiz de planejamento
+        (projeto/programa) da tarefa, não a entidade Project ('TD')."""
+        root_of, root_title = await CapacityService._root_index(db)
+        detail, _acc, _ids = CapacityService._distribute_detail(tasks, calendar, date_from, date_to)
+        for c in cells:
+            items = sorted(detail.get((c.user_id, c.date), []), key=lambda x: x[1], reverse=True)
+            c.items = [
+                WorkloadCellItem(project_name=root_title(root_of(t.id)), task_title=t.title, hours=round(h, 2))
+                for (t, h) in items
+            ]
+
+    @staticmethod
+    def _assemble_heatmap(
+        cells: list[WorkloadCell],
+        persons_by_id: dict[uuid.UUID, Person],
+        unmapped: list[str],
+        virtual_meta: Optional[dict[uuid.UUID, CapacityPersonMeta]] = None,
+    ) -> CapacityHeatmapResponse:
+        """Monta CapacityHeatmapResponse (meta de pessoas + summary) a partir das células.
+        `virtual_meta` injeta pessoas sintéticas (freelancers do simulador)."""
+        virtual_meta = virtual_meta or {}
+        present_ids = {c.user_id for c in cells}
+        persons_meta: list[CapacityPersonMeta] = []
+        for uid in present_ids:
+            if uid in virtual_meta:
+                persons_meta.append(virtual_meta[uid])
+                continue
+            p = persons_by_id.get(uid)
+            if p is None:
+                continue
+            persons_meta.append(CapacityPersonMeta(
+                id=p.id,
+                full_name=p.full_name,
+                position_slug=(p.position.slug if p.position else None),
+                position_label=(p.position.name if p.position else None),
+                area_ids=[a.id for a in p.areas],
+            ))
+        persons_meta.sort(key=lambda m: m.full_name.lower())
+        summary = CapacitySummary(
+            overallocated_cells=sum(1 for c in cells if c.overallocated),
+            persons_over=len({c.user_id for c in cells if c.overallocated}),
+            total_capacity_h=round(sum(c.capacity_hours for c in cells), 2),
+            total_allocated_h=round(sum(c.allocated_hours for c in cells), 2),
+            unmapped_assignees=unmapped,
+        )
+        return CapacityHeatmapResponse(unit="day", cells=cells, persons=persons_meta, summary=summary)
+
+    # ── Lente por PROJETO (viabilidade) ──
+    @staticmethod
+    async def compute_capacity_by_project(
+        db: AsyncSession,
+        date_from: date,
+        date_to: date,
+        area_id: Optional[uuid.UUID] = None,
+    ) -> CapacityByProjectResponse:
+        calendar = await load_calendar(db)
+        tasks = await CapacityService._select_tasks_in_window(db, date_from, date_to)
+        detail, acc, all_ids = CapacityService._distribute_detail(tasks, calendar, date_from, date_to)
+        root_of, root_title = await CapacityService._root_index(db)
+
+        # Filtro opcional por área (restringe às pessoas da área).
+        allowed_ids: Optional[set[uuid.UUID]] = None
+        if area_id and all_ids:
+            persons = (await db.execute(
+                select(Person).options(selectinload(Person.areas)).where(Person.id.in_(all_ids))
+            )).scalars().all()
+            allowed_ids = {p.id for p in persons if area_id in {a.id for a in p.areas}}
+
+        capacity_for = await CapacityService._capacity_resolver(db, all_ids, calendar)
+        # Sobrecarga GLOBAL por (pessoa, dia) — capacidade é compartilhada entre projetos.
+        overloaded_cell = {
+            (uid, d) for (uid, d), alloc in acc.items() if alloc > capacity_for(uid, d) + 1e-6
+        }
+        window_days = [date_from + timedelta(days=i) for i in range((date_to - date_from).days + 1)]
+        person_cap_total: dict[uuid.UUID, float] = {
+            uid: sum(capacity_for(uid, d) for d in window_days) for uid in all_ids
+        }
+
+        # Agrega por CARD-RAIZ (projeto/programa), não pela entidade Project.
+        proj_demand: dict[uuid.UUID, float] = {}
+        proj_people: dict[uuid.UUID, set[uuid.UUID]] = {}
+        proj_overloaded: dict[uuid.UUID, set[uuid.UUID]] = {}
+        for (uid, d), items in detail.items():
+            if allowed_ids is not None and uid not in allowed_ids:
+                continue
+            over = (uid, d) in overloaded_cell
+            for (t, h) in items:
+                rid = root_of(t.id)
+                proj_demand[rid] = proj_demand.get(rid, 0.0) + h
+                proj_people.setdefault(rid, set()).add(uid)
+                if over:
+                    proj_overloaded.setdefault(rid, set()).add(uid)
+
+        result_rows: list[CapacityProjectRow] = []
+        for rid, demand in proj_demand.items():
+            people = proj_people.get(rid, set())
+            cap = sum(person_cap_total.get(uid, 0.0) for uid in people)
+            result_rows.append(CapacityProjectRow(
+                project_id=rid,
+                project_name=root_title(rid),
+                demand_hours=round(demand, 2),
+                capacity_hours=round(cap, 2),
+                people_count=len(people),
+                overloaded_people=len(proj_overloaded.get(rid, set())),
+                overallocated=demand > cap + 1e-6,
+            ))
+        result_rows.sort(key=lambda r: r.demand_hours, reverse=True)
+        return CapacityByProjectResponse(rows=result_rows)
+
+    # ── Fase 1: detecção de gargalos e finder de pessoas livres ──
+    _STACK_ORDER = {
+        StackLevel.BASICO: 0,
+        StackLevel.JUNIOR: 1,
+        StackLevel.PLENO: 2,
+        StackLevel.SENIOR: 3,
+        StackLevel.ESPECIALISTA: 4,
+        StackLevel.REFERENCIA: 5,
+    }
+
+    @staticmethod
+    def _work_days(calendar, date_from: date, date_to: date) -> list[date]:
+        return [
+            d
+            for d in (date_from + timedelta(days=i) for i in range((date_to - date_from).days + 1))
+            if calendar.is_working_day(d)
+        ]
+
+    @staticmethod
+    async def _next_absences(
+        db: AsyncSession, person_ids: set[uuid.UUID], since: date
+    ) -> dict[uuid.UUID, str]:
+        """Próxima ausência (aprovada/pendente, afeta capacidade, end >= since) por pessoa,
+        já formatada. Ordenado por start_date, então a primeira por pessoa é a mais próxima."""
+        out: dict[uuid.UUID, str] = {}
+        if not person_ids:
+            return out
+        rows = (await db.execute(
+            select(Absence, AbsenceType.name)
+            .join(AbsenceType, Absence.absence_type_id == AbsenceType.id)
+            .where(
+                Absence.person_id.in_(person_ids),
+                Absence.status.in_([AbsenceStatus.APROVADA, AbsenceStatus.PENDENTE]),
+                AbsenceType.affects_capacity.is_(True),
+                Absence.end_date >= since,
+            )
+            .order_by(Absence.start_date.asc())
+        )).all()
+        for ab, type_name in rows:
+            if ab.person_id in out:
+                continue
+            out[ab.person_id] = f"{ab.start_date.isoformat()} a {ab.end_date.isoformat()} ({type_name})"
+        return out
+
+    @staticmethod
+    async def find_available_people(
+        db: AsyncSession,
+        date_from: date,
+        date_to: date,
+        position_slug: Optional[str] = None,
+        area_id: Optional[uuid.UUID] = None,
+        stack_id: Optional[uuid.UUID] = None,
+        min_level: Optional[StackLevel] = None,
+        min_free_hours: float = 0.0,
+    ) -> FreePeopleResponse:
+        """Pessoas ATIVAS com folga de capacidade no período (capacidade − alocação, descontando
+        férias), opcionalmente filtradas por cargo, área e skill (com nível mínimo). Ordena por
+        folga desc — o topo é quem o PO pode puxar para o projeto / de outros times."""
+        calendar = await load_calendar(db)
+        tasks = await CapacityService._select_tasks_in_window(db, date_from, date_to)
+        acc, _bp, _ids = CapacityService._distribute_hours(tasks, calendar, date_from, date_to)
+
+        persons = list((await db.execute(
+            select(Person)
+            .options(
+                selectinload(Person.areas),
+                selectinload(Person.stacks).selectinload(PersonStack.stack),
+            )
+            .where(Person.status == PersonStatus.ATIVO)
+        )).scalars().all())
+
+        def matches(p: Person) -> bool:
+            if position_slug and (p.position is None or p.position.slug != position_slug):
+                return False
+            if area_id and area_id not in {a.id for a in p.areas}:
+                return False
+            if stack_id:
+                have = [ps for ps in p.stacks if ps.stack_id == stack_id]
+                if not have:
+                    return False
+                if min_level is not None:
+                    need = CapacityService._STACK_ORDER.get(min_level, 0)
+                    if not any(CapacityService._STACK_ORDER.get(ps.level, 0) >= need for ps in have):
+                        return False
+            return True
+
+        persons = [p for p in persons if matches(p)]
+        pids = {p.id for p in persons}
+        capacity_for = await CapacityService._capacity_resolver(db, pids, calendar)
+        work_days = CapacityService._work_days(calendar, date_from, date_to)
+        next_abs = await CapacityService._next_absences(db, pids, date_from)
+
+        rows: list[FreePersonRow] = []
+        for p in persons:
+            cap_total = alloc_total = free_total = 0.0
+            free_days = 0
+            for d in work_days:
+                cap = capacity_for(p.id, d)
+                alloc = acc.get((p.id, d), 0.0)
+                cap_total += cap
+                alloc_total += alloc
+                free = cap - alloc
+                if free > 1e-6:
+                    free_total += free
+                    free_days += 1
+            if free_total < min_free_hours - 1e-6:
+                continue
+            util = (alloc_total / cap_total * 100.0) if cap_total > 0 else 0.0
+            rows.append(FreePersonRow(
+                person_id=p.id,
+                full_name=p.full_name,
+                position_slug=(p.position.slug if p.position else None),
+                position_label=(p.position.name if p.position else None),
+                area_ids=[a.id for a in p.areas],
+                stacks=[ps.stack.name for ps in p.stacks if ps.stack],
+                capacity_hours_total=round(cap_total, 2),
+                allocated_hours_total=round(alloc_total, 2),
+                free_hours_total=round(free_total, 2),
+                free_days=free_days,
+                utilization_pct=round(util, 1),
+                next_absence=next_abs.get(p.id),
+            ))
+        rows.sort(key=lambda r: r.free_hours_total, reverse=True)
+        return FreePeopleResponse(rows=rows)
+
+    @staticmethod
+    async def detect_bottlenecks(
+        db: AsyncSession,
+        date_from: date,
+        date_to: date,
+        group_by: str = "position",
+    ) -> CapacityGapsResponse:
+        """Agrega capacidade × demanda por cargo (ou área) em janelas SEMANAIS. Onde a demanda do
+        grupo excede a capacidade numa semana, acumula o déficit e sugere reforço (headcount) para
+        cobrir o pico — o sinal de 'preciso de freela/contratação'."""
+        calendar = await load_calendar(db)
+        tasks = await CapacityService._select_tasks_in_window(db, date_from, date_to)
+        acc, _bp, _ids = CapacityService._distribute_hours(tasks, calendar, date_from, date_to)
+
+        persons = list((await db.execute(
+            select(Person).options(selectinload(Person.areas)).where(Person.status == PersonStatus.ATIVO)
+        )).scalars().all())
+        pids = {p.id for p in persons}
+        capacity_for = await CapacityService._capacity_resolver(db, pids, calendar)
+
+        work_days = CapacityService._work_days(calendar, date_from, date_to)
+        monday = lambda d: d - timedelta(days=d.weekday())  # noqa: E731
+        weeks = sorted({monday(d) for d in work_days})
+        workdays_in_week: dict[date, int] = {}
+        for d in work_days:
+            workdays_in_week[monday(d)] = workdays_in_week.get(monday(d), 0) + 1
+
+        # Pessoa → grupo(s).
+        groups: dict[str, dict] = {}
+        if group_by == "area":
+            area_names = {aid: name for aid, name in (await db.execute(select(Area.id, Area.name))).all()}
+            for p in persons:
+                for a in p.areas:
+                    g = groups.setdefault(str(a.id), {"label": area_names.get(a.id, "—"), "members": set()})
+                    g["members"].add(p.id)
+            gtype = "area"
+        else:
+            for p in persons:
+                if p.position is None:
+                    continue
+                g = groups.setdefault(p.position.slug, {"label": p.position.name, "members": set()})
+                g["members"].add(p.id)
+            gtype = "position"
+
+        rows: list[CapacityGapRow] = []
+        for key, g in groups.items():
+            members = g["members"]
+            cap_week = {w: 0.0 for w in weeks}
+            alloc_week = {w: 0.0 for w in weeks}
+            for pid in members:
+                for d in work_days:
+                    w = monday(d)
+                    cap_week[w] += capacity_for(pid, d)
+                    alloc_week[w] += acc.get((pid, d), 0.0)
+            deficit_total = peak_def = cap_total = alloc_total = 0.0
+            peak_w: Optional[date] = None
+            for w in weeks:
+                cap_total += cap_week[w]
+                alloc_total += alloc_week[w]
+                dfc = alloc_week[w] - cap_week[w]
+                if dfc > 1e-6:
+                    deficit_total += dfc
+                    if dfc > peak_def:
+                        peak_def, peak_w = dfc, w
+            if deficit_total <= 1e-6:
+                continue
+            ref_week_cap = calendar.hours_per_day() * workdays_in_week.get(peak_w, 5)
+            headcount = int(math.ceil(peak_def / ref_week_cap)) if ref_week_cap > 0 else 0
+            rows.append(CapacityGapRow(
+                group_type=gtype,
+                group_key=key,
+                group_label=g["label"],
+                people_count=len(members),
+                capacity_hours=round(cap_total, 2),
+                allocated_hours=round(alloc_total, 2),
+                deficit_hours=round(deficit_total, 2),
+                peak_week=(peak_w.isoformat() if peak_w else None),
+                peak_deficit_hours=round(peak_def, 2),
+                suggested_headcount=headcount,
+            ))
+        rows.sort(key=lambda r: r.deficit_hours, reverse=True)
+        return CapacityGapsResponse(rows=rows)
+
+    # ── Fase 2: simulador de cenários (what-if efêmero) ──
+    @staticmethod
+    async def list_simulatable_tasks(
+        db: AsyncSession, date_from: date, date_to: date
+    ) -> SimTasksResponse:
+        """Tarefas agendadas na janela — alimenta o construtor de mutações do simulador. O 'projeto'
+        exibido é o card-raiz de planejamento (projeto/programa), não a entidade Project ('TD')."""
+        tasks = await CapacityService._select_tasks_in_window(db, date_from, date_to)
+        root_of, root_title = await CapacityService._root_index(db)
+        person_ids = {t.assigned_to for t in tasks if t.assigned_to}
+        anames = {}
+        if person_ids:
+            anames = {pid: fn for pid, fn in (await db.execute(
+                select(Person.id, Person.full_name).where(Person.id.in_(person_ids))
+            )).all()}
+        out = [
+            SimTaskMeta(
+                task_id=t.id,
+                title=t.title,
+                project_name=root_title(root_of(t.id)),
+                assigned_to=t.assigned_to,
+                assignee_name=anames.get(t.assigned_to),
+                start_date=t.start_date.date(),
+                due_date=t.due_date.date(),
+                estimated_hours=float(t.estimated_hours or 0),
+            )
+            for t in tasks
+        ]
+        out.sort(key=lambda x: (x.project_name, x.title))
+        return SimTasksResponse(tasks=out)
+
+    @staticmethod
+    def _apply_and_measure(
+        base_tasks,
+        calendar,
+        mutations: list[ScenarioMutation],
+        date_from: date,
+        date_to: date,
+        base_over_set: set[tuple[uuid.UUID, date]],
+        cap_base_fn,
+    ) -> dict:
+        """Núcleo do simulador: aplica mutações sobre CÓPIAS plain (nunca no ORM) e mede o impacto
+        contra `base_over_set`, usando `cap_base_fn(uid, dia)` (capacidade das pessoas reais, já
+        resolvida uma vez pelo chamador). Puro/síncrono → o recomendador chama N vezes sem tocar o DB."""
+        from types import SimpleNamespace
+
+        after = [
+            SimpleNamespace(
+                id=t.id,
+                project_id=t.project_id,
+                assigned_to=t.assigned_to,
+                start_date=t.start_date,
+                due_date=t.due_date,
+                estimated_hours=float(t.estimated_hours or 0),
+            )
+            for t in base_tasks
+        ]
+        by_id = {t.id: t for t in after}
+        removed: set[uuid.UUID] = set()
+        virtual_caps: dict[uuid.UUID, float] = {}
+        virtual_meta: dict[uuid.UUID, CapacityPersonMeta] = {}
+
+        for m in mutations:
+            if m.op == "move_task" and m.task_id in by_id:
+                t = by_id[m.task_id]
+                if m.new_start:
+                    t.start_date = datetime.combine(m.new_start, datetime.min.time())
+                if m.new_due:
+                    t.due_date = datetime.combine(m.new_due, datetime.min.time())
+            elif m.op == "reassign" and m.task_id in by_id and m.new_person_id:
+                by_id[m.task_id].assigned_to = m.new_person_id
+            elif m.op == "scale_hours" and m.task_id in by_id and m.factor is not None:
+                by_id[m.task_id].estimated_hours = max(0.0, by_id[m.task_id].estimated_hours * float(m.factor))
+            elif m.op == "remove_person" and m.person_id:
+                removed.add(m.person_id)
+            elif m.op == "add_freelancer" and m.daily_hours:
+                vid = uuid.uuid4()
+                virtual_caps[vid] = float(m.daily_hours)
+                virtual_meta[vid] = CapacityPersonMeta(
+                    id=vid,
+                    full_name=(m.freelancer_name or "Freelancer"),
+                    position_slug="freelancer",
+                    position_label="Freelancer",
+                    area_ids=[],
+                )
+                for tid in m.assign_task_ids:
+                    if tid in by_id:
+                        by_id[tid].assigned_to = vid
+
+        acc_a, _bp_a, ids_a = CapacityService._distribute_hours(after, calendar, date_from, date_to)
+
+        def cap_after(uid: uuid.UUID, d: date) -> float:
+            if uid in removed:
+                return 0.0
+            if uid in virtual_caps:
+                return virtual_caps[uid] if calendar.is_working_day(d) else 0.0
+            return cap_base_fn(uid, d)
+
+        cells_a = CapacityService._build_cells(acc_a, cap_after)
+        over_a = {(c.user_id, c.date) for c in cells_a if c.overallocated}
+        return {
+            "acc_a": acc_a,
+            "ids_a": ids_a,
+            "cells_a": cells_a,
+            "over_a": over_a,
+            "virtual_meta": virtual_meta,
+            "virtual_caps": virtual_caps,
+            "resolved": len(base_over_set - over_a),
+            "new": len(over_a - base_over_set),
+            "after_over_cells": len(over_a),
+            "persons_over_after": len({u for u, _ in over_a}),
+        }
+
+    @staticmethod
+    async def simulate(
+        db: AsyncSession,
+        date_from: date,
+        date_to: date,
+        mutations: list[ScenarioMutation],
+    ) -> ScenarioResult:
+        """Aplica mutações hipotéticas sobre CÓPIAS em memória (nunca no ORM — zero flush/commit)
+        e recalcula o heatmap, devolvendo o antes/depois. Efêmero: nada é persistido."""
+        calendar = await load_calendar(db)
+        tasks = await CapacityService._select_tasks_in_window(db, date_from, date_to)
+        acc_b, _bp_b, ids_b = CapacityService._distribute_hours(tasks, calendar, date_from, date_to)
+
+        # Capacidade das pessoas reais (executores base + alvos de reassign) — resolvida uma vez.
+        target_ids = {m.new_person_id for m in mutations if m.op == "reassign" and m.new_person_id}
+        real_ids = set(ids_b) | target_ids
+        cap_base = await CapacityService._capacity_resolver(db, real_ids, calendar)
+
+        cells_b = CapacityService._build_cells(acc_b, cap_base)
+        over_b = {(c.user_id, c.date) for c in cells_b if c.overallocated}
+
+        res = CapacityService._apply_and_measure(
+            tasks, calendar, mutations, date_from, date_to, over_b, cap_base
+        )
+        cells_a = res["cells_a"]
+        virtual_meta = res["virtual_meta"]
+        virtual_caps = res["virtual_caps"]
+
+        all_real = {i for i in (ids_b | res["ids_a"]) if i not in virtual_caps}
+        persons_by_id: dict[uuid.UUID, Person] = {}
+        if all_real:
+            ps = (await db.execute(
+                select(Person).options(selectinload(Person.areas)).where(Person.id.in_(all_real))
+            )).scalars().all()
+            persons_by_id = {p.id: p for p in ps}
+        unmapped_b = sorted(str(i) for i in ids_b if i not in persons_by_id and i not in virtual_caps)
+        unmapped_a = sorted(str(i) for i in res["ids_a"] if i not in persons_by_id and i not in virtual_caps)
+
+        before = CapacityService._assemble_heatmap(cells_b, persons_by_id, unmapped_b)
+        after_hm = CapacityService._assemble_heatmap(cells_a, persons_by_id, unmapped_a, virtual_meta)
+        over_a = res["over_a"]
+        diff = ScenarioDiff(
+            before_over_cells=len(over_b),
+            after_over_cells=len(over_a),
+            before_persons_over=len({u for u, _ in over_b}),
+            after_persons_over=len({u for u, _ in over_a}),
+            resolved_cells=res["resolved"],
+            new_cells=res["new"],
+            before_allocated_h=before.summary.total_allocated_h,
+            after_allocated_h=after_hm.summary.total_allocated_h,
+            before_capacity_h=before.summary.total_capacity_h,
+            after_capacity_h=after_hm.summary.total_capacity_h,
+        )
+        return ScenarioResult(before=before, after=after_hm, diff=diff)
+
+    # ── Simulador inteligente: cenários auto-gerados ──
+    @staticmethod
+    async def suggest_scenarios(
+        db: AsyncSession, date_from: date, date_to: date
+    ) -> ScenarioSuggestionsResponse:
+        """Detecta as sobrecargas e gera cenários prontos (com impacto já medido), na escada de
+        mercado: realocar interno (grátis) → freelancer (custo) → adiar prazo. Efêmero/read-only."""
+        from collections import Counter, defaultdict
+        from datetime import timedelta as _td
+
+        calendar = await load_calendar(db)
+        tasks = await CapacityService._select_tasks_in_window(db, date_from, date_to)
+        acc_b, _bp, ids_b = CapacityService._distribute_hours(tasks, calendar, date_from, date_to)
+
+        free = [f for f in (await CapacityService.find_available_people(db, date_from, date_to)).rows if f.free_hours_total > 0]
+        free_ids = {f.person_id for f in free}
+
+        cap_base = await CapacityService._capacity_resolver(db, set(ids_b) | free_ids, calendar)
+        cells_b = CapacityService._build_cells(acc_b, cap_base)
+        base_over = {(c.user_id, c.date) for c in cells_b if c.overallocated}
+        if not base_over:
+            return ScenarioSuggestionsResponse(has_overload=False, rows=[])
+        base_over_cells = len(base_over)
+        base_persons_over = len({u for u, _ in base_over})
+        over_days_by_person = Counter(u for u, _ in base_over)
+
+        person_ids = set(ids_b) | free_ids
+        persons: dict[uuid.UUID, Person] = {}
+        if person_ids:
+            ps = (await db.execute(
+                select(Person).options(selectinload(Person.areas)).where(Person.id.in_(person_ids))
+            )).scalars().all()
+            persons = {p.id: p for p in ps}
+
+        def pname(pid):
+            p = persons.get(pid)
+            return p.full_name if p else "?"
+
+        def pslug(pid):
+            p = persons.get(pid)
+            return p.position.slug if p and p.position else None
+
+        def pposname(pid):
+            p = persons.get(pid)
+            return p.position.name if p and p.position else "dev"
+
+        tasks_by_person: dict[uuid.UUID, list] = defaultdict(list)
+        for t in tasks:
+            if t.assigned_to:
+                tasks_by_person[t.assigned_to].append(t)
+
+        def twh(t):
+            return CapacityService._task_window_hours(t, calendar, date_from, date_to)
+
+        def measure(muts):
+            return CapacityService._apply_and_measure(tasks, calendar, muts, date_from, date_to, base_over, cap_base)
+
+        hpd = round(calendar.hours_per_day()) or 6
+        rows: list[SuggestedScenario] = []
+        TITLE = {"reassign": "Realocar", "freelancer": "Freelancer", "defer": "Adiar prazo"}
+
+        for pid, _od in over_days_by_person.most_common():
+            ptasks = sorted(tasks_by_person.get(pid, []), key=twh, reverse=True)
+            if not ptasks:
+                continue
+            heavy = ptasks[0]
+            heavy_h = twh(heavy)
+            if heavy_h <= 0:
+                continue
+            slug = pslug(pid)
+
+            # Melhor pessoa livre: mesmo cargo com folga → mesmo cargo → qualquer livre.
+            pool = [f for f in free if f.position_slug == slug and f.person_id != pid and f.free_hours_total >= heavy_h]
+            if not pool:
+                pool = [f for f in free if f.position_slug == slug and f.person_id != pid]
+            if not pool:
+                pool = [f for f in free if f.person_id != pid]
+            pool.sort(key=lambda f: f.free_hours_total, reverse=True)
+            cand = pool[0] if pool else None
+
+            remedies = []
+            if cand:
+                same = cand.position_slug == slug
+                remedies.append(("reassign", "gratis",
+                    ScenarioMutation(op="reassign", task_id=heavy.id, new_person_id=cand.person_id),
+                    f"Passar \"{heavy.title}\" ({round(heavy_h)}h) de {pname(pid)} (sobrecarregado) para "
+                    f"{cand.full_name} (livre{', mesmo cargo' if same else ', outro cargo'})"))
+            remedies.append(("freelancer", "custo",
+                ScenarioMutation(op="add_freelancer", freelancer_name=f"Freela ({pposname(pid)})",
+                                 daily_hours=hpd, assign_task_ids=[heavy.id]),
+                f"Contratar 1 freelancer ({hpd}h/dia) para assumir \"{heavy.title}\" ({round(heavy_h)}h) de {pname(pid)}"))
+            remedies.append(("defer", "prazo",
+                ScenarioMutation(op="move_task", task_id=heavy.id,
+                                 new_start=(heavy.start_date + _td(days=14)).date(),
+                                 new_due=(heavy.due_date + _td(days=14)).date()),
+                f"Adiar \"{heavy.title}\" em 2 semanas para aliviar {pname(pid)}"))
+
+            added = 0
+            for kind, cost, mut, desc in remedies:
+                r = measure([mut])
+                if r["resolved"] <= r["new"]:  # só net positivo (resolve mais do que cria)
+                    continue
+                rows.append(SuggestedScenario(
+                    id=f"{kind}:{heavy.id}:{pid}",
+                    title=f"{TITLE[kind]} — {pname(pid)}",
+                    description=desc, kind=kind, cost_tag=cost, target_person_name=pname(pid),
+                    mutations=[mut],
+                    resolved_cells=r["resolved"], new_cells=r["new"],
+                    before_over_cells=base_over_cells, after_over_cells=r["after_over_cells"],
+                    persons_over_before=base_persons_over, persons_over_after=r["persons_over_after"],
+                ))
+                added += 1
+                if added >= 2:
+                    break
+
+        kind_rank = {"reassign": 0, "freelancer": 1, "defer": 2, "combo": -1}
+        rows.sort(key=lambda s: (kind_rank[s.kind], -s.resolved_cells, s.new_cells))
+        rows = rows[:10]
+
+        # "Plano completo": realocações internas não-conflitantes (mesmo cargo, folga restante).
+        combo_muts: list[ScenarioMutation] = []
+        remaining = {f.person_id: f.free_hours_total for f in free}
+        for pid, _od in over_days_by_person.most_common():
+            slug = pslug(pid)
+            for t in sorted(tasks_by_person.get(pid, []), key=twh, reverse=True):
+                h = twh(t)
+                if h <= 0:
+                    continue
+                best = next((f for f in sorted(free, key=lambda f: remaining.get(f.person_id, 0), reverse=True)
+                             if f.person_id != pid and f.position_slug == slug and remaining.get(f.person_id, 0) >= h), None)
+                if best:
+                    combo_muts.append(ScenarioMutation(op="reassign", task_id=t.id, new_person_id=best.person_id))
+                    remaining[best.person_id] -= h
+                    break  # a tarefa realocável mais pesada por pessoa
+        if combo_muts:
+            rc = measure(combo_muts)
+            if rc["resolved"] > rc["new"]:
+                rows.insert(0, SuggestedScenario(
+                    id="combo:full",
+                    title=f"Plano completo — {len(combo_muts)} realocação(ões)",
+                    description=f"Redistribui {len(combo_muts)} tarefa(s) para pessoas livres do mesmo cargo, "
+                                f"resolvendo o máximo sem custo.",
+                    kind="combo", cost_tag="gratis", target_person_name=None,
+                    mutations=combo_muts,
+                    resolved_cells=rc["resolved"], new_cells=rc["new"],
+                    before_over_cells=base_over_cells, after_over_cells=rc["after_over_cells"],
+                    persons_over_before=base_persons_over, persons_over_after=rc["persons_over_after"],
+                ))
+
+        return ScenarioSuggestionsResponse(has_overload=True, rows=rows)
+
+    # ── Vazamento entre times (cross-team) ──
+    @staticmethod
+    def _task_window_hours(task, calendar, date_from: date, date_to: date) -> float:
+        """Horas da tarefa que caem na janela [date_from, date_to], usando a MESMA distribuição
+        por dias úteis de _distribute_hours (per_day × nº de dias úteis na janela)."""
+        hours = float(task.estimated_hours or 0)
+        if hours <= 0:
+            return 0.0
+        work_days: list[date] = []
+        cur = task.start_date
+        while cur.date() <= task.due_date.date():
+            if calendar.is_working_day(cur.date()):
+                work_days.append(cur.date())
+            cur = cur + timedelta(days=1)
+        if not work_days:
+            return 0.0
+        per_day = hours / len(work_days)
+        in_win = sum(1 for d in work_days if date_from <= d <= date_to)
+        return per_day * in_win
+
+    @staticmethod
+    async def analyze_cross_team(
+        db: AsyncSession, date_from: date, date_to: date
+    ) -> CrossTeamResponse:
+        """Vazamento de capacidade entre times: para cada pessoa, quanto das horas na janela vai
+        para o SEU time (Área) vs para outros times. 'Time dono' de um trabalho = Área do PO
+        (assigned_to) do card-raiz de planejamento (sobe parent_task_id até planning_kind
+        projeto/programa). Risco = horas fora do time > horas no próprio time."""
+        from collections import defaultdict
+
+        calendar = await load_calendar(db)
+
+        # 1. Grafo de cards (leve) + resolvedor memoizado do card-raiz.
+        graph = (await db.execute(
+            select(
+                ProjectTask.id,
+                ProjectTask.parent_task_id,
+                ProjectTask.planning_kind,
+                ProjectTask.assigned_to,
+            )
+        )).all()
+        parent: dict[uuid.UUID, Optional[uuid.UUID]] = {}
+        kind: dict[uuid.UUID, Optional[str]] = {}
+        owner: dict[uuid.UUID, Optional[uuid.UUID]] = {}
+        for tid, pid, pk, asg in graph:
+            parent[tid] = pid
+            kind[tid] = pk
+            owner[tid] = asg
+
+        ROOT_KINDS = ("projeto", "programa")
+        root_cache: dict[uuid.UUID, uuid.UUID] = {}
+
+        def root_of(tid: uuid.UUID) -> uuid.UUID:
+            seen: list[uuid.UUID] = []
+            cur: Optional[uuid.UUID] = tid
+            r = tid
+            while cur is not None:
+                if cur in root_cache:
+                    r = root_cache[cur]
+                    break
+                seen.append(cur)
+                if kind.get(cur) in ROOT_KINDS:
+                    r = cur
+                    break
+                nxt = parent.get(cur)
+                if nxt is None or nxt == cur or nxt in seen:
+                    r = cur
+                    break
+                cur = nxt
+            for s in seen:
+                root_cache[s] = r
+            return r
+
+        # 2. Tarefas agendadas na janela.
+        tasks = await CapacityService._select_tasks_in_window(db, date_from, date_to)
+
+        # 3. Áreas de executores ∪ POs dos roots (uma query).
+        root_po: dict[uuid.UUID, Optional[uuid.UUID]] = {}
+        for t in tasks:
+            r = root_of(t.id)
+            root_po[r] = owner.get(r)
+        exec_ids = {t.assigned_to for t in tasks if t.assigned_to}
+        po_ids = {pid for pid in root_po.values() if pid}
+        person_ids = exec_ids | po_ids
+        persons_by_id: dict[uuid.UUID, Person] = {}
+        if person_ids:
+            ps = (await db.execute(
+                select(Person).options(selectinload(Person.areas)).where(Person.id.in_(person_ids))
+            )).scalars().all()
+            persons_by_id = {p.id: p for p in ps}
+
+        def areas_of(pid: Optional[uuid.UUID]) -> dict[uuid.UUID, str]:
+            p = persons_by_id.get(pid) if pid else None
+            return {a.id: a.name for a in p.areas} if p else {}
+
+        # 4/5. Atribuição e agregação por pessoa.
+        home: dict[uuid.UUID, float] = defaultdict(float)
+        undef: dict[uuid.UUID, float] = defaultdict(float)
+        total: dict[uuid.UUID, float] = defaultdict(float)
+        away: dict[uuid.UUID, dict[uuid.UUID, float]] = defaultdict(lambda: defaultdict(float))
+        team_name: dict[uuid.UUID, str] = {}
+
+        for t in tasks:
+            p = t.assigned_to
+            if not p:
+                continue
+            wh = CapacityService._task_window_hours(t, calendar, date_from, date_to)
+            if wh <= 0:
+                continue
+            total[p] += wh
+            po = root_po.get(root_of(t.id))
+            owner_areas = areas_of(po) if po else {}
+            person_areas = set(areas_of(p).keys())
+            if not owner_areas:
+                undef[p] += wh
+            elif set(owner_areas.keys()) & person_areas:
+                home[p] += wh
+            else:
+                aid = sorted(owner_areas.keys(), key=lambda k: owner_areas[k])[0]
+                away[p][aid] += wh
+                team_name[aid] = owner_areas[aid]
+
+        rows: list[CrossTeamPersonRow] = []
+        for p in total.keys():
+            pp = persons_by_id.get(p)
+            pareas = pp.areas if pp else []
+            away_total = sum(away[p].values())
+            tot = total[p]
+            away_items = [
+                CrossTeamAwayItem(team_area_id=aid, team_name=team_name.get(aid, "—"), hours=round(h, 2))
+                for aid, h in sorted(away[p].items(), key=lambda kv: kv[1], reverse=True)
+            ]
+            rows.append(CrossTeamPersonRow(
+                person_id=p,
+                full_name=(pp.full_name if pp else str(p)),
+                position_label=(pp.position.name if pp and pp.position else None),
+                home_area_ids=[a.id for a in pareas],
+                home_area_names=[a.name for a in pareas],
+                home_hours=round(home[p], 2),
+                away_hours=round(away_total, 2),
+                undefined_hours=round(undef[p], 2),
+                total_hours=round(tot, 2),
+                away_pct=round((away_total / tot * 100) if tot > 0 else 0.0, 1),
+                at_risk=away_total > home[p] + 1e-6,
+                away_by_team=away_items,
+            ))
+        rows.sort(key=lambda r: (r.away_pct, r.away_hours), reverse=True)
+        return CrossTeamResponse(rows=rows)
 
 
 class ProjectTaskCommentService:
@@ -4231,6 +5858,7 @@ class ProjectStageAgentService:
             has_gateway_client_secret=bool(item.gateway_client_secret),
             continue_thread=item.continue_thread,
             add_comment_on_success=item.add_comment_on_success,
+            advance_to_status_id=item.advance_to_status_id,
             is_active=item.is_active,
             created_at=item.created_at,
             updated_at=item.updated_at,
@@ -4400,7 +6028,10 @@ class ProjectStageAgentService:
 
 
 class ProjectAgentRunner:
-    """Dispara agentes IDCortex quando um card entra numa etapa vinculada."""
+    """Dispara agentes do Azure AI Foundry quando um card entra numa etapa vinculada."""
+
+    # Cache do token Entra ID (compartilhado): {"token": str, "exp": float (time.monotonic)}.
+    _AZURE_TOKEN_CACHE: dict = {}
 
     @staticmethod
     async def run_on_enter(
@@ -4470,38 +6101,64 @@ class ProjectAgentRunner:
         return prev.thread_id if prev else None
 
     @staticmethod
-    def _format_gateway_error(exc: Exception, gateway_url: str) -> str:
+    def _format_gateway_error(exc: Exception, endpoint: str = "") -> str:
         msg = str(exc)
-        host = gateway_url.replace("https://", "").replace("http://", "").split("/")[0]
+        host = (endpoint or settings.AZURE_AI_ENDPOINT or "").replace("https://", "").replace("http://", "").split("/")[0]
         if "Name or service not known" in msg or "Errno -2" in msg or "nodename nor servname" in msg.lower():
             return (
-                f"Não foi possível resolver o host do gateway ({host}). "
-                f"Este servidor não encontra esse endereço no DNS. "
-                f"Confirme a URL com o time IDCortex, cadastre o DNS ou use o IP correto em "
-                f"Configurações → Agentes → URL do gateway."
+                f"Não foi possível resolver o host do Azure AI Foundry ({host}). "
+                f"Confirme AZURE_AI_ENDPOINT no .env e o DNS/rede deste servidor."
             )
         if "ConnectError" in type(exc).__name__ or "connection" in msg.lower():
-            return f"Falha ao conectar ao gateway ({gateway_url}): {msg[:500]}"
+            return f"Falha ao conectar ao Azure AI Foundry ({host}): {msg[:500]}"
         return msg[:2000]
 
     @staticmethod
-    def _gateway_credentials(binding: ProjectStageAgentBinding) -> tuple[str, str, str]:
-        gateway_url = (binding.gateway_url or settings.IDCORTEX_GATEWAY_URL or "").strip()
-        client_id = (binding.gateway_client_id or settings.IDCORTEX_CLIENT_ID or "").strip()
-        client_secret = (binding.gateway_client_secret or settings.IDCORTEX_CLIENT_SECRET or "").strip()
-        return gateway_url, client_id, client_secret
+    def _azure_config(binding: ProjectStageAgentBinding) -> tuple[str, str]:
+        """(endpoint_base, api_version). Endpoint vem SEMPRE do .env (AZURE_AI_ENDPOINT) —
+        o campo legado binding.gateway_url (IDCortex) é ignorado."""
+        endpoint = (settings.AZURE_AI_ENDPOINT or "").strip().rstrip("/")
+        api_version = (settings.AZURE_AI_API_VERSION or "2025-05-01").strip()
+        return endpoint, api_version
+
+    @staticmethod
+    def _azure_sp_configured() -> bool:
+        return bool(settings.AZURE_AI_TENANT_ID and settings.AZURE_AI_CLIENT_ID and settings.AZURE_AI_CLIENT_SECRET)
+
+    @staticmethod
+    async def _azure_token() -> str:
+        """Token Bearer (Microsoft Entra ID) via client-credentials, com cache até ~expirar.
+        Escopo do Foundry Agent Service: https://ai.azure.com/.default."""
+        now = time.monotonic()
+        cache = ProjectAgentRunner._AZURE_TOKEN_CACHE
+        if cache.get("token") and (cache.get("exp", 0.0) - 60) > now:
+            return cache["token"]
+        url = f"https://login.microsoftonline.com/{settings.AZURE_AI_TENANT_ID}/oauth2/v2.0/token"
+        data = {
+            "grant_type": "client_credentials",
+            "client_id": settings.AZURE_AI_CLIENT_ID,
+            "client_secret": settings.AZURE_AI_CLIENT_SECRET,
+            "scope": "https://ai.azure.com/.default",
+        }
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            r = await client.post(url, data=data)
+            r.raise_for_status()
+            j = r.json()
+        cache["token"] = j["access_token"]
+        cache["exp"] = now + float(j.get("expires_in", 3600))
+        return cache["token"]
 
     @staticmethod
     def _credentials_error_message(binding: ProjectStageAgentBinding) -> str:
-        gateway_url, client_id, client_secret = ProjectAgentRunner._gateway_credentials(binding)
+        endpoint, _ = ProjectAgentRunner._azure_config(binding)
         missing: list[str] = []
-        if not gateway_url:
-            missing.append("URL do gateway (IDCORTEX_GATEWAY_URL ou na config do agente)")
-        if not client_id:
-            missing.append("X-Client-ID (IDCORTEX_CLIENT_ID ou gateway_client_id na config)")
-        if not client_secret:
-            missing.append("X-Client-Secret (IDCORTEX_CLIENT_SECRET ou gateway_client_secret na config)")
-        return "Credenciais IDCortex incompletas: " + "; ".join(missing)
+        if not endpoint:
+            missing.append("AZURE_AI_ENDPOINT (.env)")
+        if not ProjectAgentRunner._azure_sp_configured():
+            missing.append("credenciais Entra ID — AZURE_AI_TENANT_ID/CLIENT_ID/CLIENT_SECRET (.env)")
+        if not (binding.agent_id or "").strip():
+            missing.append("ID do agente na config do agente")
+        return "Configuração do Azure AI Foundry incompleta: " + "; ".join(missing)
 
     @staticmethod
     def _notify_agent_failure(
@@ -4516,31 +6173,106 @@ class ProjectAgentRunner:
         )
 
     @staticmethod
-    async def _call_gateway(
+    def _extract_assistant_text(messages: list) -> Optional[str]:
+        """Extrai o texto da última mensagem do assistant (formato threads/messages do Azure)."""
+        for m in messages:
+            if m.get("role") != "assistant":
+                continue
+            parts = []
+            for c in (m.get("content") or []):
+                if c.get("type") == "text":
+                    parts.append(((c.get("text") or {}).get("value") or ""))
+                elif isinstance(c.get("text"), str):
+                    parts.append(c["text"])
+            txt = "\n".join(p for p in parts if p).strip()
+            if txt:
+                return txt
+        return None
+
+    @staticmethod
+    async def _call_azure_agent(
         binding: ProjectStageAgentBinding,
-        payload: dict,
+        prompt: str,
         thread_id: Optional[str],
     ) -> tuple[int, dict, Optional[str]]:
-        gateway_url, client_id, client_secret = ProjectAgentRunner._gateway_credentials(binding)
-        if not gateway_url or not client_id or not client_secret:
+        """Executa o agente no Azure AI Foundry (threads → message → run → poll → messages).
+        Auth por Microsoft Entra ID (Bearer). Retorna (status_code, body, answer_message)."""
+        endpoint, api_version = ProjectAgentRunner._azure_config(binding)
+        if not endpoint or not ProjectAgentRunner._azure_sp_configured() or not (binding.agent_id or "").strip():
             raise ValueError(ProjectAgentRunner._credentials_error_message(binding))
-        body_payload = {**payload, "thread_id": thread_id}
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(
-                gateway_url,
-                json=body_payload,
-                headers={
-                    "Content-Type": "application/json",
-                    "X-Client-ID": client_id,
-                    "X-Client-Secret": client_secret,
-                },
-            )
-        body = resp.json() if resp.content else {}
-        if not isinstance(body, dict):
-            body = {"raw": str(body)}
-        answer = body.get("answer") if isinstance(body.get("answer"), dict) else None
-        answer_message = answer.get("message") if answer else None
-        return resp.status_code, body, answer_message
+        token = await ProjectAgentRunner._azure_token()
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        params = {"api-version": api_version}
+        tid = thread_id
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                if not tid:
+                    r = await client.post(f"{endpoint}/threads", params=params, headers=headers, json={})
+                    r.raise_for_status()
+                    tid = r.json().get("id")
+                r = await client.post(
+                    f"{endpoint}/threads/{tid}/messages", params=params, headers=headers,
+                    json={"role": "user", "content": prompt},
+                )
+                r.raise_for_status()
+                r = await client.post(
+                    f"{endpoint}/threads/{tid}/runs", params=params, headers=headers,
+                    json={"assistant_id": binding.agent_id},
+                )
+                r.raise_for_status()
+                run = r.json()
+                run_id, status = run.get("id"), run.get("status")
+                waited = 0.0
+                while status in ("queued", "in_progress", "cancelling", "requires_action"):
+                    if waited >= 110:
+                        raise RuntimeError("Tempo esgotado aguardando a resposta do agente Azure (run não concluído).")
+                    await asyncio.sleep(1.5)
+                    waited += 1.5
+                    r = await client.get(f"{endpoint}/threads/{tid}/runs/{run_id}", params=params, headers=headers)
+                    r.raise_for_status()
+                    status = r.json().get("status")
+                if status != "completed":
+                    le = (r.json().get("last_error") or {}) if r.content else {}
+                    detail = le.get("message", "")
+                    if "rate limit" in detail.lower() or le.get("code") == "rate_limit_exceeded":
+                        raise RuntimeError(
+                            "Limite de requisições da Azure atingido (rate limit) no modelo do agente. "
+                            "Tente novamente em instantes ou aumente a cota (TPM) do deployment no Azure AI Foundry."
+                        )
+                    raise RuntimeError(
+                        f"Run do agente Azure terminou como '{status}'. {detail}".strip()
+                    )
+                r = await client.get(f"{endpoint}/threads/{tid}/messages", params=params, headers=headers)
+                r.raise_for_status()
+                answer_message = ProjectAgentRunner._extract_assistant_text(r.json().get("data") or [])
+        except httpx.HTTPStatusError as exc:
+            # Erro HTTP do Azure → devolve o status para o chamador reportar mensagem amigável.
+            return exc.response.status_code, {"thread_id": tid, "error": (exc.response.text or "")[:300]}, None
+        body = {"thread_id": tid, "run_status": status, "answer": {"message": answer_message}}
+        return 200, body, answer_message
+
+    @staticmethod
+    def _gateway_http_message(status_code: int) -> str:
+        """Mensagem amigável para falhas HTTP do Azure (em vez de só o código cru)."""
+        if status_code in (502, 503, 504):
+            return (f"Azure AI Foundry indisponível no momento (HTTP {status_code}). "
+                    f"Tente novamente em alguns minutos.")
+        if status_code in (401, 403):
+            return (f"Azure retornou HTTP {status_code} — token Entra ID inválido ou o service "
+                    f"principal não tem a role 'Cognitive Services User'/'Foundry User' no projeto.")
+        if status_code == 404:
+            return ("Azure retornou HTTP 404 — verifique AZURE_AI_ENDPOINT, a api-version e o "
+                    "ID do agente (assistant).")
+        return f"Azure retornou HTTP {status_code}"
+
+    @staticmethod
+    async def _anonymize_prompt(db: AsyncSession, prompt: str) -> tuple[str, dict]:
+        """Anonimiza o prompt antes de enviar ao Azure (EXTERNO): nomes→papéis funcionais,
+        e-mails→marcadores, dados sensíveis e sistemas generalizados. Retorna (texto, relatório)."""
+        if not isinstance(prompt, str) or not prompt:
+            return prompt, {}
+        names = set((await db.execute(select(Person.full_name))).scalars().all())
+        return anonymize_text(prompt, names)
 
     @staticmethod
     def _extract_json_from_text(text: str) -> Optional[dict]:
@@ -4750,8 +6482,8 @@ class ProjectAgentRunner:
         task: ProjectTask,
         binding: ProjectStageAgentBinding,
     ) -> None:
-        gateway_url, client_id, client_secret = ProjectAgentRunner._gateway_credentials(binding)
-        if not gateway_url or not client_id or not client_secret:
+        endpoint, _ = ProjectAgentRunner._azure_config(binding)
+        if not endpoint or not ProjectAgentRunner._azure_sp_configured() or not (binding.agent_id or "").strip():
             err = ProjectAgentRunner._credentials_error_message(binding)
             exec_row = ProjectAgentExecution(
                 task_id=task.id,
@@ -4769,29 +6501,28 @@ class ProjectAgentRunner:
         if binding.continue_thread:
             thread_id = await ProjectAgentRunner._resolve_thread_id(db, task.id, binding.id)
 
-        payload = {
-            "usuario": binding.usuario,
-            "id_agente": binding.agent_id,
-            "mensagem": prompt,
-        }
+        # Anonimiza ANTES de registrar e enviar (DLP/PII): o registro guarda o conteúdo já
+        # anonimizado + relatório de categorias tratadas (nunca os dados reais removidos).
+        send_msg, anon_report = await ProjectAgentRunner._anonymize_prompt(db, prompt)
         exec_row = ProjectAgentExecution(
             task_id=task.id,
             binding_id=binding.id,
             status="pending",
             thread_id=thread_id,
-            request_payload={**payload, "thread_id": thread_id},
+            request_payload={"agent_id": binding.agent_id, "mensagem": send_msg,
+                             "thread_id": thread_id, "_anonimizacao": anon_report},
         )
         db.add(exec_row)
         await db.flush()
 
         try:
-            status_code, body, answer_message = await ProjectAgentRunner._call_gateway(
-                binding, payload, thread_id,
+            status_code, body, answer_message = await ProjectAgentRunner._call_azure_agent(
+                binding, send_msg, thread_id,
             )
             if status_code >= 400:
                 exec_row.status = "failed"
                 exec_row.response_payload = body
-                exec_row.error_message = f"Gateway retornou HTTP {status_code}"
+                exec_row.error_message = ProjectAgentRunner._gateway_http_message(status_code)
             else:
                 exec_row.status = "success"
                 exec_row.response_payload = body
@@ -4805,8 +6536,7 @@ class ProjectAgentRunner:
                     ))
         except Exception as exc:  # noqa: BLE001
             exec_row.status = "failed"
-            gw_url, _, _ = ProjectAgentRunner._gateway_credentials(binding)
-            exec_row.error_message = ProjectAgentRunner._format_gateway_error(exc, gw_url)
+            exec_row.error_message = ProjectAgentRunner._format_gateway_error(exc)
             db.add(ProjectAgentRunner._notify_agent_failure(binding, task.id, exec_row.error_message))
         await db.commit()
 
@@ -4829,24 +6559,23 @@ class ProjectAgentRunner:
         if binding.continue_thread:
             thread_id = await ProjectAgentRunner._resolve_thread_id(db, task.id, binding.id)
 
-        payload = {
-            "usuario": binding.usuario,
-            "id_agente": binding.agent_id,
-            "mensagem": prompt,
-        }
+        # Anonimiza ANTES de registrar e enviar (DLP/PII): o registro guarda o conteúdo já
+        # anonimizado + relatório de categorias tratadas (nunca os dados reais removidos).
+        send_msg, anon_report = await ProjectAgentRunner._anonymize_prompt(db, prompt)
         exec_row = ProjectAgentExecution(
             task_id=task.id,
             binding_id=binding.id,
             status="pending",
             thread_id=thread_id,
-            request_payload={**payload, "thread_id": thread_id},
+            request_payload={"agent_id": binding.agent_id, "mensagem": send_msg,
+                             "thread_id": thread_id, "_anonimizacao": anon_report},
         )
         db.add(exec_row)
         await db.flush()
 
         try:
-            status_code, body, answer_message = await ProjectAgentRunner._call_gateway(
-                binding, payload, thread_id,
+            status_code, body, answer_message = await ProjectAgentRunner._call_azure_agent(
+                binding, send_msg, thread_id,
             )
             exec_row.response_payload = body
             exec_row.thread_id = body.get("thread_id")
@@ -4854,7 +6583,7 @@ class ProjectAgentRunner:
 
             if status_code >= 400:
                 exec_row.status = "failed"
-                exec_row.error_message = f"Gateway retornou HTTP {status_code}"
+                exec_row.error_message = ProjectAgentRunner._gateway_http_message(status_code)
                 db.add(ProjectAgentRunner._notify_agent_failure(binding, task.id, exec_row.error_message))
                 await db.commit()
                 return
@@ -4875,11 +6604,19 @@ class ProjectAgentRunner:
                 raise ValueError("Falha ao registrar execução do agente.")
             await db.refresh(task)
 
-            next_status = await ProjectAgentRunner._next_status_in_funnel(
-                db, current_status.funnel_id, current_status.order,
-            )
+            # Raia de destino: usa a configurada no agente (advance_to_status_id), se válida
+            # neste projeto; caso contrário, avança para a próxima etapa do funil.
+            next_status = None
+            if binding.advance_to_status_id:
+                cfg = await db.get(ProjectStatusConfig, binding.advance_to_status_id)
+                if cfg is not None and cfg.project_id == project_id:
+                    next_status = cfg
+            if next_status is None:
+                next_status = await ProjectAgentRunner._next_status_in_funnel(
+                    db, current_status.funnel_id, current_status.order,
+                )
             advanced_to: Optional[str] = None
-            if next_status:
+            if next_status and next_status.id != task.status_id:
                 await ProjectTaskService.update(
                     db,
                     project_id,
@@ -4911,8 +6648,7 @@ class ProjectAgentRunner:
             await db.commit()
         except Exception as exc:  # noqa: BLE001
             exec_row.status = "failed"
-            gw_url, _, _ = ProjectAgentRunner._gateway_credentials(binding)
-            exec_row.error_message = ProjectAgentRunner._format_gateway_error(exc, gw_url)
+            exec_row.error_message = ProjectAgentRunner._format_gateway_error(exc)
             db.add(ProjectAgentRunner._notify_agent_failure(binding, task.id, exec_row.error_message))
             await db.commit()
 
@@ -6037,16 +7773,17 @@ class PoPortfolioService:
 _CARD_FIELDS_SEED: list[dict] = [
     {"field_key": "demand_type", "label": "Tipo da demanda", "is_visible": True, "order": 0},
     {"field_key": "priority_quadrant", "label": "Classificação da prioridade", "is_visible": True, "order": 1},
-    {"field_key": "schedule_sla", "label": "Situação (SLA/cronograma)", "is_visible": True, "order": 2},
-    {"field_key": "code", "label": "Código", "is_visible": False, "order": 3},
-    {"field_key": "title", "label": "Título", "is_visible": True, "order": 4},
-    {"field_key": "description", "label": "Descrição", "is_visible": False, "order": 5},
-    {"field_key": "parent", "label": "Projeto pai", "is_visible": True, "order": 6},
-    {"field_key": "children_progress", "label": "Conclusão dos filhos", "is_visible": False, "order": 7},
-    {"field_key": "diretoria", "label": "Diretoria", "is_visible": False, "order": 8},
-    {"field_key": "area", "label": "Área", "is_visible": False, "order": 9},
-    {"field_key": "due_date", "label": "Prazo", "is_visible": True, "order": 10},
-    {"field_key": "assignee", "label": "Responsável", "is_visible": True, "order": 11},
+    {"field_key": "card_classification", "label": "Tipo (portfólio)", "is_visible": True, "order": 2},
+    {"field_key": "schedule_sla", "label": "Situação (SLA/cronograma)", "is_visible": True, "order": 3},
+    {"field_key": "code", "label": "Código", "is_visible": False, "order": 4},
+    {"field_key": "title", "label": "Título", "is_visible": True, "order": 5},
+    {"field_key": "description", "label": "Descrição", "is_visible": False, "order": 6},
+    {"field_key": "parent", "label": "Projeto pai", "is_visible": True, "order": 7},
+    {"field_key": "children_progress", "label": "Conclusão dos filhos", "is_visible": False, "order": 8},
+    {"field_key": "diretoria", "label": "Diretoria", "is_visible": False, "order": 9},
+    {"field_key": "area", "label": "Área", "is_visible": False, "order": 10},
+    {"field_key": "due_date", "label": "Prazo", "is_visible": True, "order": 11},
+    {"field_key": "assignee", "label": "Responsável", "is_visible": True, "order": 12},
 ]
 _CARD_FIELD_KEYS = {row["field_key"] for row in _CARD_FIELDS_SEED}
 # Prefixo das chaves de campos personalizados do formulário no layout do card.
@@ -7030,6 +8767,12 @@ class PoSyncService:
             "prazo": {"projetos": None, "itens": None, "sem_datas_comparaveis": 0},
             "ranking_pos": [], "por_po": [], "por_diretoria": [],
             "maiores_atrasos": [], "baseline_gaps": None, "proximos_passos": [],
+            "saude_produtos": {"por_po": [], "resumo": {
+                "total_produtos": 0, "media_score": 0.0,
+                "producao": {"total": 0, "score_medio": None},
+                "desenvolvimento": {"total": 0, "score_medio": None},
+                "outros": {"total": 0, "score_medio": None},
+                "distribuicao": {"saudavel": 0, "atencao": 0, "critico": 0}}},
             "available_diretorias": available_diretorias, "available_areas": available_areas,
         }
 
@@ -7322,10 +9065,90 @@ class PoSyncService:
                 f"revisar os maiores outliers e replanejar."
             )
 
+        # ── Saúde do portfólio de PRODUTOS por PO (módulo Produtos, tenant-wide) ──
+        from app.modules.produtos.service import ProductService
+        saude_produtos = await ProductService.health_by_po(db)
+
         return {
             "meta": meta, "capa": capa, "panorama": panorama, "prazo": prazo,
             "ranking_pos": ranking_pos, "por_po": por_po, "por_diretoria": por_diretoria,
             "maiores_atrasos": maiores_atrasos, "baseline_gaps": baseline_gaps,
-            "proximos_passos": proximos_passos,
+            "proximos_passos": proximos_passos, "saude_produtos": saude_produtos,
             "available_diretorias": available_diretorias, "available_areas": available_areas,
         }
+
+
+class ProjectProgramService:
+    """CRUD do cadastro próprio de Programas (catálogo do tenant)."""
+
+    @staticmethod
+    async def _person_names(db: AsyncSession, ids: set) -> dict:
+        ids = {i for i in ids if i}
+        if not ids:
+            return {}
+        rows = await db.execute(select(Person.id, Person.full_name).where(Person.id.in_(ids)))
+        return {r[0]: r[1] for r in rows.all()}
+
+    @classmethod
+    def _to_response(cls, item: ProjectProgram, names: dict) -> ProjectProgramResponse:
+        return ProjectProgramResponse(
+            id=item.id, name=item.name, description=item.description,
+            responsavel_person_id=item.responsavel_person_id,
+            responsavel_nome=names.get(item.responsavel_person_id),
+            is_active=item.is_active, created_at=item.created_at, updated_at=item.updated_at,
+        )
+
+    @classmethod
+    async def list(cls, db: AsyncSession, active_only: bool = False) -> list[ProjectProgramResponse]:
+        q = select(ProjectProgram)
+        if active_only:
+            q = q.where(ProjectProgram.is_active == True)  # noqa: E712
+        rows = (await db.execute(q.order_by(ProjectProgram.name.asc()))).scalars().all()
+        names = await cls._person_names(db, {p.responsavel_person_id for p in rows})
+        return [cls._to_response(p, names) for p in rows]
+
+    @classmethod
+    async def create(cls, db: AsyncSession, data: ProjectProgramCreate,
+                     user_id: Optional[uuid.UUID] = None) -> ProjectProgramResponse:
+        item = ProjectProgram(
+            name=data.name.strip(),
+            description=(data.description or None),
+            responsavel_person_id=data.responsavel_person_id,
+            is_active=data.is_active,
+            created_by=user_id,
+        )
+        db.add(item)
+        await db.commit()
+        await db.refresh(item)
+        names = await cls._person_names(db, {item.responsavel_person_id})
+        return cls._to_response(item, names)
+
+    @classmethod
+    async def update(cls, db: AsyncSession, program_id: uuid.UUID, data: ProjectProgramUpdate,
+                     user_id: Optional[uuid.UUID] = None) -> ProjectProgramResponse:
+        item = await db.get(ProjectProgram, program_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="Programa não encontrado.")
+        payload = data.model_dump(exclude_unset=True)
+        if "name" in payload and payload["name"]:
+            item.name = payload["name"].strip()
+        if "description" in payload:
+            item.description = payload["description"] or None
+        if "responsavel_person_id" in payload:
+            item.responsavel_person_id = payload["responsavel_person_id"]
+        if "is_active" in payload and payload["is_active"] is not None:
+            item.is_active = payload["is_active"]
+        item.updated_by = user_id
+        item.updated_at = datetime.utcnow()
+        await db.commit()
+        await db.refresh(item)
+        names = await cls._person_names(db, {item.responsavel_person_id})
+        return cls._to_response(item, names)
+
+    @staticmethod
+    async def delete(db: AsyncSession, program_id: uuid.UUID) -> None:
+        item = await db.get(ProjectProgram, program_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="Programa não encontrado.")
+        await db.delete(item)
+        await db.commit()

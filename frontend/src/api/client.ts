@@ -3,6 +3,9 @@ import axios from "axios"
 const api = axios.create({
   baseURL: "/api/v1",
   headers: { "Content-Type": "application/json" },
+  // Evita spinner eterno se o backend travar/ficar lento: a request falha em 20s
+  // e o .finally(setLoading(false)) da UI dispara.
+  timeout: 20000,
 })
 
 // Injeta o token em toda requisição

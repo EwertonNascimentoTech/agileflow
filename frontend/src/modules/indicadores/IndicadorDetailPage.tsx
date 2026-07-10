@@ -72,7 +72,7 @@ export default function IndicadorDetailPage() {
     try {
       const updated = await indicadoresApi.atualizarPortfolio(id)
       setInd(updated)
-      toast.success("Portfólio atualizado.")
+      toast.success("Portfólio atualizado (meses bloqueados foram preservados).")
     } catch {
       toast.error("Não foi possível atualizar do portfólio.")
     } finally {
@@ -182,24 +182,21 @@ export default function IndicadorDetailPage() {
                 <th className="px-3 py-2 font-semibold text-right">Atingimento</th>
                 <th className="px-3 py-2 font-semibold">Status</th>
                 <th className="px-3 py-2 font-semibold">Origem</th>
-                <th className="px-3 py-2 font-semibold">Evidências</th>
                 <th className="px-3 py-2"></th>
               </tr>
             </thead>
             <tbody>
               {acomps.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-3 py-6 text-center text-muted-foreground">
+                  <td colSpan={7} className="px-3 py-6 text-center text-muted-foreground">
                     Nenhum período gerado para {ano}.
                   </td>
                 </tr>
               ) : acomps.map((a) => (
                 <AcompanhamentoTableRow
                   key={a.id}
-                  indicador={ind}
                   acomp={a}
                   onUpdated={patchAcomp}
-                  onIndicadorUpdated={setInd}
                   onEditDetails={() => setEditAcomp(a)}
                   onEditEvidencias={() => setEvidenciasAcomp(a)}
                 />
@@ -228,6 +225,7 @@ export default function IndicadorDetailPage() {
       {evidenciasAcomp && (
         <AcompanhamentoEvidenciasDialog
           acomp={evidenciasAcomp}
+          fonteMetrica={ind.fonte_metrica}
           onClose={() => setEvidenciasAcomp(null)}
           onSaved={(updated) => {
             patchAcomp(updated)

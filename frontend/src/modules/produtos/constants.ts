@@ -1,5 +1,4 @@
 import type {
-  AutenticacaoTipo,
   ClassificacaoInformacao,
   ContratoStatus,
   ContratoTipoValor,
@@ -7,7 +6,6 @@ import type {
   DocumentacaoTipo,
   DocumentoEspecie,
   DocumentoFormato,
-  IntegracaoTipo,
   NivelDadosPessoais,
   ProductCategoria,
   ProductCriticidade,
@@ -22,7 +20,6 @@ import type {
   ReleaseImpacto,
   ReleaseStatus,
   ReleaseTipo,
-  RiscoIndisponibilidade,
   ServicoStatus,
   ServicoSuporte,
   Sustentacao,
@@ -78,9 +75,18 @@ export const CATEGORIA_LABEL: Record<ProductCategoria, string> = {
   sistema_interno_ia: "Sistema interno (IA)",
   sistema_externo_ia: "Sistema externo (IA)",
   sistema_externo_implantacao: "Sistema externo (Implantação)",
+  sistema_externo_hibrido: "Sistema externo (Híbrido)",
   sistema_externo_dn: "Sistema externo (DN)",
 }
-export const CATEGORIA_OPTS: ProductCategoria[] = ["sistema_interno_dev", "sistema_interno_ia", "sistema_externo_ia", "sistema_externo_implantacao", "sistema_externo_dn"]
+export const CATEGORIA_OPTS: ProductCategoria[] = ["sistema_interno_dev", "sistema_interno_ia", "sistema_externo_ia", "sistema_externo_implantacao", "sistema_externo_hibrido", "sistema_externo_dn"]
+
+const CATEGORIAS_EXTERNAS: ProductCategoria[] = [
+  "sistema_externo_ia", "sistema_externo_implantacao", "sistema_externo_hibrido", "sistema_externo_dn",
+]
+
+export function isCategoriaExterna(categoria: ProductCategoria | string | null | undefined): boolean {
+  return !!categoria && (CATEGORIAS_EXTERNAS as string[]).includes(categoria)
+}
 
 export const UNIDADE_LABEL: Record<ProductUnidade, string> = {
   sesi: "SESI", senai: "SENAI", iel: "IEL", fiea: "FIEA", corporativo: "Corporativo",
@@ -204,26 +210,6 @@ export const DOCNT_STATUS_COLOR: Record<DocumentacaoStatus, string> = {
   necessita_atualizacao: "#EA580C", obsoleta: "#DC2626",
 }
 export const DOCNT_STATUS_OPTS: DocumentacaoStatus[] = ["nao_iniciada", "em_elaboracao", "publicada", "necessita_atualizacao", "obsoleta"]
-
-export const SUPORTE_TIPO_OPTS = ["interna", "fornecedor", "compartilhada"] as const
-export const SUPORTE_TIPO_LABEL: Record<string, string> = { interna: "Interna", fornecedor: "Fornecedor", compartilhada: "Compartilhada" }
-
-export const INTEGRACAO_TIPO_LABEL: Record<IntegracaoTipo, string> = {
-  api: "API", banco: "Banco de dados", arquivo: "Arquivo", etl: "ETL", webhook: "Webhook", manual: "Manual", outro: "Outro",
-}
-export const INTEGRACAO_TIPO_OPTS: IntegracaoTipo[] = ["api", "banco", "arquivo", "etl", "webhook", "manual", "outro"]
-
-export const AUTENTICACAO_TIPO_LABEL: Record<AutenticacaoTipo, string> = {
-  active_directory: "Active Directory", entra_id: "Microsoft Entra ID", login_local: "Login local",
-  sso: "SSO", token: "Token", oauth: "OAuth", outro: "Outro",
-}
-export const AUTENTICACAO_TIPO_OPTS: AutenticacaoTipo[] = ["active_directory", "entra_id", "login_local", "sso", "token", "oauth", "outro"]
-
-export const RISCO_LABEL: Record<RiscoIndisponibilidade, string> = { baixo: "Baixo", medio: "Médio", alto: "Alto", critico: "Crítico" }
-export const RISCO_COLOR: Record<RiscoIndisponibilidade, string> = {
-  baixo: "#16A34A", medio: "#CA8A04", alto: "#EA580C", critico: "#DC2626",
-}
-export const RISCO_OPTS: RiscoIndisponibilidade[] = ["baixo", "medio", "alto", "critico"]
 
 export const PROCESS_ITEM_STATUS_LABEL: Record<ProcessItemStatus, string> = {
   planejado: "Planejado", em_andamento: "Em andamento", concluido: "Concluído",

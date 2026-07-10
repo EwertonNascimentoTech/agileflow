@@ -6,10 +6,11 @@ from app.core.config import settings
 
 engine = create_async_engine(
     settings.DATABASE_URL,
-    echo=settings.DEBUG,
-    pool_size=10,
-    max_overflow=20,
+    echo=settings.SQL_ECHO,
+    pool_size=settings.DB_POOL_SIZE,
+    max_overflow=settings.DB_MAX_OVERFLOW,
     pool_pre_ping=True,   # revalida conexões da pool antes de usar — evita "aborted transaction" acumulado
+    pool_recycle=300,     # recicla conexões ociosas >5min (evita conexões mortas por timeout do PG/proxy)
     # Multi-tenant via search_path muda o schema entre requests. asyncpg cacheia
     # prepared statements pelo plano gerado no schema ativo — se a conexão volta
     # pra pool com search_path de tenant antigo, os statements cacheados apontam

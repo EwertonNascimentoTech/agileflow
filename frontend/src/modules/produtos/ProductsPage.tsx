@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import {
-  AlertTriangle, Boxes, Clock, FileQuestion, FileWarning, FileX, Loader2, type LucideIcon,
+  AlertTriangle, Boxes, Building2, Clock, FileQuestion, FileWarning, FileX, Loader2, type LucideIcon,
   PackageX, Plus, ShieldAlert, Sparkles, Trash2, UserX,
 } from "lucide-react"
 
@@ -16,6 +16,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { toast } from "@/lib/toast"
 import { ProductFormDialog } from "@/modules/produtos/ProductFormDialog"
+import { DefinirFornecedorDialog } from "@/modules/produtos/DefinirFornecedorDialog"
 import {
   CATEGORIA_LABEL, CONTRATO_STATUS_COLOR, CONTRATO_STATUS_LABEL,
   DOCNT_STATUS_COLOR, DOCNT_STATUS_LABEL, LIFECYCLE_LABEL, LIFECYCLE_OPTS,
@@ -24,6 +25,9 @@ import {
 
 function fmtDate(iso: string | null) { return iso ? new Date(iso).toLocaleDateString("pt-BR") : "—" }
 const ALL = "__all__"
+const SERVICOS_ALL = "__all__"
+const SERVICOS_COM = "com"
+const SERVICOS_SEM = "sem"
 
 type Toggle = "saude_critico" | "saude_atencao" | "com_alertas" | "sem_contrato" | "a_vencer" | "sem_doc" | "dados_pessoais"
 const TOGGLES: { key: Toggle; label: string }[] = [
@@ -35,6 +39,16 @@ const TOGGLES: { key: Toggle; label: string }[] = [
   { key: "sem_doc", label: "Sem documentação" },
   { key: "dados_pessoais", label: "Com dados pessoais" },
 ]
+
+// Persistência dos filtros — sobrevive à navegação (entrar num produto e voltar).
+// Só é "perdido" quando o usuário limpa/altera os filtros.
+const FILTERS_KEY = "produtos.filtros.v1"
+type StoredFilters = {
+  q?: string; fCategoria?: string; fLifecycle?: string; fServicos?: string; fPO?: string; toggles?: Toggle[]
+}
+function loadFilters(): StoredFilters {
+  try { return JSON.parse(localStorage.getItem(FILTERS_KEY) || "{}") as StoredFilters } catch { return {} }
+}
 
 const ALERTA_ICON: Record<ProductAlertaCode, LucideIcon> = {
   producao_sem_servico: PackageX,
@@ -61,12 +75,23 @@ export default function ProductsPage() {
   const [openNew, setOpenNew] = useState(false)
   const [openFromProject, setOpenFromProject] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [fornecedorProd, setFornecedorProd] = useState<ProductListItem | null>(null)
 
-  const [q, setQ] = useState("")
-  const [fCategoria, setFCategoria] = useState(ALL)
-  const [fLifecycle, setFLifecycle] = useState(ALL)
-  const [fPO, setFPO] = useState(ALL)
-  const [toggles, setToggles] = useState<Set<Toggle>>(new Set())
+  const [q, setQ] = useState(() => loadFilters().q ?? "")
+  const [fCategoria, setFCategoria] = useState(() => loadFilters().fCategoria ?? ALL)
+  const [fLifecycle, setFLifecycle] = useState(() => loadFilters().fLifecycle ?? ALL)
+  const [fServicos, setFServicos] = useState(() => loadFilters().fServicos ?? SERVICOS_ALL)
+  const [fPO, setFPO] = useState(() => loadFilters().fPO ?? ALL)
+  const [toggles, setToggles] = useState<Set<Toggle>>(() => new Set(loadFilters().toggles ?? []))
+
+  // Salva os filtros sempre que mudam (entrar num produto e voltar mantém o filtro).
+  useEffect(() => {
+    try {
+      localStorage.setItem(FILTERS_KEY, JSON.stringify({
+        q, fCategoria, fLifecycle, fServicos, fPO, toggles: Array.from(toggles),
+      }))
+    } catch { /* ignore */ }
+  }, [q, fCategoria, fLifecycle, fServicos, fPO, toggles])
 
   async function reload() { setProducts(await produtosApi.listProducts().catch(() => [])) }
   useEffect(() => { produtosApi.listProducts().catch(() => []).then(setProducts).finally(() => setLoading(false)) }, [])
@@ -81,6 +106,8 @@ export default function ProductsPage() {
     if (q && !p.name.toLowerCase().includes(q.toLowerCase())) return false
     if (fCategoria !== ALL && p.categoria !== fCategoria) return false
     if (fLifecycle !== ALL && p.lifecycle !== fLifecycle) return false
+    if (fServicos === SERVICOS_COM && (p.servicos_count ?? 0) === 0) return false
+    if (fServicos === SERVICOS_SEM && (p.servicos_count ?? 0) > 0) return false
     if (fPO !== ALL && p.responsavel_nome !== fPO) return false
     if (toggles.has("saude_critico") && p.classe !== "critico") return false
     if (toggles.has("saude_atencao") && p.classe !== "atencao") return false
@@ -90,7 +117,7 @@ export default function ProductsPage() {
     if (toggles.has("sem_doc") && p.has_documentation) return false
     if (toggles.has("dados_pessoais") && !p.tem_dados_pessoais) return false
     return true
-  }), [products, q, fCategoria, fLifecycle, fPO, toggles])
+  }), [products, q, fCategoria, fLifecycle, fServicos, fPO, toggles])
 
   function toggle(t: Toggle) {
     setToggles((cur) => { const n = new Set(cur); n.has(t) ? n.delete(t) : n.add(t); return n })
@@ -135,6 +162,7 @@ export default function ProductsPage() {
               <div className="space-y-1"><Label className="text-[11px]">Buscar</Label><Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nome" className="h-9 w-48" /></div>
               <FilterSelect label="Categoria" value={fCategoria} onChange={setFCategoria} options={Object.entries(CATEGORIA_LABEL)} />
               <FilterSelect label="Ciclo de vida" value={fLifecycle} onChange={setFLifecycle} options={LIFECYCLE_OPTS.map((v) => [v, LIFECYCLE_LABEL[v]])} allLabel="Todos" />
+              <FilterSelect label="Serviços" value={fServicos} onChange={setFServicos} options={[[SERVICOS_COM, "Com serviços"], [SERVICOS_SEM, "Sem serviços"]]} allLabel="Todos" />
               <FilterSelect label="Product Owner" value={fPO} onChange={setFPO} options={poOptions} allLabel="Todos os POs" />
             </div>
             <div className="flex flex-wrap gap-1.5">
@@ -185,12 +213,19 @@ export default function ProductsPage() {
                       </div>
                     </td>
                     <td className="px-3 py-2 text-center tabular-nums">{p.servicos_count ?? 0}</td>
-                    <td className="px-3 py-2">
-                      <span title={`Saúde: ${SAUDE_LABEL[p.classe]} (${p.score}/100)`}
-                        className="inline-flex min-w-[2.25rem] items-center justify-center gap-1 rounded-full border px-1.5 py-0.5 text-[11px] font-semibold tabular-nums"
-                        style={{ backgroundColor: `${SAUDE_COLOR[p.classe]}1a`, color: SAUDE_COLOR[p.classe], borderColor: `${SAUDE_COLOR[p.classe]}55` }}>
-                        {p.score}
-                      </span>
+                    <td className="px-3 py-2 align-top">
+                      <div className="flex flex-col gap-1">
+                        <span title={p.saude_gaps.length ? `Saúde: ${SAUDE_LABEL[p.classe]} (${p.score}/100)\nFalta para 100: ${p.saude_gaps.join(", ")}` : `Saúde: ${SAUDE_LABEL[p.classe]} (${p.score}/100)`}
+                          className="inline-flex w-fit min-w-[2.25rem] items-center justify-center gap-1 rounded-full border px-1.5 py-0.5 text-[11px] font-semibold tabular-nums"
+                          style={{ backgroundColor: `${SAUDE_COLOR[p.classe]}1a`, color: SAUDE_COLOR[p.classe], borderColor: `${SAUDE_COLOR[p.classe]}55` }}>
+                          {p.score}
+                        </span>
+                        {p.saude_gaps.length > 0 && (
+                          <span className="max-w-[160px] text-[10px] leading-tight text-muted-foreground" title={`Falta para 100: ${p.saude_gaps.join(", ")}`}>
+                            falta: {p.saude_gaps.join(", ")}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-3 py-2">
                       {p.alertas.length === 0
@@ -225,6 +260,16 @@ export default function ProductsPage() {
                     </td>
                     <td className="px-3 py-2">
                       <div className="flex items-center opacity-0 transition group-hover:opacity-100">
+                        {p.requires_contract && !p.fornecedor_nome && (
+                          <Button
+                            size="icon" variant="ghost"
+                            className="h-7 w-7"
+                            title="Definir fornecedor"
+                            onClick={(e) => { e.stopPropagation(); setFornecedorProd(p) }}
+                          >
+                            <Building2 size={13} />
+                          </Button>
+                        )}
                         <Button
                           size="icon" variant="ghost"
                           className="h-7 w-7 text-destructive hover:text-destructive"
@@ -249,6 +294,15 @@ export default function ProductsPage() {
 
       <ProductFormDialog open={openNew} onOpenChange={setOpenNew} onSaved={(p) => { setOpenNew(false); navigate(`/app/modules/produtos/produtos/${p.id}`) }} />
       <FromProjectDialog open={openFromProject} onOpenChange={setOpenFromProject} onCreated={(id) => { setOpenFromProject(false); void reload(); navigate(`/app/modules/produtos/produtos/${id}`) }} />
+      {fornecedorProd && (
+        <DefinirFornecedorDialog
+          open={!!fornecedorProd}
+          onOpenChange={(v) => { if (!v) setFornecedorProd(null) }}
+          productId={fornecedorProd.id}
+          productName={fornecedorProd.name}
+          onSaved={() => { setFornecedorProd(null); void reload() }}
+        />
+      )}
     </div>
   )
 }

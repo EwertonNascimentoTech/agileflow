@@ -2,7 +2,8 @@
 
 Planeja em HORAS úteis sobre um `WorkingCalendar` (expediente/almoço/dias úteis/feriados),
 combinando:
-- cadeia implícita por ORDEM entre irmãos (FS sequencial);
+- cadeia implícita por ORDEM entre irmãos do mesmo responsável (FS sequencial);
+- irmãos com responsáveis diferentes iniciam em paralelo (mesmo início do pai);
 - dependências explícitas FS / SS / FF / SF com lag/lead em horas;
 - rollup de pais (start=min filhos, finish=max filhos);
 - marcos (duração 0);
@@ -31,6 +32,8 @@ class EngineNode:
     duration_hours: Optional[float]
     # Critério de desempate estável entre irmãos de mesma ordem.
     tiebreak: str = ""
+    # Responsável (Person.id). Irmãos com assignees diferentes iniciam em paralelo.
+    assignee_id: Optional[Hashable] = None
 
 
 @dataclass
@@ -133,20 +136,28 @@ def schedule_tree(
         eb = cal.next_start(eb)
         kids = children.get(tid, [])
         if kids:
-            cursor = eb
+            # Por responsável: só encadeia sequencialmente irmãos do mesmo assignee.
+            last_end_by_assignee: dict[Optional[Hashable], datetime] = {}
             starts: list[datetime] = []
             ends: list[datetime] = []
             for c in kids:
-                # Irmão sem predecessora explícita cascateia pela ordem (começa após o anterior);
-                # com predecessora, parte do início do pai e a dependência (extra_start) o posiciona.
-                base = eb if c.id in has_pred else cursor
+                if c.id in has_pred:
+                    # Predecessora explícita: parte do início do pai; extra_start posiciona.
+                    base = eb
+                elif c.assignee_id in last_end_by_assignee:
+                    # Mesmo responsável que irmão anterior → sequencial após o término dele.
+                    base = last_end_by_assignee[c.assignee_id]
+                else:
+                    # Responsável novo ou diferente → paralelo no início do pai.
+                    base = eb
                 r = schedule_node(c.id, base)
                 if r is None:
                     continue
                 cs, ce = r
                 starts.append(cs)
                 ends.append(ce)
-                cursor = cal.next_start(ce)
+                if c.id not in has_pred:
+                    last_end_by_assignee[c.assignee_id] = cal.next_start(ce)
             if not starts:
                 return None
             s, e = min(starts), max(ends)
@@ -276,14 +287,17 @@ def compute_cpm(
     explicit = [e for e in edges if e.predecessor in scheduled and e.successor in scheduled]
     has_pred = {e.successor for e in explicit}
 
-    # Arestas implícitas por ordem: filho sem predecessora explícita segue o irmão anterior (FS).
+    # Arestas implícitas: irmãos do mesmo responsável encadeiam FS; assignees diferentes = paralelo.
     implicit: list[EngineEdge] = []
     for kids in children.values():
-        prev: Optional[Hashable] = None
+        last_by_assignee: dict[Optional[Hashable], Hashable] = {}
         for c in kids:
-            if prev is not None and c.id not in has_pred:
+            if c.id in has_pred:
+                continue
+            prev = last_by_assignee.get(c.assignee_id)
+            if prev is not None:
                 implicit.append(EngineEdge(predecessor=prev, successor=c.id, dep_type="FS", lag_hours=0.0))
-            prev = c.id
+            last_by_assignee[c.assignee_id] = c.id
 
     successors: dict[Hashable, list[EngineEdge]] = {}
     for e in explicit + implicit:

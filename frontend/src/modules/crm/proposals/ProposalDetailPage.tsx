@@ -6,6 +6,7 @@ import {
 } from "lucide-react"
 import { proposalsApi, contractsApi } from "@/api/crm"
 import { toast } from "@/lib/toast"
+import { nullableStr } from "@/lib/utils"
 import type { Proposal, ProposalStatus, ProposalStatusLog, ProposalItem } from "@/api/crm"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -125,7 +126,7 @@ export default function ProposalDetailPage() {
       const payload = {
         description: itemForm.description.trim(),
         quantity: qty,
-        unit: itemForm.unit.trim() || undefined,
+        unit: itemDialog.mode === "edit" ? nullableStr(itemForm.unit) : (itemForm.unit.trim() || undefined),
         unit_price: price,
       }
       if (itemDialog.mode === "create") {
@@ -179,13 +180,13 @@ export default function ProposalDetailPage() {
     setEditError("")
     try {
       const payload = {
-        title: editForm.title.trim() || undefined,
-        description: editForm.description,
+        title: editForm.title.trim(),
+        description: nullableStr(editForm.description),
         discount: Number(editForm.discount) || 0,
-        payment_terms: editForm.payment_terms,
-        delivery_terms: editForm.delivery_terms,
-        notes: editForm.notes,
-        valid_until: editForm.valid_until ? new Date(editForm.valid_until).toISOString() : undefined,
+        payment_terms: nullableStr(editForm.payment_terms),
+        delivery_terms: nullableStr(editForm.delivery_terms),
+        notes: nullableStr(editForm.notes),
+        valid_until: editForm.valid_until ? new Date(editForm.valid_until).toISOString() : null,
       }
       await proposalsApi.update(proposal.id, payload)
       await refresh()

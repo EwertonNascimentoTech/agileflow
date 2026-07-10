@@ -1,6 +1,7 @@
 import {
   BarChart3,
   FolderKanban,
+  Layers,
   List,
   CalendarRange,
   Settings2,
@@ -8,6 +9,7 @@ import {
   Users,
   Code2,
   CalendarOff,
+  Gauge,
 } from "lucide-react"
 import type { ElementType } from "react"
 
@@ -23,7 +25,9 @@ export const moduleNavConfig: Record<string, ModuleNavItem[]> = {
     { to: "/app/modules/projetos/board", icon: FolderKanban, label: "Quadro" },
     { to: "/app/modules/projetos/lista", icon: List, label: "Lista" },
     { to: "/app/modules/projetos/cronograma", icon: CalendarRange, label: "Cronograma" },
+    { to: "/app/modules/projetos/capacidade", icon: Gauge, label: "Capacidade" },
     { to: "/app/modules/projetos/calendario", icon: CalendarRange, label: "Calendário" },
+    { to: "/app/modules/projetos/programas", icon: Layers, label: "Programa" },
     { to: "/app/modules/projetos/relatorios", icon: BarChart3, label: "Relatórios" },
     { to: "/app/modules/projetos/config", icon: Settings2, label: "Configurações" },
   ],

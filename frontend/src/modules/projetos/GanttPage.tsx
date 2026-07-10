@@ -8,7 +8,7 @@ const DEP_LABELS: Record<DependencyType, string> = {
   FS: "Fim → Início", SS: "Início → Início", FF: "Fim → Fim", SF: "Início → Fim",
 }
 
-import { teamopsApi, type WorkCalendar } from "@/api/teamops"
+import { teamopsApi, type Person, type WorkCalendar } from "@/api/teamops"
 import {
   projetosApi,
   type AssigneeAbsenceItem, type CriticalPathItem, type DependencyType, type Project, type ProjectDemandType, type ProjectFunnel, type ProjectScheduleBinding,
@@ -75,12 +75,21 @@ function addBusinessDays(dateStr: string, n: number): string {
   while (step < n) { cur.setUTCDate(cur.getUTCDate() + 1); if (isBiz(cur)) step++ }
   return cur.toISOString().slice(0, 10)
 }
-// Vencimento derivado de início + horas estimadas (ceil(horas/8) dias úteis, mín. 1). "" se faltar.
-function deriveDue(startStr: string, hoursStr: string): string {
+
+/** Horas diárias efetivas para projetos (daily_hours × alocação %). */
+function projectHoursPerDay(person: Person | undefined, calendarHoursPerDay = 8): number {
+  if (!person) return calendarHoursPerDay
+  const base = person.daily_hours > 0 ? person.daily_hours : calendarHoursPerDay
+  const pct = person.project_allocation_pct ?? 100
+  return Math.max(0.01, base * pct / 100)
+}
+
+// Vencimento derivado de início + horas estimadas (ceil(horas/taxa) dias úteis, mín. 1). "" se faltar.
+function deriveDue(startStr: string, hoursStr: string, hoursPerDay = 8): string {
   if (!startStr) return ""
   const h = parseFloat(hoursStr)
   if (isNaN(h) || h <= 0) return ""
-  const duration = Math.max(1, Math.ceil(h / 8))
+  const duration = Math.max(1, Math.ceil(h / hoursPerDay))
   return addBusinessDays(startStr, duration - 1)
 }
 
@@ -97,6 +106,7 @@ export default function GanttPage() {
   const [bindings, setBindings] = useState<ProjectScheduleBinding[]>([])
   const [dependencies, setDependencies] = useState<ProjectTaskDependency[]>([])
   const [users, setUsers] = useState<User[]>([])
+  const [persons, setPersons] = useState<Person[]>([])
   const [loading, setLoading] = useState(true)
   const [scale, setScale] = useState<"day" | "week">("day")
   const [view, setView] = useState<"schedule" | "resources">("schedule")
@@ -162,6 +172,7 @@ export default function GanttPage() {
       ])
       setProjects(ps)
       setDemandTypes(dts)
+      setPersons(persons)
       // Responsável = Pessoa do teamops (todas, inclusive sem login).
       setUsers(persons.map((p) => ({ id: p.id, full_name: p.full_name })) as unknown as User[])
       // Pré-seleciona o projeto da tarefa vinda do botão "Cronograma" (?root), senão o primeiro.
@@ -722,6 +733,8 @@ export default function GanttPage() {
             task={editing}
             statusName={statusById.get(editing.status_id)?.name ?? null}
             users={users}
+            persons={persons}
+            calendar={calendar}
             allTasks={tasks}
             progressById={progressById}
             absencesByUser={absencesByUser}
@@ -884,6 +897,8 @@ export default function GanttPage() {
           task={editing}
           statusName={statusById.get(editing.status_id)?.name ?? null}
           users={users}
+          persons={persons}
+          calendar={calendar}
           allTasks={tasks}
           progressById={progressById}
           absencesByUser={absencesByUser}
@@ -925,6 +940,8 @@ function GanttEditModal({
   task,
   statusName,
   users,
+  persons,
+  calendar,
   allTasks,
   progressById,
   absencesByUser,
@@ -939,6 +956,8 @@ function GanttEditModal({
   task: ProjectTask
   statusName: string | null
   users: User[]
+  persons: Person[]
+  calendar: WorkCalendar | null
   allTasks: ProjectTask[]
   progressById: Map<string, number>
   absencesByUser: Record<string, AssigneeAbsenceItem[]>
@@ -980,8 +999,11 @@ function GanttEditModal({
   // Candidatas: itens do escopo (subárvore do projeto/programa), em ordem hierárquica,
   // exceto a própria tarefa e as que já são predecessoras.
   const candidates = candidateNodes.filter((n) => n.task.id !== task.id && !predIds.has(n.task.id))
+  const calHpd = calendar?.hours_per_day ?? 8
+  const assigneePerson = persons.find((p) => p.id === assignee)
+  const effectiveProjectHpd = projectHoursPerDay(assigneePerson, calHpd)
   const hoursNum = parseFloat(hours)
-  const durationDays = !isNaN(hoursNum) && hoursNum > 0 ? Math.max(1, Math.ceil(hoursNum / 8)) : null
+  const durationDays = !isNaN(hoursNum) && hoursNum > 0 ? Math.max(1, Math.ceil(hoursNum / effectiveProjectHpd)) : null
   const selUser = users.find((u) => u.id === assignee) ?? null
   // O card raiz (programa/projeto) é a data-base: seu término é calculado a partir das etapas.
   const isRoot = task.planning_kind === "programa" || task.planning_kind === "projeto"
@@ -991,8 +1013,18 @@ function GanttEditModal({
     [absencesByUser, assignee, start, due],
   )
   // Ao mudar o início, recalcula o vencimento pelas horas (dias úteis) — espelha o servidor.
-  function changeStart(v: string) { setStart(v); const nd = deriveDue(v, hours); if (nd) setDue(nd) }
-  function changeHours(v: string) { setHours(v); const nd = deriveDue(start, v); if (nd) setDue(nd) }
+  function recalcDue(startVal: string, hoursVal: string, assigneeId: string) {
+    const person = persons.find((p) => p.id === assigneeId)
+    const hpd = projectHoursPerDay(person, calHpd)
+    return deriveDue(startVal, hoursVal, hpd)
+  }
+  function changeStart(v: string) { setStart(v); const nd = recalcDue(v, hours, assignee); if (nd) setDue(nd) }
+  function changeHours(v: string) { setHours(v); const nd = recalcDue(start, v, assignee); if (nd) setDue(nd) }
+  function changeAssignee(v: string) {
+    setAssignee(v)
+    const nd = recalcDue(start, hours, v)
+    if (nd) setDue(nd)
+  }
   // Progresso é derivado dos filhos (rollup de conclusão), não editável aqui.
   const hasChildren = allTasks.some((t) => t.parent_task_id === task.id)
   const rolledProgress = progressById.get(task.id) ?? (task.completed_at ? 100 : (task.percent_complete ?? 0))
@@ -1106,7 +1138,12 @@ function GanttEditModal({
               {isAggregatedParent ? (
                 <div className="hint"><Check size={13} style={{ color: "var(--af-success)" }} /> Soma das horas das US filhas — defina as horas em cada US.</div>
               ) : durationDays != null && (
-                <div className="hint"><Check size={13} style={{ color: "var(--af-success)" }} /> Equivale a <b>{durationDays} dia{durationDays > 1 ? "s" : ""} úteis</b> · vencimento calculado a partir do início</div>
+                <div className="hint">
+                  <Check size={13} style={{ color: "var(--af-success)" }} />
+                  {" "}Equivale a <b>{durationDays} dia{durationDays > 1 ? "s" : ""} úteis</b>
+                  {" "}(1 dia ≈ {effectiveProjectHpd}h de projeto{assigneePerson ? ` · ${assigneePerson.full_name}` : ""})
+                  {" "}· vencimento calculado a partir do início
+                </div>
               )}
             </div>
           )}
@@ -1151,7 +1188,7 @@ function GanttEditModal({
               <>
                 <div className="owner-row">
                   <span className="gx-avatar" style={{ width: 26, height: 26, fontSize: 10, background: colorForUser(selUser?.id ?? null) }}>{initials(selUser?.full_name)}</span>
-                  <select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
+                  <select value={assignee} onChange={(e) => changeAssignee(e.target.value)}>
                     <option value="">Sem responsável</option>
                     {users.map((m) => <option key={m.id} value={m.id}>{m.full_name}</option>)}
                   </select>

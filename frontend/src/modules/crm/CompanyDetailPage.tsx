@@ -17,6 +17,7 @@ import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { nullableStr } from "@/lib/utils"
 
 const editSchema = z.object({
   name: z.string().min(2),
@@ -91,7 +92,16 @@ export default function CompanyDetailPage() {
     if (!id) return
     setEditError("")
     try {
-      const payload = { ...data, email: data.email || undefined }
+      const payload = {
+        ...data,
+        trade_name: nullableStr(data.trade_name),
+        document: nullableStr(data.document),
+        email: nullableStr(data.email),
+        phone: nullableStr(data.phone),
+        website: nullableStr(data.website),
+        industry: nullableStr(data.industry),
+        notes: nullableStr(data.notes),
+      }
       const updated = await companiesApi.update(id, payload)
       setCompany(updated)
       setEditOpen(false)

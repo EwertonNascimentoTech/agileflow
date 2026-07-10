@@ -6,8 +6,10 @@ import {
   Clock,
   Filter,
   FolderKanban,
+  HeartPulse,
   Layers,
   ListChecks,
+  Package,
   Users,
   X,
 } from "lucide-react"
@@ -19,6 +21,8 @@ import {
   type PoSyncPrazoBlock,
   type PoSyncProjeto,
   type PoSyncResponse,
+  type PoSyncSaudeProdutosFaixa,
+  type PoSyncSaudeProdutosPo,
 } from "@/api/projetos"
 import { KpiCard } from "@/components/KpiCard"
 import { Badge } from "@/components/ui/badge"
@@ -38,6 +42,71 @@ const FASE_VARIANT: Record<PoSyncFase, "warning" | "default" | "success"> = {
   planejamento: "warning",
   execucao: "default",
   encerramento: "success",
+}
+
+function fmtScore(score: number | null | undefined): string {
+  if (score == null) return "—"
+  return Number.isInteger(score) ? String(score) : score.toFixed(1)
+}
+
+function scoreTone(score: number | null | undefined): string {
+  if (score == null) return "text-muted-foreground"
+  if (score >= 75) return "text-emerald-600 font-semibold"
+  if (score >= 40) return "text-amber-600 font-semibold"
+  return "text-red-600 font-semibold"
+}
+
+function FaixaScoreCell({ faixa, label }: { faixa: PoSyncSaudeProdutosFaixa; label: string }) {
+  return (
+    <td className="py-2.5 px-2 align-top">
+      <div className={`tabular-nums ${scoreTone(faixa.score_medio)}`}>{fmtScore(faixa.score_medio)}</div>
+      <div className="mt-0.5 text-[10px] text-muted-foreground">{faixa.total} {label}</div>
+    </td>
+  )
+}
+
+function SaudeDistribuicaoBar({ saudavel, atencao, critico }: { saudavel: number; atencao: number; critico: number }) {
+  const total = saudavel + atencao + critico
+  if (total === 0) return <span className="text-xs text-muted-foreground">—</span>
+  const pct = (n: number) => Math.round((n / total) * 100)
+  return (
+    <div className="space-y-1">
+      <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted">
+        {saudavel > 0 && <div className="h-full bg-emerald-500" style={{ width: `${pct(saudavel)}%` }} />}
+        {atencao > 0 && <div className="h-full bg-amber-500" style={{ width: `${pct(atencao)}%` }} />}
+        {critico > 0 && <div className="h-full bg-red-500" style={{ width: `${pct(critico)}%` }} />}
+      </div>
+      <div className="flex gap-2 text-[10px] text-muted-foreground">
+        <span className="text-emerald-600">{saudavel} ok</span>
+        <span className="text-amber-600">{atencao} aten.</span>
+        <span className="text-red-600">{critico} crít.</span>
+      </div>
+    </div>
+  )
+}
+
+function SaudeProdutosPoRow({ po }: { po: PoSyncSaudeProdutosPo }) {
+  return (
+    <tr className="border-b last:border-0 hover:bg-muted/30">
+      <td className="py-2.5 pr-3 font-medium">
+        {po.po_id === null ? (
+          <span className="italic text-muted-foreground">{po.full_name}</span>
+        ) : (
+          po.full_name
+        )}
+      </td>
+      <td className="py-2.5 px-2 tabular-nums text-center">{po.total}</td>
+      <FaixaScoreCell faixa={po.producao} label="em prod." />
+      <FaixaScoreCell faixa={po.desenvolvimento} label="em dev." />
+      <td className="py-2.5 px-2 tabular-nums text-center text-muted-foreground">{po.outros.total || "—"}</td>
+      <td className="py-2.5 px-2 min-w-[120px]">
+        <SaudeDistribuicaoBar saudavel={po.saudavel} atencao={po.atencao} critico={po.critico} />
+      </td>
+      <td className="py-2.5 pl-2 text-right">
+        {po.critico > 0 ? <Badge variant="destructive">{po.critico}</Badge> : <span className="text-muted-foreground">0</span>}
+      </td>
+    </tr>
+  )
 }
 
 function fmtDate(iso: string | null): string {
@@ -375,6 +444,110 @@ export default function PoSyncPage() {
                   <td className="py-2 pl-2">
                     {po.em_risco > 0 ? <Badge variant="destructive">{po.em_risco}</Badge> : <span className="text-muted-foreground">0</span>}
                   </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+
+      {/* 4b. Saúde do portfólio de PRODUTOS por PO */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><Package className="h-4 w-4" /> Saúde do portfólio de produtos por PO</CardTitle>
+          <CardDescription>
+            Índice de Saúde agregado por Responsável (PO). Scores de <strong>produção</strong> consideram produtos em
+            Produção, Sustentação ou Evolução; scores de <strong>desenvolvimento</strong> consideram Ideia, Discovery,
+            Desenvolvimento ou Homologação. Produtos corporativos contam para cada PO dos serviços. Visão de todo o portfólio.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {data.saude_produtos.resumo.total_produtos === 0 ? (
+            <p className="text-sm text-muted-foreground">Nenhum produto ativo cadastrado.</p>
+          ) : (
+            <>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-lg border p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Portfólio</p>
+                  <p className="mt-1 text-2xl font-bold tabular-nums">{data.saude_produtos.resumo.total_produtos}</p>
+                  <p className="text-xs text-muted-foreground">produtos ativos</p>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Score — Produção</p>
+                  <p className={`mt-1 text-2xl tabular-nums ${scoreTone(data.saude_produtos.resumo.producao.score_medio)}`}>
+                    {fmtScore(data.saude_produtos.resumo.producao.score_medio)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">{data.saude_produtos.resumo.producao.total} em produção</p>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Score — Desenvolvimento</p>
+                  <p className={`mt-1 text-2xl tabular-nums ${scoreTone(data.saude_produtos.resumo.desenvolvimento.score_medio)}`}>
+                    {fmtScore(data.saude_produtos.resumo.desenvolvimento.score_medio)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">{data.saude_produtos.resumo.desenvolvimento.total} em desenvolvimento</p>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Distribuição geral</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <Badge variant="success">{data.saude_produtos.resumo.distribuicao.saudavel} saudável</Badge>
+                    <Badge variant="warning">{data.saude_produtos.resumo.distribuicao.atencao} atenção</Badge>
+                    <Badge variant="destructive">{data.saude_produtos.resumo.distribuicao.critico} crítico</Badge>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">Média geral {data.saude_produtos.resumo.media_score}</p>
+                </div>
+              </div>
+              <div className="overflow-x-auto rounded-lg border">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                      <th className="py-2.5 pr-3 pl-3 font-medium">Product Owner</th>
+                      <th className="py-2.5 px-2 font-medium text-center">Total</th>
+                      <th className="py-2.5 px-2 font-medium">Score produção</th>
+                      <th className="py-2.5 px-2 font-medium">Score desenvolvimento</th>
+                      <th className="py-2.5 px-2 font-medium text-center">Outros</th>
+                      <th className="py-2.5 px-2 font-medium min-w-[120px]">Distribuição</th>
+                      <th className="py-2.5 pl-2 pr-3 font-medium text-right">Críticos</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.saude_produtos.por_po.map((po) => (
+                      <SaudeProdutosPoRow key={po.po_id ?? po.full_name} po={po} />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 4c. Saúde dos PROJETOS por PO */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><HeartPulse className="h-4 w-4" /> Saúde dos projetos por PO</CardTitle>
+          <CardDescription>Saúde de prazo dos projetos deste recorte por Product Owner — saudável (verde) vs. em risco/atrasado (vermelho).</CardDescription>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
+                <th className="py-2 pr-3 font-medium">Product Owner</th>
+                <th className="py-2 px-2 font-medium">Projetos</th>
+                <th className="py-2 px-2 font-medium">Saudáveis</th>
+                <th className="py-2 px-2 font-medium">Em risco</th>
+                <th className="py-2 pl-2 font-medium">Atrasados</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.ranking_pos.map((po) => (
+                <tr key={po.po_id ?? po.full_name} className="border-b last:border-0">
+                  <td className="py-2 pr-3 font-medium">{po.full_name ?? "—"}</td>
+                  <td className="py-2 px-2 tabular-nums">{po.total}</td>
+                  <td className="py-2 px-2 tabular-nums">{po.total - po.em_risco}</td>
+                  <td className="py-2 px-2">
+                    {po.em_risco > 0 ? <Badge variant="destructive">{po.em_risco}</Badge> : <span className="text-muted-foreground">0</span>}
+                  </td>
+                  <td className="py-2 pl-2 tabular-nums">{po.atrasados}</td>
                 </tr>
               ))}
             </tbody>

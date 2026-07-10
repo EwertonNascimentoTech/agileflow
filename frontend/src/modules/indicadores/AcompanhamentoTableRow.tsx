@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
-import { Loader2, Paperclip, Pencil, RefreshCw } from "lucide-react"
+import { Loader2, Lock, LockOpen, Paperclip, Pencil, RefreshCw } from "lucide-react"
 
-import { indicadoresApi, type Acompanhamento, type Indicador } from "@/api/indicadores"
+import { indicadoresApi, type Acompanhamento } from "@/api/indicadores"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -12,17 +12,13 @@ const fmt = (n: number | null | undefined) => (n == null ? "—" : Number(n).toL
 const num = (s: string): number | null => (s.trim() === "" ? null : Number(s))
 
 export function AcompanhamentoTableRow({
-  indicador,
   acomp,
   onUpdated,
-  onIndicadorUpdated,
   onEditDetails,
   onEditEvidencias,
 }: {
-  indicador: Indicador
   acomp: Acompanhamento
   onUpdated: (updated: Acompanhamento) => void
-  onIndicadorUpdated: (ind: Indicador) => void
   onEditDetails: () => void
   onEditEvidencias: () => void
 }) {
@@ -32,6 +28,8 @@ export function AcompanhamentoTableRow({
   const [savingMeta, setSavingMeta] = useState(false)
   const [savingRealizado, setSavingRealizado] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const [togglingLock, setTogglingLock] = useState(false)
+  const locked = acomp.bloqueado
 
   useEffect(() => {
     setMeta(acomp.meta != null ? String(acomp.meta) : "")
@@ -74,14 +72,32 @@ export function AcompanhamentoTableRow({
     }
   }
 
+  async function toggleLock() {
+    setTogglingLock(true)
+    try {
+      const updated = await indicadoresApi.updateAcompanhamento(acomp.id, { bloqueado: !locked })
+      onUpdated(updated)
+      toast.success(locked ? `${acomp.competencia} desbloqueado.` : `${acomp.competencia} bloqueado.`)
+    } catch {
+      toast.error(locked ? "Não foi possível desbloquear o mês." : "Não foi possível bloquear o mês.")
+    } finally {
+      setTogglingLock(false)
+    }
+  }
+
   async function refreshPortfolio() {
+    if (locked) {
+      toast.error("Este mês está bloqueado. Desbloqueie antes de atualizar do portfólio.")
+      return
+    }
     setRefreshing(true)
     try {
-      const updated = await indicadoresApi.atualizarPortfolio(indicador.id)
-      onIndicadorUpdated(updated)
+      const updated = await indicadoresApi.atualizarAcompanhamentoPortfolio(acomp.id)
+      onUpdated(updated)
       toast.success(`${acomp.competencia} atualizado do portfólio.`)
-    } catch {
-      toast.error("Não foi possível atualizar do portfólio.")
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      toast.error(typeof msg === "string" ? msg : "Não foi possível atualizar do portfólio.")
     } finally {
       setRefreshing(false)
     }
@@ -98,8 +114,13 @@ export function AcompanhamentoTableRow({
   const inputCls = "h-8 w-full min-w-[5rem] text-right tabular-nums"
 
   return (
-    <tr className="border-t">
-      <td className="px-3 py-2 font-medium">{acomp.competencia}</td>
+    <tr className={`border-t ${locked ? "bg-muted/40" : ""}`}>
+      <td className="px-3 py-2 font-medium">
+        <span className="inline-flex items-center gap-1.5">
+          {locked && <Lock size={12} className="text-muted-foreground" />}
+          {acomp.competencia}
+        </span>
+      </td>
 
       <td className="px-3 py-2">
         <div className="relative flex items-center justify-end gap-1">
@@ -110,7 +131,7 @@ export function AcompanhamentoTableRow({
             onChange={(e) => setMeta(e.target.value)}
             onBlur={() => void commitMeta()}
             onKeyDown={(e) => onEnter(e, commitMeta)}
-            disabled={savingMeta}
+            disabled={savingMeta || locked}
             placeholder="—"
           />
           {savingMeta && <Loader2 size={12} className="absolute -right-4 animate-spin text-muted-foreground" />}
@@ -129,7 +150,7 @@ export function AcompanhamentoTableRow({
               onChange={(e) => setRealizado(e.target.value)}
               onBlur={() => void commitRealizado()}
               onKeyDown={(e) => onEnter(e, commitRealizado)}
-              disabled={savingRealizado}
+              disabled={savingRealizado || locked}
               placeholder="—"
             />
             {savingRealizado && <Loader2 size={12} className="absolute -right-4 animate-spin text-muted-foreground" />}
@@ -150,9 +171,6 @@ export function AcompanhamentoTableRow({
           {FONTE_LABEL[acomp.fonte]}
         </Badge>
       </td>
-      <td className="px-3 py-2 text-xs text-muted-foreground">
-        {acomp.evidencias?.length ? `${acomp.evidencias.length} arquivo(s)` : "—"}
-      </td>
       <td className="px-3 py-2 text-right">
         <div className="flex items-center justify-end gap-0.5">
           {isPortfolio && (
@@ -162,11 +180,21 @@ export function AcompanhamentoTableRow({
               className="text-muted-foreground hover:text-primary"
               title="Atualizar do portfólio"
               onClick={() => void refreshPortfolio()}
-              disabled={refreshing}
+              disabled={refreshing || locked}
             >
               <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />
             </Button>
           )}
+          <Button
+            variant="ghost"
+            size="icon"
+            className={locked ? "text-amber-600 hover:text-amber-700" : "text-muted-foreground hover:text-primary"}
+            title={locked ? "Desbloquear mês" : "Bloquear mês (fechar competência)"}
+            onClick={() => void toggleLock()}
+            disabled={togglingLock}
+          >
+            {togglingLock ? <Loader2 size={14} className="animate-spin" /> : locked ? <LockOpen size={14} /> : <Lock size={14} />}
+          </Button>
           <Button
             variant="ghost"
             size="icon"

@@ -134,7 +134,12 @@ export default function PersonDetailPage() {
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Carga</p>
-              <p className="font-medium">{person.daily_hours}h/dia · {person.weekly_hours}h/sem</p>
+              <p className="font-medium">
+                {person.daily_hours}h/dia · {person.weekly_hours}h/sem
+                {person.project_allocation_pct != null && person.project_allocation_pct < 100 && (
+                  <> · {person.project_allocation_pct}% projetos ({Math.round(person.daily_hours * person.project_allocation_pct / 100 * 10) / 10}h/dia)</>
+                )}
+              </p>
             </div>
           </div>
         </CardContent>

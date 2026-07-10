@@ -54,6 +54,27 @@ async def dashboard(
     )
 
 
+@router.get("/dashboard/graficos", response_model=schemas.DashboardCharts)
+async def dashboard_graficos(
+    ano: Optional[int] = Query(None),
+    categoria: Optional[str] = Query(None),
+    area_id: Optional[uuid.UUID] = Query(None),
+    responsavel_id: Optional[uuid.UUID] = Query(None),
+    granularidade: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    ctx: ModuleContext = Depends(_ctx),
+):
+    return await IndicadorService.dashboard_graficos(
+        ctx.db,
+        categoria=categoria,
+        area_id=area_id,
+        responsavel_id=responsavel_id,
+        granularidade=granularidade,
+        status=status,
+        ano=ano,
+    )
+
+
 @router.post("/uploads", response_model=schemas.UploadResponse)
 async def upload_file(
     file: UploadFile = File(...),
@@ -169,6 +190,15 @@ async def atualizar_portfolio(
     _=Depends(_can_manage),
 ):
     return await IndicadorService.atualizar_portfolio(ctx.db, indicador_id, ctx.user.id)
+
+
+@router.post("/acompanhamentos/{acomp_id}/portfolio/atualizar", response_model=schemas.AcompanhamentoResponse)
+async def atualizar_acompanhamento_portfolio(
+    acomp_id: uuid.UUID,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_manage),
+):
+    return await IndicadorService.atualizar_acompanhamento_portfolio(ctx.db, acomp_id, ctx.user.id)
 
 
 @router.patch("/acompanhamentos/{acomp_id}", response_model=schemas.AcompanhamentoResponse)

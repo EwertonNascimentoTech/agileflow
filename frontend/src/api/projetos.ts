@@ -27,6 +27,7 @@ export interface ProjectFunnel {
   is_active: boolean
   allowed_demand_type_ids: string[] | null
   access_control: Record<string, FunnelAccessLevel> | null
+  classification_enforcement_enabled: boolean
   created_at: string
   updated_at: string
 }
@@ -52,6 +53,7 @@ export interface ProjectStatus {
   sla_warning_pct: number
   priority_mode: PriorityMode
   priority_required: boolean
+  classification_required: boolean
   cascade_children_on_move: boolean
   children_to_funnel_id: string | null
   grandchildren_to_funnel_id: string | null
@@ -60,11 +62,20 @@ export interface ProjectStatus {
   updated_at: string
 }
 
+export type CardClassification = "desenvolvimento" | "implantacao" | "melhoria"
+
 export interface ProjectUpload {
   object_name: string
   filename: string
   content_type: string
   size: number
+}
+
+export interface UsChecklistItem {
+  id: string
+  label: string
+  done: boolean
+  order: number
 }
 
 export interface ProjectTask {
@@ -78,6 +89,10 @@ export interface ProjectTask {
   description: string | null
   assigned_to: string | null
   planning_kind: string | null
+  linked_program_id: string | null
+  card_classification: CardClassification | null
+  linked_product_id: string | null
+  linked_release_id: string | null
   diretoria: string | null
   area: string | null
   start_date: string | null
@@ -85,6 +100,9 @@ export interface ProjectTask {
   estimated_hours: number | null
   actual_hours: number | null
   percent_complete: number
+  us_checklist?: UsChecklistItem[] | null
+  us_impediment_active?: boolean
+  us_codereview_active?: boolean
   order: number
   created_by: string | null
   completed_at: string | null
@@ -292,6 +310,7 @@ export interface ProjectStageAgentBinding {
   has_gateway_client_secret: boolean
   continue_thread: boolean
   add_comment_on_success: boolean
+  advance_to_status_id: string | null
   is_active: boolean
   created_at: string
   updated_at: string
@@ -304,13 +323,28 @@ export interface ProjectStageAgentBindingInput {
   name: string
   agent_kind?: ProjectStageAgentKind
   agent_id: string
-  usuario: string
   prompt_template: string
-  gateway_url?: string | null
-  gateway_client_id: string
-  gateway_client_secret: string
   continue_thread?: boolean
   add_comment_on_success?: boolean
+  advance_to_status_id?: string | null
+  is_active?: boolean
+}
+
+export interface ProjectProgram {
+  id: string
+  name: string
+  description: string | null
+  responsavel_person_id: string | null
+  responsavel_nome: string | null
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface ProjectProgramInput {
+  name: string
+  description?: string | null
+  responsavel_person_id?: string | null
   is_active?: boolean
 }
 
@@ -377,6 +411,7 @@ export interface ProjectReports {
 export type CardFieldKey =
   | "demand_type"
   | "priority_quadrant"
+  | "card_classification"
   | "schedule_sla"
   | "code"
   | "title"
@@ -468,17 +503,200 @@ export interface ScheduleBaseline {
   created_at: string
 }
 
+export interface WorkloadCellItem {
+  project_name: string
+  task_title: string
+  hours: number
+}
+
 export interface WorkloadCell {
   user_id: string
   date: string
   allocated_hours: number
   capacity_hours: number
   overallocated: boolean
+  items?: WorkloadCellItem[]
 }
 
 export interface WorkloadResponse {
   unit: "day" | "week"
   cells: WorkloadCell[]
+}
+
+// ── Cockpit de capacidade (cross-project) ──
+export interface CapacityPersonMeta {
+  id: string
+  full_name: string
+  position_slug: string | null
+  position_label: string | null
+  area_ids: string[]
+}
+
+export interface CapacitySummary {
+  overallocated_cells: number
+  persons_over: number
+  total_capacity_h: number
+  total_allocated_h: number
+  unmapped_assignees: string[]
+}
+
+export interface CapacityHeatmapResponse {
+  unit: "day" | "week"
+  cells: WorkloadCell[]
+  persons: CapacityPersonMeta[]
+  summary: CapacitySummary
+}
+
+export interface CapacityProjectRow {
+  project_id: string
+  project_name: string
+  demand_hours: number
+  capacity_hours: number
+  people_count: number
+  overloaded_people: number
+  overallocated: boolean
+}
+
+export interface CapacityByProjectResponse {
+  rows: CapacityProjectRow[]
+}
+
+export interface CapacityGapRow {
+  group_type: "position" | "area"
+  group_key: string
+  group_label: string
+  people_count: number
+  capacity_hours: number
+  allocated_hours: number
+  deficit_hours: number
+  peak_week: string | null
+  peak_deficit_hours: number
+  suggested_headcount: number
+}
+
+export interface CapacityGapsResponse {
+  rows: CapacityGapRow[]
+}
+
+export interface FreePersonRow {
+  person_id: string
+  full_name: string
+  position_slug: string | null
+  position_label: string | null
+  area_ids: string[]
+  stacks: string[]
+  capacity_hours_total: number
+  allocated_hours_total: number
+  free_hours_total: number
+  free_days: number
+  utilization_pct: number
+  next_absence: string | null
+}
+
+export interface FreePeopleResponse {
+  rows: FreePersonRow[]
+}
+
+// ── Fase 2: simulador what-if ──
+export interface SimTaskMeta {
+  task_id: string
+  title: string
+  project_name: string
+  assigned_to: string | null
+  assignee_name: string | null
+  start_date: string
+  due_date: string
+  estimated_hours: number
+}
+
+export interface SimTasksResponse {
+  tasks: SimTaskMeta[]
+}
+
+export interface ScenarioMutation {
+  op: "move_task" | "reassign" | "scale_hours" | "remove_person" | "add_freelancer"
+  task_id?: string
+  new_start?: string
+  new_due?: string
+  new_person_id?: string
+  factor?: number
+  person_id?: string
+  freelancer_name?: string
+  daily_hours?: number
+  assign_task_ids?: string[]
+}
+
+export interface ScenarioRequest {
+  date_from: string
+  date_to: string
+  mutations: ScenarioMutation[]
+}
+
+export interface ScenarioDiff {
+  before_over_cells: number
+  after_over_cells: number
+  before_persons_over: number
+  after_persons_over: number
+  resolved_cells: number
+  new_cells: number
+  before_allocated_h: number
+  after_allocated_h: number
+  before_capacity_h: number
+  after_capacity_h: number
+}
+
+export interface ScenarioResult {
+  before: CapacityHeatmapResponse
+  after: CapacityHeatmapResponse
+  diff: ScenarioDiff
+}
+
+// ── Simulador inteligente: cenários auto-gerados ──
+export interface SuggestedScenario {
+  id: string
+  title: string
+  description: string
+  kind: "reassign" | "freelancer" | "defer" | "combo"
+  cost_tag: "gratis" | "custo" | "prazo"
+  target_person_name: string | null
+  mutations: ScenarioMutation[]
+  resolved_cells: number
+  new_cells: number
+  before_over_cells: number
+  after_over_cells: number
+  persons_over_before: number
+  persons_over_after: number
+}
+
+export interface ScenarioSuggestionsResponse {
+  has_overload: boolean
+  rows: SuggestedScenario[]
+}
+
+// ── Vazamento entre times (cross-team) ──
+export interface CrossTeamAwayItem {
+  team_area_id: string | null
+  team_name: string
+  hours: number
+}
+
+export interface CrossTeamPersonRow {
+  person_id: string
+  full_name: string
+  position_label: string | null
+  home_area_ids: string[]
+  home_area_names: string[]
+  home_hours: number
+  away_hours: number
+  undefined_hours: number
+  total_hours: number
+  away_pct: number
+  at_risk: boolean
+  away_by_team: CrossTeamAwayItem[]
+}
+
+export interface CrossTeamResponse {
+  rows: CrossTeamPersonRow[]
 }
 
 export interface AssigneeAbsenceItem {
@@ -923,8 +1141,37 @@ export interface PoSyncResponse {
     total_projetos: number
   } | null
   proximos_passos: string[]
+  saude_produtos: {
+    por_po: PoSyncSaudeProdutosPo[]
+    resumo: {
+      total_produtos: number
+      media_score: number
+      producao: PoSyncSaudeProdutosFaixa
+      desenvolvimento: PoSyncSaudeProdutosFaixa
+      outros: PoSyncSaudeProdutosFaixa
+      distribuicao: { saudavel: number; atencao: number; critico: number }
+    }
+  }
   available_diretorias: PoSyncOption[]
   available_areas: PoSyncOption[]
+}
+
+export interface PoSyncSaudeProdutosFaixa {
+  total: number
+  score_medio: number | null
+}
+
+export interface PoSyncSaudeProdutosPo {
+  po_id: string | null
+  full_name: string
+  total: number
+  score_medio: number
+  producao: PoSyncSaudeProdutosFaixa
+  desenvolvimento: PoSyncSaudeProdutosFaixa
+  outros: PoSyncSaudeProdutosFaixa
+  saudavel: number
+  atencao: number
+  critico: number
 }
 
 // ── API client ────────────────────────────────────────────────────────────────
@@ -1084,7 +1331,10 @@ export const projetosApi = {
     is_active: boolean
     allowed_demand_type_ids: string[] | null
     access_control: Record<string, FunnelAccessLevel> | null
+    classification_enforcement_enabled: boolean
   }>) => api.patch<ProjectFunnel>(`/projetos/projects/${projectId}/funnels/${funnelId}`, data).then((r) => r.data),
+  getUnclassifiedPastBacklogCount: (projectId: string, funnelId: string) =>
+    api.get<{ count: number }>(`/projetos/projects/${projectId}/funnels/${funnelId}/unclassified-count`).then((r) => r.data),
   deleteFunnel: (projectId: string, funnelId: string) =>
     api.delete<void>(`/projetos/projects/${projectId}/funnels/${funnelId}`).then((r) => r.data),
 
@@ -1111,6 +1361,7 @@ export const projetosApi = {
     sla_warning_pct?: number
     priority_mode?: PriorityMode
     priority_required?: boolean
+    classification_required?: boolean
     cascade_children_on_move?: boolean
     children_to_funnel_id?: string | null
     grandchildren_to_funnel_id?: string | null
@@ -1130,6 +1381,7 @@ export const projetosApi = {
     sla_warning_pct: number
     priority_mode: PriorityMode
     priority_required: boolean
+    classification_required: boolean
     cascade_children_on_move: boolean
     children_to_funnel_id: string | null
     grandchildren_to_funnel_id: string | null
@@ -1142,6 +1394,8 @@ export const projetosApi = {
 
   listTasks: (projectId: string, params?: { status_id?: string; assigned_to?: string }) =>
     api.get<ProjectTask[]>(`/projetos/projects/${projectId}/tasks`, { params }).then((r) => r.data),
+  listPrograms: (projectId: string) =>
+    api.get<{ id: string; name: string }[]>(`/projetos/projects/${projectId}/programs`).then((r) => r.data),
   createTask: (projectId: string, data: {
     status_id: string
     demand_type_id?: string | null
@@ -1182,7 +1436,18 @@ export const projetosApi = {
     conversion_description: string | null
     conversion_items: Array<{ title: string; description?: string | null; start_date?: string | null; due_date?: string | null }>
     conversion_assigned_to: string | null
+    conversion_program_id: string | null
+    card_classification: CardClassification | null
+    linked_product_id: string | null
+    linked_release_id: string | null
+    us_checklist: UsChecklistItem[] | null
   }>) => api.patch<ProjectTask>(`/projetos/projects/${projectId}/tasks/${taskId}`, data).then((r) => r.data),
+  setPlanningClassification: (projectId: string, taskId: string, data: {
+    kind: "projeto" | "programa"
+    program_id?: string | null
+    new_program_name?: string | null
+    new_program_desc?: string | null
+  }) => api.patch<ProjectTask>(`/projetos/projects/${projectId}/tasks/${taskId}/planning-classification`, data).then((r) => r.data),
   deleteTask: (projectId: string, taskId: string) =>
     api.delete<void>(`/projetos/projects/${projectId}/tasks/${taskId}`).then((r) => r.data),
   reorderTasks: (projectId: string, items: Array<{ id: string; order: number }>) =>
@@ -1207,6 +1472,29 @@ export const projetosApi = {
     api.delete<void>(`/projetos/projects/${projectId}/dependencies/${depId}`).then((r) => r.data),
   getWorkload: (projectId: string, params?: { unit?: "day" | "week"; from?: string; to?: string }) =>
     api.get<WorkloadResponse>(`/projetos/projects/${projectId}/workload`, { params }).then((r) => r.data),
+  getCapacityHeatmap: (params: { from: string; to: string; unit?: "day" | "week"; area?: string; position?: string }) =>
+    api.get<CapacityHeatmapResponse>(`/projetos/capacity/heatmap`, { params }).then((r) => r.data),
+  getCapacityByProject: (params: { from: string; to: string; area?: string }) =>
+    api.get<CapacityByProjectResponse>(`/projetos/capacity/by-project`, { params }).then((r) => r.data),
+  getCapacityGaps: (params: { from: string; to: string; group_by?: "position" | "area" }) =>
+    api.get<CapacityGapsResponse>(`/projetos/capacity/gaps`, { params }).then((r) => r.data),
+  getAvailablePeople: (params: {
+    from: string
+    to: string
+    position?: string
+    area?: string
+    stack?: string
+    min_level?: string
+    min_free_hours?: number
+  }) => api.get<FreePeopleResponse>(`/projetos/capacity/available-people`, { params }).then((r) => r.data),
+  getSimulatableTasks: (params: { from: string; to: string }) =>
+    api.get<SimTasksResponse>(`/projetos/capacity/tasks`, { params }).then((r) => r.data),
+  simulateScenario: (payload: ScenarioRequest) =>
+    api.post<ScenarioResult>(`/projetos/capacity/simulate`, payload).then((r) => r.data),
+  getCrossTeam: (params: { from: string; to: string }) =>
+    api.get<CrossTeamResponse>(`/projetos/capacity/cross-team`, { params }).then((r) => r.data),
+  getScenarioSuggestions: (params: { from: string; to: string }) =>
+    api.get<ScenarioSuggestionsResponse>(`/projetos/capacity/suggest-scenarios`, { params }).then((r) => r.data),
   getCriticalPath: (projectId: string, rootTaskId: string) =>
     api.get<CriticalPathItem[]>(`/projetos/projects/${projectId}/critical-path`, { params: { root: rootTaskId } }).then((r) => r.data),
   getAssigneeAbsences: (projectId: string) =>
@@ -1384,6 +1672,16 @@ export const projetosApi = {
     api.patch<ProjectStageAgentBinding>(`/projetos/config/stage-agents/${bindingId}`, data).then((r) => r.data),
   deleteStageAgent: (bindingId: string) =>
     api.delete<void>(`/projetos/config/stage-agents/${bindingId}`).then((r) => r.data),
+
+  // Cadastro próprio de Programas (catálogo do tenant).
+  listProgramCatalog: (activeOnly = false) =>
+    api.get<ProjectProgram[]>(`/projetos/programs`, { params: activeOnly ? { active_only: true } : undefined }).then((r) => r.data),
+  createProgram: (data: ProjectProgramInput) =>
+    api.post<ProjectProgram>(`/projetos/programs`, data).then((r) => r.data),
+  updateProgram: (programId: string, data: Partial<ProjectProgramInput>) =>
+    api.patch<ProjectProgram>(`/projetos/programs/${programId}`, data).then((r) => r.data),
+  deleteProgram: (programId: string) =>
+    api.delete<void>(`/projetos/programs/${programId}`).then((r) => r.data),
   listTaskAgentExecutions: (taskId: string) =>
     api.get<ProjectAgentExecution[]>(`/projetos/tasks/${taskId}/agent-executions`).then((r) => r.data),
   listAgentExecutionLogs: (params?: {

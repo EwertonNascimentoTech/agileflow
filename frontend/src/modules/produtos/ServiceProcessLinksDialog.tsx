@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { toast } from "@/lib/toast"
@@ -27,13 +28,19 @@ function normalize(s: string) {
 }
 
 export default function ServiceProcessLinksDialog({
+  productId,
   servicoId,
   servicoName,
+  semSubprocessoInicial = false,
+  justificativaInicial = "",
   onClose,
   onSaved,
 }: {
+  productId: string
   servicoId: string
   servicoName: string
+  semSubprocessoInicial?: boolean
+  justificativaInicial?: string
   onClose: () => void
   onSaved?: () => void
 }) {
@@ -42,6 +49,8 @@ export default function ServiceProcessLinksDialog({
   const [subs, setSubs] = useState<SubEntry[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [query, setQuery] = useState("")
+  const [semDispensa, setSemDispensa] = useState(semSubprocessoInicial)
+  const [justificativa, setJustificativa] = useState(justificativaInicial)
   const [loading, setLoading] = useState(true)
   const [loadingTree, setLoadingTree] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -59,6 +68,11 @@ export default function ServiceProcessLinksDialog({
   }, [servicoId])
 
   useEffect(() => {
+    setSemDispensa(semSubprocessoInicial)
+    setJustificativa(justificativaInicial)
+  }, [semSubprocessoInicial, justificativaInicial, servicoId])
+
+  useEffect(() => {
     if (!portfolioId) { setSubs([]); return }
     setLoadingTree(true)
     setQuery("")
@@ -72,6 +86,8 @@ export default function ServiceProcessLinksDialog({
     () => subs.filter((s) => selected.has(s.item.lineage_id)).length,
     [subs, selected],
   )
+
+  const totalSelected = selected.size
 
   const visibleSubs = useMemo(() => {
     const q = normalize(query.trim())
@@ -96,21 +112,35 @@ export default function ServiceProcessLinksDialog({
       else next.add(lineageId)
       return next
     })
+    if (semDispensa) setSemDispensa(false)
   }
 
   async function save() {
-    if (!portfolioId) return
+    if (totalSelected === 0 && semDispensa && !justificativa.trim()) {
+      toast.error("Informe a justificativa quando não houver sub-processo disponível.")
+      return
+    }
     setSaving(true)
     try {
-      const idsThisPortfolio = subs
-        .filter((s) => selected.has(s.item.lineage_id))
-        .map((s) => s.item.lineage_id)
-      await produtosApi.setServiceProcessLinks(servicoId, portfolioId, idsThisPortfolio)
-      toast.success("Vínculos salvos.")
+      if (portfolioId && portfolios.length > 0) {
+        const idsThisPortfolio = subs
+          .filter((s) => selected.has(s.item.lineage_id))
+          .map((s) => s.item.lineage_id)
+        await produtosApi.setServiceProcessLinks(servicoId, portfolioId, idsThisPortfolio)
+      }
+
+      if (totalSelected === 0) {
+        await produtosApi.setServicoSubprocessoDispensa(productId, servicoId, {
+          sem_subprocesso_disponivel: semDispensa,
+          justificativa_sem_subprocesso: semDispensa ? justificativa.trim() : null,
+        })
+      }
+
+      toast.success("Salvo com sucesso.")
       onSaved?.()
       onClose()
-    } catch {
-      toast.error("Falha ao salvar vínculos.")
+    } catch (e) {
+      toast.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Falha ao salvar.")
     } finally {
       setSaving(false)
     }
@@ -131,9 +161,17 @@ export default function ServiceProcessLinksDialog({
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         ) : portfolios.length === 0 ? (
-          <p className="flex-1 px-6 py-16 text-center text-sm text-muted-foreground">
-            Nenhum portfólio de processos cadastrado.
-          </p>
+          <div className="flex-1 space-y-4 px-6 py-8">
+            <p className="text-center text-sm text-muted-foreground">
+              Nenhum portfólio de processos cadastrado.
+            </p>
+            <DispensaSection
+              semDispensa={semDispensa}
+              onSemDispensa={setSemDispensa}
+              justificativa={justificativa}
+              onJustificativa={setJustificativa}
+            />
+          </div>
         ) : (
           <>
             <div className="shrink-0 space-y-3 border-b bg-muted/20 px-6 py-4">
@@ -167,6 +205,9 @@ export default function ServiceProcessLinksDialog({
                 <Badge variant="secondary" className="font-normal">
                   {selectedInPortfolio} selecionado{selectedInPortfolio !== 1 ? "s" : ""} neste portfólio
                 </Badge>
+                <Badge variant="outline" className="font-normal">
+                  {totalSelected} no total
+                </Badge>
                 {subs.length > 0 && (
                   <span>{visibleSubs.length} de {subs.length} exibido{visibleSubs.length !== 1 ? "s" : ""}</span>
                 )}
@@ -179,12 +220,12 @@ export default function ServiceProcessLinksDialog({
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
               ) : subs.length === 0 ? (
-                <div className="flex flex-col items-center gap-2 py-16 text-center text-sm text-muted-foreground">
+                <div className="flex flex-col items-center gap-2 py-8 text-center text-sm text-muted-foreground">
                   <Workflow size={24} className="opacity-50" />
                   Nenhum sub-processo na versão consolidada deste portfólio.
                 </div>
               ) : visibleSubs.length === 0 ? (
-                <div className="flex flex-col items-center gap-2 py-16 text-center text-sm text-muted-foreground">
+                <div className="flex flex-col items-center gap-2 py-8 text-center text-sm text-muted-foreground">
                   <Search size={24} className="opacity-50" />
                   Nenhum sub-processo encontrado para &quot;{query}&quot;.
                 </div>
@@ -229,18 +270,72 @@ export default function ServiceProcessLinksDialog({
                   })}
                 </ul>
               )}
+
+              {totalSelected === 0 && (
+                <div className="mt-4">
+                  <DispensaSection
+                    semDispensa={semDispensa}
+                    onSemDispensa={setSemDispensa}
+                    justificativa={justificativa}
+                    onJustificativa={setJustificativa}
+                  />
+                </div>
+              )}
             </div>
           </>
         )}
 
         <DialogFooter className="shrink-0 gap-2 border-t px-6 py-4">
           <Button variant="outline" onClick={onClose}>Cancelar</Button>
-          <Button onClick={() => void save()} disabled={saving || !portfolioId || loading}>
+          <Button onClick={() => void save()} disabled={saving || loading}>
             {saving && <Loader2 size={14} className="mr-1.5 animate-spin" />}
-            Salvar{selectedInPortfolio > 0 ? ` (${selectedInPortfolio})` : ""}
+            Salvar{totalSelected > 0 ? ` (${totalSelected})` : semDispensa ? " (dispensa)" : ""}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function DispensaSection({
+  semDispensa,
+  onSemDispensa,
+  justificativa,
+  onJustificativa,
+}: {
+  semDispensa: boolean
+  onSemDispensa: (v: boolean) => void
+  justificativa: string
+  onJustificativa: (v: string) => void
+}) {
+  return (
+    <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50/50 p-3">
+      <label className="flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          className="mt-0.5 size-4 shrink-0 accent-primary"
+          checked={semDispensa}
+          onChange={(e) => onSemDispensa(e.target.checked)}
+        />
+        <span>
+          <strong>Não há sub-processo disponível</strong> para vincular a este serviço
+        </span>
+      </label>
+      <p className="mt-1 pl-6 text-[11px] text-muted-foreground">
+        Marque esta opção somente quando o portfólio de processos não oferece sub-processo aplicável.
+        Com justificativa preenchida, o critério de saúde não penaliza este serviço.
+      </p>
+      {semDispensa && (
+        <div className="mt-3 space-y-1.5 pl-6">
+          <Label className="text-xs">Justificativa *</Label>
+          <Textarea
+            rows={3}
+            value={justificativa}
+            onChange={(e) => onJustificativa(e.target.value)}
+            placeholder="Explique por que não existe sub-processo para vincular..."
+          />
+        </div>
+      )}
+    </div>
   )
 }

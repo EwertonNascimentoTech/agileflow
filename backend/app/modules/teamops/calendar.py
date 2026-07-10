@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # evita importar models (e a cadeia de DB) em uso puro/testes
     from sqlalchemy.ext.asyncio import AsyncSession
+    from app.modules.teamops.models import Person
 
 
 def _to_minutes(t: time) -> int:
@@ -166,6 +167,16 @@ class WorkingCalendar:
             minutes += int((stop - cur).total_seconds() // 60)
             cur = self.next_start(seg_end_dt)
         return minutes / 60.0
+
+
+def project_hours_per_day(person: "Person | None", calendar: WorkingCalendar) -> float:
+    """Horas diárias efetivas para projetos: daily_hours × project_allocation_pct / 100.
+    Sem pessoa (tarefa sem responsável), usa 100% do expediente corporativo."""
+    if person is None:
+        return calendar.hours_per_day()
+    base = float(person.daily_hours) if person.daily_hours else calendar.hours_per_day()
+    pct = float(person.project_allocation_pct) if person.project_allocation_pct is not None else 100.0
+    return max(0.01, base * pct / 100.0)
 
 
 async def load_calendar(db: "AsyncSession") -> WorkingCalendar:

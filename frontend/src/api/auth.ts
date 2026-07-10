@@ -13,4 +13,15 @@ export const authApi = {
 
   resetPassword: (token: string, new_password: string) =>
     api.post<{ message: string }>("/auth/reset-password", { token, new_password }).then((r) => r.data),
+
+  checkFirstAccess: (email: string) =>
+    api.post<{
+      setup_token: string
+      full_name: string
+      email: string
+      message: string
+    }>("/auth/first-access/check", { email }).then((r) => r.data),
+
+  completeFirstAccess: (token: string, password: string) =>
+    api.post<TokenResponse>("/auth/first-access/complete", { token, password }).then((r) => r.data),
 }

@@ -143,6 +143,40 @@ def decode_password_reset_token(token: str) -> dict:
     return payload
 
 
+def create_first_access_token(
+    *,
+    user_id: uuid.UUID | None = None,
+    person_id: uuid.UUID | None = None,
+    tenant_id: uuid.UUID | None = None,
+) -> str:
+    """Token de primeiro acesso — válido por 30 minutos."""
+    payload: dict = {"typ": "first_access"}
+    if user_id:
+        payload["sub"] = str(user_id)
+    if person_id:
+        payload["person_id"] = str(person_id)
+    if tenant_id:
+        payload["tenant_id"] = str(tenant_id)
+    return _create_token(payload, timedelta(minutes=30))
+
+
+def decode_first_access_token(token: str) -> dict:
+    """Decodifica e valida token de primeiro acesso."""
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token de primeiro acesso inválido ou expirado.",
+        )
+    if payload.get("typ") != "first_access":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token inválido.",
+        )
+    return payload
+
+
 def decode_token(token: str) -> dict:
     try:
         return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
@@ -158,15 +192,61 @@ def decode_token(token: str) -> dict:
 # DEPENDENCIES
 # ─────────────────────────────────────────────
 
+# ─────────────────────────────────────────────
+# CACHE DO USUÁRIO AUTENTICADO
+# ─────────────────────────────────────────────
+# O current_user já é detached após get_current_user (a sessão fecha), então
+# reconstruir um User transiente a partir do cache é equivalente para os
+# consumidores (só leem colunas escalares; nenhum acessa relações lazy).
+# hashed_password NÃO é cacheado — não é usado no current_user injetado e
+# manter credencial fora do Redis é defense-in-depth.
+
+def _serialize_user(u: User) -> dict:
+    return {
+        "id": str(u.id),
+        "tenant_id": str(u.tenant_id) if u.tenant_id else None,
+        "email": u.email,
+        "full_name": u.full_name,
+        "role": u.role.value if hasattr(u.role, "value") else u.role,
+        "role_id": str(u.role_id) if u.role_id else None,
+        "is_active": u.is_active,
+        "last_login": u.last_login.isoformat() if u.last_login else None,
+        "created_at": u.created_at.isoformat() if u.created_at else None,
+        "updated_at": u.updated_at.isoformat() if u.updated_at else None,
+    }
+
+
+def _deserialize_user(d: dict) -> User:
+    return User(
+        id=uuid.UUID(d["id"]),
+        tenant_id=uuid.UUID(d["tenant_id"]) if d["tenant_id"] else None,
+        email=d["email"],
+        full_name=d["full_name"],
+        hashed_password="",  # não cacheado
+        role=UserRole(d["role"]),
+        role_id=uuid.UUID(d["role_id"]) if d["role_id"] else None,
+        is_active=d["is_active"],
+        last_login=datetime.fromisoformat(d["last_login"]) if d["last_login"] else None,
+        created_at=datetime.fromisoformat(d["created_at"]) if d["created_at"] else None,
+        updated_at=datetime.fromisoformat(d["updated_at"]) if d["updated_at"] else None,
+    )
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
 ) -> User:
     from app.core.database import AsyncSessionLocal
+    from app.core.cache import cache_get, cache_set, user_key
 
     payload = decode_token(credentials.credentials)
     user_id = payload.get("sub")
     if not user_id:
         raise HTTPException(status_code=401, detail="Token sem identificação.")
+
+    if settings.AUTH_CACHE_TTL > 0:
+        cached = await cache_get(user_key(user_id))
+        if cached is not None:
+            return _deserialize_user(cached)
 
     from sqlalchemy import text
     async with AsyncSessionLocal() as session:
@@ -176,6 +256,10 @@ async def get_current_user(
 
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="Usuário não encontrado ou inativo.")
+
+    # Só cacheia usuários ativos (evita persistir estados que resultam em 401).
+    if settings.AUTH_CACHE_TTL > 0:
+        await cache_set(user_key(user_id), _serialize_user(user), settings.AUTH_CACHE_TTL)
 
     return user
 

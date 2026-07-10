@@ -268,6 +268,8 @@ class PositionService:
             db.add(RolePermission(role_id=role.id, permission_code=c))
         pos.updated_at = datetime.utcnow()
         await db.commit()
+        from app.core.cache import invalidate_role_permissions
+        await invalidate_role_permissions(role.id)
         return await PositionService.get_permissions(db, position_id)
 
     @staticmethod
@@ -821,6 +823,48 @@ class PersonService:
             await db.rollback()
             raise HTTPException(status_code=400, detail="Não foi possível salvar (e-mail já em uso).")
         return await PersonService.get(db, item.id)
+
+    @staticmethod
+    async def provision_login_from_first_access(
+        db: AsyncSession,
+        person_id: uuid.UUID,
+        password: str,
+        tenant_id: uuid.UUID,
+    ) -> User:
+        """Ativa login de colaborador cadastrado no TeamOps sem usuário vinculado."""
+        item = await PersonService.get(db, person_id)
+        if item.status != PersonStatus.ATIVO:
+            raise HTTPException(
+                status_code=403,
+                detail="Colaborador inativo. Contate o administrador da sua empresa.",
+            )
+
+        if item.user_id:
+            user = (await db.execute(select(User).where(User.id == item.user_id))).scalar_one_or_none()
+            if user is None:
+                item.user_id = None
+            elif user.last_login is not None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Primeiro acesso já concluído. Faça login com sua senha.",
+                )
+            else:
+                user.hashed_password = PersonService._hash_validated(password)
+                user.last_login = datetime.utcnow()
+                user.updated_at = datetime.utcnow()
+                await db.commit()
+                await db.refresh(user)
+                return user
+
+        await PersonService._provision_user(db, item, "com_acesso", password, None, tenant_id)
+        if not item.user_id:
+            raise HTTPException(status_code=500, detail="Não foi possível criar o acesso.")
+        user = (await db.execute(select(User).where(User.id == item.user_id))).scalar_one()
+        user.last_login = datetime.utcnow()
+        user.updated_at = datetime.utcnow()
+        await db.commit()
+        await db.refresh(user)
+        return user
 
     # ── Acesso ao sistema: provisionamento Pessoa ↔ Usuário ──────────────────
     @staticmethod

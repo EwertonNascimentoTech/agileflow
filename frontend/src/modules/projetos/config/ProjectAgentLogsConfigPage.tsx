@@ -57,6 +57,25 @@ function JsonBlock({ value }: { value: Record<string, unknown> | null }) {
   )
 }
 
+// Rótulos amigáveis para as categorias do relatório de anonimização.
+const ANON_LABELS: Record<string, string> = {
+  email: "E-mails", nome_pessoa: "Nomes cadastrados", dado_sensivel: "Dados sensíveis (LGPD)",
+  sistema_generalizado: "Sistemas generalizados", cpf: "CPF", cnpj: "CNPJ", rg: "RG",
+  telefone: "Telefones", ip: "IPs", url: "URLs",
+}
+function anonCatLabel(cat: string): string {
+  if (cat.startsWith("campo_pessoa:")) return `Campo de pessoa (${cat.split(":")[1]})`
+  return ANON_LABELS[cat] ?? cat
+}
+
+// Remove o relatório interno de anonimização da exibição do payload (não é enviado ao gateway).
+function withoutReport(p: Record<string, unknown> | null): Record<string, unknown> | null {
+  if (!p) return p
+  const copy = { ...p }
+  delete copy._anonimizacao
+  return copy
+}
+
 export default function ProjectAgentLogsConfigPage() {
   const [logs, setLogs] = useState<ProjectAgentExecutionLogItem[]>([])
   const [agents, setAgents] = useState<ProjectStageAgentBinding[]>([])
@@ -112,7 +131,7 @@ export default function ProjectAgentLogsConfigPage() {
         <div>
           <h1 className="text-xl font-bold">Logs de agentes</h1>
           <p className="text-sm text-muted-foreground">
-            Histórico de execuções dos agentes IDCortex vinculados às etapas do kanban.
+            Histórico de execuções dos agentes (Azure AI Foundry) vinculados às etapas do kanban.
           </p>
         </div>
         <Button
@@ -283,19 +302,37 @@ export default function ProjectAgentLogsConfigPage() {
                   </div>
                 )}
 
+                {(() => {
+                  const rep = detail.request_payload?._anonimizacao as Record<string, number> | undefined
+                  if (!rep || Object.keys(rep).length === 0) return null
+                  return (
+                    <div>
+                      <p className="text-xs font-medium mb-1">Relatório de anonimização (categorias tratadas)</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {Object.entries(rep).map(([cat, n]) => (
+                          <Badge key={cat} variant="secondary" className="text-[10px]">{anonCatLabel(cat)}: {n}</Badge>
+                        ))}
+                      </div>
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        O payload abaixo é a versão anonimizada efetivamente enviada ao Azure — sem dados pessoais reais.
+                      </p>
+                    </div>
+                  )
+                })()}
+
                 <div>
-                  <p className="text-xs font-medium mb-1">Requisição (payload enviado ao gateway)</p>
-                  <JsonBlock value={detail.request_payload} />
+                  <p className="text-xs font-medium mb-1">Requisição (payload anonimizado enviado ao Azure)</p>
+                  <JsonBlock value={withoutReport(detail.request_payload)} />
                 </div>
 
                 <div>
-                  <p className="text-xs font-medium mb-1">Resposta completa (gateway)</p>
+                  <p className="text-xs font-medium mb-1">Resposta completa (Azure)</p>
                   <JsonBlock value={detail.response_payload} />
                 </div>
 
                 {agentsById.get(detail.binding_id) && (
                   <p className="text-[11px] text-muted-foreground">
-                    ID do agente IDCortex: {agentsById.get(detail.binding_id)?.agent_id}
+                    ID do agente (Azure AI Foundry): {agentsById.get(detail.binding_id)?.agent_id}
                   </p>
                 )}
               </div>

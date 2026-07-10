@@ -62,6 +62,7 @@ class ProjectFunnelUpdate(BaseModel):
     is_active: Optional[bool] = None
     allowed_demand_type_ids: Optional[list[uuid.UUID]] = None
     access_control: Optional[dict[str, str]] = None
+    classification_enforcement_enabled: Optional[bool] = None
 
 
 class ProjectFunnelResponse(BaseModel):
@@ -75,6 +76,7 @@ class ProjectFunnelResponse(BaseModel):
     is_active: bool
     allowed_demand_type_ids: Optional[list[uuid.UUID]] = None
     access_control: Optional[dict[str, str]] = None
+    classification_enforcement_enabled: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -293,6 +295,7 @@ class ProjectStatusCreate(BaseModel):
     sla_warning_pct: int = Field(80, ge=1, le=100)
     priority_mode: PriorityMode = "edit"
     priority_required: bool = False
+    classification_required: bool = False
     cascade_children_on_move: bool = False
     children_to_funnel_id: Optional[uuid.UUID] = None
     grandchildren_to_funnel_id: Optional[uuid.UUID] = None
@@ -315,6 +318,7 @@ class ProjectStatusUpdate(BaseModel):
     sla_warning_pct: Optional[int] = Field(None, ge=1, le=100)
     priority_mode: Optional[PriorityMode] = None
     priority_required: Optional[bool] = None
+    classification_required: Optional[bool] = None
     cascade_children_on_move: Optional[bool] = None
     children_to_funnel_id: Optional[uuid.UUID] = None
     grandchildren_to_funnel_id: Optional[uuid.UUID] = None
@@ -344,6 +348,7 @@ class ProjectStatusResponse(BaseModel):
     sla_warning_pct: int = 80
     priority_mode: PriorityMode = "edit"
     priority_required: bool = False
+    classification_required: bool = False
     cascade_children_on_move: bool = False
     children_to_funnel_id: Optional[uuid.UUID] = None
     grandchildren_to_funnel_id: Optional[uuid.UUID] = None
@@ -360,6 +365,13 @@ class TaskImportResult(BaseModel):
     us_created: int = 0
     skipped: int = 0
     warnings: list[str] = Field(default_factory=list)
+
+
+class UsChecklistItem(BaseModel):
+    id: str = Field(..., min_length=1, max_length=64)
+    label: str = Field(..., min_length=1, max_length=300)
+    done: bool = False
+    order: int = Field(0, ge=0)
 
 
 class ProjectTaskCreate(BaseModel):
@@ -413,6 +425,7 @@ class ProjectTaskUpdate(BaseModel):
     estimated_hours: Optional[Decimal] = Field(None, ge=0)
     actual_hours: Optional[Decimal] = Field(None, ge=0)
     percent_complete: Optional[int] = Field(None, ge=0, le=100)
+    us_checklist: Optional[list[UsChecklistItem]] = None
     order: Optional[int] = Field(None, ge=0)
     form_values: Optional[dict] = None
     # Nome do card a ser criado por conversão nesta troca de status (não é persistido
@@ -426,6 +439,22 @@ class ProjectTaskUpdate(BaseModel):
     conversion_items: Optional[list[ConversionItem]] = None
     # PO responsável pelo item de planejamento criado na conversão.
     conversion_assigned_to: Optional[uuid.UUID] = None
+    # Programa existente a ser referenciado (kind=programa, modo "vincular"). None = criar novo.
+    conversion_program_id: Optional[uuid.UUID] = None
+    # Classificação exigida ao sair do backlog + vínculo com o portfólio de PRODUTOS.
+    card_classification: Optional[Literal["desenvolvimento", "implantacao", "melhoria"]] = None
+    linked_product_id: Optional[uuid.UUID] = None
+    linked_release_id: Optional[uuid.UUID] = None
+
+
+class PlanningClassificationUpdate(BaseModel):
+    """Edição da classificação Projeto/Programa a partir do card de origem (ex.: etapa
+    "Concluído" da prospecção). Propaga ao card de planejamento convertido."""
+    kind: Literal["projeto", "programa"]
+    # Programa existente a vincular (kind=programa). None + new_program_name = cadastrar novo.
+    program_id: Optional[uuid.UUID] = None
+    new_program_name: Optional[str] = Field(None, min_length=2, max_length=200)
+    new_program_desc: Optional[str] = None
 
 
 class ProjectTaskResponse(BaseModel):
@@ -440,6 +469,10 @@ class ProjectTaskResponse(BaseModel):
     anexos: Optional[list] = None
     assigned_to: Optional[uuid.UUID]
     planning_kind: Optional[str] = None
+    linked_program_id: Optional[uuid.UUID] = None
+    card_classification: Optional[str] = None
+    linked_product_id: Optional[uuid.UUID] = None
+    linked_release_id: Optional[uuid.UUID] = None
     diretoria: Optional[str]
     area: Optional[str]
     start_date: Optional[datetime]
@@ -447,6 +480,10 @@ class ProjectTaskResponse(BaseModel):
     estimated_hours: Optional[Decimal] = None
     actual_hours: Optional[Decimal] = None
     percent_complete: int = 0
+    us_checklist: Optional[list] = None
+    # Rollups das US filhas (usados pelos selos no card da Feature).
+    us_impediment_active: bool = False
+    us_codereview_active: bool = False
     order: int
     created_by: Optional[uuid.UUID]
     completed_at: Optional[datetime]
@@ -529,17 +566,213 @@ class ScheduleLockState(BaseModel):
     latest_version: Optional[int] = None
 
 
+class WorkloadCellItem(BaseModel):
+    """Uma demanda (tarefa) que compõe a carga daquele dia — para o tooltip do heatmap."""
+    project_name: str
+    task_title: str
+    hours: float
+
+
 class WorkloadCell(BaseModel):
     user_id: uuid.UUID
     date: date
     allocated_hours: float
     capacity_hours: float
     overallocated: bool
+    items: list[WorkloadCellItem] = []   # detalhamento projeto/demanda × horas no dia
 
 
 class WorkloadResponse(BaseModel):
     unit: Literal["day", "week"]
     cells: list[WorkloadCell]
+
+
+# ── Cockpit de capacidade (cross-project) ──
+class CapacityPersonMeta(BaseModel):
+    """Metadados da pessoa presentes no heatmap, para o front não precisar casar com listPersons."""
+    id: uuid.UUID
+    full_name: str
+    position_slug: Optional[str] = None
+    position_label: Optional[str] = None
+    area_ids: list[uuid.UUID] = []
+
+
+class CapacitySummary(BaseModel):
+    overallocated_cells: int
+    persons_over: int
+    total_capacity_h: float
+    total_allocated_h: float
+    # assigned_to (person_id) que têm alocação mas nenhuma Person correspondente no teamops.
+    unmapped_assignees: list[str] = []
+
+
+class CapacityHeatmapResponse(BaseModel):
+    """Lente por pessoa: sobrecarga pessoa×dia cruzando TODO o portfólio."""
+    unit: Literal["day", "week"]
+    cells: list[WorkloadCell]
+    persons: list[CapacityPersonMeta]
+    summary: CapacitySummary
+
+
+class CapacityProjectRow(BaseModel):
+    project_id: uuid.UUID
+    project_name: str
+    demand_hours: float          # horas estimadas deste projeto na janela
+    capacity_hours: float        # capacidade total (janela) das pessoas alocadas — compartilhada entre projetos
+    people_count: int
+    overloaded_people: int       # pessoas deste projeto sobrecarregadas (global) em algum dia que trabalham nele
+    overallocated: bool          # a demanda deste projeto sozinha já excede a capacidade das suas pessoas
+
+
+class CapacityByProjectResponse(BaseModel):
+    """Lente por projeto (viabilidade): demanda × capacidade das pessoas alocadas."""
+    rows: list[CapacityProjectRow]
+
+
+# ── Fase 1: gargalos/contratação e finder de pessoas livres ──
+class CapacityGapRow(BaseModel):
+    group_type: Literal["position", "area"]
+    group_key: str
+    group_label: str
+    people_count: int
+    capacity_hours: float
+    allocated_hours: float
+    deficit_hours: float          # soma dos déficits semanais positivos na janela
+    peak_week: Optional[str] = None   # segunda-feira da semana de pior déficit
+    peak_deficit_hours: float
+    suggested_headcount: int      # reforço sugerido (freela/contratação) p/ cobrir o pico
+
+
+class CapacityGapsResponse(BaseModel):
+    rows: list[CapacityGapRow]
+
+
+class FreePersonRow(BaseModel):
+    person_id: uuid.UUID
+    full_name: str
+    position_slug: Optional[str] = None
+    position_label: Optional[str] = None
+    area_ids: list[uuid.UUID] = []
+    stacks: list[str] = []              # competências (nomes) para o PO ver o fit
+    capacity_hours_total: float
+    allocated_hours_total: float
+    free_hours_total: float            # folga de capacidade no período
+    free_days: int                     # dias úteis com alguma folga
+    utilization_pct: float
+    next_absence: Optional[str] = None # próxima ausência que afeta capacidade
+
+
+class FreePeopleResponse(BaseModel):
+    rows: list[FreePersonRow]
+
+
+# ── Fase 2: simulador de cenários (what-if efêmero) ──
+class SimTaskMeta(BaseModel):
+    """Tarefa agendada na janela, para alimentar o construtor de mutações do simulador."""
+    task_id: uuid.UUID
+    title: str
+    project_name: str
+    assigned_to: Optional[uuid.UUID] = None
+    assignee_name: Optional[str] = None
+    start_date: date
+    due_date: date
+    estimated_hours: float
+
+
+class SimTasksResponse(BaseModel):
+    tasks: list[SimTaskMeta]
+
+
+class ScenarioMutation(BaseModel):
+    op: Literal["move_task", "reassign", "scale_hours", "remove_person", "add_freelancer"]
+    # move_task
+    task_id: Optional[uuid.UUID] = None
+    new_start: Optional[date] = None
+    new_due: Optional[date] = None
+    # reassign
+    new_person_id: Optional[uuid.UUID] = None
+    # scale_hours
+    factor: Optional[float] = None
+    # remove_person (simula férias/saída)
+    person_id: Optional[uuid.UUID] = None
+    # add_freelancer (pessoa virtual)
+    freelancer_name: Optional[str] = None
+    daily_hours: Optional[float] = None
+    assign_task_ids: list[uuid.UUID] = []
+
+
+class ScenarioRequest(BaseModel):
+    date_from: date
+    date_to: date
+    mutations: list[ScenarioMutation] = []
+
+
+class ScenarioDiff(BaseModel):
+    before_over_cells: int
+    after_over_cells: int
+    before_persons_over: int
+    after_persons_over: int
+    resolved_cells: int   # estavam em sobrecarga antes e não estão depois
+    new_cells: int        # não estavam em sobrecarga antes e passaram a estar
+    before_allocated_h: float
+    after_allocated_h: float
+    before_capacity_h: float
+    after_capacity_h: float
+
+
+class ScenarioResult(BaseModel):
+    """Comparação antes/depois — efêmero, nada é persistido."""
+    before: CapacityHeatmapResponse
+    after: CapacityHeatmapResponse
+    diff: ScenarioDiff
+
+
+# ── Simulador inteligente: cenários auto-gerados ──
+class SuggestedScenario(BaseModel):
+    id: str
+    title: str
+    description: str
+    kind: Literal["reassign", "freelancer", "defer", "combo"]
+    cost_tag: Literal["gratis", "custo", "prazo"]
+    target_person_name: Optional[str] = None   # quem o cenário ajuda (pessoa sobrecarregada)
+    mutations: list[ScenarioMutation]
+    resolved_cells: int
+    new_cells: int
+    before_over_cells: int
+    after_over_cells: int
+    persons_over_before: int
+    persons_over_after: int
+
+
+class ScenarioSuggestionsResponse(BaseModel):
+    has_overload: bool
+    rows: list[SuggestedScenario]
+
+
+# ── Vazamento entre times (cross-team) ──
+class CrossTeamAwayItem(BaseModel):
+    team_area_id: Optional[uuid.UUID] = None
+    team_name: str
+    hours: float
+
+
+class CrossTeamPersonRow(BaseModel):
+    person_id: uuid.UUID
+    full_name: str
+    position_label: Optional[str] = None
+    home_area_ids: list[uuid.UUID] = []
+    home_area_names: list[str] = []
+    home_hours: float
+    away_hours: float
+    undefined_hours: float           # horas em cards sem PO/área resolvível
+    total_hours: float
+    away_pct: float                  # away / total (0..100)
+    at_risk: bool                    # away_hours > home_hours
+    away_by_team: list[CrossTeamAwayItem] = []
+
+
+class CrossTeamResponse(BaseModel):
+    rows: list[CrossTeamPersonRow]
 
 
 class AssigneeAbsenceItem(BaseModel):
@@ -874,14 +1107,18 @@ class ProjectStageAgentBindingCreate(BaseModel):
     status_id: uuid.UUID
     name: str = Field(..., min_length=1, max_length=140)
     agent_kind: str = Field("ask", pattern=r"^(ask|classify_and_advance)$")
+    # agent_id = ID do agente (assistant) do Azure AI Foundry.
     agent_id: str = Field(..., min_length=1, max_length=120)
-    usuario: str = Field(..., min_length=3, max_length=255)
     prompt_template: str = Field(..., min_length=1)
+    # Campos abaixo: legado (auth/endpoint do Azure vêm do .env). Mantidos opcionais.
+    usuario: str = Field("", max_length=255)
     gateway_url: Optional[str] = Field(None, max_length=500)
-    gateway_client_id: str = Field(..., min_length=1, max_length=255)
-    gateway_client_secret: str = Field(..., min_length=1, max_length=255)
+    gateway_client_id: Optional[str] = Field(None, max_length=255)
+    gateway_client_secret: Optional[str] = Field(None, max_length=255)
     continue_thread: bool = False
     add_comment_on_success: bool = True
+    # Raia de destino ao concluir (classify_and_advance). None = próxima etapa do funil.
+    advance_to_status_id: Optional[uuid.UUID] = None
     is_active: bool = True
 
 
@@ -889,13 +1126,14 @@ class ProjectStageAgentBindingUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=140)
     agent_kind: Optional[str] = Field(None, pattern=r"^(ask|classify_and_advance)$")
     agent_id: Optional[str] = Field(None, min_length=1, max_length=120)
-    usuario: Optional[str] = Field(None, min_length=3, max_length=255)
+    usuario: Optional[str] = Field(None, max_length=255)
     prompt_template: Optional[str] = Field(None, min_length=1)
     gateway_url: Optional[str] = Field(None, max_length=500)
     gateway_client_id: Optional[str] = Field(None, max_length=255)
     gateway_client_secret: Optional[str] = Field(None, max_length=255)
     continue_thread: Optional[bool] = None
     add_comment_on_success: Optional[bool] = None
+    advance_to_status_id: Optional[uuid.UUID] = None
     is_active: Optional[bool] = None
 
 
@@ -914,6 +1152,7 @@ class ProjectStageAgentBindingResponse(BaseModel):
     has_gateway_client_secret: bool = False
     continue_thread: bool
     add_comment_on_success: bool
+    advance_to_status_id: Optional[uuid.UUID] = None
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -1319,3 +1558,30 @@ class StatusReportResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
+
+
+class ProjectProgramCreate(BaseModel):
+    name: str = Field(..., min_length=2, max_length=200)
+    description: Optional[str] = None
+    responsavel_person_id: Optional[uuid.UUID] = None
+    is_active: bool = True
+
+
+class ProjectProgramUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=2, max_length=200)
+    description: Optional[str] = None
+    responsavel_person_id: Optional[uuid.UUID] = None
+    is_active: Optional[bool] = None
+
+
+class ProjectProgramResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    description: Optional[str] = None
+    responsavel_person_id: Optional[uuid.UUID] = None
+    responsavel_nome: Optional[str] = None
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}

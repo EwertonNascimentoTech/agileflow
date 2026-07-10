@@ -2,14 +2,10 @@ import { useEffect, useState } from "react"
 import { useForm, type Resolver } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import * as Icons from "lucide-react"
 import { Package, Plus, Pencil, Trash2, Loader2, FolderOpen } from "lucide-react"
+import { resolveModuleIcon } from "@/lib/moduleIcons"
 
-function resolveIcon(name: string | null | undefined): React.ElementType {
-  if (!name) return Package
-  const Comp = (Icons as unknown as Record<string, React.ElementType>)[name]
-  return Comp ?? Package
-}
+const resolveIcon = resolveModuleIcon
 import { modulesApi } from "@/api/superAdmin"
 import type { Module } from "@/types"
 import { Button } from "@/components/ui/button"

@@ -15,7 +15,7 @@ _GROUP_BY = Literal["produto", "area", "setor", "portfolio"]
 
 # ── Enums "Produtos Digitais" (spec TI corporativa) ──
 _PROD_STATUS = Literal["ideia", "discovery", "desenvolvimento", "homologacao", "producao", "sustentacao", "evolucao", "suspenso", "descontinuado"]
-_PROD_CATEGORIA = Literal["sistema_interno_dev", "sistema_interno_ia", "sistema_externo_ia", "sistema_externo_implantacao", "sistema_externo_dn"]
+_PROD_CATEGORIA = Literal["sistema_interno_dev", "sistema_interno_ia", "sistema_externo_ia", "sistema_externo_implantacao", "sistema_externo_hibrido", "sistema_externo_dn"]
 _PROD_UNIDADE = Literal["sesi", "senai", "iel", "fiea", "corporativo"]
 _PROD_MODELO_CONTRAT = Literal["licenca", "saas", "fabrica", "servico_continuado", "projeto_pontual", "interno", "outro"]
 _SERVICO_SUPORTE = Literal["interno", "fornecedor", "compartilhado", "service_desk", "devops", "desenvolvimento", "infraestrutura"]
@@ -36,9 +36,6 @@ _RELEASE_AMBIENTE = Literal["dev", "hml", "prd"]
 _DOCNT_TIPO = Literal["usuario", "tecnica", "api", "implantacao", "sustentacao", "arquitetura", "seguranca", "operacional"]
 _DOCNT_STATUS = Literal["nao_iniciada", "em_elaboracao", "publicada", "necessita_atualizacao", "obsoleta"]
 _SUPORTE_TIPO = Literal["interna", "fornecedor", "compartilhada"]
-_INTEGRACAO_TIPO = Literal["api", "banco", "arquivo", "etl", "webhook", "manual", "outro"]
-_AUTENTICACAO_TIPO = Literal["active_directory", "entra_id", "login_local", "sso", "token", "oauth", "outro"]
-_RISCO = Literal["baixo", "medio", "alto", "critico"]
 
 
 # ── Anexo genérico (upload MinIO) ─────────────
@@ -100,6 +97,10 @@ class FornecedorResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class DefinirFornecedorRequest(BaseModel):
+    fornecedor_id: Optional[uuid.UUID] = None
+
+
 # ── Serviços / Documentos (com ano) ───────────
 class ServicoCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=160)
@@ -115,6 +116,17 @@ class ServicoCreate(BaseModel):
     disponibilidade: Optional[str] = Field(None, max_length=120)
     sla_atendimento: Optional[str] = Field(None, max_length=200)
     tipo_suporte: Optional[_SERVICO_SUPORTE] = None
+
+
+class ServicoSubprocessoDispensa(BaseModel):
+    sem_subprocesso_disponivel: bool = False
+    justificativa_sem_subprocesso: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _justificativa_obrigatoria(self) -> "ServicoSubprocessoDispensa":
+        if self.sem_subprocesso_disponivel and not (self.justificativa_sem_subprocesso or "").strip():
+            raise ValueError("Informe a justificativa quando não houver sub-processo disponível para vincular.")
+        return self
 
 
 class ServicoUpdate(BaseModel):
@@ -146,6 +158,8 @@ class ServicoResponse(BaseModel):
     responsavel_person_id: Optional[uuid.UUID] = None
     responsavel: Optional[PersonMini] = None
     process_links: list["ServiceLinkItem"] = Field(default_factory=list)
+    sem_subprocesso_disponivel: bool = False
+    justificativa_sem_subprocesso: Optional[str] = None
     is_active: bool
     order: int
     model_config = {"from_attributes": True}
@@ -494,6 +508,7 @@ class ProductListItem(BaseModel):
     alertas: list[ProductAlerta] = []
     score: int = 100                           # índice de saúde/maturidade 0–100
     classe: str = "saudavel"                   # saudavel | atencao | critico
+    saude_gaps: list[str] = []                 # labels dos critérios que faltam p/ 100
     servicos_count: int = 0                    # serviços digitais ativos
     stacks: list[StackMini] = Field(default_factory=list)
 
@@ -548,8 +563,7 @@ class ProductResponse(BaseModel):
     contratos: list[ContratoResponse]
     releases: list["ReleaseResponse"] = Field(default_factory=list)
     documentations: list["DocumentationResponse"] = Field(default_factory=list)
-    support: Optional["SupportResponse"] = None
-    security: Optional["SecurityResponse"] = None
+    supports: list["SupportResponse"] = Field(default_factory=list)
     health: Optional[ProductHealth] = None
 
 
@@ -839,7 +853,6 @@ class DashboardKpis(BaseModel):
     sem_documentacao: int = 0
     criticos: int = 0
     com_dados_pessoais: int = 0
-    com_plano_contingencia: int = 0
     releases_publicadas_mes: int = 0
 
 
@@ -1024,8 +1037,13 @@ class DocumentationCreate(_DocumentationFields):
 
     @model_validator(mode="after")
     def _publicada(self):
-        if self.status == "publicada" and not (self.conteudo_md and self.conteudo_md.strip()):
-            raise ValueError("Documentação publicada exige conteúdo Markdown preenchido.")
+        tem_conteudo = (
+            (self.conteudo_md and self.conteudo_md.strip())
+            or (self.link_interno and self.link_interno.strip())
+            or bool(self.anexos)
+        )
+        if self.status == "publicada" and not tem_conteudo:
+            raise ValueError("Documentação publicada exige conteúdo Markdown, link ou anexo.")
         return self
 
 
@@ -1048,47 +1066,42 @@ class DocumentationResponse(BaseModel):
     updated_at: datetime
 
 
-class SupportUpsert(BaseModel):
-    tipo: Optional[_SUPORTE_TIPO] = None
+_NIVEL_ATENDIMENTO = Literal["n1", "n2", "n3"]
+
+
+class SupportCreate(BaseModel):
+    canal_atendimento: Optional[str] = Field(None, max_length=200)
+    nivel: _NIVEL_ATENDIMENTO
+    interno: bool = True
+    person_ids: list[uuid.UUID] = Field(default_factory=list)
+    nomes_externos: list[str] = Field(default_factory=list)
+    sla_horas: Optional[int] = Field(None, ge=1)
+    observacoes: Optional[str] = None
+
+
+class SupportUpdate(BaseModel):
+    canal_atendimento: Optional[str] = Field(None, max_length=200)
+    nivel: Optional[_NIVEL_ATENDIMENTO] = None
+    interno: Optional[bool] = None
+    person_ids: Optional[list[uuid.UUID]] = None
+    nomes_externos: Optional[list[str]] = None
+    sla_horas: Optional[int] = Field(None, ge=1)
+    observacoes: Optional[str] = None
+
+
+class SupportResponse(BaseModel):
+    id: uuid.UUID
     canal_atendimento: Optional[str] = None
-    sla_critico: Optional[str] = None
-    sla_medio: Optional[str] = None
-    sla_solicitacao: Optional[str] = None
-    equipe_responsavel: Optional[str] = None
-    horario_suporte: Optional[str] = None
-    escalonamento: Optional[str] = None
-    link_base_conhecimento: Optional[str] = None
+    nivel: str
+    interno: bool
+    person_ids: list[uuid.UUID] = Field(default_factory=list)
+    nomes_externos: list[str] = Field(default_factory=list)
+    sla_horas: Optional[int] = None
+    responsaveis: list[PersonMini] = Field(default_factory=list)
     observacoes: Optional[str] = None
 
 
-class SupportResponse(SupportUpsert):
-    id: uuid.UUID
-    model_config = {"from_attributes": True}
-
-
-class SecurityUpsert(BaseModel):
-    possui_integracao: Optional[bool] = None
-    sistemas_integrados: Optional[str] = None
-    tipo_integracao: Optional[_INTEGRACAO_TIPO] = None
-    dados_tratados: Optional[str] = None
-    dados_pessoais: Optional[bool] = None
-    dados_sensiveis: Optional[bool] = None
-    classificacao: Optional[_CLASSIFICACAO] = None
-    tipo_autenticacao: Optional[_AUTENTICACAO_TIPO] = None
-    perfis_acesso: Optional[str] = None
-    logs_auditoria: Optional[bool] = None
-    backup: Optional[bool] = None
-    plano_contingencia: Optional[bool] = None
-    risco_indisponibilidade: Optional[_RISCO] = None
-    observacoes: Optional[str] = None
-
-
-class SecurityResponse(SecurityUpsert):
-    id: uuid.UUID
-    model_config = {"from_attributes": True}
-
-
-# Resolve forward references (ProductResponse referencia Release/Documentation/Support/Security;
+# Resolve forward references (ProductResponse referencia Release/Documentation/Support;
 # Contrato* referenciam AnexoItem).
 ProductResponse.model_rebuild()
 ContratoCreate.model_rebuild()

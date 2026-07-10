@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     # ── APP ──────────────────────────────────────
     PROJECT_NAME: str = "AgileFlow"
     DEBUG: bool = False
+    # Logging síncrono de toda query SQL — SÓ para debug local. Nunca em runtime
+    # sob carga (serializa I/O e derruba throughput). Desacoplado de DEBUG de
+    # propósito: DEBUG controla /docs, SQL_ECHO controla o log de queries.
+    SQL_ECHO: bool = False
     SECRET_KEY: str
     ALLOWED_ORIGINS: List[str] = ["http://localhost:3000"]
 
@@ -26,6 +30,12 @@ class Settings(BaseSettings):
     POSTGRES_DB: str
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
+    # Pool por PROCESSO. Com N workers uvicorn, o total de conexões é
+    # N × (DB_POOL_SIZE + DB_MAX_OVERFLOW) e precisa caber no max_connections do
+    # Postgres (default 100), reservando espaço para Celery e psql. Ex.: 4 workers
+    # × (5 + 10) = 60.
+    DB_POOL_SIZE: int = 5
+    DB_MAX_OVERFLOW: int = 10
 
     @property
     def DATABASE_URL(self) -> str:
@@ -46,6 +56,10 @@ class Settings(BaseSettings):
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     REDIS_PASSWORD: str = ""
+    # TTL (segundos) do cache de autorização (user / módulo-tenant / permissão).
+    # Curto de propósito: limita a janela de inconsistência caso alguma
+    # invalidação explícita seja perdida. 0 desativa o cache de auth.
+    AUTH_CACHE_TTL: int = 30
 
     @property
     def REDIS_URL(self) -> str:
@@ -77,10 +91,16 @@ class Settings(BaseSettings):
     MINIO_BUCKET_DEFAULT: str = "saas-storage"
     MINIO_SECURE: bool = False
 
-    # ── IDCortex Gateway (agentes por etapa do kanban) ──
-    IDCORTEX_GATEWAY_URL: str = "https://idcortex-dev.sistemafiea.com.br/gateway/ask"
-    IDCORTEX_CLIENT_ID: str = ""
-    IDCORTEX_CLIENT_SECRET: str = ""
+    # ── Azure AI Foundry — Agent Service (agentes por etapa do kanban) ──
+    # Endpoint do PROJETO Foundry (base até antes de "/threads"). Ex.:
+    # https://<recurso>.services.ai.azure.com/api/projects/<projeto>
+    AZURE_AI_ENDPOINT: str = ""
+    AZURE_AI_API_VERSION: str = "2025-05-01"
+    # Autenticação por Microsoft Entra ID (o Agent Service NÃO aceita api-key).
+    # Service principal com a role "Cognitive Services User" / "Foundry User" no recurso.
+    AZURE_AI_TENANT_ID: str = ""
+    AZURE_AI_CLIENT_ID: str = ""
+    AZURE_AI_CLIENT_SECRET: str = ""
 
 
 settings = Settings()

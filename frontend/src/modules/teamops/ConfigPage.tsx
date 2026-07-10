@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { Plus, Trash2, Pencil, KeyRound, Loader2 } from "lucide-react"
 import { PositionAccessDialog } from "@/modules/teamops/PositionAccessDialog"
 import { toast } from "@/lib/toast"
+import { nullableStr } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -745,10 +746,23 @@ function AbsenceTypeDialog({
     setSaving(true)
     setError(null)
     try {
-      const payload: any = {
-        name, slug: slug || undefined, requires_approval: requiresApproval,
-        affects_capacity: affectsCapacity, color, is_active: active,
-      }
+      const payload: any = isEdit
+        ? {
+            name,
+            slug: nullableStr(slug),
+            requires_approval: requiresApproval,
+            affects_capacity: affectsCapacity,
+            color,
+            is_active: active,
+          }
+        : {
+            name,
+            slug: slug || undefined,
+            requires_approval: requiresApproval,
+            affects_capacity: affectsCapacity,
+            color,
+            is_active: active,
+          }
       if (isEdit) await teamopsApi.updateAbsenceType(item!.id, payload)
       else await teamopsApi.createAbsenceType(payload)
       onSaved()

@@ -34,7 +34,7 @@ services:
         condition: service_healthy
       minio:
         condition: service_started
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${API_WORKERS:-4}
 
   # ── CELERY WORKER ────────────────────────────────────────────────────
   celery_worker:
@@ -73,6 +73,23 @@ services:
       - "${POSTGRES_HOST_PORT:-5437}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    # Tuning básico OLTP (valores conservadores, seguros p/ hosts pequenos):
+    # - max_connections folgado p/ os 4 workers × pool + Celery
+    # - jit=off ajuda cargas de muitas queries curtas
+    command:
+      - postgres
+      - -c
+      - max_connections=150
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=768MB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=128MB
+      - -c
+      - jit=off
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -86,6 +103,10 @@ services:
     restart: unless-stopped
     ports:
       - "${REDIS_HOST_PORT:-6380}:6379"
+    # Limita memória e evita crescimento sem fim ao usar como cache (auth etc):
+    # despeja as chaves menos usadas quando cheio. Mantém a persistência default
+    # (RDB) — o Redis também é result-backend do Celery.
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
     healthcheck:

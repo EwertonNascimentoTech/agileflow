@@ -7,14 +7,13 @@ from datetime import date, datetime
 from typing import Optional
 
 from fastapi import HTTPException
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, update, exists, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import storage
 from app.modules.teamops.models import Area, Person
 from app.modules.produtos import schemas
 from app.modules.produtos.models import (
-    AutenticacaoTipo,
     ClassificacaoInformacao,
     Contrato,
     ContratoStatus,
@@ -23,10 +22,7 @@ from app.modules.produtos.models import (
     DocumentacaoTipo,
     DocumentoTipo,
     Fornecedor,
-    IntegracaoTipo,
     NivelDadosPessoais,
-    RiscoIndisponibilidade,
-    SuporteTipo,
     Processo,
     ProcessoNivel,
     ProcessItemNivel,
@@ -46,7 +42,6 @@ from app.modules.produtos.models import (
     ProductModeloContratacao,
     ProductOrigem,
     ProductRelease,
-    ProductSecurityIntegration,
     ProductServico,
     ProductStatus,
     ProductSupport,
@@ -63,7 +58,6 @@ from app.modules.produtos.models import (
 )
 
 _NIVEL_PARENT = {ProcessoNivel.PROCESSO: ProcessoNivel.MACROPROCESSO, ProcessoNivel.SUBPROCESSO: ProcessoNivel.PROCESSO}
-_REQUIRES_CONTRACT_ORIGEM = {ProductOrigem.COTS, ProductOrigem.SAAS, ProductOrigem.CUSTOMIZACAO}
 
 
 def _now() -> datetime:
@@ -152,25 +146,25 @@ def _tipo_from_categoria(cat) -> Optional[str]:
 # são calculados por produto em ProductService._health. Os pesos e limiares podem ser
 # customizados por tenant em produto_health_config (ver HealthConfigService).
 _HEALTH_CHECKS = [
+    ("geral_completo", "Cadastro geral completo", 20),
     ("servicos_cadastrados", "Serviços cadastrados", 20),
+    ("servicos_subprocesso", "Serviços vinculados a sub-processos", 15),
+    ("documentos_cadastrados", "Documentos cadastrados", 10),
     ("contrato_vigente", "Contrato vigente", 20),
-    ("release_recente", "Release recente (≤12m)", 15),
-    ("documentacao", "Documentação", 15),
+    ("documentacao", "Documentação cadastrada", 15),
+    ("sustentacao_sla", "Sustentação cadastrada", 10),
     ("referencia_tecnica", "Referência técnica válida", 15),
-    ("sustentacao_sla", "Sustentação/SLA definida", 10),
-    ("avaliacao_seguranca", "Avaliação de segurança", 10),
-    ("processo_vinculado", "Processo vinculado", 5),
 ]
 _HEALTH_DEFAULT_WEIGHTS = {code: w for code, _lbl, w in _HEALTH_CHECKS}
 _HEALTH_APLICABILIDADE = {
-    "servicos_cadastrados": "Só aplica a produtos em produção.",
-    "contrato_vigente": "Só aplica a produtos externos / que exigem contrato.",
-    "release_recente": "Só aplica a produtos em produção que já têm release.",
-    "documentacao": "Aplica a todos, exceto descontinuados.",
+    "geral_completo": "Aplica a produtos em produção. Exige todos os campos da aba Geral, exceto Ambiente DEV e HML.",
+    "servicos_cadastrados": "Aplica a produtos em produção.",
+    "servicos_subprocesso": "Aplica a produtos em produção com serviços cadastrados. Cada serviço deve ter ao menos um sub-processo vinculado, ou declaração de indisponibilidade com justificativa.",
+    "documentos_cadastrados": "Aplica a produtos em produção.",
+    "contrato_vigente": "Só aplica a Sistema externo (implantação/híbrido) em produção.",
+    "documentacao": "Aplica a produtos em produção.",
+    "sustentacao_sla": "Aplica a produtos em produção.",
     "referencia_tecnica": "Aplica a todos os produtos.",
-    "sustentacao_sla": "Aplica a produtos em produção ou desenvolvimento.",
-    "avaliacao_seguranca": "Aplica a todos os produtos.",
-    "processo_vinculado": "Só aplica a produtos em produção.",
 }
 _HEALTH_DEFAULT_LIMIAR_SAUDAVEL = 75
 _HEALTH_DEFAULT_LIMIAR_ATENCAO = 40
@@ -254,9 +248,13 @@ class ProductService:
             raise HTTPException(status_code=404, detail="Produto não encontrado.")
         return p
 
+    # Categorias cujo contrato é obrigatório.
+    _CONTRACT_REQUIRED_CATEGORIAS = {"sistema_externo_implantacao", "sistema_externo_hibrido"}
+
     @staticmethod
     def _requires_contract(p: Product) -> bool:
-        return p.origem in _REQUIRES_CONTRACT_ORIGEM or p.fornecedor_id is not None
+        # Contrato obrigatório para "Sistema externo (implantação)" e "Sistema externo (híbrido)".
+        return _ev(p.categoria) in ProductService._CONTRACT_REQUIRED_CATEGORIAS
 
     @staticmethod
     def _has_active_contract(p: Product, today: date) -> bool:
@@ -292,7 +290,6 @@ class ProductService:
         today = today or date.today()
         alertas: list[schemas.ProductAlerta] = []
         lifecycle = _ev(p.lifecycle)
-        tipo_dev = _ev(p.tipo_desenvolvimento) if p.tipo_desenvolvimento else None
         servicos_ativos = sum(1 for s in p.servicos if s.is_active)
 
         # 1) Em produção sem nenhum serviço cadastrado → portfólio desatualizado.
@@ -313,11 +310,11 @@ class ProductService:
                 code="sem_documentacao", nivel="medio",
                 message="Sem documentação cadastrada.",
             ))
-        # 4) Ferramenta externa sem contrato vigente.
-        if tipo_dev == "externo" and not has_active_contract:
+        # 4) Sistema externo (implantação/híbrido) sem contrato vigente.
+        if ProductService._requires_contract(p) and not has_active_contract:
             alertas.append(schemas.ProductAlerta(
                 code="externo_sem_contrato", nivel="alto",
-                message="Ferramenta externa sem contrato vigente.",
+                message="Sistema externo sem contrato vigente.",
             ))
         # 5) Em produção, com releases, mas a última passou de 12 meses → produto parado.
         releases_com_data = [r for r in p.releases if r.is_active and r.data_release]
@@ -336,45 +333,92 @@ class ProductService:
             ))
         return alertas
 
+    @staticmethod
+    async def _servico_link_counts(db: AsyncSession, servico_ids: list[uuid.UUID]) -> dict[uuid.UUID, int]:
+        if not servico_ids:
+            return {}
+        rows = await db.execute(
+            select(ProcessServiceLink.servico_id, func.count())
+            .where(ProcessServiceLink.servico_id.in_(servico_ids), ProcessServiceLink.is_active.is_(True))
+            .group_by(ProcessServiceLink.servico_id)
+        )
+        return {sid: int(cnt) for sid, cnt in rows.all()}
+
+    @staticmethod
+    def _servico_subprocesso_ok(s: ProductServico, link_count: int) -> bool:
+        if link_count > 0:
+            return True
+        return bool(s.sem_subprocesso_disponivel and (s.justificativa_sem_subprocesso or "").strip())
+
+    @staticmethod
+    def _nivel_config_ok(cfg: Optional[dict]) -> bool:
+        if not cfg:
+            return False
+        if cfg.get("sla_horas") is None:
+            return False
+        if cfg.get("interno"):
+            return bool(cfg.get("person_ids"))
+        return bool(cfg.get("nomes_externos"))
+
+    @classmethod
+    def _supports_ok(cls, supports: list[ProductSupport]) -> bool:
+        active = [s for s in supports if s.is_active]
+        if not active:
+            return False
+        if not any((s.canal_atendimento or "").strip() for s in active):
+            return False
+        n1 = next((s for s in active if s.nivel == "n1"), None)
+        if n1:
+            return cls._nivel_config_ok(n1.niveis_atendimento)
+        return any(cls._nivel_config_ok(s.niveis_atendimento) for s in active)
+
     @classmethod
     def _health(cls, p: Product, *, today: date, has_active_contract: bool, tech_ref_ids: set,
                 weights: Optional[dict] = None,
                 lim_saud: int = _HEALTH_DEFAULT_LIMIAR_SAUDAVEL,
-                lim_aten: int = _HEALTH_DEFAULT_LIMIAR_ATENCAO) -> schemas.ProductHealth:
+                lim_aten: int = _HEALTH_DEFAULT_LIMIAR_ATENCAO,
+                servico_link_counts: Optional[dict[uuid.UUID, int]] = None) -> schemas.ProductHealth:
         """Score 0–100 ponderado de saúde/maturidade, com breakdown transparente. Puro em memória.
         `weights`/`lim_*` vêm da config do tenant (None => pesos/limiares padrão)."""
         weights = weights or {}
+        servico_link_counts = servico_link_counts or {}
         lifecycle = _ev(p.lifecycle)
-        tipo_dev = _ev(p.tipo_desenvolvimento) if p.tipo_desenvolvimento else None
 
+        mature = lifecycle == "producao"
         servicos_ativos = [s for s in p.servicos if s.is_active]
-        releases_com_data = [r for r in p.releases if r.is_active and r.data_release]
-        ult_rel = max(releases_com_data, key=lambda r: r.data_release, default=None)
-        docs_ativas = [d for d in p.documentations if d.is_active]
-        docs_validas = [d for d in docs_ativas if _ev(d.status) not in ("nao_iniciada", "obsoleta")]
-        proc_ativos = [l for l in p.processos if l.is_active]
-        support = next((s for s in p.supports if s.is_active), None)
-        security = next((s for s in p.security if s.is_active), None)
+        documentos_ativos = [d for d in p.documentos if d.is_active]       # aba Documentos (arquivos)
+        documentacoes_ativas = [d for d in p.documentations if d.is_active]  # aba Documentação (MD/anexo/link)
+        supports_ativos = [s for s in p.supports if s.is_active]
 
-        # (aplicável?, passou?) por code
+        # Cadastro geral completo:
+        # (lifecycle/corporativo/login_idigital são sempre setados; PO só é exigido se não-corporativo).
+        geral_ok = all([
+            p.categoria is not None,
+            bool((p.description or "").strip()),
+            bool((p.link_repositorio or "").strip()),
+            bool((p.link_prd or "").strip()),
+            p.responsavel_tecnico_person_id is not None,
+            len(p.stacks or []) > 0,
+            p.corporativo or p.responsavel_person_id is not None,
+        ])
+
+        subprocesso_ok = all(
+            cls._servico_subprocesso_ok(s, servico_link_counts.get(s.id, 0))
+            for s in servicos_ativos
+        )
+
+        # (aplicável?, passou?) por code. Checagens de presença só valem em produção
+        # (isenta estágios iniciais e descontinuados).
         defs = {
-            "servicos_cadastrados": (lifecycle == "producao",
-                                     len(servicos_ativos) > 0),
-            "contrato_vigente": (cls._requires_contract(p) or tipo_dev == "externo",
-                                 has_active_contract),
-            "release_recente": (lifecycle == "producao" and len(releases_com_data) > 0,
-                                ult_rel is not None and not _months_ago(ult_rel.data_release, today, 12)),
-            "documentacao": (lifecycle != "descontinuado",
-                             len(docs_validas) > 0),
+            "geral_completo": (mature, geral_ok),
+            "servicos_cadastrados": (mature, len(servicos_ativos) > 0),
+            "servicos_subprocesso": (mature and bool(servicos_ativos), subprocesso_ok),
+            "documentos_cadastrados": (mature, len(documentos_ativos) > 0),
+            "contrato_vigente": (cls._requires_contract(p) and mature, has_active_contract),
+            "documentacao": (mature, len(documentacoes_ativas) > 0),
+            "sustentacao_sla": (mature, cls._supports_ok(supports_ativos)),
             "referencia_tecnica": (True,
                                    bool(p.responsavel_tecnico_person_id) and p.responsavel_tecnico_person_id in tech_ref_ids),
-            "sustentacao_sla": (lifecycle in ("producao", "desenvolvimento"),
-                                support is not None and support.tipo is not None
-                                and any([support.sla_critico, support.sla_medio, support.sla_solicitacao])),
-            "avaliacao_seguranca": (True,
-                                    security is not None and security.risco_indisponibilidade is not None),
-            "processo_vinculado": (lifecycle == "producao",
-                                   len(proc_ativos) > 0),
         }
 
         checks: list[schemas.HealthCheck] = []
@@ -485,12 +529,14 @@ class ProductService:
             setor = _setor_name(p.area, index)
             area_ref = schemas.AreaRefMini(id=p.area.id, name=p.area.name, setor_name=setor)
         active_proc = [l for l in p.processos if l.is_active]
-        support = next((s for s in p.supports if s.is_active), None)
-        security = next((s for s in p.security if s.is_active), None)
+        active_supports = [s for s in p.supports if s.is_active]
         tech_ref_ids = await cls._tech_reference_ids(db)
         hw, hsaud, haten = await cls._load_health_params(db)
+        active_svc = [s for s in p.servicos if s.is_active]
+        link_counts = await cls._servico_link_counts(db, [s.id for s in active_svc])
         health = cls._health(p, today=today, has_active_contract=cls._has_active_contract(p, today),
-                             tech_ref_ids=tech_ref_ids, weights=hw, lim_saud=hsaud, lim_aten=haten)
+                             tech_ref_ids=tech_ref_ids, weights=hw, lim_saud=hsaud, lim_aten=haten,
+                             servico_link_counts=link_counts)
         return schemas.ProductResponse(
             id=p.id, name=p.name, simbolo=p.simbolo, description=p.description, dominio_funcional=p.dominio_funcional,
             origem=_ev(p.origem), lifecycle=_ev(p.lifecycle), criticidade=_ev(p.criticidade),
@@ -523,8 +569,7 @@ class ProductService:
             contratos=[cls._contrato_response(c, pidx_persons=None) for c in p.contratos if c.is_active],
             releases=[_release_to_resp(r) for r in sorted(p.releases, key=lambda x: (x.data_release or date.min, x.created_at), reverse=True) if r.is_active],
             documentations=[_doc_to_resp(d) for d in sorted(p.documentations, key=lambda x: x.created_at) if d.is_active],
-            support=schemas.SupportResponse.model_validate(support) if support else None,
-            security=schemas.SecurityResponse.model_validate(security) if security else None,
+            supports=await SupportService.list_responses(db, active_supports),
             health=health,
         )
 
@@ -620,6 +665,9 @@ class ProductService:
             per_product_uuids.append(uuids)
             all_uuids.extend(uuids)
         stack_map = await cls._stacks_map(db, list(dict.fromkeys(all_uuids)))
+        link_counts = await cls._servico_link_counts(
+            db, [s.id for p in products for s in p.servicos if s.is_active],
+        )
         out = []
         for p, stack_uuids in zip(products, per_product_uuids):
             area_name = p.area.name if p.area else None
@@ -635,14 +683,15 @@ class ProductService:
             # documentação mais recente
             docs_ativas = [d for d in p.documentations if d.is_active]
             ult_doc = max(docs_ativas, key=lambda d: d.created_at, default=None)
-            tem_dp = any(d.dados_pessoais for d in p.documentos if d.is_active) or any(s.dados_pessoais for s in p.security if s.is_active)
+            tem_dp = any(d.dados_pessoais for d in p.documentos if d.is_active)
             has_active_contract = cls._has_active_contract(p, today)
             alertas = cls._compute_alertas(
                 p, has_doc=len(docs_ativas) > 0, has_active_contract=has_active_contract,
                 tech_ref_ids=tech_ref_ids, today=today,
             )
             health = cls._health(p, today=today, has_active_contract=has_active_contract,
-                                 tech_ref_ids=tech_ref_ids, weights=hw, lim_saud=hsaud, lim_aten=haten)
+                                 tech_ref_ids=tech_ref_ids, weights=hw, lim_saud=hsaud, lim_aten=haten,
+                                 servico_link_counts=link_counts)
             servicos_count = sum(1 for s in p.servicos if s.is_active)
             out.append(schemas.ProductListItem(
                 id=p.id, name=p.name, simbolo=p.simbolo, origem=_ev(p.origem), lifecycle=_ev(p.lifecycle),
@@ -667,6 +716,7 @@ class ProductService:
                 corporativo=p.corporativo,
                 alertas=alertas,
                 score=health.score, classe=health.classe,
+                saude_gaps=[c.label for c in health.checks if c.status == "fail"],
                 servicos_count=servicos_count,
                 stacks=[stack_map[i] for i in stack_uuids if i in stack_map],
             ))
@@ -752,6 +802,34 @@ class ProductService:
         return await cls._to_response(db, p)
 
     @classmethod
+    async def definir_fornecedor(
+        cls,
+        db: AsyncSession,
+        product_id: uuid.UUID,
+        fornecedor_id: Optional[uuid.UUID],
+        user_id: Optional[uuid.UUID],
+    ) -> schemas.ProductResponse:
+        """Vincula (ou remove) o fornecedor de software do produto."""
+        p = await cls._get(db, product_id)
+        if fornecedor_id is not None:
+            f = (
+                await db.execute(
+                    select(Fornecedor).where(
+                        Fornecedor.id == fornecedor_id,
+                        Fornecedor.is_active.is_(True),
+                    )
+                )
+            ).scalar_one_or_none()
+            if not f:
+                raise HTTPException(status_code=404, detail="Fornecedor não encontrado.")
+        p.fornecedor_id = fornecedor_id
+        p.updated_by = user_id
+        p.updated_at = _now()
+        await db.commit()
+        await db.refresh(p)
+        return await cls._to_response(db, p)
+
+    @classmethod
     async def delete(cls, db: AsyncSession, product_id: uuid.UUID, user_id: Optional[uuid.UUID]) -> None:
         """Exclusão LÓGICA (inativação) — preserva histórico."""
         p = await cls._get(db, product_id)
@@ -774,7 +852,9 @@ class ProductService:
 
     @classmethod
     async def add_servico(cls, db, product_id, data: schemas.ServicoCreate, user_id) -> schemas.ServicoResponse:
-        await cls._get(db, product_id)
+        product = await cls._get(db, product_id)
+        if product.corporativo and not data.responsavel_person_id:
+            raise HTTPException(status_code=400, detail="Informe o Responsável (PO) do serviço em produtos corporativos.")
         order = (await db.execute(select(func.coalesce(func.max(ProductServico.order), -1)).where(ProductServico.product_id == product_id))).scalar_one() + 1
         pub, ano = cls._servico_publicacao(data)
         item = ProductServico(product_id=product_id, name=data.name.strip(), description=data.description,
@@ -796,6 +876,10 @@ class ProductService:
         old = res.scalar_one_or_none()
         if not old:
             raise HTTPException(status_code=404, detail="Serviço não encontrado.")
+        product = await cls._get(db, product_id)
+        po_id = data.responsavel_person_id if data.responsavel_person_id is not None else old.responsavel_person_id
+        if product.corporativo and not po_id:
+            raise HTTPException(status_code=400, detail="Informe o Responsável (PO) do serviço em produtos corporativos.")
         # Append-only: inativa o antigo e cria novo registro datado.
         old.is_active = False
         old.inactivated_by = user_id
@@ -809,7 +893,9 @@ class ProductService:
                              area_usuaria=data.area_usuaria, processo_relacionado=data.processo_relacionado,
                              disponibilidade=data.disponibilidade, sla_atendimento=data.sla_atendimento,
                              tipo_suporte=ServicoTipoSuporte(data.tipo_suporte) if data.tipo_suporte else None,
-                             status_servico=ServicoStatus(data.status_servico) if data.status_servico else old.status_servico)
+                             status_servico=ServicoStatus(data.status_servico) if data.status_servico else old.status_servico,
+                             sem_subprocesso_disponivel=old.sem_subprocesso_disponivel,
+                             justificativa_sem_subprocesso=old.justificativa_sem_subprocesso)
         db.add(new)
         await db.flush()
         # Append-only cria uma nova linha de serviço; preserva os vínculos de sub-processo
@@ -834,6 +920,53 @@ class ProductService:
         item.inactivated_by = user_id
         item.inactivated_at = _now()
         await db.commit()
+
+    @classmethod
+    async def set_servico_subprocesso_dispensa(
+        cls,
+        db: AsyncSession,
+        product_id: uuid.UUID,
+        servico_id: uuid.UUID,
+        data: schemas.ServicoSubprocessoDispensa,
+        user_id: Optional[uuid.UUID],
+    ) -> schemas.ServicoResponse:
+        await cls._get(db, product_id)
+        svc = (
+            await db.execute(
+                select(ProductServico).where(
+                    ProductServico.id == servico_id,
+                    ProductServico.product_id == product_id,
+                    ProductServico.is_active.is_(True),
+                )
+            )
+        ).scalar_one_or_none()
+        if not svc:
+            raise HTTPException(status_code=404, detail="Serviço não encontrado.")
+        link_count = (
+            await db.execute(
+                select(func.count()).select_from(ProcessServiceLink).where(
+                    ProcessServiceLink.servico_id == servico_id,
+                    ProcessServiceLink.is_active.is_(True),
+                )
+            )
+        ).scalar_one()
+        if link_count > 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Não é possível declarar indisponibilidade com sub-processos já vinculados.",
+            )
+        if data.sem_subprocesso_disponivel:
+            svc.sem_subprocesso_disponivel = True
+            svc.justificativa_sem_subprocesso = (data.justificativa_sem_subprocesso or "").strip()
+        else:
+            svc.sem_subprocesso_disponivel = False
+            svc.justificativa_sem_subprocesso = None
+        svc.updated_by = user_id
+        svc.updated_at = _now()
+        await db.commit()
+        await db.refresh(svc)
+        links = await ProcessPortfolioService.list_service_links(db, svc.id)
+        return schemas.ServicoResponse.model_validate(svc).model_copy(update={"process_links": links})
 
     # ── Documentos (append-only history) ──────
     @classmethod
@@ -1081,33 +1214,52 @@ class ProductService:
     @classmethod
     async def dashboard(cls, db: AsyncSession) -> schemas.DashboardKpis:
         today = date.today()
-        products = list((await db.execute(select(Product).where(Product.is_active.is_(True)))).scalars().all())
+        limite_90 = date.fromordinal(today.toordinal() + 90)
+
+        # Distribuições por enum: consulta só as colunas escalares → evita o
+        # fan-out das 12 coleções lazy="selectin" do Product (nenhuma é usada aqui).
+        rows = (await db.execute(select(
+            Product.lifecycle, Product.criticidade, Product.status_produto,
+            Product.tipo_desenvolvimento,
+        ).where(Product.is_active.is_(True)))).all()
+        total = len(rows)
         by_life: dict = {}
         by_crit: dict = {}
         by_status: dict = {}
-        internos = externos = sem_contrato = a_vencer = sem_doc = criticos = com_dp = com_contingencia = 0
-        for p in products:
-            by_life[_ev(p.lifecycle)] = by_life.get(_ev(p.lifecycle), 0) + 1
-            by_crit[_ev(p.criticidade)] = by_crit.get(_ev(p.criticidade), 0) + 1
-            if p.status_produto is not None:
-                by_status[_ev(p.status_produto)] = by_status.get(_ev(p.status_produto), 0) + 1
-            if p.tipo_desenvolvimento == ProductTipoDesenvolvimento.INTERNO:
+        internos = externos = criticos = 0
+        for r in rows:
+            by_life[_ev(r.lifecycle)] = by_life.get(_ev(r.lifecycle), 0) + 1
+            by_crit[_ev(r.criticidade)] = by_crit.get(_ev(r.criticidade), 0) + 1
+            if r.status_produto is not None:
+                by_status[_ev(r.status_produto)] = by_status.get(_ev(r.status_produto), 0) + 1
+            if r.tipo_desenvolvimento == ProductTipoDesenvolvimento.INTERNO:
                 internos += 1
-            elif p.tipo_desenvolvimento in (ProductTipoDesenvolvimento.EXTERNO, ProductTipoDesenvolvimento.HIBRIDO):
+            elif r.tipo_desenvolvimento in (ProductTipoDesenvolvimento.EXTERNO, ProductTipoDesenvolvimento.HIBRIDO):
                 externos += 1
-            contratos_ativos = [c for c in p.contratos if c.is_active]
-            if not contratos_ativos:
-                sem_contrato += 1
-            elif any(0 <= (c.vigencia_fim - today).days <= 90 for c in contratos_ativos):
-                a_vencer += 1
-            if not any(d.is_active for d in p.documentations):
-                sem_doc += 1
-            if p.criticidade == ProductCriticidade.CRITICA:
+            if r.criticidade == ProductCriticidade.CRITICA:
                 criticos += 1
-            if any(d.dados_pessoais for d in p.documentos if d.is_active) or any(s.dados_pessoais for s in p.security if s.is_active):
-                com_dp += 1
-            if any(s.is_active and s.plano_contingencia for s in p.security):
-                com_contingencia += 1
+
+        # Métricas derivadas de coleções: agregação SQL (EXISTS correlacionado)
+        # em vez de materializar contratos/documentos de cada produto em memória.
+        active = Product.is_active.is_(True)
+        has_active_contract = exists(select(Contrato.id).where(and_(
+            Contrato.product_id == Product.id, Contrato.is_active.is_(True))))
+        sem_contrato = (await db.execute(select(func.count()).select_from(Product).where(
+            active, ~has_active_contract))).scalar_one()
+        a_vencer = (await db.execute(select(func.count()).select_from(Product).where(
+            active, exists(select(Contrato.id).where(and_(
+                Contrato.product_id == Product.id, Contrato.is_active.is_(True),
+                Contrato.vigencia_fim >= today, Contrato.vigencia_fim <= limite_90)))))).scalar_one()
+        sem_doc = (await db.execute(select(func.count()).select_from(Product).where(
+            active, ~exists(select(ProductDocumentation.id).where(and_(
+                ProductDocumentation.product_id == Product.id,
+                ProductDocumentation.is_active.is_(True))))))).scalar_one()
+        com_dp = (await db.execute(select(func.count()).select_from(Product).where(
+            active, exists(select(ProductDocumento.id).where(and_(
+                ProductDocumento.product_id == Product.id,
+                ProductDocumento.is_active.is_(True),
+                ProductDocumento.dados_pessoais.is_(True))))))).scalar_one()
+
         total_serv = (await db.execute(select(func.count(ProductServico.id)).where(ProductServico.is_active.is_(True)))).scalar_one()
         total_doc = (await db.execute(select(func.count(ProductDocumento.id)).where(ProductDocumento.is_active.is_(True)))).scalar_one()
         total_auto = (await db.execute(select(func.count(ProdutoProcesso.id)).where(ProdutoProcesso.is_active.is_(True), ProdutoProcesso.automatizado.is_(True)))).scalar_one()
@@ -1118,7 +1270,7 @@ class ProductService:
             ProductRelease.data_release >= mes_ini, ProductRelease.data_release <= today,
         ))).scalar_one()
         return schemas.DashboardKpis(
-            total_products=len(products), active_products=len(products), by_lifecycle=by_life, by_criticidade=by_crit,
+            total_products=total, active_products=total, by_lifecycle=by_life, by_criticidade=by_crit,
             total_servicos=int(total_serv), total_documentos=int(total_doc), total_processos_automatizados=int(total_auto),
             contratos_vencendo=int(venc),
             by_status=by_status,
@@ -1128,7 +1280,7 @@ class ProductService:
             descontinuados=by_status.get("descontinuado", 0),
             internos=internos, externos=externos, sem_contrato=sem_contrato, contratos_a_vencer_90d=a_vencer,
             sem_documentacao=sem_doc, criticos=criticos, com_dados_pessoais=com_dp,
-            com_plano_contingencia=com_contingencia, releases_publicadas_mes=int(rel_mes),
+            releases_publicadas_mes=int(rel_mes),
         )
 
     # ── Inteligência de portfólio ─────────────
@@ -1148,6 +1300,9 @@ class ProductService:
         tech_ref_ids = await cls._tech_reference_ids(db)
         hw, hsaud, haten = await cls._load_health_params(db)
         products = list((await db.execute(select(Product).where(Product.is_active.is_(True)))).scalars().all())
+        link_counts = await cls._servico_link_counts(
+            db, [s.id for p in products for s in p.servicos if s.is_active],
+        )
 
         distribuicao = {"saudavel": 0, "atencao": 0, "critico": 0}
         matriz: dict[tuple[str, str], int] = {}
@@ -1162,7 +1317,8 @@ class ProductService:
             has_active_contract = cls._has_active_contract(p, today)
             docs_ativas = [d for d in p.documentations if d.is_active]
             health = cls._health(p, today=today, has_active_contract=has_active_contract,
-                                 tech_ref_ids=tech_ref_ids, weights=hw, lim_saud=hsaud, lim_aten=haten)
+                                 tech_ref_ids=tech_ref_ids, weights=hw, lim_saud=hsaud, lim_aten=haten,
+                                 servico_link_counts=link_counts)
             scored.append((p, health))
             soma += health.score
             distribuicao[health.classe] += 1
@@ -1212,6 +1368,114 @@ class ProductService:
             produtos_parados=parados,
             doc_debt=doc_debt,
         )
+
+    @staticmethod
+    def _faixa_saude_produto(p: Product) -> str:
+        """Agrupa produto para score médio: produção vs desenvolvimento vs outros."""
+        st = _ev(p.status_produto) if p.status_produto else None
+        if st in ("producao", "sustentacao", "evolucao"):
+            return "producao"
+        if st in ("ideia", "discovery", "desenvolvimento", "homologacao"):
+            return "desenvolvimento"
+        if st in ("suspenso", "descontinuado"):
+            return "outros"
+        lc = _ev(p.lifecycle)
+        if lc == "producao":
+            return "producao"
+        if lc in ("concepcao", "desenvolvimento"):
+            return "desenvolvimento"
+        return "outros"
+
+    @staticmethod
+    def _empty_po_agg() -> dict:
+        faixa = lambda: {"total": 0, "soma": 0}
+        return {
+            "total": 0, "soma": 0, "saudavel": 0, "atencao": 0, "critico": 0,
+            "producao": faixa(), "desenvolvimento": faixa(), "outros": faixa(),
+        }
+
+    @staticmethod
+    def _score_medio(soma: int, total: int) -> Optional[float]:
+        return round(soma / total, 1) if total else None
+
+    @classmethod
+    async def health_by_po(cls, db: AsyncSession) -> dict:
+        """Saúde do portfólio de produtos agregada por PO (Responsável). Produtos corporativos
+        (PO definido por serviço) são atribuídos a cada PO dos seus serviços ativos; produtos
+        sem PO caem em "Sem PO". Read-only — reusa `_health` (mesma regra do Índice de Saúde)."""
+        today = date.today()
+        tech_ref_ids = await cls._tech_reference_ids(db)
+        hw, hsaud, haten = await cls._load_health_params(db)
+        products = list((await db.execute(select(Product).where(Product.is_active.is_(True)))).scalars().all())
+        name_by_id = {p.id: p.full_name for p in (await db.execute(select(Person))).scalars().all()}
+        link_counts = await cls._servico_link_counts(
+            db, [s.id for p in products for s in p.servicos if s.is_active],
+        )
+
+        agg: dict = {}
+        soma_geral = 0
+        dist_geral = {"saudavel": 0, "atencao": 0, "critico": 0}
+        resumo_faixas = {k: {"total": 0, "soma": 0} for k in ("producao", "desenvolvimento", "outros")}
+
+        def bump(pid, h, faixa: str):
+            a = agg.setdefault(pid, cls._empty_po_agg())
+            a["total"] += 1
+            a["soma"] += h.score
+            a[h.classe] += 1
+            fx = a[faixa]
+            fx["total"] += 1
+            fx["soma"] += h.score
+            resumo_faixas[faixa]["total"] += 1
+            resumo_faixas[faixa]["soma"] += h.score
+
+        for p in products:
+            h = cls._health(p, today=today, has_active_contract=cls._has_active_contract(p, today),
+                            tech_ref_ids=tech_ref_ids, weights=hw, lim_saud=hsaud, lim_aten=haten,
+                            servico_link_counts=link_counts)
+            faixa = cls._faixa_saude_produto(p)
+            soma_geral += h.score
+            dist_geral[h.classe] += 1
+            if p.corporativo:
+                po_ids = {s.responsavel_person_id for s in p.servicos if s.is_active and s.responsavel_person_id}
+                if not po_ids:
+                    po_ids = {None}
+            else:
+                po_ids = {p.responsavel_person_id} if p.responsavel_person_id else {None}
+            for pid in po_ids:
+                bump(pid, h, faixa)
+
+        def faixa_row(fx: dict) -> dict:
+            return {
+                "total": fx["total"],
+                "score_medio": cls._score_medio(fx["soma"], fx["total"]),
+            }
+
+        por_po = [
+            {
+                "po_id": str(pid) if pid else None,
+                "full_name": (name_by_id.get(pid) or "Sem PO") if pid else "Sem PO",
+                "total": a["total"],
+                "score_medio": round(a["soma"] / a["total"]) if a["total"] else 0,
+                "producao": faixa_row(a["producao"]),
+                "desenvolvimento": faixa_row(a["desenvolvimento"]),
+                "outros": faixa_row(a["outros"]),
+                "saudavel": a["saudavel"], "atencao": a["atencao"], "critico": a["critico"],
+            }
+            for pid, a in agg.items()
+        ]
+        por_po.sort(key=lambda x: (-x["critico"], -x["total"], x["score_medio"]))
+
+        return {
+            "por_po": por_po,
+            "resumo": {
+                "total_produtos": len(products),
+                "media_score": round(soma_geral / len(products), 1) if products else 0.0,
+                "producao": faixa_row(resumo_faixas["producao"]),
+                "desenvolvimento": faixa_row(resumo_faixas["desenvolvimento"]),
+                "outros": faixa_row(resumo_faixas["outros"]),
+                "distribuicao": dist_geral,
+            },
+        }
 
     @classmethod
     async def contratos_intelligence(cls, db: AsyncSession) -> schemas.ContratosInteligencia:
@@ -1511,73 +1775,163 @@ class DocumentationService:
 
 
 class SupportService:
-    """Sustentação/SLA — 1 registro ativo por produto (upsert)."""
+    """Sustentação/SLA — múltiplos registros por produto (um por nível N1/N2/N3)."""
 
-    @classmethod
-    async def get(cls, db, product_id) -> Optional[schemas.SupportResponse]:
-        s = (await db.execute(select(ProductSupport).where(
-            ProductSupport.product_id == product_id, ProductSupport.is_active.is_(True),
-        ))).scalars().first()
-        return schemas.SupportResponse.model_validate(s) if s else None
-
-    @classmethod
-    async def upsert(cls, db, product_id, data: schemas.SupportUpsert, user_id) -> schemas.SupportResponse:
-        if not (await db.execute(select(Product.id).where(Product.id == product_id))).scalar_one_or_none():
-            raise HTTPException(status_code=404, detail="Produto não encontrado.")
-        s = (await db.execute(select(ProductSupport).where(
-            ProductSupport.product_id == product_id, ProductSupport.is_active.is_(True),
-        ))).scalars().first()
-        payload = data.model_dump(exclude_unset=True)
-        if s is None:
-            s = ProductSupport(product_id=product_id, created_by=user_id)
-            db.add(s)
-        if "tipo" in payload:
-            s.tipo = SuporteTipo(payload.pop("tipo")) if payload.get("tipo") else None
-        for f, v in payload.items():
-            if f != "tipo":
-                setattr(s, f, v)
-        s.updated_by = user_id
-        s.updated_at = _now()
-        await db.commit()
-        await db.refresh(s)
-        return schemas.SupportResponse.model_validate(s)
-
-
-class SecurityIntegrationService:
-    """Integrações, dados e segurança — 1 registro ativo por produto (upsert)."""
-
-    @classmethod
-    async def get(cls, db, product_id) -> Optional[schemas.SecurityResponse]:
-        s = (await db.execute(select(ProductSecurityIntegration).where(
-            ProductSecurityIntegration.product_id == product_id, ProductSecurityIntegration.is_active.is_(True),
-        ))).scalars().first()
-        return schemas.SecurityResponse.model_validate(s) if s else None
-
-    @classmethod
-    async def upsert(cls, db, product_id, data: schemas.SecurityUpsert, user_id) -> schemas.SecurityResponse:
-        if not (await db.execute(select(Product.id).where(Product.id == product_id))).scalar_one_or_none():
-            raise HTTPException(status_code=404, detail="Produto não encontrado.")
-        s = (await db.execute(select(ProductSecurityIntegration).where(
-            ProductSecurityIntegration.product_id == product_id, ProductSecurityIntegration.is_active.is_(True),
-        ))).scalars().first()
-        payload = data.model_dump(exclude_unset=True)
-        if s is None:
-            s = ProductSecurityIntegration(product_id=product_id, created_by=user_id)
-            db.add(s)
-        enum_map = {
-            "tipo_integracao": IntegracaoTipo, "classificacao": ClassificacaoInformacao,
-            "tipo_autenticacao": AutenticacaoTipo, "risco_indisponibilidade": RiscoIndisponibilidade,
+    @staticmethod
+    def _normalize_config(
+        *,
+        interno: bool,
+        person_ids: Optional[list],
+        nomes_externos: Optional[list],
+        sla_horas: Optional[int],
+    ) -> dict:
+        ids = [str(x) for x in (person_ids or [])] if interno else []
+        nomes = [str(x).strip() for x in (nomes_externos or []) if x and str(x).strip()] if not interno else []
+        return {
+            "interno": interno,
+            "person_ids": ids,
+            "nomes_externos": nomes,
+            "sla_horas": int(sla_horas) if sla_horas is not None else None,
         }
-        for f, v in payload.items():
-            if f in enum_map:
-                setattr(s, f, enum_map[f](v) if v else None)
-            else:
-                setattr(s, f, v)
+
+    @classmethod
+    async def _persons_map(cls, db: AsyncSession, supports: list[ProductSupport]) -> dict[uuid.UUID, Person]:
+        person_ids: set[uuid.UUID] = set()
+        for s in supports:
+            cfg = s.niveis_atendimento or {}
+            for pid in cfg.get("person_ids") or []:
+                try:
+                    person_ids.add(uuid.UUID(str(pid)))
+                except ValueError:
+                    pass
+        if not person_ids:
+            return {}
+        rows = await db.execute(select(Person).where(Person.id.in_(person_ids)))
+        return {p.id: p for p in rows.scalars().all()}
+
+    @classmethod
+    def to_response(cls, s: ProductSupport, persons: dict[uuid.UUID, Person]) -> schemas.SupportResponse:
+        cfg = s.niveis_atendimento or {}
+        interno = bool(cfg.get("interno", True))
+        pids: list[uuid.UUID] = []
+        for pid in cfg.get("person_ids") or []:
+            try:
+                pids.append(uuid.UUID(str(pid)))
+            except ValueError:
+                pass
+        nomes = [str(x) for x in (cfg.get("nomes_externos") or [])]
+        return schemas.SupportResponse(
+            id=s.id,
+            canal_atendimento=s.canal_atendimento,
+            nivel=s.nivel or "n1",
+            interno=interno,
+            person_ids=pids,
+            nomes_externos=nomes,
+            sla_horas=cfg.get("sla_horas"),
+            responsaveis=[
+                schemas.PersonMini(id=persons[pid].id, full_name=persons[pid].full_name)
+                for pid in pids if pid in persons
+            ],
+            observacoes=s.observacoes,
+        )
+
+    @classmethod
+    async def list_responses(cls, db: AsyncSession, supports: list[ProductSupport]) -> list[schemas.SupportResponse]:
+        persons = await cls._persons_map(db, supports)
+        order = {"n1": 0, "n2": 1, "n3": 2}
+        sorted_rows = sorted(supports, key=lambda s: (order.get(s.nivel or "n1", 9), s.created_at))
+        return [cls.to_response(s, persons) for s in sorted_rows]
+
+    @classmethod
+    async def list(cls, db, product_id) -> list[schemas.SupportResponse]:
+        rows = (await db.execute(select(ProductSupport).where(
+            ProductSupport.product_id == product_id, ProductSupport.is_active.is_(True),
+        ).order_by(ProductSupport.created_at))).scalars().all()
+        return await cls.list_responses(db, list(rows))
+
+    @classmethod
+    async def _get_row(cls, db, product_id, support_id) -> ProductSupport:
+        s = (await db.execute(select(ProductSupport).where(
+            ProductSupport.id == support_id,
+            ProductSupport.product_id == product_id,
+            ProductSupport.is_active.is_(True),
+        ))).scalar_one_or_none()
+        if not s:
+            raise HTTPException(status_code=404, detail="Registro de sustentação não encontrado.")
+        return s
+
+    @classmethod
+    async def create(cls, db, product_id, data: schemas.SupportCreate, user_id) -> schemas.SupportResponse:
+        if not (await db.execute(select(Product.id).where(Product.id == product_id))).scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Produto não encontrado.")
+        dup = (await db.execute(select(ProductSupport.id).where(
+            ProductSupport.product_id == product_id,
+            ProductSupport.nivel == data.nivel,
+            ProductSupport.is_active.is_(True),
+        ))).scalar_one_or_none()
+        if dup:
+            raise HTTPException(status_code=400, detail=f"Já existe sustentação cadastrada para {data.nivel.upper()}.")
+        cfg = cls._normalize_config(
+            interno=data.interno,
+            person_ids=data.person_ids,
+            nomes_externos=data.nomes_externos,
+            sla_horas=data.sla_horas,
+        )
+        s = ProductSupport(
+            product_id=product_id,
+            canal_atendimento=(data.canal_atendimento or "").strip() or None,
+            nivel=data.nivel,
+            niveis_atendimento=cfg,
+            observacoes=(data.observacoes or "").strip() or None,
+            created_by=user_id,
+        )
+        db.add(s)
+        await db.commit()
+        await db.refresh(s)
+        persons = await cls._persons_map(db, [s])
+        return cls.to_response(s, persons)
+
+    @classmethod
+    async def update(cls, db, product_id, support_id, data: schemas.SupportUpdate, user_id) -> schemas.SupportResponse:
+        s = await cls._get_row(db, product_id, support_id)
+        payload = data.model_dump(exclude_unset=True)
+        if "nivel" in payload and payload["nivel"] != s.nivel:
+            dup = (await db.execute(select(ProductSupport.id).where(
+                ProductSupport.product_id == product_id,
+                ProductSupport.nivel == payload["nivel"],
+                ProductSupport.is_active.is_(True),
+                ProductSupport.id != support_id,
+            ))).scalar_one_or_none()
+            if dup:
+                raise HTTPException(status_code=400, detail=f"Já existe sustentação cadastrada para {payload['nivel'].upper()}.")
+            s.nivel = payload["nivel"]
+        if "canal_atendimento" in payload:
+            s.canal_atendimento = (payload["canal_atendimento"] or "").strip() or None
+        if "observacoes" in payload:
+            s.observacoes = (payload["observacoes"] or "").strip() or None
+        cfg_keys = {"interno", "person_ids", "nomes_externos", "sla_horas"}
+        if cfg_keys & payload.keys():
+            cur = s.niveis_atendimento or {}
+            s.niveis_atendimento = cls._normalize_config(
+                interno=payload.get("interno", cur.get("interno", True)),
+                person_ids=payload.get("person_ids", cur.get("person_ids")),
+                nomes_externos=payload.get("nomes_externos", cur.get("nomes_externos")),
+                sla_horas=payload.get("sla_horas", cur.get("sla_horas")),
+            )
         s.updated_by = user_id
         s.updated_at = _now()
         await db.commit()
         await db.refresh(s)
-        return schemas.SecurityResponse.model_validate(s)
+        persons = await cls._persons_map(db, [s])
+        return cls.to_response(s, persons)
+
+    @classmethod
+    async def delete(cls, db, product_id, support_id, user_id) -> None:
+        s = await cls._get_row(db, product_id, support_id)
+        s.is_active = False
+        s.updated_by = user_id
+        s.updated_at = _now()
+        await db.commit()
 
 
 class ProcessoService:
@@ -2515,5 +2869,10 @@ class ProcessPortfolioService:
                 servico_id=servico_id, portfolio_id=data.portfolio_id,
                 item_lineage_id=lineage_id, created_by=user_id,
             ))
+        if data.item_lineage_ids:
+            svc.sem_subprocesso_disponivel = False
+            svc.justificativa_sem_subprocesso = None
+            svc.updated_at = _now()
+            svc.updated_by = user_id
         await db.commit()
         return await cls.list_service_links(db, servico_id)

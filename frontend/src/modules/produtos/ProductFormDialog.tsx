@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { Loader2, Plus, Trash2 } from "lucide-react"
 
 import {
-  produtosApi, type PersonMini, type Product, type ProductCategoria,
+  produtosApi, type Fornecedor, type PersonMini, type Product, type ProductCategoria,
   type ProductCriticidade, type ProductLifecycle, type ProductModeloContratacao, type ProductOrigem,
   type ProductStatus, type StackMini,
 } from "@/api/produtos"
@@ -13,8 +13,9 @@ import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { toast } from "@/lib/toast"
+import { nullableStr } from "@/lib/utils"
 import {
-  CATEGORIA_LABEL, CATEGORIA_OPTS, LIFECYCLE_LABEL, LIFECYCLE_OPTS,
+  CATEGORIA_LABEL, CATEGORIA_OPTS, LIFECYCLE_LABEL, LIFECYCLE_OPTS, isCategoriaExterna,
 } from "@/modules/produtos/constants"
 
 const NONE = "__none__"
@@ -30,6 +31,7 @@ export function ProductFormDialog({ open, onOpenChange, product, onSaved }: {
   const editing = !!product
   const [pos, setPos] = useState<PersonMini[]>([])
   const [techRefs, setTechRefs] = useState<PersonMini[]>([])
+  const [fornecedores, setFornecedores] = useState<Fornecedor[]>([])
   const [stackCatalog, setStackCatalog] = useState<StackMini[]>([])
   const [stackIds, setStackIds] = useState<string[]>([])
   const [stackPick, setStackPick] = useState(NONE)
@@ -59,7 +61,8 @@ export function ProductFormDialog({ open, onOpenChange, product, onSaved }: {
       produtosApi.listPos().catch(() => []),
       produtosApi.listTechReferences().catch(() => []),
       produtosApi.listStacks().catch(() => []),
-    ]).then(([po, tr, st]) => { setPos(po); setTechRefs(tr); setStackCatalog(st) })
+      produtosApi.listFornecedores().catch(() => []),
+    ]).then(([po, tr, st, fn]) => { setPos(po); setTechRefs(tr); setStackCatalog(st); setFornecedores(fn) })
     setName(product?.name ?? "")
     setDescription(product?.description ?? "")
     setDominio(product?.dominio_funcional ?? "")
@@ -90,6 +93,7 @@ export function ProductFormDialog({ open, onOpenChange, product, onSaved }: {
     setSaving(true)
     const t = (s: string) => s.trim() || undefined
     const sel = (v: string) => (v === NONE ? undefined : v)
+    const selNullable = (v: string) => (v === NONE ? null : v)
     const digital = {
       sigla: t(extra.sigla), link_descricao: t(extra.link_descricao), publico_alvo: t(extra.publico_alvo),
       url_acesso: t(extra.url_acesso), observacoes: t(extra.observacoes), desenvolvido_por: t(extra.desenvolvido_por),
@@ -105,8 +109,8 @@ export function ProductFormDialog({ open, onOpenChange, product, onSaved }: {
     // Produto corporativo: o PO é definido por serviço, não no produto.
     const responsavelSel = corporativo ? NONE : responsavelId
     const payload = {
-      name: name.trim(), description: description.trim() || undefined,
-      dominio_funcional: dominio.trim() || undefined, origem, lifecycle, criticidade,
+      name: name.trim(), description: t(description),
+      dominio_funcional: t(dominio), origem, lifecycle, criticidade,
       data_entrada_producao: dataProd || undefined,
       responsavel_person_id: responsavelSel === NONE ? undefined : responsavelSel,
       responsavel_tecnico_person_id: responsavelTecnicoId === NONE ? undefined : responsavelTecnicoId,
@@ -117,9 +121,35 @@ export function ProductFormDialog({ open, onOpenChange, product, onSaved }: {
     try {
       const p = editing
         ? await produtosApi.updateProduct(product!.id, {
-            ...payload, responsavel_person_id: responsavelSel === NONE ? null : responsavelSel,
+            name: payload.name,
+            description: nullableStr(description),
+            dominio_funcional: nullableStr(dominio),
+            origem: payload.origem,
+            lifecycle: payload.lifecycle,
+            criticidade: payload.criticidade,
+            data_entrada_producao: dataProd || null,
+            responsavel_person_id: responsavelSel === NONE ? null : responsavelSel,
             responsavel_tecnico_person_id: responsavelTecnicoId === NONE ? null : responsavelTecnicoId,
+            stack_ids: stackIds,
             fornecedor_id: fornecedorId === NONE ? null : fornecedorId,
+            sigla: nullableStr(extra.sigla),
+            link_descricao: nullableStr(extra.link_descricao),
+            publico_alvo: nullableStr(extra.publico_alvo),
+            url_acesso: nullableStr(extra.url_acesso),
+            observacoes: nullableStr(extra.observacoes),
+            desenvolvido_por: nullableStr(extra.desenvolvido_por),
+            fornecedor_cnpj: nullableStr(extra.fornecedor_cnpj),
+            ambiente_tecnologico: nullableStr(extra.ambiente_tecnologico),
+            tecnologias: nullableStr(extra.tecnologias),
+            link_repositorio: nullableStr(extra.link_repositorio),
+            link_dev: nullableStr(extra.link_dev),
+            link_hml: nullableStr(extra.link_hml),
+            link_prd: nullableStr(extra.link_prd),
+            categoria: selNullable(categoria) as ProductCategoria | null,
+            status_produto: selNullable(status) as ProductStatus | null,
+            modelo_contratacao: selNullable(modeloContrat) as ProductModeloContratacao | null,
+            login_idigital: loginIdigital,
+            corporativo,
           })
         : await produtosApi.createProduct(payload)
       toast.success(editing ? "Produto atualizado." : "Produto criado.")
@@ -144,6 +174,19 @@ export function ProductFormDialog({ open, onOpenChange, product, onSaved }: {
               </Select>
             </div>
           </div>
+          {isCategoriaExterna(categoria === NONE ? null : categoria) && (
+            <div className="space-y-1.5">
+              <Label>Fornecedor</Label>
+              <Select value={fornecedorId} onValueChange={setFornecedorId}>
+                <SelectTrigger><SelectValue placeholder="Selecione o fornecedor" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NONE}>—</SelectItem>
+                  {fornecedores.map((f) => <SelectItem key={f.id} value={f.id}>{f.nome}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">Obrigatório para produtos externos com contrato.</p>
+            </div>
+          )}
           <div className="rounded-md border border-dashed p-3">
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={corporativo} onChange={(e) => setCorporativo(e.target.checked)}

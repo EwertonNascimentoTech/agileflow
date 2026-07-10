@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { EmptyState } from "@/components/EmptyState"
+import { nullableStr } from "@/lib/utils"
 
 function getApiError(err: unknown): string {
   const e = err as { response?: { data?: { detail?: unknown } } }
@@ -70,7 +71,13 @@ export default function CategoriesPage() {
     setSaving(true)
     try {
       if (editing) {
-        const updated = await categoriesApi.update(editing.id, form)
+        const updated = await categoriesApi.update(editing.id, {
+          name: form.name.trim(),
+          description: nullableStr(form.description),
+          parent_id: form.parent_id,
+          product_type_id: form.product_type_id,
+          is_active: form.is_active,
+        })
         setCats(prev => prev.map(c => c.id === updated.id ? updated : c))
       } else {
         const created = await categoriesApi.create(form)

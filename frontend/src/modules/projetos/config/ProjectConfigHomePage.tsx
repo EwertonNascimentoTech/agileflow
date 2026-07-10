@@ -50,7 +50,7 @@ const sections = [
     to: "/app/modules/projetos/config/agentes",
     icon: Bot,
     title: "Agentes",
-    description: "Vincule agentes IDCortex a etapas do kanban para executar tarefas quando o card entrar na raia.",
+    description: "Vincule agentes do Azure AI Foundry a etapas do kanban para executar tarefas quando o card entrar na raia.",
   },
   {
     to: "/app/modules/projetos/config/agentes/logs",
