@@ -487,6 +487,7 @@ class ProjectTaskResponse(BaseModel):
     order: int
     created_by: Optional[uuid.UUID]
     completed_at: Optional[datetime]
+    left_backlog_at: Optional[datetime] = None
     status_entered_at: Optional[datetime] = None
     sla_state: str = "none"
     # Controle de baseline (só relevante no card-raiz de planejamento).
@@ -1066,6 +1067,43 @@ class ProjectReportsResponse(BaseModel):
     throughput: ReportThroughput
     available_diretorias: list[str] = Field(default_factory=list)
     available_areas: list[str] = Field(default_factory=list)
+
+
+# ─────────────────────────────────────────────
+# Relatório de entregas US por responsável
+# ─────────────────────────────────────────────
+
+UsDeliveryPeriod = Literal[
+    "today", "tomorrow", "this_week", "next_week", "this_month", "next_month"
+]
+
+
+class UsDeliveryItem(BaseModel):
+    id: uuid.UUID
+    title: str
+    project_id: uuid.UUID
+    assigned_to: Optional[uuid.UUID] = None
+    due_date: Optional[datetime] = None
+    left_backlog_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    is_overdue: bool = False
+
+
+class UsDeliveryAssigneeGroup(BaseModel):
+    assignee_id: Optional[uuid.UUID] = None
+    assignee_name: str
+    delivered: list[UsDeliveryItem] = Field(default_factory=list)
+    overdue: list[UsDeliveryItem] = Field(default_factory=list)
+    delivered_count: int = 0
+    overdue_count: int = 0
+
+
+class UsDeliveryReportResponse(BaseModel):
+    period: UsDeliveryPeriod
+    range_start: datetime
+    range_end: datetime
+    by_assignee: list[UsDeliveryAssigneeGroup]
+    available_assignees: list[dict] = Field(default_factory=list)
 
 
 # ─────────────────────────────────────────────

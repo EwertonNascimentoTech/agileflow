@@ -296,11 +296,11 @@ class ProdutoProcessoResponse(BaseModel):
 # ── Contrato ──────────────────────────────────
 class ContratoCreate(BaseModel):
     fornecedor_id: uuid.UUID
-    identificador: Optional[str] = Field(None, max_length=120)
+    identificador: Optional[str] = Field(None, max_length=255)
     vigencia_inicio: date
     vigencia_fim: date
     renovacao_automatica: bool = False
-    modelo_licenciamento: Optional[str] = Field(None, max_length=120)
+    modelo_licenciamento: Optional[str] = None
     gestor_person_id: Optional[uuid.UUID] = None
     sustentacao_n1: _SUSTENTACAO = "interna"
     sustentacao_n2: _SUSTENTACAO = "interna"
@@ -312,12 +312,12 @@ class ContratoCreate(BaseModel):
     size: Optional[int] = None
     external_link: Optional[str] = None
     # ── Extensão spec ──
-    numero: Optional[str] = Field(None, max_length=120)
+    numero: Optional[str] = Field(None, max_length=255)
     objeto_contratual: Optional[str] = None
     status_contrato: Optional[_CONTRATO_STATUS] = None
     valor: Optional[float] = None
     tipo_valor: Optional[_CONTRATO_TIPOVALOR] = None
-    centro_custo: Optional[str] = Field(None, max_length=120)
+    centro_custo: Optional[str] = Field(None, max_length=255)
     fiscal_person_id: Optional[uuid.UUID] = None
     sla_contratual: Optional[str] = None
     aditivos: Optional[list["AnexoItem"]] = None

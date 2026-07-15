@@ -1,0 +1,4 @@
+# Horário America/Sao_Paulo (TZ no container).
+# Backup completo 2x ao dia: meio-dia e 17h.
+0 12 * * * /usr/local/bin/backup.sh >> /proc/1/fd/1 2>&1
+0 17 * * * /usr/local/bin/backup.sh >> /proc/1/fd/1 2>&1

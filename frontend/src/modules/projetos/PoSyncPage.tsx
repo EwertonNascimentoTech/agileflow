@@ -133,12 +133,106 @@ function MiniBar({ value, max, color }: { value: number; max: number; color?: st
 
 function PrazoBadge({ p }: { p: PoSyncProjeto }) {
   if (p.prazo_status === "atrasado") {
-    return <Badge variant="destructive">+{p.atraso_dias}d</Badge>
+    return (
+      <Badge
+        variant="destructive"
+        title={`Projeto entregue com atraso de ${p.atraso_dias}d em relação ao prazo planejado`}
+      >
+        +{p.atraso_dias}d
+      </Badge>
+    )
   }
   if (p.prazo_status === "no_prazo") {
-    return <Badge variant="success">No prazo</Badge>
+    return <Badge variant="success" title="Concluído dentro do prazo planejado">No prazo</Badge>
   }
-  return <span className="text-xs text-muted-foreground">sem baseline</span>
+  return (
+    <span className="text-xs text-muted-foreground" title="Sem data fim planejada e data real para comparar">
+      sem baseline
+    </span>
+  )
+}
+
+type RiskIcon = {
+  key: string
+  Icon: typeof AlertTriangle
+  tip: string
+  className: string
+}
+
+/** Ícones de risco por projeto — cada um com tooltip explicando o motivo. */
+function projectRiskIcons(p: PoSyncProjeto): RiskIcon[] {
+  const out: RiskIcon[] = []
+  if (p.overdue) {
+    out.push({
+      key: "overdue",
+      Icon: AlertTriangle,
+      tip: "Em risco: há itens atrasados ou com SLA estourado",
+      className: "text-destructive",
+    })
+  }
+  if (p.prazo_status === "atrasado") {
+    out.push({
+      key: "atraso",
+      Icon: Clock,
+      tip: `Entregue com atraso de ${p.atraso_dias}d em relação ao prazo planejado`,
+      className: "text-destructive",
+    })
+  }
+  if (p.backlog_montado) {
+    out.push({
+      key: "backlog",
+      Icon: Layers,
+      tip: "Backlog montado, execução ainda não iniciada",
+      className: "text-amber-600",
+    })
+  }
+  if (p.sem_datas_planejadas) {
+    out.push({
+      key: "sem-datas",
+      Icon: CalendarX,
+      tip: "Sem datas planejadas (início e fim) — saúde de prazo não avaliável",
+      className: "text-amber-600",
+    })
+  }
+  if (p.baseline_inconsistente) {
+    out.push({
+      key: "baseline",
+      Icon: AlertTriangle,
+      tip: "Baseline inconsistente (fim antes do início ou data inválida)",
+      className: "text-amber-600",
+    })
+  }
+  if (p.sem_diretoria) {
+    out.push({
+      key: "diretoria",
+      Icon: FolderKanban,
+      tip: "Sem diretoria cadastrada — não entra na visão por diretoria",
+      className: "text-muted-foreground",
+    })
+  }
+  return out
+}
+
+function ProjectRiskIcons({ p }: { p: PoSyncProjeto }) {
+  const icons = projectRiskIcons(p)
+  if (icons.length === 0) return null
+  return (
+    <span className="inline-flex shrink-0 items-center gap-0.5">
+      {icons.map(({ key, Icon, tip, className }) => (
+        <span key={key} className={`group/ri relative inline-flex ${className}`}>
+          <span
+            aria-label={tip}
+            className="inline-flex cursor-help rounded p-0.5 hover:bg-muted"
+          >
+            <Icon className="h-3.5 w-3.5" />
+          </span>
+          <span className="pointer-events-none absolute bottom-full left-1/2 z-[60] mb-1.5 hidden w-max max-w-[260px] -translate-x-1/2 rounded-md border bg-popover px-2.5 py-1.5 text-left text-[11px] leading-snug text-popover-foreground shadow-md group-hover/ri:block">
+            {tip}
+          </span>
+        </span>
+      ))}
+    </span>
+  )
 }
 
 /** Tabela com TODOS os projetos de um recorte (PO). Nunca trunca em "+N". */
@@ -162,11 +256,7 @@ function ProjetosTable({ projetos }: { projetos: PoSyncProjeto[] }) {
               <td className="py-2 pr-3">
                 <div className="flex items-center gap-1.5">
                   <span className="font-medium" title={p.title}>{p.title}</span>
-                  {p.backlog_montado && (
-                    <Badge variant="warning" className="shrink-0" title="Backlog montado, execução não iniciada">
-                      backlog
-                    </Badge>
-                  )}
+                  <ProjectRiskIcons p={p} />
                 </div>
                 {p.stage_name && (
                   <span className="text-xs text-muted-foreground">{p.stage_name}</span>
@@ -182,7 +272,7 @@ function ProjetosTable({ projetos }: { projetos: PoSyncProjeto[] }) {
                 </div>
               </td>
               <td className="py-2 px-2">
-                <span className="text-xs" title={p.diretoria_label ?? ""}>
+                <span className="text-xs" title={p.diretoria_label ?? "Sem diretoria cadastrada"}>
                   {p.diretoria_label ?? <span className="text-muted-foreground italic">sem diretoria</span>}
                 </span>
               </td>
@@ -196,6 +286,21 @@ function ProjetosTable({ projetos }: { projetos: PoSyncProjeto[] }) {
   )
 }
 
+const EM_RISCO_TIP =
+  "Projetos com itens atrasados, SLA estourado ou entregues fora do prazo planejado"
+
+function EmRiscoBadge({ count }: { count: number }) {
+  if (count <= 0) return <span className="text-muted-foreground">0</span>
+  return (
+    <span className="group/er relative inline-flex">
+      <Badge variant="destructive" className="cursor-help">{count}</Badge>
+      <span className="pointer-events-none absolute bottom-full left-0 z-[60] mb-1.5 hidden w-max max-w-[260px] rounded-md border bg-popover px-2.5 py-1.5 text-left text-[11px] leading-snug text-popover-foreground shadow-md group-hover/er:block">
+        {EM_RISCO_TIP}
+      </span>
+    </span>
+  )
+}
+
 function PoKpiStrip({ kpis }: { kpis: PoSyncKpis }) {
   return (
     <div className="flex flex-wrap gap-2 text-xs">
@@ -206,7 +311,14 @@ function PoKpiStrip({ kpis }: { kpis: PoSyncKpis }) {
       <Badge variant="secondary">
         exec. média {kpis.avg_exec_pct === null ? "—" : `${kpis.avg_exec_pct}%`}
       </Badge>
-      {kpis.em_risco > 0 && <Badge variant="destructive">{kpis.em_risco} em risco</Badge>}
+      {kpis.em_risco > 0 && (
+        <span className="group/er relative inline-flex">
+          <Badge variant="destructive" className="cursor-help">{kpis.em_risco} em risco</Badge>
+          <span className="pointer-events-none absolute bottom-full left-0 z-[60] mb-1.5 hidden w-max max-w-[260px] rounded-md border bg-popover px-2.5 py-1.5 text-left text-[11px] leading-snug text-popover-foreground shadow-md group-hover/er:block">
+            {EM_RISCO_TIP}
+          </span>
+        </span>
+      )}
     </div>
   )
 }
@@ -442,7 +554,7 @@ export default function PoSyncPage() {
                   <td className="py-2 px-2 tabular-nums">{po.encerramento}</td>
                   <td className="py-2 px-2 tabular-nums">{po.avg_exec_pct === null ? "—" : `${po.avg_exec_pct}%`}</td>
                   <td className="py-2 pl-2">
-                    {po.em_risco > 0 ? <Badge variant="destructive">{po.em_risco}</Badge> : <span className="text-muted-foreground">0</span>}
+                    <EmRiscoBadge count={po.em_risco} />
                   </td>
                 </tr>
               ))}
@@ -545,7 +657,7 @@ export default function PoSyncPage() {
                   <td className="py-2 px-2 tabular-nums">{po.total}</td>
                   <td className="py-2 px-2 tabular-nums">{po.total - po.em_risco}</td>
                   <td className="py-2 px-2">
-                    {po.em_risco > 0 ? <Badge variant="destructive">{po.em_risco}</Badge> : <span className="text-muted-foreground">0</span>}
+                    <EmRiscoBadge count={po.em_risco} />
                   </td>
                   <td className="py-2 pl-2 tabular-nums">{po.atrasados}</td>
                 </tr>
@@ -604,7 +716,7 @@ export default function PoSyncPage() {
                   <td className="py-2 px-2 tabular-nums">{d.encerramento}</td>
                   <td className="py-2 px-2 tabular-nums">{d.avg_exec_pct === null ? "—" : `${d.avg_exec_pct}%`}</td>
                   <td className="py-2 pl-2">
-                    {d.em_risco > 0 ? <Badge variant="destructive">{d.em_risco}</Badge> : <span className="text-muted-foreground">0</span>}
+                    <EmRiscoBadge count={d.em_risco} />
                   </td>
                 </tr>
               ))}

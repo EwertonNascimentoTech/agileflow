@@ -40,6 +40,124 @@ export function isUserStoryDemandType(name: string | null | undefined, slug?: st
   return n === "us" || n.includes("user story") || n.includes("história") || n.includes("historia")
 }
 
+export function isFeatureDemandType(name: string | null | undefined, slug?: string | null): boolean {
+  const n = (name ?? "").trim().toLowerCase()
+  const s = (slug ?? "").trim().toLowerCase()
+  if (["feature", "features"].includes(s)) return true
+  return n === "feature" || n.includes("feature")
+}
+
+export type PlanningProgressBar = {
+  key: "feature" | "user_story" | "other"
+  label: string
+  total: number
+  pct: number
+}
+
+/**
+ * Barras de progresso sob um card Projeto/Programa:
+ * - Features: itens Feature na subárvore (tipo de demanda OU funil Features)
+ * - User Stories: todas as US na subárvore (tipo OU funil User Story)
+ * - Outros: filhos diretos que não são Feature nem US
+ *
+ * Muitos cards importados não têm demand_type_id — a classificação cai no funil do status.
+ */
+export function buildPlanningProgressBars(
+  rootId: string,
+  tasks: Array<{
+    id: string
+    parent_task_id: string | null
+    status_id?: string
+    demand_type_id: string | null
+    completed_at?: string | null
+    percent_complete?: number
+    estimated_hours?: number | null
+  }>,
+  typeMeta: Map<string, { name: string; slug?: string | null }>,
+  progressById: Map<string, number>,
+  funnelNameByStatusId?: Map<string, string> | Record<string, string>,
+): PlanningProgressBar[] {
+  const byParent = new Map<string, typeof tasks>()
+  for (const t of tasks) {
+    if (!t.parent_task_id) continue
+    const list = byParent.get(t.parent_task_id) ?? []
+    list.push(t)
+    byParent.set(t.parent_task_id, list)
+  }
+
+  const funnelOf = (t: (typeof tasks)[number]): string | null => {
+    if (!t.status_id || !funnelNameByStatusId) return null
+    if (funnelNameByStatusId instanceof Map) return funnelNameByStatusId.get(t.status_id) ?? null
+    return funnelNameByStatusId[t.status_id] ?? null
+  }
+
+  const classify = (t: (typeof tasks)[number]): "feature" | "user_story" | "other" => {
+    const meta = t.demand_type_id ? typeMeta.get(t.demand_type_id) : null
+    if (isFeatureDemandType(meta?.name, meta?.slug)) return "feature"
+    if (isUserStoryDemandType(meta?.name, meta?.slug)) return "user_story"
+    const funnel = funnelOf(t)
+    if (isFeatureKanbanFunnel(funnel)) return "feature"
+    if (isUserStoryKanbanFunnel(funnel)) return "user_story"
+    return "other"
+  }
+
+  // Descendentes (BFS) a partir da raiz.
+  const descendants: typeof tasks = []
+  const queue = [...(byParent.get(rootId) ?? [])]
+  while (queue.length) {
+    const cur = queue.shift()!
+    descendants.push(cur)
+    for (const k of byParent.get(cur.id) ?? []) queue.push(k)
+  }
+
+  const features = descendants.filter((t) => classify(t) === "feature")
+  const userStories = descendants.filter((t) => classify(t) === "user_story")
+  const others = descendants.filter(
+    (t) => t.parent_task_id === rootId && classify(t) === "other",
+  )
+
+  const avgPct = (list: typeof tasks): number => {
+    if (list.length === 0) return 0
+    let acc = 0
+    let wsum = 0
+    for (const t of list) {
+      const pct = progressById.get(t.id) ?? (t.completed_at ? 100 : (t.percent_complete ?? 0))
+      const h = Number(t.estimated_hours)
+      const w = h > 0 ? h : 1
+      acc += pct * w
+      wsum += w
+    }
+    return wsum > 0 ? Math.round(acc / wsum) : 0
+  }
+
+  const bars: PlanningProgressBar[] = []
+  if (features.length > 0) {
+    bars.push({
+      key: "feature",
+      label: `${features.length} Feature${features.length === 1 ? "" : "s"}`,
+      total: features.length,
+      pct: avgPct(features),
+    })
+  }
+  if (userStories.length > 0) {
+    bars.push({
+      key: "user_story",
+      label: `${userStories.length} User ${userStories.length === 1 ? "Story" : "Stories"}`,
+      total: userStories.length,
+      pct: avgPct(userStories),
+    })
+  }
+  if (others.length > 0) {
+    bars.push({
+      key: "other",
+      label: `${others.length} ${others.length === 1 ? "outro" : "outros"}`,
+      total: others.length,
+      pct: avgPct(others),
+    })
+  }
+  return bars
+}
+
 export function percentFromUsChecklist(items: Array<{ done: boolean }> | null | undefined): number {
   if (!items?.length) return 0
   const done = items.filter((i) => i.done).length

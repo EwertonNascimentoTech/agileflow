@@ -1857,17 +1857,23 @@ class ProjectTaskService:
 
     @staticmethod
     async def _is_user_story_task(db: AsyncSession, task: ProjectTask) -> bool:
-        if not task.demand_type_id:
+        if task.demand_type_id:
+            row = await db.execute(
+                select(ProjectDemandType.slug, ProjectDemandType.name).where(
+                    ProjectDemandType.id == task.demand_type_id,
+                )
+            )
+            dt = row.one_or_none()
+            if dt and ProjectTaskService._is_user_story_type(dt.slug, dt.name):
+                return True
+        funnel_id = await ProjectTaskService._funnel_id_of_status(db, task.status_id)
+        if not funnel_id:
             return False
         row = await db.execute(
-            select(ProjectDemandType.slug, ProjectDemandType.name).where(
-                ProjectDemandType.id == task.demand_type_id,
-            )
+            select(ProjectFunnel.name).where(ProjectFunnel.id == funnel_id)
         )
-        dt = row.one_or_none()
-        if not dt:
-            return False
-        return ProjectTaskService._is_user_story_type(dt.slug, dt.name)
+        funnel_name = row.scalar_one_or_none()
+        return ProjectTaskService._is_user_story_funnel_name(funnel_name)
 
     @staticmethod
     def _is_user_story_funnel_name(name: Optional[str]) -> bool:
@@ -1897,6 +1903,59 @@ class ProjectTaskService:
             return False
         n = str(name).lower()
         return "feature" in n or ProjectTaskService._is_user_story_funnel_name(name)
+
+    @staticmethod
+    def _is_feature_funnel_name(name: Optional[str]) -> bool:
+        return bool(name and "feature" in str(name).lower())
+
+    @staticmethod
+    async def _guard_feature_us_kanban_affinity(
+        db: AsyncSession,
+        task: ProjectTask,
+        target_status: ProjectStatusConfig,
+        source_status: Optional[ProjectStatusConfig] = None,
+    ) -> None:
+        """Impede Feature ir para o kanban User Story (e o inverso).
+
+        Features e User Story costumam ter etapas com o mesmo nome (ex.: Homologação).
+        Sem esta trava, um status_id errado move o card para o kanban irmão.
+        """
+        target_funnel_name: Optional[str] = None
+        if target_status.funnel_id:
+            row = await db.execute(
+                select(ProjectFunnel.name).where(ProjectFunnel.id == target_status.funnel_id)
+            )
+            target_funnel_name = row.scalar_one_or_none()
+
+        source_funnel_name: Optional[str] = None
+        if source_status and source_status.funnel_id:
+            row = await db.execute(
+                select(ProjectFunnel.name).where(ProjectFunnel.id == source_status.funnel_id)
+            )
+            source_funnel_name = row.scalar_one_or_none()
+
+        is_feature = await ProjectTaskService._is_feature_task(db, task, source_funnel_name)
+        is_us = await ProjectTaskService._is_user_story_task(db, task)
+
+        target_is_feature = ProjectTaskService._is_feature_funnel_name(target_funnel_name)
+        target_is_us = ProjectTaskService._is_user_story_funnel_name(target_funnel_name)
+
+        if is_feature and target_is_us:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Este card é uma Feature e não pode ir para o kanban de User Story. "
+                    "As etapas têm nomes iguais — escolha a Homologação/etapa do kanban Features."
+                ),
+            )
+        if is_us and target_is_feature:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Este card é uma User Story e não pode ir para o kanban de Features. "
+                    "Escolha a etapa correspondente no kanban User Story."
+                ),
+            )
 
     @staticmethod
     async def _check_assignee_for_feature_us_kanban_move(
@@ -2129,50 +2188,19 @@ class ProjectTaskService:
         if target is None or target.id == feature.status_id:
             return
 
-        source_status = await db.get(ProjectStatusConfig, feature.status_id)
-        try:
-            ProjectTaskService._check_move_out_permission(source_status, current_user)
-            ProjectTaskService._check_move_permission(target, current_user)
-            if source_status is not None:
-                await ProjectTaskService._check_funnel_access_for_move(
-                    db, source_status, target, current_user, feature
-                )
-            await ProjectTaskService._check_assignee_for_feature_us_kanban_move(
-                db, source_status, feature, {}
-            )
-            # Campos obrigatórios da etapa de origem só valem ao AVANÇAR de raia.
-            if await ProjectTaskService._is_forward_status_move(
-                db, feature.status_id, target.id
-            ):
-                sub_row = await db.execute(
-                    select(ProjectDemandFormSubmission).where(
-                        ProjectDemandFormSubmission.task_id == feature.id
-                    )
-                )
-                sub = sub_row.scalar_one_or_none()
-                await ProjectTaskService._validate_form_values_for_status(
-                    db,
-                    demand_type_id=feature.demand_type_id,
-                    status_id=feature.status_id,
-                    form_values=(sub.values if sub else None) or {},
-                )
-        except HTTPException as exc:
-            logger.info(
-                "reconcile Feature %s: movimento para '%s' barrado por trava (%s); "
-                "mantendo etapa atual",
-                feature.id,
-                getattr(target, "name", "?"),
-                getattr(exc, "detail", exc),
-            )
-            return
-
-        # Aplica o movimento espelhando o mini-bloco de entrada, SEM re-invocar o pipeline
-        # completo (evita loop de volta nas US), no padrão de _maybe_move_to_funnel.
+        # Sincronização automática Feature ← US: a US já foi movida com sucesso;
+        # não reaplicar travas de permissão/assignee/formulário no card-pai.
         feature.status_id = target.id
         feature.completed_at = datetime.utcnow() if target.is_final else None
         feature.status_entered_at = datetime.utcnow()
         feature.sla_state = ProjectTaskService._sla_initial(target)
         feature.updated_at = datetime.utcnow()
+        logger.info(
+            "reconcile Feature %s: movida para '%s' (agregado de %d US filha(s))",
+            feature.id,
+            getattr(target, "name", "?"),
+            len(us_children),
+        )
 
     @staticmethod
     async def _maybe_move_to_funnel(
@@ -2915,6 +2943,22 @@ class ProjectTaskService:
             if not demand_type.is_active:
                 raise HTTPException(status_code=400, detail="Tipo de demanda está inativo.")
             await ProjectTaskService._validate_type_allowed_in_funnel(db, status_obj.funnel_id, demand_type_id)
+            funnel_name_row = await db.execute(
+                select(ProjectFunnel.name).where(ProjectFunnel.id == status_obj.funnel_id)
+            )
+            funnel_name = funnel_name_row.scalar_one_or_none()
+            is_feat_type = "feature" in f"{demand_type.slug or ''} {demand_type.name or ''}".lower()
+            is_us_type = ProjectTaskService._is_user_story_type(demand_type.slug, demand_type.name)
+            if is_feat_type and ProjectTaskService._is_user_story_funnel_name(funnel_name):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Card do tipo Feature não pode ser criado no kanban de User Story.",
+                )
+            if is_us_type and ProjectTaskService._is_feature_funnel_name(funnel_name):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Card do tipo User Story não pode ser criado no kanban de Features.",
+                )
         await ProjectTaskService._validate_parent(
             db,
             project_id=project_id,
@@ -3160,6 +3204,8 @@ class ProjectTaskService:
             if payload.get(key) == "":
                 payload[key] = None
 
+        target_status: Optional[ProjectStatusConfig] = None
+        source_status: Optional[ProjectStatusConfig] = None
         if payload.get("status_id"):
             status_row = await db.execute(
                 select(ProjectStatusConfig).where(
@@ -3186,6 +3232,9 @@ class ProjectTaskService:
                 )
                 await ProjectTaskService._check_assignee_for_feature_us_kanban_move(
                     db, source_status, task, payload,
+                )
+                await ProjectTaskService._guard_feature_us_kanban_affinity(
+                    db, task, target_status, source_status,
                 )
                 # Guard-rail: uma Feature só pode ser concluída manualmente quando todas as
                 # User Stories filhas estiverem concluídas. (O auto-move do reconcile não passa
@@ -3275,6 +3324,16 @@ class ProjectTaskService:
                 task.completed_at = datetime.utcnow()
             else:
                 task.completed_at = None
+            # Primeira saída do backlog (US): grava uma vez, nunca sobrescreve.
+            if (
+                task.left_backlog_at is None
+                and source_status is not None
+                and bool(getattr(source_status, "is_initial", False))
+                and status_obj is not None
+                and not bool(getattr(status_obj, "is_initial", False))
+                and await ProjectTaskService._is_user_story_task(db, task)
+            ):
+                task.left_backlog_at = datetime.utcnow()
             # Reinicia o relógio de SLA ao entrar numa nova etapa.
             task.status_entered_at = datetime.utcnow()
             task.sla_state = ProjectTaskService._sla_initial(status_obj)
@@ -4156,13 +4215,14 @@ class TaskDependencyService:
         date_to: Optional[date] = None,
         unit: str = "day",
     ) -> list[WorkloadCell]:
-        """Distribui as horas estimadas pelos DIAS ÚTEIS do calendário corporativo (pula
-        fim de semana e feriados) e agrega por (responsável, dia). A capacidade por dia vem da
-        jornada da Pessoa (Person.daily_hours) e é reduzida pelas Ausências aprovadas que afetam
-        a capacidade (dia inteiro → 0, ou menos as horas parciais). Superlotação = alocado > capacidade.
+        """Distribui as horas estimadas das User Stories pelos DIAS ÚTEIS do calendário
+        corporativo (pula fim de semana e feriados) e agrega por (responsável, dia). Features
+        não entram — já carregam o rollup das US filhas. A capacidade por dia vem da jornada
+        da Pessoa (Person.daily_hours) e é reduzida pelas Ausências aprovadas que afetam a
+        capacidade. Superlotação = alocado > capacidade.
 
         A matemática vive em CapacityService (reutilizada pelo cockpit cross-project e pelo
-        futuro simulador what-if). Esta rota apenas restringe ao projeto."""
+        simulador what-if). Esta rota apenas restringe ao projeto."""
         calendar = await load_calendar(db)
         result = await db.execute(
             select(ProjectTask).where(
@@ -4174,6 +4234,7 @@ class TaskDependencyService:
             )
         )
         tasks = list(result.scalars().all())
+        tasks = await CapacityService._keep_us_tasks_only(db, tasks)
         acc, _by_project, user_ids = CapacityService._distribute_hours(tasks, calendar, date_from, date_to)
         capacity_for = await CapacityService._capacity_resolver(db, user_ids, calendar)
         return CapacityService._build_cells(acc, capacity_for)
@@ -4219,9 +4280,77 @@ class CapacityService:
     """Cockpit de planejamento de capacidade: cruza a demanda estimada de TODO o portfólio
     do tenant (schema atual) com a capacidade real das pessoas, descontando ausências e
     feriados. Reaproveita a mesma matemática do workload por-projeto
-    (TaskDependencyService.compute_workload delega para os helpers daqui)."""
+    (TaskDependencyService.compute_workload delega para os helpers daqui).
+
+    A carga conta apenas User Stories: a Feature-pai guarda o rollup das horas das US —
+    somar Feature+US (ou o Projeto-pai) contaria em dobro."""
 
     # ── Núcleo reutilizável (também alimentará o simulador what-if) ──
+
+    @staticmethod
+    async def _keep_us_tasks_only(
+        db: AsyncSession, tasks: list[ProjectTask]
+    ) -> list[ProjectTask]:
+        """Mantém só User Stories (tipo de demanda ou funil US). Exclui Features e demais
+        níveis cujo estimated_hours é rollup dos filhos."""
+        if not tasks:
+            return []
+
+        type_ids = {t.demand_type_id for t in tasks if t.demand_type_id}
+        type_kind: dict[uuid.UUID, str] = {}  # "feature" | "us" | "other"
+        if type_ids:
+            rows = (
+                await db.execute(
+                    select(ProjectDemandType.id, ProjectDemandType.slug, ProjectDemandType.name).where(
+                        ProjectDemandType.id.in_(type_ids)
+                    )
+                )
+            ).all()
+            for tid, slug, name in rows:
+                if ProjectTaskService._is_user_story_type(slug, name):
+                    type_kind[tid] = "us"
+                elif "feature" in f"{slug or ''} {name or ''}".lower():
+                    type_kind[tid] = "feature"
+                else:
+                    type_kind[tid] = "other"
+
+        status_ids = {t.status_id for t in tasks if t.status_id}
+        funnel_by_status: dict[uuid.UUID, Optional[uuid.UUID]] = {}
+        if status_ids:
+            rows = (
+                await db.execute(
+                    select(ProjectStatusConfig.id, ProjectStatusConfig.funnel_id).where(
+                        ProjectStatusConfig.id.in_(status_ids)
+                    )
+                )
+            ).all()
+            funnel_by_status = {sid: fid for sid, fid in rows}
+
+        funnel_ids = {fid for fid in funnel_by_status.values() if fid}
+        funnel_names: dict[uuid.UUID, str] = {}
+        if funnel_ids:
+            rows = (
+                await db.execute(
+                    select(ProjectFunnel.id, ProjectFunnel.name).where(ProjectFunnel.id.in_(funnel_ids))
+                )
+            ).all()
+            funnel_names = {fid: (name or "") for fid, name in rows}
+
+        out: list[ProjectTask] = []
+        for t in tasks:
+            if t.demand_type_id:
+                kind = type_kind.get(t.demand_type_id)
+                if kind == "feature":
+                    continue
+                if kind == "us":
+                    out.append(t)
+                    continue
+            fid = funnel_by_status.get(t.status_id) if t.status_id else None
+            fname = funnel_names.get(fid, "") if fid else ""
+            if ProjectTaskService._is_user_story_funnel_name(fname):
+                out.append(t)
+        return out
+
     @staticmethod
     def _distribute_hours(
         tasks: list[ProjectTask],
@@ -4334,7 +4463,8 @@ class CapacityService:
         )
         if person_ids:
             q = q.where(ProjectTask.assigned_to.in_(person_ids))
-        return list((await db.execute(q)).scalars().all())
+        tasks = list((await db.execute(q)).scalars().all())
+        return await CapacityService._keep_us_tasks_only(db, tasks)
 
     @staticmethod
     async def _root_index(db: AsyncSession):
@@ -5724,6 +5854,242 @@ class ProjectReportsService:
             },
             "available_diretorias": available_diretorias,
             "available_areas": available_areas,
+        }
+
+
+class UsDeliveryReportService:
+    """Relatório de entregas de User Story por responsável (período + atrasadas)."""
+
+    PERIODS = frozenset({
+        "today", "tomorrow", "this_week", "next_week", "this_month", "next_month",
+    })
+    TZ = timezone(timedelta(hours=-3))  # America/Sao_Paulo (sem DST desde 2019)
+
+    @staticmethod
+    def _now_sp() -> datetime:
+        return datetime.now(UsDeliveryReportService.TZ)
+
+    @staticmethod
+    def _monday(d: date) -> date:
+        return d - timedelta(days=d.weekday())  # Monday=0
+
+    @staticmethod
+    def period_range(period: str, now_sp: Optional[datetime] = None) -> tuple[datetime, datetime]:
+        """Retorna [start, end) em UTC naive (compatível com completed_at no banco)."""
+        if period not in UsDeliveryReportService.PERIODS:
+            raise HTTPException(status_code=400, detail="Período inválido.")
+        now_sp = now_sp or UsDeliveryReportService._now_sp()
+        today = now_sp.date()
+
+        if period == "today":
+            start_d, end_d = today, today + timedelta(days=1)
+        elif period == "tomorrow":
+            start_d = today + timedelta(days=1)
+            end_d = start_d + timedelta(days=1)
+        elif period == "this_week":
+            start_d = UsDeliveryReportService._monday(today)
+            end_d = start_d + timedelta(days=7)
+        elif period == "next_week":
+            start_d = UsDeliveryReportService._monday(today) + timedelta(days=7)
+            end_d = start_d + timedelta(days=7)
+        elif period == "this_month":
+            start_d = today.replace(day=1)
+            if start_d.month == 12:
+                end_d = date(start_d.year + 1, 1, 1)
+            else:
+                end_d = date(start_d.year, start_d.month + 1, 1)
+        else:  # next_month
+            if today.month == 12:
+                start_d = date(today.year + 1, 1, 1)
+                end_d = date(today.year + 1, 2, 1)
+            elif today.month == 11:
+                start_d = date(today.year, 12, 1)
+                end_d = date(today.year + 1, 1, 1)
+            else:
+                start_d = date(today.year, today.month + 1, 1)
+                end_d = date(today.year, today.month + 2, 1)
+
+        tz = UsDeliveryReportService.TZ
+
+        def to_utc_naive(d: date) -> datetime:
+            local = datetime(d.year, d.month, d.day, 0, 0, 0, tzinfo=tz)
+            return local.astimezone(timezone.utc).replace(tzinfo=None)
+
+        return to_utc_naive(start_d), to_utc_naive(end_d)
+
+    @staticmethod
+    def _is_homolog_po_status(status) -> bool:
+        """Raia Homologação (PO): aguardando o PO do projeto, não o desenvolvedor."""
+        if status is None:
+            return False
+        n = ProjectTaskService._norm_col(getattr(status, "name", None))
+        return "homolog" in n and "po" in n
+
+    @staticmethod
+    def _planning_root_assignee(
+        task_id: uuid.UUID,
+        *,
+        parent: dict[uuid.UUID, Optional[uuid.UUID]],
+        kind: dict[uuid.UUID, Optional[str]],
+        owner: dict[uuid.UUID, Optional[uuid.UUID]],
+        cache: dict[uuid.UUID, Optional[uuid.UUID]],
+    ) -> Optional[uuid.UUID]:
+        """`assigned_to` do ancestral projeto/programa (mesmo critério do filtro PO do board)."""
+        if task_id in cache:
+            return cache[task_id]
+        seen: list[uuid.UUID] = []
+        cur: Optional[uuid.UUID] = task_id
+        result: Optional[uuid.UUID] = None
+        while cur is not None:
+            if cur in cache:
+                result = cache[cur]
+                break
+            seen.append(cur)
+            if kind.get(cur) in ("projeto", "programa"):
+                result = owner.get(cur)
+                break
+            nxt = parent.get(cur)
+            if nxt is None or nxt == cur or nxt in seen:
+                result = owner.get(cur)
+                break
+            cur = nxt
+        for s in seen:
+            cache[s] = result
+        return result
+
+    @staticmethod
+    def _item(t: ProjectTask, *, is_overdue: bool, report_assignee: Optional[uuid.UUID]) -> dict:
+        return {
+            "id": t.id,
+            "title": t.title,
+            "project_id": t.project_id,
+            "assigned_to": report_assignee,
+            "due_date": t.due_date,
+            "left_backlog_at": t.left_backlog_at,
+            "completed_at": t.completed_at,
+            "is_overdue": is_overdue,
+        }
+
+    @classmethod
+    async def build(
+        cls,
+        db: AsyncSession,
+        period: str = "today",
+        assignee: Optional[uuid.UUID] = None,
+    ) -> dict:
+        range_start, range_end = cls.period_range(period)
+        today_start, _ = cls.period_range("today")
+
+        rows = await db.execute(
+            select(ProjectTask).options(
+                selectinload(ProjectTask.status),
+                selectinload(ProjectTask.demand_type),
+            )
+        )
+        all_tasks = list(rows.scalars().all())
+
+        parent: dict[uuid.UUID, Optional[uuid.UUID]] = {}
+        kind: dict[uuid.UUID, Optional[str]] = {}
+        owner: dict[uuid.UUID, Optional[uuid.UUID]] = {}
+        for t in all_tasks:
+            parent[t.id] = t.parent_task_id
+            kind[t.id] = t.planning_kind
+            owner[t.id] = t.assigned_to
+        root_assignee_cache: dict[uuid.UUID, Optional[uuid.UUID]] = {}
+
+        us_tasks: list[ProjectTask] = []
+        for t in all_tasks:
+            if await ProjectTaskService._is_user_story_task(db, t):
+                us_tasks.append(t)
+
+        def report_assignee_of(t: ProjectTask) -> Optional[uuid.UUID]:
+            if cls._is_homolog_po_status(t.status):
+                return cls._planning_root_assignee(
+                    t.id,
+                    parent=parent,
+                    kind=kind,
+                    owner=owner,
+                    cache=root_assignee_cache,
+                )
+            return t.assigned_to
+
+        effective_pairs = [(t, report_assignee_of(t)) for t in us_tasks]
+        assignee_ids = {aid for _, aid in effective_pairs if aid}
+        persons_by_id: dict[uuid.UUID, Person] = {}
+        if assignee_ids:
+            pres = await db.execute(select(Person).where(Person.id.in_(assignee_ids)))
+            persons_by_id = {p.id: p for p in pres.scalars().all()}
+
+        available_assignees = sorted(
+            (
+                {"id": str(pid), "name": persons_by_id[pid].full_name}
+                for pid in assignee_ids
+                if pid in persons_by_id
+            ),
+            key=lambda r: r["name"].lower(),
+        )
+
+        if assignee is not None:
+            effective_pairs = [(t, aid) for t, aid in effective_pairs if aid == assignee]
+
+        groups: dict[Optional[uuid.UUID], dict] = {}
+
+        def bucket(aid: Optional[uuid.UUID]) -> dict:
+            g = groups.get(aid)
+            if g is None:
+                name = "Sem responsável"
+                if aid and aid in persons_by_id:
+                    name = persons_by_id[aid].full_name
+                g = {
+                    "assignee_id": aid,
+                    "assignee_name": name,
+                    "delivered": [],
+                    "overdue": [],
+                }
+                groups[aid] = g
+            return g
+
+        for t, report_aid in effective_pairs:
+            is_final = bool(t.status and t.status.is_final) or t.completed_at is not None
+            if t.completed_at and range_start <= t.completed_at < range_end:
+                bucket(report_aid)["delivered"].append(
+                    cls._item(t, is_overdue=False, report_assignee=report_aid)
+                )
+            if (
+                not is_final
+                and t.due_date is not None
+                and t.due_date < today_start
+            ):
+                bucket(report_aid)["overdue"].append(
+                    cls._item(t, is_overdue=True, report_assignee=report_aid)
+                )
+
+        by_assignee = []
+        for g in groups.values():
+            g["delivered"].sort(
+                key=lambda x: x["completed_at"] or datetime.min,
+                reverse=True,
+            )
+            g["overdue"].sort(key=lambda x: x["due_date"] or datetime.max)
+            by_assignee.append({
+                **g,
+                "delivered_count": len(g["delivered"]),
+                "overdue_count": len(g["overdue"]),
+            })
+
+        by_assignee.sort(
+            key=lambda g: (
+                0 if g["assignee_id"] is not None else 1,
+                g["assignee_name"].lower(),
+            )
+        )
+
+        return {
+            "period": period,
+            "range_start": range_start,
+            "range_end": range_end,
+            "by_assignee": by_assignee,
+            "available_assignees": available_assignees,
         }
 
 

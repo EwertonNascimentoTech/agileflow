@@ -53,6 +53,7 @@ from app.modules.projetos.schemas import (
     ProjectMemberCreate,
     ProjectMemberResponse,
     ProjectReportsResponse,
+    UsDeliveryReportResponse,
     ProjectResponse,
     ProjectScheduleBindingResponse,
     ProjectScheduleBindingsUpsert,
@@ -130,6 +131,7 @@ from app.modules.projetos.service import (
     ProjectImportService,
     ProjectMemberService,
     ProjectReportsService,
+    UsDeliveryReportService,
     ProjectScheduleBindingService,
     ProjectStageAgentService,
     ProjectService,
@@ -691,6 +693,19 @@ async def get_reports(
     ctx: ModuleContext = Depends(_ctx),
 ):
     return await ProjectReportsService.build(ctx.db, po=po, diretoria=diretoria, area=area)
+
+
+@router.get("/reports/us-delivery", response_model=UsDeliveryReportResponse)
+async def get_us_delivery_report(
+    period: str = Query(
+        "today",
+        description="today|tomorrow|this_week|next_week|this_month|next_month",
+    ),
+    assignee: Optional[uuid.UUID] = Query(None, description="Filtra pelo responsável (Person.id)."),
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Entregas de User Story por responsável no período + lista de atrasadas."""
+    return await UsDeliveryReportService.build(ctx.db, period=period, assignee=assignee)
 
 
 @router.get("/pos", response_model=list[PoOption])

@@ -226,6 +226,8 @@ class ProjectTask(TenantBase):
     order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Primeira saída de etapa is_initial (backlog) — só User Story; não sobrescreve.
+    left_backlog_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     # SLA: quando o card entrou na etapa atual + estado calculado pela rotina de SLA.
     status_entered_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     sla_state: Mapped[str] = mapped_column(String(12), nullable=False, default="none")  # none|ok|warning|breached

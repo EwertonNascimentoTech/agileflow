@@ -9,7 +9,7 @@ import {
   Package, Boxes, ArrowLeftRight, Layers, BadgeCheck,
   ShoppingCart, Wallet, ReceiptText,
   Network, Code2, CalendarOff,
-  CirclePlus, ClipboardList, Gauge, TrendingUp, ListChecks,
+  CirclePlus, ClipboardList, Gauge, TrendingUp, ListChecks, PackageCheck,
 } from "lucide-react"
 import type { ElementType } from "react"
 
@@ -54,6 +54,7 @@ export const moduleNavConfig: Record<string, ModuleNavItem[]> = {
     { to: "/app/modules/projetos/programas", icon: Layers, label: "Programa" },
     { to: "/app/modules/projetos/capacidade", icon: Gauge, label: "Capacidade" },
     { to: "/app/modules/projetos/relatorios", icon: BarChart3, label: "Relatórios" },
+    { to: "/app/modules/projetos/entregas-us", icon: PackageCheck, label: "Entregas US" },
     { to: "/app/modules/projetos/config", icon: Settings2, label: "Configurações" },
   ],
   produtos: [

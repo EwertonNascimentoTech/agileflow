@@ -21,7 +21,7 @@ from app.modules.super_admin.service import (
 )
 from app.core.security import (
     create_tokens, create_refresh_token,
-    decode_refresh_token, create_password_reset_token, decode_password_reset_token,
+    decode_refresh_token,
     validate_password_strength,
 )
 from pydantic import BaseModel as _BaseModel, field_validator
@@ -157,36 +157,16 @@ async def refresh_token(data: _RefreshRequest, db: AsyncSession = Depends(get_db
 @auth_router.post("/forgot-password")
 @limiter.limit("10/minute")
 async def forgot_password(request: Request, data: _ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
-    """
-    Gera token de reset de senha.
-    Em produção, enviaria o token por e-mail. Aqui retorna o token diretamente para testes.
-    """
-    from sqlalchemy import select as _select
-    from app.modules.super_admin.models import User as _User
-    result = await db.execute(_select(_User).where(_User.email == data.email))
-    user = result.scalar_one_or_none()
-    if not user:
-        # Não revela se o e-mail existe
-        return {"message": "Se o e-mail existir, um link de reset será enviado."}
-    reset_token = create_password_reset_token(user.id)
-    # TODO: em produção, enviar por e-mail em vez de retornar
-    return {"reset_token": reset_token, "message": "Token gerado (apenas para testes)."}
+    """Recuperação de senha desativada — use o administrador para redefinir."""
+    from fastapi import HTTPException
+    raise HTTPException(status_code=403, detail="A recuperação de senha está desativada. Contate o administrador.")
 
 
 @auth_router.post("/reset-password")
 async def reset_password(data: _ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
-    """Valida token de reset e atualiza a senha do usuário."""
-    from app.core.security import get_password_hash
-    payload = decode_password_reset_token(data.token)
-    user_id = payload.get("sub")
-    if not user_id:
-        from fastapi import HTTPException
-        raise HTTPException(400, "Token inválido.")
-    user = await UserService.get_user(db, uuid.UUID(user_id))
-    user.hashed_password = get_password_hash(data.new_password)
-    user.updated_at = __import__("datetime").datetime.utcnow()
-    await db.commit()
-    return {"message": "Senha atualizada com sucesso."}
+    """Recuperação de senha desativada — use o administrador para redefinir."""
+    from fastapi import HTTPException
+    raise HTTPException(status_code=403, detail="A recuperação de senha está desativada. Contate o administrador.")
 
 
 @auth_router.post("/first-access/check")

@@ -2589,11 +2589,11 @@ async def _step_059_produtos_portfolio(conn: AsyncConnection, schema: str) -> No
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 product_id UUID NOT NULL REFERENCES {schema}.products(id) ON DELETE CASCADE,
                 fornecedor_id UUID NOT NULL REFERENCES {schema}.produto_fornecedores(id) ON DELETE RESTRICT,
-                identificador VARCHAR(120),
+                identificador VARCHAR(255),
                 vigencia_inicio DATE NOT NULL,
                 vigencia_fim DATE NOT NULL,
                 renovacao_automatica BOOLEAN NOT NULL DEFAULT FALSE,
-                modelo_licenciamento VARCHAR(120),
+                modelo_licenciamento TEXT,
                 gestor_person_id UUID{gestor_fk},
                 sustentacao_n1 VARCHAR(20) NOT NULL DEFAULT 'interna',
                 sustentacao_n2 VARCHAR(20) NOT NULL DEFAULT 'interna',
@@ -3038,12 +3038,12 @@ async def _step_072_produtos_documento_extend(conn: AsyncConnection, schema: str
 
 async def _step_073_produtos_contrato_extend(conn: AsyncConnection, schema: str) -> None:
     await _add_columns(conn, schema, "produto_contratos", {
-        "numero": "VARCHAR(120)",
+        "numero": "VARCHAR(255)",
         "objeto_contratual": "TEXT",
         "status_contrato": "VARCHAR(20)",
         "valor": "NUMERIC(18,2)",
         "tipo_valor": "VARCHAR(20)",
-        "centro_custo": "VARCHAR(120)",
+        "centro_custo": "VARCHAR(255)",
         "fiscal_person_id": f"UUID REFERENCES {schema}.team_persons(id) ON DELETE SET NULL",
         "sla_contratual": "TEXT",
         "aditivos": "JSONB",
@@ -3676,6 +3676,28 @@ async def _step_106_team_person_project_allocation_pct(conn: AsyncConnection, sc
     })
 
 
+async def _step_107_produtos_contrato_widen_varchars(conn: AsyncConnection, schema: str) -> None:
+    """Amplia campos curtos de contrato (identificador/licença/número) — evita 500 por varchar(120)."""
+    if not await _table_exists(conn, schema, "produto_contratos"):
+        return
+    await conn.execute(text(f"""
+        ALTER TABLE {schema}.produto_contratos
+            ALTER COLUMN identificador TYPE VARCHAR(255),
+            ALTER COLUMN modelo_licenciamento TYPE TEXT,
+            ALTER COLUMN numero TYPE VARCHAR(255),
+            ALTER COLUMN centro_custo TYPE VARCHAR(255)
+    """))
+
+
+async def _step_108_projetos_left_backlog_at(conn: AsyncConnection, schema: str) -> None:
+    """Data da primeira saída do backlog (User Story) — relatório de entregas."""
+    if not await _table_exists(conn, schema, "project_tasks"):
+        return
+    await _add_columns(conn, schema, "project_tasks", {
+        "left_backlog_at": "TIMESTAMP",
+    })
+
+
 # Lista ordenada de steps. Adicionar novos no final.
 STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("001_funnels", _step_001_funnels),
@@ -3784,6 +3806,8 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("104_projetos_us_impediment", _step_104_projetos_us_impediment),
     ("105_projetos_us_codereview", _step_105_projetos_us_codereview),
     ("106_team_person_project_allocation_pct", _step_106_team_person_project_allocation_pct),
+    ("107_produtos_contrato_widen_varchars", _step_107_produtos_contrato_widen_varchars),
+    ("108_projetos_left_backlog_at", _step_108_projetos_left_backlog_at),
 ]
 
 

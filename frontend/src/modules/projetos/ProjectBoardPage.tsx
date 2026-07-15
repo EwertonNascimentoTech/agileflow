@@ -30,10 +30,12 @@ import {
   filterPlanningRootsByPo,
   planningRootTasks,
   buildEffectivePoByTaskId,
+  buildEffectiveProgramByTaskId,
   buildPoByOriginTaskId,
   buildPoMatchByFormDimensions,
   taskMatches,
   usePersistedTaskFilters,
+  DELIVERY_PERIOD_OPTIONS,
   type BoardFilterState,
 } from "@/modules/projetos/projectTaskFilters"
 import { useAuth } from "@/contexts/AuthContext"
@@ -53,13 +55,16 @@ import { getRowBreak, groupIntoRows } from "@/modules/projetos/layout"
 import { toast } from "@/lib/toast"
 import { funnelAccessLevel } from "@/lib/permissions"
 import {
+  buildPlanningProgressBars,
   buildTaskProgressById,
   fmtEstimatedHours,
   isFeatureKanbanFunnel,
   isFeatureOrUsKanbanFunnel,
+  isPlanningRootTask,
   isUserStoryKanbanFunnel,
   shouldShowUsChecklistProgress,
   usChecklistProgressPct,
+  type PlanningProgressBar,
 } from "@/modules/projetos/kanbanDisplay"
 import { UsCardProgressBar } from "@/modules/projetos/UsChecklistSection"
 import { canEditTaskOnBoard, canMoveTaskOnBoard } from "@/modules/projetos/taskMovePermissions"
@@ -162,6 +167,8 @@ type CardCtx = {
   /** Etiqueta Projeto/Programa efetiva do card: próprio (planning_kind) ou herdada do card
    * convertido a partir dele (origin_task_id). Ex.: card "Concluído" da prospecção. */
   planningTag: (task: ProjectTask) => { kind: "projeto" | "programa"; programName: string | null } | null
+  /** Barras Feature / User Stories / Outros sob cards Projeto/Programa. */
+  planningProgressBars: (taskId: string) => PlanningProgressBar[]
 }
 
 function BoardCard({
@@ -206,7 +213,7 @@ function BoardCard({
             </span>
           )
         }
-        if (task.completed_at) return <span className="chip success"><Check size={10} /> Concluída</span>
+        if (task.completed_at) return null // Status já aparece na raia (ex.: Concluído).
         if (task.sla_state === "breached") return <span className="chip destructive">Atrasado</span>
         if (task.sla_state === "warning") return <span className="chip warning">Alerta</span>
         if (isOverdue) return <span className="chip destructive">Atrasado</span>
@@ -293,12 +300,6 @@ function BoardCard({
     }]
   })
 
-  // Indicador de Programa/agrupador: sempre visível quando o card tem itens-filhos.
-  const childAgg = ctx.childrenProgress(task.id)
-  const childDates = ctx.childrenDates(task.id)
-  const lastDelivery = childDates?.due
-    ? new Date(childDates.due).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" })
-    : null
   // Etiqueta Projeto/Programa: do próprio card-raiz ou herdada do card convertido
   // a partir desta origem (ex.: card "Concluído" do kanban de prospecção).
   const planningTag = ctx.planningTag(task)
@@ -329,18 +330,6 @@ function BoardCard({
           )}
         </div>
       )}
-      {childAgg && !ctx.isFeatureKanban && (
-        <div style={{ marginBottom: 4, display: "flex", flexWrap: "wrap", gap: 4 }}>
-          <span
-            className="chip"
-            style={{ background: "var(--af-primary, #2563eb)", color: "#fff" }}
-            title="Abra o card para ver/gerenciar os itens"
-          >
-            {childAgg.total} {childAgg.total === 1 ? "item" : "itens"} · {childAgg.pct}%
-          </span>
-          {lastDelivery && <span className="chip muted">Última entrega: {lastDelivery}</span>}
-        </div>
-      )}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
         {rendered.length > 0
           ? rendered.map((x) => (
@@ -359,6 +348,9 @@ function BoardCard({
         const usLabel = `${fp.total} User ${fp.total === 1 ? "Story" : "Stories"}`
         return <UsCardProgressBar percent={fp.pct} label={usLabel} />
       })()}
+      {isPlanningRootTask(task.planning_kind) && ctx.planningProgressBars(task.id).map((bar) => (
+        <UsCardProgressBar key={bar.key} percent={bar.pct} label={bar.label} />
+      ))}
       {ctx.isFeatureKanban && task.us_impediment_active && (
         <span
           className="chip"
@@ -853,6 +845,10 @@ export default function ProjectBoardPage() {
     setPlanningCards,
     areas,
     setAreas,
+    deliveryPeriod,
+    setDeliveryPeriod,
+    programIds,
+    setProgramIds,
     planningScopeIds,
     hasFilters,
     clearFilters,
@@ -929,6 +925,7 @@ export default function ProjectBoardPage() {
   )
 
   const effectivePoByTaskId = useMemo(() => buildEffectivePoByTaskId(tasks), [tasks])
+  const effectiveProgramByTaskId = useMemo(() => buildEffectiveProgramByTaskId(tasks), [tasks])
 
   const poByOriginTaskId = useMemo(() => buildPoByOriginTaskId(tasks), [tasks])
 
@@ -965,6 +962,38 @@ export default function ProjectBoardPage() {
   const selectedFunnelName = funnels.find((f) => f.id === selectedFunnelId)?.name ?? null
 
   const taskProgressById = useMemo(() => buildTaskProgressById(tasks), [tasks])
+
+  const demandTypeMeta = useMemo(() => {
+    const m = new Map<string, { name: string; slug?: string | null }>()
+    for (const d of demandTypes) m.set(d.id, { name: d.name, slug: d.slug })
+    return m
+  }, [demandTypes])
+
+  const funnelNameByStatusId = useMemo(() => {
+    const funnelName = new Map(funnels.map((f) => [f.id, f.name]))
+    const m = new Map<string, string>()
+    for (const [statusId, funnelId] of Object.entries(statusFunnel)) {
+      const name = funnelName.get(funnelId)
+      if (name) m.set(statusId, name)
+    }
+    // Statuses do funil selecionado (já carregados) — cobre o caso em que statusFunnel
+    // ainda não tem todos os status de Features/US.
+    for (const s of statuses) {
+      if (m.has(s.id)) continue
+      const name = funnelName.get(s.funnel_id)
+      if (name) m.set(s.id, name)
+    }
+    return m
+  }, [funnels, statusFunnel, statuses])
+
+  const planningProgressBarsById = useMemo(() => {
+    const m = new Map<string, PlanningProgressBar[]>()
+    for (const t of tasks) {
+      if (!isPlanningRootTask(t.planning_kind)) continue
+      m.set(t.id, buildPlanningProgressBars(t.id, tasks, demandTypeMeta, taskProgressById, funnelNameByStatusId))
+    }
+    return m
+  }, [tasks, demandTypeMeta, taskProgressById, funnelNameByStatusId])
 
   const programNameById = useMemo(
     () => new Map(programs.map((p) => [p.id, p.name])),
@@ -1017,6 +1046,7 @@ export default function ProjectBoardPage() {
         programName: kind === "programa" ? (src.linked_program_id ? programNameById.get(src.linked_program_id) ?? null : null) : null,
       }
     },
+    planningProgressBars: (taskId: string) => planningProgressBarsById.get(taskId) ?? [],
   }), [
     visibleCardFields,
     demandTypeName,
@@ -1034,6 +1064,7 @@ export default function ProjectBoardPage() {
     tasks,
     programNameById,
     plannedByOrigin,
+    planningProgressBarsById,
   ])
   const userRoleName = (user?.role_name ?? "").trim().toLowerCase()
   const isBasicUser =
@@ -1407,6 +1438,8 @@ export default function ProjectBoardPage() {
       }
       const updated = await projetosApi.updateTask(projectId, task.id, payload)
       formValuesCache.current.delete(task.id)
+      const moveFunnelName = funnels.find((f) => f.id === (statuses.find((s) => s.id === task.status_id)?.funnel_id ?? selectedFunnelId))?.name ?? selectedFunnelName
+      const syncFeatureUsFamily = !!task.parent_task_id || isFeatureOrUsKanbanFunnel(moveFunnelName)
       // Se a etapa de destino transita o card para outro kanban (moves_to_funnel_id),
       // o status retornado não pertence ao funil atual: o card sai desta visão.
       const leftFunnel = !statuses.some((s) => s.id === updated.status_id)
@@ -1415,7 +1448,11 @@ export default function ProjectBoardPage() {
         toast.success("Card enviado para o próximo kanban.")
         await reloadTasks()
       } else {
-        setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+        if (syncFeatureUsFamily) {
+          await reloadTasks()
+        } else {
+          setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+        }
         // Conversão cria um card novo em outro funil — recarrega para refletir.
         if (conversionTitle !== undefined) await reloadTasks()
       }
@@ -1587,6 +1624,8 @@ export default function ProjectBoardPage() {
 
   const selectedFunnel = funnels.find((f) => f.id === selectedFunnelId) ?? null
   const canManageFunnel = funnelAccessLevel(selectedFunnel?.access_control, user) === "manage"
+  const hideRequisitanteFilter = isFeatureOrUsKanbanFunnel(selectedFunnelName)
+  const showDeliveryPeriodFilter = hideRequisitanteFilter
   const selectedTaskStatus = selectedTask
     ? statuses.find((s) => s.id === selectedTask.status_id)
     : undefined
@@ -1597,12 +1636,15 @@ export default function ProjectBoardPage() {
     q: searchQuery,
     assignees,
     productOwners,
-    requisitantes,
+    requisitantes: hideRequisitanteFilter ? [] : requisitantes,
     requesterFieldKey,
     formValuesByTask,
     resolveRequisitanteLabel: requesterLabel,
     diretorias,
     areas,
+    deliveryPeriod: showDeliveryPeriodFilter ? deliveryPeriod : null,
+    programIds,
+    effectiveProgramByTaskId,
     planningScopeIds,
     groupedChildIds,
     effectivePoByTaskId,
@@ -1672,24 +1714,53 @@ export default function ProjectBoardPage() {
           {poUsers.length === 0 && <div className="dd-item" style={{ opacity: 0.6 }}>Nenhum PO cadastrado no TeamOps</div>}
         </FilterDropdown>
 
-        <FilterDropdown label="Requisitante" open={openMenu === "requisitante"} onToggle={() => setOpenMenu(openMenu === "requisitante" ? null : "requisitante")} selectedCount={requisitantes.length}>
-          <div className="dd-head">Filtrar por requisitante</div>
-          {[
-            { label: "Sem requisitante", values: ["__none__"] as string[] },
-            ...requisitanteOptionGroups,
-          ].map((opt) => (
-            <div
-              key={opt.label}
-              className="dd-item"
-              onClick={() => setRequisitantes((prev) => toggleGroupedFilterSelection(prev, opt.values))}
-            >
-              <span className={`check ${groupedFilterChecked(requisitantes, opt.values) ? "checked" : ""}`}>
-                {groupedFilterChecked(requisitantes, opt.values) && <Check size={11} />}
-              </span>
-              <span>{opt.label}</span>
-            </div>
-          ))}
-        </FilterDropdown>
+        {!hideRequisitanteFilter && (
+          <FilterDropdown label="Requisitante" open={openMenu === "requisitante"} onToggle={() => setOpenMenu(openMenu === "requisitante" ? null : "requisitante")} selectedCount={requisitantes.length}>
+            <div className="dd-head">Filtrar por requisitante</div>
+            {[
+              { label: "Sem requisitante", values: ["__none__"] as string[] },
+              ...requisitanteOptionGroups,
+            ].map((opt) => (
+              <div
+                key={opt.label}
+                className="dd-item"
+                onClick={() => setRequisitantes((prev) => toggleGroupedFilterSelection(prev, opt.values))}
+              >
+                <span className={`check ${groupedFilterChecked(requisitantes, opt.values) ? "checked" : ""}`}>
+                  {groupedFilterChecked(requisitantes, opt.values) && <Check size={11} />}
+                </span>
+                <span>{opt.label}</span>
+              </div>
+            ))}
+          </FilterDropdown>
+        )}
+
+        {showDeliveryPeriodFilter && (
+          <FilterDropdown
+            label="Entrega"
+            open={openMenu === "entrega"}
+            onToggle={() => setOpenMenu(openMenu === "entrega" ? null : "entrega")}
+            selectedCount={deliveryPeriod ? 1 : 0}
+          >
+            <div className="dd-head">Entregas por prazo</div>
+            {DELIVERY_PERIOD_OPTIONS.map((opt) => {
+              const checked = deliveryPeriod === opt.value
+              return (
+                <div
+                  key={opt.value}
+                  className="dd-item"
+                  onClick={() => {
+                    setDeliveryPeriod(checked ? null : opt.value)
+                    setOpenMenu(null)
+                  }}
+                >
+                  <span className={`check ${checked ? "checked" : ""}`}>{checked && <Check size={11} />}</span>
+                  <span>{opt.label}</span>
+                </div>
+              )
+            })}
+          </FilterDropdown>
+        )}
 
         <FilterDropdown label="Diretoria" open={openMenu === "diretoria"} onToggle={() => setOpenMenu(openMenu === "diretoria" ? null : "diretoria")} selectedCount={diretorias.length} align="end">
           <div className="dd-head">Filtrar por diretoria</div>
@@ -1723,6 +1794,32 @@ export default function ProjectBoardPage() {
               <span>{opt.label}</span>
             </div>
           ))}
+        </FilterDropdown>
+
+        <FilterDropdown label="Programa" open={openMenu === "programa"} onToggle={() => setOpenMenu(openMenu === "programa" ? null : "programa")} selectedCount={programIds.length} menuClassName="dd-menu-wide">
+          <div className="dd-head">Filtrar por programa</div>
+          <div
+            className="dd-item"
+            onClick={() => toggleMulti(setProgramIds, programIds, "__none__")}
+          >
+            <span className={`check ${programIds.includes("__none__") ? "checked" : ""}`}>
+              {programIds.includes("__none__") && <Check size={11} />}
+            </span>
+            <span>Sem programa</span>
+          </div>
+          {programs.length === 0 ? (
+            <div className="dd-item" style={{ opacity: 0.6, pointerEvents: "none" }}>
+              Nenhum programa cadastrado
+            </div>
+          ) : programs.map((p) => {
+            const checked = programIds.includes(p.id)
+            return (
+              <div key={p.id} className="dd-item" onClick={() => toggleMulti(setProgramIds, programIds, p.id)}>
+                <span className={`check ${checked ? "checked" : ""}`}>{checked && <Check size={11} />}</span>
+                <span className="dd-item-label">{p.name}</span>
+              </div>
+            )
+          })}
         </FilterDropdown>
 
         <FilterDropdown label="Projeto / Programa" open={openMenu === "planning"} onToggle={() => setOpenMenu(openMenu === "planning" ? null : "planning")} selectedCount={planningCards.length} menuClassName="dd-menu-wide">

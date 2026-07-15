@@ -28,3 +28,6 @@ htmlcov/
 .claude/worktrees/
 .claude/.claude/
 .claude/settings.local.json
+
+# Artefatos gerados pelo job de backup (não versionar)
+/backups/

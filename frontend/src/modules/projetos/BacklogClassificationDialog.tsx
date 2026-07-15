@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react"
-import { Loader2, Plus, X } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { Check, ChevronDown, Loader2, Plus, Search, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -48,6 +48,108 @@ function apiMessage(err: unknown, fallback: string): string {
   const d = detail?.data?.detail
   if (typeof d === "string") return d
   return fallback
+}
+
+/** Select de produto com campo de pesquisa (lista longa no vínculo do card). */
+function ProductSearchSelect({
+  products,
+  value,
+  onChange,
+  disabled,
+  loading,
+}: {
+  products: ProductListItem[]
+  value: string
+  onChange: (id: string) => void
+  disabled?: boolean
+  loading?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState("")
+  const rootRef = useRef<HTMLDivElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
+
+  const selected = products.find((p) => p.id === value) ?? null
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return products
+    return products.filter((p) => p.name.toLowerCase().includes(q))
+  }, [products, query])
+
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener("mousedown", onDoc)
+    return () => document.removeEventListener("mousedown", onDoc)
+  }, [open])
+
+  useEffect(() => {
+    if (open) {
+      setQuery("")
+      requestAnimationFrame(() => searchRef.current?.focus())
+    }
+  }, [open])
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        disabled={disabled || loading}
+        onClick={() => setOpen((v) => !v)}
+        className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <span className={selected ? "truncate text-foreground" : "truncate text-muted-foreground"}>
+          {loading ? "Carregando produtos…" : (selected?.name ?? "Selecione um produto")}
+        </span>
+        <ChevronDown size={16} className="ml-2 shrink-0 opacity-50" />
+      </button>
+      {open && !loading && (
+        <div className="absolute z-50 mt-1 w-full overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md">
+          <div className="relative border-b p-2">
+            <Search size={14} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              ref={searchRef}
+              className="h-9 pl-8"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Pesquisar produto…"
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setOpen(false)
+              }}
+            />
+          </div>
+          <ul className="max-h-52 overflow-y-auto p-1">
+            {filtered.length === 0 ? (
+              <li className="px-2 py-3 text-center text-xs text-muted-foreground">
+                Nenhum produto encontrado{query.trim() ? ` para “${query.trim()}”` : ""}.
+              </li>
+            ) : filtered.map((p) => {
+              const active = p.id === value
+              return (
+                <li key={p.id}>
+                  <button
+                    type="button"
+                    className={`flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground ${
+                      active ? "bg-accent text-accent-foreground" : ""
+                    }`}
+                    onClick={() => {
+                      onChange(p.id)
+                      setOpen(false)
+                    }}
+                  >
+                    <Check size={14} className={active ? "shrink-0 opacity-100" : "shrink-0 opacity-0"} />
+                    <span className="truncate">{p.name}</span>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      )}
+    </div>
+  )
 }
 
 export function BacklogClassificationDialog({ open, task, mode = "backlog_exit", onCancel, onConfirm }: Props) {
@@ -216,21 +318,13 @@ export function BacklogClassificationDialog({ open, task, mode = "backlog_exit",
 
               {productMode === "select" || !allowNewProduct ? (
                 <>
-                  <Select
-                    value={selectedProductId || "__none__"}
-                    onValueChange={(v) => setSelectedProductId(v === "__none__" ? "" : v)}
-                    disabled={loadingProducts}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder={loadingProducts ? "Carregando produtos…" : "Selecione um produto"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">Selecione um produto</SelectItem>
-                      {products.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <ProductSearchSelect
+                    products={products}
+                    value={selectedProductId}
+                    onChange={setSelectedProductId}
+                    disabled={saving}
+                    loading={loadingProducts}
+                  />
                   {needsRelease && products.length === 0 && !loadingProducts && (
                     <p className="text-[11px] text-muted-foreground">
                       Nenhum produto cadastrado. Cadastre um produto no módulo Produtos antes de registrar uma melhoria.

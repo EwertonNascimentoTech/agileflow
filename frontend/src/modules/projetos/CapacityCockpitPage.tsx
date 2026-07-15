@@ -306,10 +306,15 @@ export function CapacityCockpitPage() {
           </div>
           <SectionCard title="Carga por pessoa (todos os projetos)">
             {heatmap && heatmap.cells.length > 0 ? (
-              <WorkloadView cells={heatmap.cells} nameForUser={nameFor} />
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  Demanda = horas das <strong>User Stories</strong> (Features ficam de fora — já carregam o rollup das US).
+                </p>
+                <WorkloadView cells={heatmap.cells} nameForUser={nameFor} />
+              </div>
             ) : (
               <EmptyState icon={Users} title="Sem carga no período"
-                description="Nenhuma tarefa com responsável, horas estimadas e datas no intervalo selecionado. Ajuste o período ou os filtros." />
+                description="Nenhuma User Story com responsável, horas estimadas e datas no intervalo selecionado. Ajuste o período ou os filtros." />
             )}
           </SectionCard>
         </>

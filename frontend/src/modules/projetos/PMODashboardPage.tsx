@@ -1,17 +1,20 @@
-import { LayoutGrid, BarChart3, FileText, Users } from "lucide-react"
+import { LayoutGrid, BarChart3, FileText, Users, PackageCheck } from "lucide-react"
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import PODashboardPage from "@/modules/projetos/PODashboardPage"
 import PoSyncPage from "@/modules/projetos/PoSyncPage"
 import ReportsPage from "@/modules/projetos/ReportsPage"
 import StatusReportsPage from "@/modules/projetos/StatusReportsPage"
+import UsDeliveryReportPage from "@/modules/projetos/UsDeliveryReportPage"
+
+export type PmoTab = "portfolio" | "po-sync" | "relatorios" | "entregas-us" | "status-reports"
 
 /**
  * Cockpit do PMO: unifica o portfólio (Painel do PO), os Relatórios do board e os
  * Status Reports por recorte em abas, dando ao coordenador controle de todos os
  * POs/projetos numa única tela.
  */
-export default function PMODashboardPage({ initialTab = "portfolio" }: { initialTab?: "portfolio" | "po-sync" | "relatorios" | "status-reports" }) {
+export default function PMODashboardPage({ initialTab = "portfolio" }: { initialTab?: PmoTab }) {
   return (
     <div className="w-full space-y-4">
       <div>
@@ -32,6 +35,9 @@ export default function PMODashboardPage({ initialTab = "portfolio" }: { initial
           <TabsTrigger value="relatorios" className="gap-1.5">
             <BarChart3 className="h-4 w-4" /> Relatórios
           </TabsTrigger>
+          <TabsTrigger value="entregas-us" className="gap-1.5">
+            <PackageCheck className="h-4 w-4" /> Entregas US
+          </TabsTrigger>
           <TabsTrigger value="status-reports" className="gap-1.5">
             <FileText className="h-4 w-4" /> Status Reports
           </TabsTrigger>
@@ -45,6 +51,9 @@ export default function PMODashboardPage({ initialTab = "portfolio" }: { initial
         </TabsContent>
         <TabsContent value="relatorios" className="mt-4">
           <ReportsPage />
+        </TabsContent>
+        <TabsContent value="entregas-us" className="mt-4">
+          <UsDeliveryReportPage />
         </TabsContent>
         <TabsContent value="status-reports" className="mt-4">
           <StatusReportsPage />

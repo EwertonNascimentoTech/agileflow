@@ -31,10 +31,9 @@ async def test_me_with_invalid_token(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_forgot_password_unknown_email(client: AsyncClient):
+async def test_forgot_password_disabled(client: AsyncClient):
     resp = await client.post("/api/v1/auth/forgot-password", json={"email": "nobody@nowhere.com"})
-    # Pode retornar 404 (usuário não encontrado) ou 200 com reset_token em modo dev
-    assert resp.status_code in (200, 404, 400)
+    assert resp.status_code == 403
 
 
 @pytest.mark.asyncio

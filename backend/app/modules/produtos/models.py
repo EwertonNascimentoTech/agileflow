@@ -572,16 +572,16 @@ class Contrato(TenantBase):
     fornecedor_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("produto_fornecedores.id", ondelete="RESTRICT"), nullable=False,
     )
-    identificador: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    identificador: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     vigencia_inicio: Mapped[date] = mapped_column(Date, nullable=False)
     vigencia_fim: Mapped[date] = mapped_column(Date, nullable=False)
     renovacao_automatica: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    modelo_licenciamento: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    modelo_licenciamento: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     gestor_person_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("team_persons.id", ondelete="SET NULL"), nullable=True,
     )
     # ── Extensão spec (contrato) ──
-    numero: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    numero: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     objeto_contratual: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     status_contrato: Mapped[Optional[ContratoStatus]] = mapped_column(
         SAEnum(ContratoStatus, native_enum=False, values_callable=_enum_values), nullable=True,
@@ -590,7 +590,7 @@ class Contrato(TenantBase):
     tipo_valor: Mapped[Optional[ContratoTipoValor]] = mapped_column(
         SAEnum(ContratoTipoValor, native_enum=False, values_callable=_enum_values), nullable=True,
     )
-    centro_custo: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    centro_custo: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     fiscal_person_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("team_persons.id", ondelete="SET NULL"), nullable=True,
     )

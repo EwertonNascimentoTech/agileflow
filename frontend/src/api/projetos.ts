@@ -106,6 +106,7 @@ export interface ProjectTask {
   order: number
   created_by: string | null
   completed_at: string | null
+  left_backlog_at?: string | null
   status_entered_at: string | null
   sla_state: "none" | "ok" | "warning" | "breached"
   anexos?: ProjectUpload[] | null
@@ -404,6 +405,42 @@ export interface ProjectReports {
   }
   available_diretorias: string[]
   available_areas: string[]
+}
+
+export type UsDeliveryPeriod =
+  | "today"
+  | "tomorrow"
+  | "this_week"
+  | "next_week"
+  | "this_month"
+  | "next_month"
+
+export interface UsDeliveryItem {
+  id: string
+  title: string
+  project_id: string
+  assigned_to: string | null
+  due_date: string | null
+  left_backlog_at: string | null
+  completed_at: string | null
+  is_overdue: boolean
+}
+
+export interface UsDeliveryAssigneeGroup {
+  assignee_id: string | null
+  assignee_name: string
+  delivered: UsDeliveryItem[]
+  overdue: UsDeliveryItem[]
+  delivered_count: number
+  overdue_count: number
+}
+
+export interface UsDeliveryReport {
+  period: UsDeliveryPeriod
+  range_start: string
+  range_end: string
+  by_assignee: UsDeliveryAssigneeGroup[]
+  available_assignees: Array<{ id: string; name: string }>
 }
 
 // ── Layout do card (quadro) ─────────────────────────────────────────────────
@@ -1580,6 +1617,14 @@ export const projetosApi = {
         ...(params?.po ? { po: params.po } : {}),
         ...(params?.diretoria ? { diretoria: params.diretoria } : {}),
         ...(params?.area ? { area: params.area } : {}),
+      },
+    }).then((r) => r.data),
+
+  getUsDeliveryReport: (params?: { period?: UsDeliveryPeriod; assignee?: string | null }) =>
+    api.get<UsDeliveryReport>(`/projetos/reports/us-delivery`, {
+      params: {
+        period: params?.period ?? "today",
+        ...(params?.assignee ? { assignee: params.assignee } : {}),
       },
     }).then((r) => r.data),
 

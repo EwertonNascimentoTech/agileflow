@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react"
-import { AlertTriangle, Loader2 } from "lucide-react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react"
+import { AlertTriangle, Loader2, Users } from "lucide-react"
 
 import { projetosApi, type WorkloadCell } from "@/api/projetos"
 import type { User } from "@/types"
 import { EmptyState } from "@/components/EmptyState"
-import { Users } from "lucide-react"
 
 function initials(name: string | undefined): string {
   if (!name) return "?"
@@ -64,6 +63,33 @@ export function WorkloadView({
 
   // Tooltip customizado (position: fixed → não é cortado pelo overflow da tabela).
   const [hover, setHover] = useState<{ c: WorkloadCell; name: string; date: string; x: number; y: number } | null>(null)
+  const tipRef = useRef<HTMLDivElement>(null)
+  const [tipPos, setTipPos] = useState<{ left: number; top: number; ready: boolean }>({ left: 0, top: 0, ready: false })
+
+  // Reposiciona o tooltip para caber na viewport (vira para cima perto da borda inferior).
+  useLayoutEffect(() => {
+    if (!hover) {
+      setTipPos({ left: 0, top: 0, ready: false })
+      return
+    }
+    const el = tipRef.current
+    const pad = 8
+    const gap = 14
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const tw = el?.offsetWidth ?? 256
+    const th = el?.offsetHeight ?? 120
+
+    let left = hover.x + gap
+    if (left + tw > vw - pad) left = hover.x - tw - gap
+    if (left < pad) left = pad
+
+    let top = hover.y + gap
+    if (top + th > vh - pad) top = hover.y - th - gap
+    if (top < pad) top = pad
+
+    setTipPos({ left, top, ready: true })
+  }, [hover])
 
   const { dates, byUser, userIds, overCount } = useMemo(() => {
     const dateSet = new Set<string>()
@@ -92,7 +118,7 @@ export function WorkloadView({
       <EmptyState
         icon={Users}
         title="Sem dados de carga"
-        description="Atribua responsáveis e horas estimadas às tarefas com início e prazo para ver a distribuição de carga e identificar superlotação."
+        description="Atribua responsáveis e horas estimadas às User Stories com início e prazo para ver a distribuição de carga e identificar superlotação."
       />
     )
   }
@@ -160,8 +186,13 @@ export function WorkloadView({
 
       {hover && (
         <div
-          className="pointer-events-none fixed z-50 w-64 rounded-md border bg-popover px-3 py-2 text-[11px] text-popover-foreground shadow-lg"
-          style={{ left: Math.min(hover.x + 14, (typeof window !== "undefined" ? window.innerWidth : 1200) - 272), top: hover.y + 14 }}
+          ref={tipRef}
+          className="pointer-events-none fixed z-50 w-64 max-h-[min(320px,calc(100vh-16px))] overflow-y-auto rounded-md border bg-popover px-3 py-2 text-[11px] text-popover-foreground shadow-lg"
+          style={{
+            left: tipPos.left,
+            top: tipPos.top,
+            visibility: tipPos.ready ? "visible" : "hidden",
+          }}
         >
           <div className="font-semibold">{hover.name} · {hover.date}</div>
           <div className="mb-1.5 text-muted-foreground">

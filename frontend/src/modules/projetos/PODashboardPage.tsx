@@ -41,14 +41,46 @@ function fmtShortDate(s: string | null): string {
 const HEALTH_COLOR: Record<string, string> = { verde: "#16A34A", amarelo: "#CA8A04", vermelho: "#DC2626" }
 const HEALTH_LABEL: Record<string, string> = { verde: "No prazo", amarelo: "Atenção", vermelho: "Risco" }
 
-function HealthDot({ health }: { health: string }) {
+function HealthDot({
+  health,
+  tip,
+}: {
+  health: string
+  tip?: string
+}) {
+  const label = tip || HEALTH_LABEL[health] || health
   return (
-    <span
-      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-      style={{ backgroundColor: HEALTH_COLOR[health] ?? "#6B7280" }}
-      title={HEALTH_LABEL[health] ?? health}
-    />
+    <span className="group/hd relative inline-flex shrink-0">
+      <span
+        className="inline-block h-2.5 w-2.5 cursor-help rounded-full ring-2 ring-transparent group-hover/hd:ring-offset-1"
+        style={{ backgroundColor: HEALTH_COLOR[health] ?? "#6B7280" }}
+        aria-label={label}
+      />
+      <span className="pointer-events-none absolute left-1/2 top-full z-[60] mt-1.5 hidden w-max max-w-[240px] -translate-x-1/2 rounded-md border bg-popover px-2.5 py-1.5 text-left text-[11px] leading-snug text-popover-foreground shadow-md group-hover/hd:block">
+        <span className="font-semibold">{HEALTH_LABEL[health] ?? health}</span>
+        {tip && tip !== (HEALTH_LABEL[health] ?? health) && (
+          <span className="mt-0.5 block text-muted-foreground">{tip}</span>
+        )}
+      </span>
+    </span>
   )
+}
+
+function riskTipForItem(it: PoPortfolioItem): string {
+  const reasons: string[] = []
+  if (it.overdue) reasons.push("prazo ultrapassado")
+  if (it.breached_count > 0) reasons.push(`${it.breached_count} SLA estourado(s)`)
+  if (it.absence_conflict) reasons.push("ausência do responsável no período")
+  if (it.blocked_count > 0) reasons.push(`${it.blocked_count} card(s) bloqueado(s)`)
+  if (it.overallocated_users.length > 0) reasons.push("sobrecarga de equipe")
+  if (it.no_due_date) reasons.push("sem data de prazo")
+  if (it.unscored) reasons.push("sem score de prioridade")
+  if (reasons.length === 0) {
+    if (it.health === "vermelho") return "Progresso muito atrás do esperado no cronograma"
+    if (it.health === "amarelo") return "Atenção — possível bloqueio ou sobrecarga"
+    return "Sem sinais de risco"
+  }
+  return reasons.join(" · ")
 }
 
 function BarRow({ label, value, max, color }: { label: string; value: number; max: number; color?: string }) {
@@ -536,7 +568,7 @@ export default function PODashboardPage() {
                   className="flex w-full items-center gap-3 rounded-md border p-2.5 text-left transition hover:bg-muted/50"
                 >
                   <span className="w-5 shrink-0 text-right font-mono text-xs text-muted-foreground">{idx + 1}</span>
-                  <HealthDot health={it.health} />
+                  <HealthDot health={it.health} tip={riskTipForItem(it)} />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="truncate text-sm font-medium">{it.title}</span>
@@ -569,11 +601,11 @@ export default function PODashboardPage() {
                     </div>
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
-                    {it.overdue && <Badge variant="destructive" className="text-[10px]">Atrasado</Badge>}
-                    {it.breached_count > 0 && <Badge variant="destructive" className="text-[10px]">{it.breached_count} SLA</Badge>}
-                    {it.blocked_count > 0 && <Badge variant="outline" className="text-[10px]">{it.blocked_count} bloq.</Badge>}
-                    {it.absence_conflict && <Badge variant="outline" className="text-[10px]">Ausência</Badge>}
-                    {it.no_due_date && <Badge variant="outline" className="text-[10px]">Sem prazo</Badge>}
+                    {it.overdue && <Badge variant="destructive" className="text-[10px]" title="Há itens com prazo ultrapassado">Atrasado</Badge>}
+                    {it.breached_count > 0 && <Badge variant="destructive" className="text-[10px]" title={`${it.breached_count} item(ns) com SLA estourado`}>{it.breached_count} SLA</Badge>}
+                    {it.blocked_count > 0 && <Badge variant="outline" className="text-[10px]" title={`${it.blocked_count} card(s) bloqueado(s)`}>{it.blocked_count} bloq.</Badge>}
+                    {it.absence_conflict && <Badge variant="outline" className="text-[10px]" title="Responsável ausente no período do projeto">Ausência</Badge>}
+                    {it.no_due_date && <Badge variant="outline" className="text-[10px]" title="Projeto sem data de prazo cadastrada">Sem prazo</Badge>}
                   </div>
                 </button>
               ))}
@@ -625,7 +657,7 @@ export default function PODashboardPage() {
                       onClick={() => openModal(it)}
                       className="flex w-full items-center gap-2 rounded-md border p-2 text-left text-sm transition hover:bg-muted/50"
                     >
-                      <HealthDot health={it.health} />
+                      <HealthDot health={it.health} tip={riskTipForItem(it)} />
                       <span className="flex-1 truncate font-medium">{it.title}</span>
                       <CompletionBadge subtreeTotal={it.subtree_total} subtreeCompleted={it.subtree_completed} progressPct={it.progress_pct} pendingStages={it.pending_stages} />
                       <span className="shrink-0 tabular-nums text-[11px] font-semibold">{fmtShortDate(it.next_due_date)}</span>

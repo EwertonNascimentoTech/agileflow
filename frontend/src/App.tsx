@@ -13,7 +13,6 @@ import ModuleConfigGuard from "@/components/ModuleConfigGuard"
 
 // ── Auth ──────────────────────────────────────────────────────────────
 const LoginPage = lazy(() => import("@/modules/auth/LoginPage"))
-const ForgotPasswordPage = lazy(() => import("@/modules/auth/ForgotPasswordPage"))
 const FirstAccessPage = lazy(() => import("@/modules/auth/FirstAccessPage"))
 
 // ── Super Admin ───────────────────────────────────────────────────────
@@ -153,7 +152,7 @@ export default function App() {
               <Routes>
               {/* Público */}
               <Route path="/login" element={<LoginPage />} />
-              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+              <Route path="/forgot-password" element={<Navigate to="/login" replace />} />
               <Route path="/primeiro-acesso" element={<FirstAccessPage />} />
               <Route path="/p/propostas/:token" element={<PublicProposalPage />} />
 
@@ -241,6 +240,7 @@ export default function App() {
                     <Route path="cronograma" element={<GanttPage />} />
                     <Route path="capacidade" element={<CapacityCockpitPage />} />
                     <Route path="relatorios" element={<PMODashboardPage initialTab="relatorios" />} />
+                    <Route path="entregas-us" element={<PMODashboardPage initialTab="entregas-us" />} />
                     <Route path="matriz" element={<ProjectPriorityMatrixPage />} />
                     <Route path="painel-po" element={<PMODashboardPage />} />
                     <Route path="po-sync" element={<PMODashboardPage initialTab="po-sync" />} />
