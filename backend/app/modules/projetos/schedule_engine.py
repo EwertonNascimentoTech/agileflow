@@ -4,6 +4,8 @@ Planeja em HORAS úteis sobre um `WorkingCalendar` (expediente/almoço/dias úte
 combinando:
 - cadeia implícita por ORDEM entre irmãos do mesmo responsável (FS sequencial);
 - irmãos com responsáveis diferentes iniciam em paralelo (mesmo início do pai);
+- `pinned_starts`: início mínimo forçado (ex.: 1ª agenda de uma US nova = data atual),
+  sem herdar a data da última irmã;
 - dependências explícitas FS / SS / FF / SF com lag/lead em horas;
 - rollup de pais (start=min filhos, finish=max filhos);
 - marcos (duração 0);
@@ -16,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Hashable, Optional
+from typing import Hashable, Mapping, Optional
 
 from app.modules.teamops.calendar import WorkingCalendar
 
@@ -75,14 +77,19 @@ def schedule_tree(
     anchor: datetime,
     calendar: WorkingCalendar,
     *,
+    pinned_starts: Optional[Mapping[Hashable, datetime]] = None,
     max_passes: int = 50,
 ) -> dict[Hashable, tuple[datetime, datetime]]:
     """Agenda a subárvore de `root_id` e devolve `{id: (start, finish)}`.
 
     Só são agendados nós da subárvore que sejam agendáveis (têm `duration_hours` ou são marco)
     e pais com ao menos um filho agendado. O início da raiz é fixado na âncora (data-base).
+
+    `pinned_starts`: início mínimo por nó (ex.: data atual na 1ª agenda). Tem prioridade sobre
+    a cadeia implícita pela última irmã do mesmo responsável.
     """
     cal = calendar
+    pins = dict(pinned_starts or {})
     by_id: dict[Hashable, EngineNode] = {n.id: n for n in nodes}
     if root_id not in by_id:
         return {}
@@ -133,6 +140,9 @@ def schedule_tree(
         el = extra_start.get(tid)
         if el is not None and el > eb:
             eb = el
+        pin = pins.get(tid)
+        if pin is not None and pin > eb:
+            eb = pin
         eb = cal.next_start(eb)
         kids = children.get(tid, [])
         if kids:
@@ -144,6 +154,10 @@ def schedule_tree(
                 if c.id in has_pred:
                     # Predecessora explícita: parte do início do pai; extra_start posiciona.
                     base = eb
+                elif c.id in pins:
+                    # 1ª agenda (ex.: US nova com horas): usa a data pinada (hoje), não a
+                    # data da última irmã — ainda respeita o início mínimo do pai.
+                    base = max(eb, cal.next_start(pins[c.id]))
                 elif c.assignee_id in last_end_by_assignee:
                     # Mesmo responsável que irmão anterior → sequencial após o término dele.
                     base = last_end_by_assignee[c.assignee_id]

@@ -111,6 +111,23 @@ from app.modules.projetos.schemas import (
     ProjectTaskUpdate,
     ProjectTaskWithContextResponse,
     ProjectUpdate,
+    DevPerformanceRow,
+    DevAbsenceInfo,
+    DevUsBreakdown,
+    DevUsBreakdownItem,
+    DevUsFeatureGroup,
+    DevUsProjectGroup,
+    PoRag,
+    PoPerformanceRow,
+    TeamPerfKpis,
+    TeamPerfMonthPoint,
+    TeamPerfScatterPoint,
+    TeamPerfSeries,
+    TeamPerfSwimlaneRow,
+    TeamPerfMeta,
+    TeamPerfPositionOption,
+    TeamPerfTeamOption,
+    TeamPerformanceResponse,
 )
 from sqlalchemy import text as _sa_text
 from app.modules.super_admin.models import User, UserRole
@@ -2987,8 +3004,19 @@ class ProjectTaskService:
         for key in ("diretoria", "area"):
             if payload.get(key) == "":
                 payload[key] = None
-        payload["due_date"] = _to_naive_utc(payload.get("due_date"))
-        payload["start_date"] = _to_naive_utc(payload.get("start_date"))
+        # Se nasce sob um projeto/programa, datas vêm do motor (âncora + horas) — ignora datas manuais.
+        under_schedule_create = False
+        parent_ref = payload.get("parent_task_id")
+        if parent_ref is not None:
+            root_id = await ProjectTaskService._planning_root_id(db, project_id, parent_ref)
+            root = await db.get(ProjectTask, root_id)
+            under_schedule_create = root is not None and root.planning_kind in ("programa", "projeto")
+        if under_schedule_create:
+            payload["start_date"] = None
+            payload["due_date"] = None
+        else:
+            payload["due_date"] = _to_naive_utc(payload.get("due_date"))
+            payload["start_date"] = _to_naive_utc(payload.get("start_date"))
         task = ProjectTask(
             project_id=project_id,
             **payload,
@@ -2996,11 +3024,22 @@ class ProjectTaskService:
         )
         task.sla_state = ProjectTaskService._sla_initial(status_obj)
         # Horas + início sem prazo explícito → deriva o prazo (dias úteis).
-        if task.due_date is None:
+        # Sob cronograma, as datas são calculadas no reschedule após o flush.
+        if not under_schedule_create and task.due_date is None:
             hpd = await ProjectTaskService._project_hours_per_day_for_task(db, task)
             ProjectTaskService._apply_hours(task, hpd)
         db.add(task)
         await db.flush()
+        if under_schedule_create and task.estimated_hours is not None and float(task.estimated_hours) > 0:
+            root_id = await ProjectTaskService._planning_root_id(db, project_id, task.id)
+            # US criada já com horas: começa na data atual, sem mexer no início do projeto.
+            calendar = await load_calendar(db)
+            pinned_starts = {
+                task.id: datetime.combine(datetime.utcnow().date(), calendar.day_start),
+            }
+            await ProjectTaskService._reschedule_root(
+                db, project_id, root_id, pinned_starts=pinned_starts,
+            )
         await ProjectTaskService._upsert_form_submission(db, task.id, form_values, current_user_id)
         # Automações de "ao entrar na etapa" valem também para a criação direta do card
         # na coluna — não só no arraste. Atribui responsável, cria subtarefa, notifica, etc.
@@ -3276,6 +3315,28 @@ class ProjectTaskService:
             await ProjectTaskService._enforce_priority_gate(db, task)
             await ProjectTaskService._enforce_backlog_classification_gate(db, task, payload)
 
+        # Cronograma em horas: só o card-raiz (projeto/programa) aceita data de início manual.
+        # Datas dos demais itens são calculadas pelo motor a partir da âncora + horas.
+        # Itens já Concluídos: datas congeladas (nem payload nem reschedule alteram).
+        current_status = source_status or await db.get(ProjectStatusConfig, task.status_id)
+        dates_frozen = ProjectTaskService._schedule_dates_frozen(task, current_status)
+        if dates_frozen:
+            payload.pop("start_date", None)
+            payload.pop("due_date", None)
+
+        planning_root_id = await ProjectTaskService._planning_root_id(db, project_id, task.id)
+        planning_root = await db.get(ProjectTask, planning_root_id)
+        under_schedule = (
+            planning_root is not None
+            and planning_root.planning_kind in ("programa", "projeto")
+        )
+        if under_schedule and not dates_frozen:
+            if task.id == planning_root.id:
+                payload.pop("due_date", None)
+            else:
+                payload.pop("start_date", None)
+                payload.pop("due_date", None)
+
         # "Mudou de fato" — compara com o valor atual. Assim um save de título/etc. que reenvia
         # as mesmas datas (ex.: drawer) NÃO é tratado como alteração de cronograma.
         schedule_changed = (
@@ -3288,7 +3349,18 @@ class ProjectTaskService:
         if schedule_changed:
             await ScheduleBaselineService.assert_editable(db, project_id, task.id)
         prev_hours = task.estimated_hours
+        prev_start = task.start_date
         hours_changed = "estimated_hours" in payload and payload["estimated_hours"] != prev_hours
+        # US/etapa nova (ainda sem data): ao informar horas, ancora na data atual — não na
+        # última irmã nem no início do projeto. O início do projeto em si não muda.
+        first_hours_schedule = (
+            hours_changed
+            and under_schedule
+            and not dates_frozen
+            and prev_start is None
+            and task.id != planning_root_id
+            and payload.get("estimated_hours") is not None
+        )
 
         if "us_checklist" in payload:
             raw_checklist = payload.pop("us_checklist")
@@ -3380,8 +3452,17 @@ class ProjectTaskService:
             await ProjectTaskService._reschedule_root(db, project_id, task.id)
         elif hours_changed:
             # Horas mudam a duração → recalcula a subárvore.
+            # US nova sem data: pin na data atual (não herda a última irmã / início do projeto).
             root_id = await ProjectTaskService._planning_root_id(db, project_id, task.id)
-            await ProjectTaskService._reschedule_root(db, project_id, root_id)
+            pinned_starts = None
+            if first_hours_schedule:
+                calendar = await load_calendar(db)
+                pinned_starts = {
+                    task.id: datetime.combine(datetime.utcnow().date(), calendar.day_start),
+                }
+            await ProjectTaskService._reschedule_root(
+                db, project_id, root_id, pinned_starts=pinned_starts,
+            )
         elif schedule_changed:
             await ProjectTaskService._reschedule_dependents(db, project_id, task.id)
         await db.commit()
@@ -3455,14 +3536,15 @@ class ProjectTaskService:
                 detail="Este item não tem um nível-filho definido na amarração de tipos; não é possível adicionar etapa.",
             )
         status_obj = await db.get(ProjectStatusConfig, parent.status_id)
+        # Etapas do cronograma só recebem horas depois; datas vêm do motor (âncora do projeto).
         stage = ProjectTask(
             project_id=project_id,
             status_id=parent.status_id,
             parent_task_id=parent.id,
             demand_type_id=None,
             title=data.title.strip()[:200],
-            start_date=_to_naive_utc(data.start_date),
-            due_date=_to_naive_utc(data.due_date),
+            start_date=None,
+            due_date=None,
             created_by=current_user_id,
             sla_state=ProjectTaskService._sla_initial(status_obj),
         )
@@ -3578,6 +3660,9 @@ class ProjectTaskService:
                 succ = await db.get(ProjectTask, succ_id)
                 if succ is None:
                     continue
+                succ_status = await db.get(ProjectStatusConfig, succ.status_id)
+                if ProjectTaskService._schedule_dates_frozen(succ, succ_status):
+                    continue
                 new_start = calendar.add_working_hours(pred.due_date, lag)
                 # Só empurra para frente.
                 if succ.start_date is not None and succ.start_date >= new_start:
@@ -3611,14 +3696,35 @@ class ProjectTaskService:
         return last.id if last is not None else task_id
 
     @staticmethod
-    async def _reschedule_root(db: AsyncSession, project_id: uuid.UUID, root_id: uuid.UUID) -> None:
+    def _schedule_dates_frozen(task: ProjectTask, status: Optional[ProjectStatusConfig] = None) -> bool:
+        """True se as datas do item não podem mudar: já concluído (completed_at ou etapa final/Concluído)."""
+        if task.completed_at is not None:
+            return True
+        if status is None:
+            return False
+        if bool(getattr(status, "is_final", False)):
+            return True
+        name = (status.name or "").strip().lower()
+        return "conclu" in name
+
+    @staticmethod
+    async def _reschedule_root(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        root_id: uuid.UUID,
+        *,
+        pinned_starts: Optional[dict[uuid.UUID, datetime]] = None,
+    ) -> None:
         """Recalcula em cascata as datas de TODA a subárvore de `root_id` (um card de
         planejamento), gravando start_date/due_date.
 
         Critérios:
-        - Âncora = Project.start_date (alinhada em dia útil); se ausente, hoje.
+        - Âncora = início do card-raiz (projeto/programa) — única data editável. Fallbacks:
+          Project.start_date, depois hoje. O início do raiz NUNCA é alterado pelo motor.
         - Irmãos (mesmo pai) são sequenciais pela ordem quando compartilham o mesmo
           responsável; com responsáveis diferentes, iniciam em paralelo na data-base.
+        - `pinned_starts`: início mínimo forçado; itens Concluídos ficam pinados nas datas
+          atuais e não têm start/due sobrescritos pelo motor.
         - Predecessoras explícitas (FS, dias úteis + lag) empurram a sucessora para frente —
           vence a data mais tarde entre a sequência e as predecessoras.
         - Pais herdam start = menor início e due = maior término dos filhos agendados (rollup).
@@ -3635,11 +3741,30 @@ class ProjectTaskService:
         calendar = await load_calendar(db)
 
         project = await db.get(Project, project_id)
-        base = project.start_date if (project is not None and project.start_date is not None) else datetime.utcnow()
+        # Fonte da verdade = data-base do card-raiz. Nunca inventar "hoje" por cima dela.
+        if root.start_date is not None:
+            base = root.start_date
+        elif project is not None and project.start_date is not None:
+            base = project.start_date
+        else:
+            base = datetime.utcnow()
         anchor = datetime.combine(base.date(), calendar.day_start)
 
         rows = await db.execute(select(ProjectTask).where(ProjectTask.project_id == project_id))
         by_id: dict[uuid.UUID, ProjectTask] = {t.id: t for t in rows.scalars().all()}
+
+        status_ids = {t.status_id for t in by_id.values() if t.status_id}
+        status_by_id: dict[uuid.UUID, ProjectStatusConfig] = {}
+        if status_ids:
+            st_rows = await db.execute(
+                select(ProjectStatusConfig).where(ProjectStatusConfig.id.in_(status_ids))
+            )
+            status_by_id = {s.id: s for s in st_rows.scalars().all()}
+
+        frozen_ids = {
+            t.id for t in by_id.values()
+            if ProjectTaskService._schedule_dates_frozen(t, status_by_id.get(t.status_id))
+        }
 
         assignee_ids = {t.assigned_to for t in by_id.values() if t.assigned_to}
         persons_by_id: dict[uuid.UUID, Person] = {}
@@ -3651,7 +3776,10 @@ class ProjectTaskService:
 
         # Duração planejada em HORAS de calendário: escala horas de projeto conforme
         # alocação do responsável (ex.: 10h projeto @ 5h/dia → 16h calendário = 2 dias).
+        # Concluídos: preserva o span real das datas (congeladas).
         def duration_hours(t: ProjectTask) -> Optional[float]:
+            if t.id in frozen_ids and t.start_date is not None and t.due_date is not None:
+                return calendar.working_hours_between(t.start_date, t.due_date)
             if t.estimated_hours is not None and float(t.estimated_hours) > 0:
                 raw = float(t.estimated_hours)
                 person = persons_by_id.get(t.assigned_to) if t.assigned_to else None
@@ -3686,15 +3814,32 @@ class ProjectTaskService:
             for p, s, dt, lag in dep_rows.all()
         ]
 
+        effective_pins: dict[uuid.UUID, datetime] = dict(pinned_starts or {})
+        for tid in frozen_ids:
+            t = by_id[tid]
+            if t.start_date is not None:
+                effective_pins[tid] = t.start_date
+
         try:
-            sched = schedule_tree(nodes, edges, root_id, anchor, calendar)
+            sched = schedule_tree(
+                nodes, edges, root_id, anchor, calendar, pinned_starts=effective_pins,
+            )
         except ScheduleCycleError:
             return  # Ciclo (não deveria ocorrer — criação já bloqueia); não reescala.
 
         now = datetime.utcnow()
         for tid, (s, e) in sched.items():
             t = by_id.get(tid)
-            if t is None:
+            if t is None or tid in frozen_ids:
+                continue
+            # Card-raiz: início é imutável no recálculo (só o usuário define a data-base).
+            # Atualiza apenas o término (rollup das Features/US).
+            if tid == root_id:
+                if t.due_date != e:
+                    t.due_date = e
+                    t.updated_at = now
+                # Se o raiz ainda não tinha início e usamos Project/hoje só para calcular,
+                # NÃO grava essa âncora no card — evita "criar US → muda início do projeto".
                 continue
             if t.start_date != s or t.due_date != e:
                 t.start_date = s
@@ -6093,6 +6238,590 @@ class UsDeliveryReportService:
         }
 
 
+class TeamPerformanceService:
+    """Painel de Desempenho do Time (Devs + POs).
+
+    COMPÕE os serviços existentes sem reimplementar:
+      - US/Dev: heurística `ProjectTaskService._is_user_story_task` + regra de overdue
+        do `ProjectReportsService`; carga por `CapacityService.find_available_people`.
+      - PO: `PoPortfolioService.build_overview` (RAG/on-time/progresso) + `PoSyncService`
+        (ranking_pos: exec %/em_risco/atrasados).
+
+    Convenção de atribuição do Dev: usa `assigned_to`, EXCETO na raia "Homologação (PO)",
+    onde a US é reatribuída ao responsável do card-raiz projeto/programa (o PO), mesmo
+    critério do Relatório de Entregas (`UsDeliveryReportService`)."""
+
+    # Cargos considerados "executores" (aba Devs). POs e gestão ficam de fora.
+    DEV_POSITION_SLUGS = frozenset({
+        "dev_backend", "dev_frontend", "dev_fullstack", "qa", "ux_ui",
+        "tech_reference", "data_analyst", "data_scientist", "devops",
+    })
+
+    @staticmethod
+    def _avg(vals: list[float]) -> Optional[float]:
+        return round(sum(vals) / len(vals), 1) if vals else None
+
+    @classmethod
+    def _dev_status(cls, util_pct: Optional[float]) -> str:
+        if util_pct is None:
+            return "sem_dados"
+        if util_pct > 100.0 + 1e-6:
+            return "sobrecarregado"
+        if util_pct < 60.0:
+            return "livre"
+        return "equilibrado"
+
+    @staticmethod
+    def _task_as_date(value: Optional[datetime]) -> Optional[date]:
+        if value is None:
+            return None
+        return value.date() if isinstance(value, datetime) else value
+
+    @classmethod
+    def _task_overlaps_absence(cls, task: ProjectTask, abs_start: date, abs_end: date) -> bool:
+        lo = cls._task_as_date(task.start_date)
+        hi = cls._task_as_date(task.due_date)
+        if lo is not None and hi is not None:
+            return abs_end >= lo and abs_start <= hi
+        if hi is not None:
+            return abs_start <= hi <= abs_end
+        if lo is not None:
+            return abs_start <= lo <= abs_end
+        return False
+
+    @classmethod
+    def _absence_bottleneck(
+        cls,
+        status: str,
+        conflicting: int,
+        undated_wip: int,
+        abs_end: date,
+        since: date,
+    ) -> str:
+        if conflicting > 0 and status == "aprovada":
+            return "confirmado"
+        if conflicting > 0 and status == "pendente":
+            return "provavel"
+        if undated_wip > 0 and abs_end >= since:
+            return "provavel"
+        return "none"
+
+    @staticmethod
+    async def _absences_impact_for_people(
+        db: AsyncSession,
+        person_ids: set[uuid.UUID],
+        open_by_person: dict[uuid.UUID, list[ProjectTask]],
+        since: date,
+    ) -> dict[uuid.UUID, list[DevAbsenceInfo]]:
+        if not person_ids:
+            return {}
+        rows = (await db.execute(
+            select(Absence, AbsenceType.name)
+            .join(AbsenceType, Absence.absence_type_id == AbsenceType.id)
+            .where(
+                Absence.person_id.in_(person_ids),
+                Absence.status.in_([AbsenceStatus.APROVADA, AbsenceStatus.PENDENTE]),
+                AbsenceType.affects_capacity.is_(True),
+                Absence.end_date >= since,
+            )
+            .order_by(Absence.start_date.asc())
+        )).all()
+        out: dict[uuid.UUID, list[DevAbsenceInfo]] = {}
+        for ab, type_name in rows:
+            open_tasks = open_by_person.get(ab.person_id, [])
+            conflicting: list[ProjectTask] = []
+            undated_wip = 0
+            hours = 0.0
+            for t in open_tasks:
+                if TeamPerformanceService._task_overlaps_absence(t, ab.start_date, ab.end_date):
+                    conflicting.append(t)
+                    hours += float(t.estimated_hours or 0)
+                elif t.start_date is None and t.due_date is None and ab.end_date >= since:
+                    undated_wip += 1
+            status = ab.status.value if hasattr(ab.status, "value") else str(ab.status)
+            partial = float(ab.partial_hours) if ab.partial_hours is not None else None
+            info = DevAbsenceInfo(
+                type_name=type_name,
+                start_date=ab.start_date,
+                end_date=ab.end_date,
+                status=status,
+                partial_hours=partial,
+                conflicting_tasks=len(conflicting),
+                conflicting_hours=(round(hours, 1) if hours > 0 else None),
+                undated_wip=undated_wip,
+                bottleneck=TeamPerformanceService._absence_bottleneck(
+                    status, len(conflicting), undated_wip, ab.end_date, since,
+                ),
+                conflict_titles=[t.title for t in conflicting[:3]],
+            )
+            out.setdefault(ab.person_id, []).append(info)
+        return out
+
+    @staticmethod
+    def _group_us_breakdown(
+        tasks: list[ProjectTask],
+        root_of,
+        root_title,
+        task_by_id: dict[uuid.UUID, ProjectTask],
+    ) -> DevUsBreakdown:
+        from collections import defaultdict
+
+        nest: dict[str, dict[str, list[DevUsBreakdownItem]]] = defaultdict(lambda: defaultdict(list))
+        for t in tasks:
+            proj = root_title(root_of(t.id))
+            parent = task_by_id.get(t.parent_task_id) if t.parent_task_id else None
+            feat = parent.title if parent else "Sem feature"
+            nest[proj][feat].append(DevUsBreakdownItem(
+                task_id=t.id,
+                title=t.title,
+                status_name=(t.status.name if t.status else None),
+                status_color=(t.status.color if t.status else None),
+                due_date=t.due_date,
+            ))
+        projects: list[DevUsProjectGroup] = []
+        for proj_name in sorted(nest.keys(), key=str.lower):
+            features: list[DevUsFeatureGroup] = []
+            for feat_name in sorted(nest[proj_name].keys(), key=str.lower):
+                items = sorted(nest[proj_name][feat_name], key=lambda x: x.title.lower())
+                features.append(DevUsFeatureGroup(feature_title=feat_name, items=items))
+            projects.append(DevUsProjectGroup(project_title=proj_name, features=features))
+        return DevUsBreakdown(projects=projects)
+
+    @staticmethod
+    def _teamops_leaf_teams(
+        all_areas: list[Area],
+        person_area_ids: set[uuid.UUID],
+    ) -> list[TeamPerfTeamOption]:
+        """Áreas folha (sem filhos) com pessoas — caminho completo + nome do time destacável."""
+        by_id = {a.id: a for a in all_areas}
+        parent_ids_with_kids = {
+            a.id for a in all_areas if any(ch.parent_area_id == a.id for ch in all_areas)
+        }
+        leaves = [a for a in all_areas if a.id not in parent_ids_with_kids]
+        out: list[TeamPerfTeamOption] = []
+        for a in leaves:
+            if a.id not in person_area_ids:
+                continue
+            ancestors: list[str] = []
+            cur = a
+            seen: set[uuid.UUID] = set()
+            while cur.parent_area_id and cur.parent_area_id in by_id and cur.parent_area_id not in seen:
+                seen.add(cur.parent_area_id)
+                cur = by_id[cur.parent_area_id]
+                ancestors.insert(0, cur.name)
+            context = " · ".join(ancestors) if ancestors else None
+            label = " - ".join(ancestors + [a.name]) if ancestors else a.name
+            out.append(TeamPerfTeamOption(
+                value=str(a.id),
+                label=label,
+                short_label=a.name,
+                context=context,
+            ))
+        out.sort(key=lambda o: (o.short_label.lower(), o.label.lower()))
+        return out
+
+    @classmethod
+    async def build(
+        cls,
+        db: AsyncSession,
+        date_from: date,
+        date_to: date,
+        area: Optional[str] = None,
+        diretoria: Optional[str] = None,
+        positions: Optional[list[str]] = None,
+        position: Optional[str] = None,  # legado (um único slug)
+        team_area_ids: Optional[list[str]] = None,
+    ) -> TeamPerformanceResponse:
+        now = datetime.utcnow()
+        # Janela [win_start, win_end) em UTC naive (completed_at/due_date são naive no banco).
+        win_start = datetime(date_from.year, date_from.month, date_from.day)
+        win_end = datetime(date_to.year, date_to.month, date_to.day) + timedelta(days=1)
+
+        pos_filter: set[str] = set(positions or [])
+        if position:
+            pos_filter.add(position)
+
+        team_filter: set[uuid.UUID] = set()
+        for raw in team_area_ids or []:
+            try:
+                team_filter.add(uuid.UUID(str(raw)))
+            except ValueError:
+                continue
+
+        # Pessoas ↔ áreas (TeamOps) para filtro de Time.
+        pa_rows = await db.execute(
+            select(team_person_areas.c.person_id, team_person_areas.c.area_id)
+        )
+        person_teams: dict[uuid.UUID, set[uuid.UUID]] = {}
+        areas_with_people: set[uuid.UUID] = set()
+        for pid, aid in pa_rows.all():
+            person_teams.setdefault(pid, set()).add(aid)
+            areas_with_people.add(aid)
+
+        all_team_areas = list((await db.execute(select(Area))).scalars().all())
+        available_teams = cls._teamops_leaf_teams(all_team_areas, areas_with_people)
+
+        team_person_ids: Optional[set[uuid.UUID]] = None
+        if team_filter:
+            team_person_ids = {
+                pid for pid, aids in person_teams.items() if aids & team_filter
+            }
+
+        rows = await db.execute(
+            select(ProjectTask).options(
+                selectinload(ProjectTask.status),
+                selectinload(ProjectTask.demand_type),
+            )
+        )
+        all_tasks = list(rows.scalars().all())
+        task_by_id = {t.id: t for t in all_tasks}
+        root_of, root_title = await CapacityService._root_index(db)
+
+        # Reatribuição da raia "Homologação (PO)": a US nessa etapa é responsabilidade do PO
+        # (assigned_to do card-raiz projeto/programa), não do dev que aparece no card.
+        parent_map: dict[uuid.UUID, Optional[uuid.UUID]] = {}
+        kind_map: dict[uuid.UUID, Optional[str]] = {}
+        owner_map: dict[uuid.UUID, Optional[uuid.UUID]] = {}
+        for t in all_tasks:
+            parent_map[t.id] = t.parent_task_id
+            kind_map[t.id] = t.planning_kind
+            owner_map[t.id] = t.assigned_to
+        root_assignee_cache: dict[uuid.UUID, Optional[uuid.UUID]] = {}
+
+        def effective_assignee_of(t: ProjectTask) -> Optional[uuid.UUID]:
+            if UsDeliveryReportService._is_homolog_po_status(t.status):
+                return UsDeliveryReportService._planning_root_assignee(
+                    t.id,
+                    parent=parent_map,
+                    kind=kind_map,
+                    owner=owner_map,
+                    cache=root_assignee_cache,
+                )
+            return t.assigned_to
+
+        available_diretorias = sorted({t.diretoria for t in all_tasks if t.diretoria})
+        # Áreas em cascata: com diretoria selecionada, só áreas que aparecem nela.
+        if diretoria:
+            available_areas = sorted({
+                t.area for t in all_tasks if t.diretoria == diretoria and t.area
+            })
+        else:
+            available_areas = sorted({t.area for t in all_tasks if t.area})
+
+        funnels = (await db.execute(select(ProjectFunnel))).scalars().all()
+        funnel_by_id = {f.id: f for f in funnels}
+
+        tasks = all_tasks
+        if diretoria:
+            tasks = [t for t in tasks if t.diretoria == diretoria]
+        if area:
+            tasks = [t for t in tasks if t.area == area]
+
+        us_tasks: list[ProjectTask] = []
+        for t in tasks:
+            if await ProjectTaskService._is_user_story_task(db, t):
+                us_tasks.append(t)
+
+        # Time (área folha TeamOps): métricas só de US cujo responsável efetivo está no(s) time(s).
+        if team_person_ids is not None:
+            us_tasks = [
+                t for t in us_tasks
+                if (eff := effective_assignee_of(t)) and eff in team_person_ids
+            ]
+
+        # ── Acumuladores por Dev + globais ──
+        dev_acc: dict[uuid.UUID, dict] = {}
+
+        def dev_bucket(pid: uuid.UUID) -> dict:
+            d = dev_acc.get(pid)
+            if d is None:
+                d = {
+                    "delivered": 0, "on_time": 0, "overdue": 0, "wip": 0,
+                    "aging": [], "cycle": [], "lead": [],
+                    "delivered_tasks": [], "overdue_tasks": [],
+                }
+                dev_acc[pid] = d
+            return d
+
+        throughput_total = 0
+        ontime_total = 0
+        say_planned = 0
+        wip_total = 0
+        overdue_total = 0
+        lead_all: list[float] = []
+        cycle_all: list[float] = []
+        aging_all: list[float] = []
+        month_tp: dict[str, int] = {}
+        month_lead: dict[str, list[float]] = {}
+        stage_acc: dict[uuid.UUID, dict] = {}
+
+        for t in us_tasks:
+            pid = effective_assignee_of(t)
+            is_final = bool(t.status and t.status.is_final) or t.completed_at is not None
+
+            # Say (planejado na janela) = US com prazo dentro da janela.
+            if t.due_date is not None and win_start <= t.due_date < win_end:
+                say_planned += 1
+
+            # Do (entregue na janela) = concluída na janela.
+            if t.completed_at is not None and win_start <= t.completed_at < win_end:
+                throughput_total += 1
+                on_time = t.due_date is None or t.completed_at <= t.due_date
+                if on_time:
+                    ontime_total += 1
+                mk = t.completed_at.strftime("%Y-%m")
+                month_tp[mk] = month_tp.get(mk, 0) + 1
+                base = t.start_date or t.created_at
+                lead_days = ((t.completed_at - base).total_seconds() / 86400.0) if base else None
+                if lead_days is not None:
+                    lead_all.append(lead_days)
+                    month_lead.setdefault(mk, []).append(lead_days)
+                cyc = None
+                if t.left_backlog_at is not None:
+                    cyc = (t.completed_at - t.left_backlog_at).total_seconds() / 86400.0
+                    cycle_all.append(cyc)
+                if pid is not None:
+                    d = dev_bucket(pid)
+                    d["delivered"] += 1
+                    d["delivered_tasks"].append(t)
+                    if on_time:
+                        d["on_time"] += 1
+                    if lead_days is not None:
+                        d["lead"].append(lead_days)
+                    if cyc is not None:
+                        d["cycle"].append(cyc)
+
+            # Snapshot atual: WIP / aging / overdue (US abertas).
+            if not is_final:
+                overdue = (t.sla_state == "breached") or (
+                    t.due_date is not None and t.due_date < now
+                )
+                wip_total += 1
+                if overdue:
+                    overdue_total += 1
+                aging_days = None
+                if t.status_entered_at is not None:
+                    aging_days = (now - t.status_entered_at).total_seconds() / 86400.0
+                    aging_all.append(aging_days)
+                if pid is not None:
+                    d = dev_bucket(pid)
+                    d["wip"] += 1
+                    if overdue:
+                        d["overdue"] += 1
+                        d["overdue_tasks"].append(t)
+                    if aging_days is not None:
+                        d["aging"].append(aging_days)
+                # Raia por etapa (WIP/aging por status).
+                st = t.status
+                srow = stage_acc.get(t.status_id)
+                if srow is None:
+                    fn = funnel_by_id.get(st.funnel_id) if st else None
+                    srow = {
+                        "funnel_name": fn.name if fn else "—",
+                        "status_name": st.name if st else "—",
+                        "status_color": st.color if st else "#6B7280",
+                        "count": 0, "aging": [], "overdue": 0,
+                    }
+                    stage_acc[t.status_id] = srow
+                srow["count"] += 1
+                if overdue:
+                    srow["overdue"] += 1
+                if aging_days is not None:
+                    srow["aging"].append(aging_days)
+
+        # ── Carga/capacidade por pessoa (fonte canônica: find_available_people) ──
+        free = await CapacityService.find_available_people(db, date_from, date_to)
+        util_by_id: dict[uuid.UUID, FreePersonRow] = {r.person_id: r for r in free.rows}
+
+        # Nomes/cargos para devs sem linha de capacidade (inativos com US atribuída).
+        persons_by_id: dict[uuid.UUID, Person] = {}
+        missing = [pid for pid in dev_acc if pid not in util_by_id]
+        if missing:
+            pres = await db.execute(
+                select(Person).options(selectinload(Person.position)).where(Person.id.in_(missing))
+            )
+            persons_by_id = {p.id: p for p in pres.scalars().all()}
+
+        # Universo de devs = quem tem US (dev_acc) + pessoas ativas com cargo de executor.
+        # Com filtro de cargo(s), inclui qualquer pessoa daqueles cargos (não só executores).
+        dev_ids: set[uuid.UUID] = set(dev_acc.keys())
+        for r in free.rows:
+            if pos_filter:
+                if r.position_slug in pos_filter:
+                    dev_ids.add(r.person_id)
+            elif r.position_slug in cls.DEV_POSITION_SLUGS:
+                dev_ids.add(r.person_id)
+
+        def slug_of(pid: uuid.UUID) -> Optional[str]:
+            u = util_by_id.get(pid)
+            if u is not None:
+                return u.position_slug
+            p = persons_by_id.get(pid)
+            return p.position.slug if (p and p.position) else None
+
+        if pos_filter:
+            dev_ids = {pid for pid in dev_ids if slug_of(pid) in pos_filter}
+        if team_person_ids is not None:
+            dev_ids = {pid for pid in dev_ids if pid in team_person_ids}
+
+        open_by_person: dict[uuid.UUID, list[ProjectTask]] = {}
+        for t in us_tasks:
+            is_final = bool(t.status and t.status.is_final) or t.completed_at is not None
+            if not is_final and t.assigned_to:
+                open_by_person.setdefault(t.assigned_to, []).append(t)
+
+        absences_by_person = await cls._absences_impact_for_people(
+            db, dev_ids, open_by_person, date_from,
+        )
+
+        # Cargos com pessoa vinculada (ativos) — opções do filtro, não o catálogo estático.
+        pos_opt_rows = await db.execute(
+            select(Position.slug, Position.name)
+            .join(Person, Person.position_id == Position.id)
+            .where(Person.status != PersonStatus.DESLIGADO)
+            .distinct()
+            .order_by(Position.name.asc())
+        )
+        available_positions = [
+            TeamPerfPositionOption(value=slug, label=(name or slug))
+            for slug, name in pos_opt_rows.all()
+            if slug
+        ]
+
+        devs: list[DevPerformanceRow] = []
+        for pid in dev_ids:
+            u = util_by_id.get(pid)
+            p = persons_by_id.get(pid)
+            d = dev_acc.get(pid) or {
+                "delivered": 0, "on_time": 0, "overdue": 0, "wip": 0,
+                "aging": [], "cycle": [], "lead": [],
+                "delivered_tasks": [], "overdue_tasks": [],
+            }
+            if u is not None:
+                name, label, mapped = u.full_name, u.position_label, True
+                util_pct, free_h, nxt = u.utilization_pct, u.free_hours_total, u.next_absence
+                alloc_h, cap_h = u.allocated_hours_total, u.capacity_hours_total
+            elif p is not None:
+                name = p.full_name
+                label = p.position.name if p.position else None
+                mapped, util_pct, free_h, nxt = True, None, None, None
+                alloc_h, cap_h = None, None
+            else:
+                name, label, mapped = "Não mapeado", None, False
+                util_pct, free_h, nxt = None, None, None
+                alloc_h, cap_h = None, None
+            delivered = d["delivered"]
+            person_abs = absences_by_person.get(pid, [])
+            devs.append(DevPerformanceRow(
+                person_id=pid, full_name=name, position_label=label, is_mapped=mapped,
+                delivered=delivered, on_time=d["on_time"],
+                on_time_pct=(round(100 * d["on_time"] / delivered, 1) if delivered else None),
+                overdue=d["overdue"], wip=d["wip"],
+                avg_aging_days=cls._avg(d["aging"]),
+                avg_cycle_time_days=cls._avg(d["cycle"]),
+                avg_lead_time_days=cls._avg(d["lead"]),
+                utilization_pct=util_pct,
+                allocated_hours_total=alloc_h, capacity_hours_total=cap_h,
+                free_hours_total=free_h,
+                status=cls._dev_status(util_pct),
+                absences=person_abs,
+                delivered_breakdown=cls._group_us_breakdown(
+                    d.get("delivered_tasks", []), root_of, root_title, task_by_id,
+                ),
+                overdue_breakdown=cls._group_us_breakdown(
+                    d.get("overdue_tasks", []), root_of, root_title, task_by_id,
+                ),
+                next_absence=nxt or (
+                    f"{person_abs[0].start_date.isoformat()} a {person_abs[0].end_date.isoformat()} "
+                    f"({person_abs[0].type_name})"
+                    if person_abs else None
+                ),
+            ))
+        devs.sort(key=lambda r: (-r.delivered, -r.wip, r.full_name.lower()))
+
+        scatter = [
+            TeamPerfScatterPoint(
+                person_id=r.person_id, full_name=r.full_name,
+                utilization_pct=r.utilization_pct or 0.0,
+                allocated_hours_total=r.allocated_hours_total,
+                capacity_hours_total=r.capacity_hours_total,
+                free_hours_total=r.free_hours_total,
+                delivered=r.delivered, status=r.status,
+            )
+            for r in devs if r.utilization_pct is not None
+        ]
+
+        throughput_by_month = [
+            TeamPerfMonthPoint(month=m, count=c) for m, c in sorted(month_tp.items())
+        ]
+        lead_time_trend = [
+            TeamPerfMonthPoint(month=m, count=len(v), avg_days=cls._avg(v))
+            for m, v in sorted(month_lead.items())
+        ]
+
+        swimlanes = [
+            TeamPerfSwimlaneRow(
+                funnel_name=s["funnel_name"], status_name=s["status_name"],
+                status_color=s["status_color"], count=s["count"],
+                avg_aging_days=cls._avg(s["aging"]), overdue=s["overdue"],
+            )
+            for s in stage_acc.values()
+        ]
+        swimlanes.sort(key=lambda r: (r.funnel_name, -r.count))
+
+        # ── Linhas por PO (compõe Portfólio + PO Sync) ──
+        overview = await PoPortfolioService.build_overview(db, diretoria=diretoria, area=area)
+        posync = await PoSyncService.build(db, diretoria=diretoria, area=area)
+        rank_by_id = {r["po_id"]: r for r in posync.get("ranking_pos", [])}
+        pos: list[PoPerformanceRow] = []
+        for it in overview.get("items", []):
+            rk = rank_by_id.get(it["po_id"], {})
+            pos.append(PoPerformanceRow(
+                po_id=it["po_id"], full_name=it["full_name"],
+                projetos=it["total_projetos"] + it["total_programas"],
+                on_time_pct=it.get("on_time_pct"),
+                avg_progress_pct=it.get("avg_progress_pct"),
+                avg_exec_pct=rk.get("avg_exec_pct"),
+                em_risco=rk.get("em_risco", it["rag"]["vermelho"]),
+                atrasados=rk.get("atrasados", 0),
+                overallocated_user_days=it.get("overallocated_user_days", 0),
+                rag=PoRag(**it["rag"]),
+            ))
+        pos.sort(key=lambda r: (-r.rag.vermelho, -r.rag.amarelo, -r.projetos))
+
+        kpis = TeamPerfKpis(
+            throughput_total=throughput_total,
+            on_time_delivery_pct=(round(100 * ontime_total / throughput_total, 1) if throughput_total else None),
+            avg_lead_time_days=cls._avg(lead_all),
+            avg_cycle_time_days=cls._avg(cycle_all),
+            wip_total=wip_total,
+            avg_aging_days=cls._avg(aging_all),
+            say_do_ratio=(round(throughput_total / say_planned, 2) if say_planned else None),
+            devs_livres=sum(1 for r in devs if r.status == "livre"),
+            devs_sobrecarregados=sum(1 for r in devs if r.status == "sobrecarregado"),
+            pos_em_risco=sum(r.em_risco for r in pos),
+            overdue_total=overdue_total,
+        )
+
+        meta = TeamPerfMeta(
+            generated_at=now, date_from=date_from, date_to=date_to,
+            area=area, diretoria=diretoria, positions=sorted(pos_filter),
+            team_area_ids=[str(i) for i in sorted(team_filter, key=str)],
+            available_areas=available_areas, available_diretorias=available_diretorias,
+            available_positions=available_positions,
+            available_teams=available_teams,
+        )
+        return TeamPerformanceResponse(
+            meta=meta, kpis=kpis, devs=devs, pos=pos,
+            series=TeamPerfSeries(
+                throughput_by_month=throughput_by_month,
+                lead_time_trend=lead_time_trend,
+                load_vs_delivery=scatter,
+            ),
+            swimlanes=swimlanes,
+        )
+
+
 class ProjectScheduleBindingService:
     """CRUD dos vínculos do Cronograma (fluxo + etapa). Configurado pelo card
     "Cronograma" nas configurações do módulo Projetos."""
@@ -7779,21 +8508,24 @@ class PoPortfolioService:
         return t.completed_at is not None or (t.status is not None and bool(t.status.is_final))
 
     @staticmethod
-    def _tree_progress(sub) -> int:
-        """Progresso ponderado por horas sobre TODA a subárvore (inclui raiz e pais): um card
-        só conta 100% quando finalizado (etapa final OU concluído). Assim um card pai/raiz
-        parado numa etapa não-final impede o projeto de chegar a 100% (trava em 99 no
-        arredondamento enquanto houver algo em aberto). `sub` = tarefas da subárvore (com
-        `status` carregado)."""
+    def _tree_progress(sub, *, us_ids: Optional[set] = None) -> int:
+        """Progresso ponderado por horas das User Stories apenas.
+
+        Feature/Projeto guardam rollup das horas das US — somar Feature+US duplica o peso.
+        Cards pai/raiz em etapa não-final ainda travam em 99% (checagem em toda a subárvore).
+        `us_ids`: ids das US; se None, pondera todos (legado — preferir sempre passar).
+        """
         done_w = tot_w = 0.0
         any_open = False
         for t in sub:
-            w = float(t.estimated_hours) if t.estimated_hours and float(t.estimated_hours) > 0 else 1.0
             final = PoPortfolioService._is_final_stage(t)
-            done_w += (100 if final else (t.percent_complete or 0)) / 100.0 * w
-            tot_w += w
             if not final:
                 any_open = True
+            if us_ids is not None and t.id not in us_ids:
+                continue
+            w = float(t.estimated_hours) if t.estimated_hours and float(t.estimated_hours) > 0 else 1.0
+            done_w += (100 if final else (t.percent_complete or 0)) / 100.0 * w
+            tot_w += w
         p = round(100 * done_w / tot_w) if tot_w else 0
         return 99 if (any_open and p >= 100) else p
 
@@ -7859,6 +8591,8 @@ class PoPortfolioService:
             .options(selectinload(ProjectTask.status))
         )
         all_tasks = list(tasks_res.scalars().all())
+        # Horas só contam em User Stories (Feature/raiz = rollup → duplicaria).
+        us_ids = {t.id for t in await CapacityService._keep_us_tasks_only(db, all_tasks)}
         by_id = {t.id: t for t in all_tasks}
         children: dict = {}
         for t in all_tasks:
@@ -7915,9 +8649,8 @@ class PoPortfolioService:
         for root in roots:
             subtree_ids = PoPortfolioService._subtree(root.id, children)
             sub = [by_id[i] for i in subtree_ids]
-            # Progresso/conclusão consideram toda a árvore (inclui raiz e pais); "finalizado"
-            # = etapa final OU concluído. Card pai/raiz parado em etapa não-final não fecha 100%.
-            progress_pct = PoPortfolioService._tree_progress(sub)
+            # Progresso: peso só das US; pais abertos ainda travam 100%. Horas = só US.
+            progress_pct = PoPortfolioService._tree_progress(sub, us_ids=us_ids)
             subtree_total = len(sub)
             subtree_completed = sum(1 for t in sub if PoPortfolioService._is_final_stage(t))
 
@@ -7972,8 +8705,9 @@ class PoPortfolioService:
             completed_due = [t for t in sub if t.completed_at is not None and t.due_date is not None]
             on_time_completed = sum(1 for t in completed_due if t.completed_at <= t.due_date)
             completed_count = len(completed_due)
-            est_hours = round(sum(float(t.estimated_hours) for t in sub if t.estimated_hours), 2)
-            actual_hours = round(sum(float(t.actual_hours) for t in sub if t.actual_hours), 2)
+            us_sub = [t for t in sub if t.id in us_ids]
+            est_hours = round(sum(float(t.estimated_hours) for t in us_sub if t.estimated_hours), 2)
+            actual_hours = round(sum(float(t.actual_hours) for t in us_sub if t.actual_hours), 2)
             lead = []
             for t in sub:
                 if t.completed_at is not None:
@@ -8638,6 +9372,8 @@ class StatusReportService:
             .options(selectinload(ProjectTask.status))
         )
         all_tasks = list(tasks_res.scalars().all())
+        # Progresso ponderado por horas: só User Stories (Feature = rollup).
+        us_ids = {t.id for t in await CapacityService._keep_us_tasks_only(db, all_tasks)}
         by_id = {t.id: t for t in all_tasks}
         children: dict = {}
         for t in all_tasks:
@@ -8757,17 +9493,12 @@ class StatusReportService:
             subtree_total = len(sub)
             subtree_completed = sum(1 for t in sub if _is_final_stage(t))
 
-            # Progresso considerando TODA a árvore (inclui o card raiz e os pais), ponderado por
-            # horas: um card só conta 100% quando finalizado (etapa final OU concluído). Assim um
-            # card pai/raiz parado numa etapa não-final impede o projeto de chegar a 100%.
+            # Progresso ponderado por horas das User Stories (Feature/raiz = rollup →
+            # somar juntos duplicaria). Pais abertos ainda travam 100%.
             done_w = tot_w = 0.0
             open_stages: list = []
             for t in sub:
-                w = float(t.estimated_hours) if t.estimated_hours and float(t.estimated_hours) > 0 else 1.0
                 final = _is_final_stage(t)
-                pct = 100 if final else (t.percent_complete or 0)
-                done_w += (pct / 100.0) * w
-                tot_w += w
                 if not final:
                     open_stages.append({
                         "title": t.title,
@@ -8775,6 +9506,12 @@ class StatusReportService:
                         "stage": t.status.name if t.status else None,
                         "is_root": t.id == root.id,
                     })
+                if t.id not in us_ids:
+                    continue
+                w = float(t.estimated_hours) if t.estimated_hours and float(t.estimated_hours) > 0 else 1.0
+                pct = 100 if final else (t.percent_complete or 0)
+                done_w += (pct / 100.0) * w
+                tot_w += w
             progress_pct = round(100 * done_w / tot_w) if tot_w else 0
             # Garante que nunca exibe 100% enquanto houver card em aberto (arredondamento).
             if open_stages and progress_pct >= 100:
@@ -9066,20 +9803,22 @@ class PoSyncService:
         return out
 
     @classmethod
-    def _exec_progress(cls, sub: list, excl_ids: set) -> int:
-        """Progresso ponderado por horas sobre a subárvore, EXCLUINDO itens 'Não realizado'.
-        Card finalizado (etapa final/concluído) = 100%; trava em 99 enquanto houver aberto."""
+    def _exec_progress(cls, sub: list, excl_ids: set, us_ids: Optional[set] = None) -> int:
+        """Progresso ponderado por horas das User Stories, EXCLUINDO 'Não realizado'.
+        Feature/raiz têm rollup — não entram no peso. Pais abertos travam em 99%."""
         done_w = tot_w = 0.0
         any_open = False
         for t in sub:
             if t.id in excl_ids:
                 continue
-            w = float(t.estimated_hours) if t.estimated_hours and float(t.estimated_hours) > 0 else 1.0
             final = PoPortfolioService._is_final_stage(t)
-            done_w += (100 if final else (t.percent_complete or 0)) / 100.0 * w
-            tot_w += w
             if not final:
                 any_open = True
+            if us_ids is not None and t.id not in us_ids:
+                continue
+            w = float(t.estimated_hours) if t.estimated_hours and float(t.estimated_hours) > 0 else 1.0
+            done_w += (100 if final else (t.percent_complete or 0)) / 100.0 * w
+            tot_w += w
         p = round(100 * done_w / tot_w) if tot_w else 0
         return 99 if (any_open and p >= 100) else p
 
@@ -9170,6 +9909,7 @@ class PoSyncService:
             .options(selectinload(ProjectTask.status))
         )
         all_tasks = list(tasks_res.scalars().all())
+        us_ids = {t.id for t in await CapacityService._keep_us_tasks_only(db, all_tasks)}
         by_id = {t.id: t for t in all_tasks}
         children: dict = {}
         for t in all_tasks:
@@ -9237,7 +9977,7 @@ class PoSyncService:
             non_root_eff = [t for t in eff if t.id != root.id]
             backlog_montado = fase == "planejamento" and len(non_root_eff) > 0
 
-            exec_pct = None if fase == "planejamento" else cls._exec_progress(sub, excl_ids)
+            exec_pct = None if fase == "planejamento" else cls._exec_progress(sub, excl_ids, us_ids)
             subtree_total = len(eff)
             subtree_completed = sum(1 for t in eff if PoPortfolioService._is_final_stage(t))
 

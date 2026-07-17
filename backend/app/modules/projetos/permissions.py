@@ -18,5 +18,6 @@ PERMISSIONS: list[tuple[str, str, str | None]] = [
     ("projetos.automation.manage", "Gerenciar automações", "Cria e mantém automações por etapa do kanban."),
     ("projetos.priority.manage", "Gerenciar priorização", "Edita critérios, pesos, rubricas, pilares, confiança e quadrantes da matriz."),
     ("projetos.priority.score", "Pontuar demandas", "Atribui scores de impacto/esforço às demandas na triagem."),
+    ("projetos.performance.view", "Ver painel de desempenho", "Acessa o dashboard de desempenho de devs e POs (ranking nominal)."),
 ]
 

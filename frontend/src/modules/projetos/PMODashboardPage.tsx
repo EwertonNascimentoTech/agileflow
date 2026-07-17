@@ -1,13 +1,15 @@
-import { LayoutGrid, BarChart3, FileText, Users, PackageCheck } from "lucide-react"
+import { LayoutGrid, BarChart3, FileText, Users, PackageCheck, Gauge } from "lucide-react"
 
+import { useAuth } from "@/contexts/AuthContext"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import PODashboardPage from "@/modules/projetos/PODashboardPage"
 import PoSyncPage from "@/modules/projetos/PoSyncPage"
 import ReportsPage from "@/modules/projetos/ReportsPage"
 import StatusReportsPage from "@/modules/projetos/StatusReportsPage"
+import TeamPerformancePage from "@/modules/projetos/TeamPerformancePage"
 import UsDeliveryReportPage from "@/modules/projetos/UsDeliveryReportPage"
 
-export type PmoTab = "portfolio" | "po-sync" | "relatorios" | "entregas-us" | "status-reports"
+export type PmoTab = "portfolio" | "po-sync" | "relatorios" | "entregas-us" | "status-reports" | "desempenho"
 
 /**
  * Cockpit do PMO: unifica o portfólio (Painel do PO), os Relatórios do board e os
@@ -15,6 +17,11 @@ export type PmoTab = "portfolio" | "po-sync" | "relatorios" | "entregas-us" | "s
  * POs/projetos numa única tela.
  */
 export default function PMODashboardPage({ initialTab = "portfolio" }: { initialTab?: PmoTab }) {
+  const { user } = useAuth()
+  const canViewPerformance =
+    !!user &&
+    (!!user.permissions?.includes("*") || !!user.permissions?.includes("projetos.performance.view"))
+
   return (
     <div className="w-full space-y-4">
       <div>
@@ -29,6 +36,11 @@ export default function PMODashboardPage({ initialTab = "portfolio" }: { initial
           <TabsTrigger value="portfolio" className="gap-1.5">
             <LayoutGrid className="h-4 w-4" /> Portfólio
           </TabsTrigger>
+          {canViewPerformance && (
+            <TabsTrigger value="desempenho" className="gap-1.5">
+              <Gauge className="h-4 w-4" /> Desempenho
+            </TabsTrigger>
+          )}
           <TabsTrigger value="po-sync" className="gap-1.5">
             <Users className="h-4 w-4" /> PO Sync
           </TabsTrigger>
@@ -46,6 +58,11 @@ export default function PMODashboardPage({ initialTab = "portfolio" }: { initial
         <TabsContent value="portfolio" className="mt-4">
           <PODashboardPage />
         </TabsContent>
+        {canViewPerformance && (
+          <TabsContent value="desempenho" className="mt-4">
+            <TeamPerformancePage />
+          </TabsContent>
+        )}
         <TabsContent value="po-sync" className="mt-4">
           <PoSyncPage />
         </TabsContent>

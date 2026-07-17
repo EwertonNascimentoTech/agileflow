@@ -401,9 +401,8 @@ class ConversionItem(BaseModel):
 
 
 class ScheduleStageCreate(BaseModel):
+    """Etapa do cronograma: só título. Datas vêm do motor (âncora do projeto + horas)."""
     title: str = Field(..., min_length=2, max_length=200)
-    start_date: Optional[datetime] = None
-    due_date: Optional[datetime] = None
 
 
 class ProjectTaskReorder(BaseModel):
@@ -1104,6 +1103,176 @@ class UsDeliveryReportResponse(BaseModel):
     range_end: datetime
     by_assignee: list[UsDeliveryAssigneeGroup]
     available_assignees: list[dict] = Field(default_factory=list)
+
+
+# ─────────────────────────────────────────────
+# Painel de Desempenho do Time (Devs + POs)
+# Compõe Relatórios + Entregas US + Capacidade + PO Sync/Portfólio.
+# ─────────────────────────────────────────────
+
+DevLoadStatus = Literal["livre", "equilibrado", "sobrecarregado", "sem_dados"]
+DevAbsenceBottleneck = Literal["none", "provavel", "confirmado"]
+
+
+class DevAbsenceInfo(BaseModel):
+    type_name: str
+    start_date: date
+    end_date: date
+    status: str  # aprovada | pendente
+    partial_hours: Optional[float] = None
+    conflicting_tasks: int = 0
+    conflicting_hours: Optional[float] = None
+    undated_wip: int = 0
+    bottleneck: DevAbsenceBottleneck = "none"
+    conflict_titles: list[str] = Field(default_factory=list)
+
+
+class DevUsBreakdownItem(BaseModel):
+    task_id: uuid.UUID
+    title: str
+    status_name: Optional[str] = None    # etapa atual do kanban
+    status_color: Optional[str] = None
+    due_date: Optional[datetime] = None
+
+
+class DevUsFeatureGroup(BaseModel):
+    feature_title: str
+    items: list[DevUsBreakdownItem] = Field(default_factory=list)
+
+
+class DevUsProjectGroup(BaseModel):
+    project_title: str
+    features: list[DevUsFeatureGroup] = Field(default_factory=list)
+
+
+class DevUsBreakdown(BaseModel):
+    projects: list[DevUsProjectGroup] = Field(default_factory=list)
+
+
+class DevPerformanceRow(BaseModel):
+    person_id: uuid.UUID
+    full_name: str
+    position_label: Optional[str] = None
+    is_mapped: bool = True                 # False = assigned_to sem Person correspondente
+    delivered: int = 0                     # US concluídas na janela
+    on_time: int = 0                       # entregues dentro do prazo
+    on_time_pct: Optional[float] = None    # None quando delivered == 0
+    overdue: int = 0                       # US abertas atrasadas (snapshot)
+    wip: int = 0                           # US abertas atribuídas (snapshot)
+    avg_aging_days: Optional[float] = None # média de dias na etapa atual (US abertas)
+    avg_cycle_time_days: Optional[float] = None  # completed_at − left_backlog_at
+    avg_lead_time_days: Optional[float] = None   # completed_at − (start_date|created_at)
+    utilization_pct: Optional[float] = None      # alocado/capacidade na janela
+    allocated_hours_total: Optional[float] = None  # demanda (horas estimadas US)
+    capacity_hours_total: Optional[float] = None   # capacidade disponível no período
+    free_hours_total: Optional[float] = None
+    status: DevLoadStatus = "sem_dados"
+    absences: list[DevAbsenceInfo] = Field(default_factory=list)
+    delivered_breakdown: DevUsBreakdown = Field(default_factory=DevUsBreakdown)
+    overdue_breakdown: DevUsBreakdown = Field(default_factory=DevUsBreakdown)
+    next_absence: Optional[str] = None
+
+
+class PoRag(BaseModel):
+    verde: int = 0
+    amarelo: int = 0
+    vermelho: int = 0
+
+
+class PoPerformanceRow(BaseModel):
+    po_id: uuid.UUID
+    full_name: str
+    projetos: int = 0                       # projetos + programas do portfólio
+    on_time_pct: Optional[float] = None
+    avg_progress_pct: Optional[float] = None
+    avg_exec_pct: Optional[float] = None     # execução ponderada (PO Sync)
+    em_risco: int = 0                        # itens vermelhos
+    atrasados: int = 0
+    overallocated_user_days: int = 0
+    rag: PoRag = Field(default_factory=PoRag)
+
+
+class TeamPerfKpis(BaseModel):
+    throughput_total: int = 0
+    on_time_delivery_pct: Optional[float] = None
+    avg_lead_time_days: Optional[float] = None
+    avg_cycle_time_days: Optional[float] = None
+    wip_total: int = 0
+    avg_aging_days: Optional[float] = None
+    say_do_ratio: Optional[float] = None      # entregues ÷ planejadas na janela
+    devs_livres: int = 0
+    devs_sobrecarregados: int = 0
+    pos_em_risco: int = 0
+    overdue_total: int = 0
+
+
+class TeamPerfMonthPoint(BaseModel):
+    month: str
+    count: int = 0
+    avg_days: Optional[float] = None
+
+
+class TeamPerfScatterPoint(BaseModel):
+    person_id: uuid.UUID
+    full_name: str
+    utilization_pct: float = 0.0
+    allocated_hours_total: Optional[float] = None
+    capacity_hours_total: Optional[float] = None
+    free_hours_total: Optional[float] = None
+    delivered: int = 0
+    status: DevLoadStatus = "sem_dados"
+
+
+class TeamPerfSeries(BaseModel):
+    throughput_by_month: list[TeamPerfMonthPoint] = Field(default_factory=list)
+    lead_time_trend: list[TeamPerfMonthPoint] = Field(default_factory=list)
+    load_vs_delivery: list[TeamPerfScatterPoint] = Field(default_factory=list)
+
+
+class TeamPerfSwimlaneRow(BaseModel):
+    funnel_name: str
+    status_name: str
+    status_color: str = "#6B7280"
+    count: int = 0
+    avg_aging_days: Optional[float] = None
+    overdue: int = 0
+
+
+class TeamPerfPositionOption(BaseModel):
+    value: str  # slug do cargo
+    label: str
+
+
+class TeamPerfTeamOption(BaseModel):
+    value: str  # uuid da área folha (teamops)
+    label: str  # caminho completo: "DIGEST - TD Desenvolvimento - ERP & Finanças"
+    short_label: str  # só o último nível (nome do time)
+    context: Optional[str] = None  # ancestrais, ex.: "DIGEST · TD Desenvolvimento"
+
+
+class TeamPerfMeta(BaseModel):
+    generated_at: datetime
+    date_from: date
+    date_to: date
+    area: Optional[str] = None
+    diretoria: Optional[str] = None
+    positions: list[str] = Field(default_factory=list)
+    team_area_ids: list[str] = Field(default_factory=list)
+    available_areas: list[str] = Field(default_factory=list)
+    available_diretorias: list[str] = Field(default_factory=list)
+    # Cargos com pelo menos uma pessoa vinculada (não a lista estática do catálogo).
+    available_positions: list[TeamPerfPositionOption] = Field(default_factory=list)
+    # Times = áreas folha do TeamOps com pessoas (último nível da hierarquia).
+    available_teams: list[TeamPerfTeamOption] = Field(default_factory=list)
+
+
+class TeamPerformanceResponse(BaseModel):
+    meta: TeamPerfMeta
+    kpis: TeamPerfKpis
+    devs: list[DevPerformanceRow] = Field(default_factory=list)
+    pos: list[PoPerformanceRow] = Field(default_factory=list)
+    series: TeamPerfSeries = Field(default_factory=TeamPerfSeries)
+    swimlanes: list[TeamPerfSwimlaneRow] = Field(default_factory=list)
 
 
 # ─────────────────────────────────────────────

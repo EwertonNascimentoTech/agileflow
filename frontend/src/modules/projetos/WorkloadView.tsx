@@ -15,6 +15,28 @@ function initials(name: string | undefined): string {
 
 const MON = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"]
 
+function parseIsoDate(iso: string): Date {
+  return new Date(iso + "T00:00:00")
+}
+
+function toIsoDate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+
+/** Dias úteis (seg–sex) inclusivos — alinhado ao calendário de carga (sem feriados no front). */
+function weekdayRange(fromIso: string, toIso: string): string[] {
+  const out: string[] = []
+  const cur = parseIsoDate(fromIso)
+  const end = parseIsoDate(toIso)
+  if (Number.isNaN(cur.getTime()) || Number.isNaN(end.getTime()) || cur > end) return out
+  while (cur <= end) {
+    const wd = cur.getDay()
+    if (wd !== 0 && wd !== 6) out.push(toIsoDate(cur))
+    cur.setDate(cur.getDate() + 1)
+  }
+  return out
+}
+
 // Cor da célula por proporção carga/capacidade (paleta inspirada no MS Planner).
 function cellStyle(allocated: number, capacity: number): CSSProperties {
   if (capacity <= 0) {
@@ -31,6 +53,8 @@ function cellStyle(allocated: number, capacity: number): CSSProperties {
  * Heatmap carga×capacidade por pessoa×dia. Dois modos:
  *  - Não-controlado: recebe `projectId` (+ `users`) e busca o workload do projeto (usado no Gantt).
  *  - Controlado: recebe `cells` já calculadas (+ `nameForUser`) — usado pelo Cockpit de capacidade cross-project.
+ * `dateFrom`/`dateTo`: quando informados, a grade mostra todos os dias úteis da janela
+ * (incluindo futuro sem alocação), não só dias que já têm demanda.
  */
 export function WorkloadView({
   projectId,
@@ -38,12 +62,16 @@ export function WorkloadView({
   cells: cellsProp,
   nameForUser,
   loading: loadingProp,
+  dateFrom,
+  dateTo,
 }: {
   projectId?: string
   users?: User[]
   cells?: WorkloadCell[]
   nameForUser?: (id: string) => string
   loading?: boolean
+  dateFrom?: string
+  dateTo?: string
 }) {
   const controlled = cellsProp !== undefined
   const [fetched, setFetched] = useState<WorkloadCell[]>([])
@@ -65,6 +93,8 @@ export function WorkloadView({
   const [hover, setHover] = useState<{ c: WorkloadCell; name: string; date: string; x: number; y: number } | null>(null)
   const tipRef = useRef<HTMLDivElement>(null)
   const [tipPos, setTipPos] = useState<{ left: number; top: number; ready: boolean }>({ left: 0, top: 0, ready: false })
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const todayColRef = useRef<HTMLTableCellElement>(null)
 
   // Reposiciona o tooltip para caber na viewport (vira para cima perto da borda inferior).
   useLayoutEffect(() => {
@@ -102,10 +132,41 @@ export function WorkloadView({
       if (!row) { row = new Map(); map.set(c.user_id, row) }
       row.set(c.date, c)
     }
-    const ds = [...dateSet].sort()
+    let ds = [...dateSet].sort()
+    // Continuidade da janela (inclui futuro vazio) quando o pai informa from/to.
+    if (dateFrom && dateTo) {
+      const filled = weekdayRange(dateFrom, dateTo)
+      if (filled.length > 0) ds = filled
+    }
     const uids = [...map.keys()]
     return { dates: ds, byUser: map, userIds: uids, overCount: over }
-  }, [cells])
+  }, [cells, dateFrom, dateTo])
+
+  const todayIso = useMemo(() => {
+    const t = new Date()
+    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`
+  }, [])
+
+  // Coluna-alvo: hoje se existir; senão o próximo dia útil no range; senão o último.
+  const focusDate = useMemo(() => {
+    if (dates.length === 0) return null
+    if (dates.includes(todayIso)) return todayIso
+    const next = dates.find((d) => d >= todayIso)
+    return next ?? dates[dates.length - 1]
+  }, [dates, todayIso])
+
+  // Ao abrir / recarregar dados, rola a grade para a data de hoje — com passado à
+  // esquerda e futuro à direita (hoje ~30% da viewport, não colado no fim).
+  useLayoutEffect(() => {
+    const scroller = scrollRef.current
+    const col = todayColRef.current
+    if (!scroller || !col || !focusDate) return
+    const sticky = scroller.querySelector<HTMLElement>("th.sticky")
+    const stickyW = sticky?.offsetWidth ?? 180
+    const viewW = scroller.clientWidth - stickyW
+    const target = col.offsetLeft - stickyW - Math.max(0, viewW * 0.3)
+    scroller.scrollLeft = Math.max(0, Math.min(target, scroller.scrollWidth - scroller.clientWidth))
+  }, [focusDate, dates.length, userIds.length])
 
   const userName = (id: string) =>
     nameForUser?.(id) ?? users?.find((u) => u.id === id)?.full_name ?? "Usuário"
@@ -131,15 +192,27 @@ export function WorkloadView({
           ? <span><strong className="text-destructive">{overCount}</strong> dia(s)/pessoa em superlotação (carga acima da capacidade da jornada).</span>
           : <span>Nenhuma superlotação — capacidade pela jornada de cada pessoa, descontando ausências e feriados.</span>}
       </div>
-      <div className="overflow-x-auto rounded-md border bg-card">
+      <div ref={scrollRef} className="overflow-x-auto rounded-md border bg-card">
         <table className="border-collapse text-[11px]">
           <thead>
             <tr className="border-b bg-muted/40">
               <th className="sticky left-0 z-10 bg-muted/40 px-3 py-2 text-left font-medium text-muted-foreground" style={{ minWidth: 180 }}>Responsável</th>
               {dates.map((d) => {
                 const dt = new Date(d + "T00:00:00")
+                const isFocus = d === focusDate
+                const isToday = d === todayIso
                 return (
-                  <th key={d} className="border-l px-1 py-2 text-center font-medium text-muted-foreground" style={{ minWidth: 38 }}>
+                  <th
+                    key={d}
+                    ref={isFocus ? todayColRef : undefined}
+                    className={`border-l px-1 py-2 text-center font-medium ${
+                      isToday
+                        ? "bg-primary/15 text-primary"
+                        : "text-muted-foreground"
+                    }`}
+                    style={{ minWidth: 38 }}
+                    title={isToday ? "Hoje" : undefined}
+                  >
                     <div>{dt.getDate()}</div>
                     <div className="text-[9px] opacity-70">{MON[dt.getMonth()]}</div>
                   </th>
@@ -164,10 +237,11 @@ export function WorkloadView({
                     const c = row.get(d)
                     const allocated = c?.allocated_hours ?? 0
                     const capacity = c?.capacity_hours ?? 8
+                    const isToday = d === todayIso
                     return (
                       <td
                         key={d}
-                        className="border-l px-1 py-1.5 text-center"
+                        className={`border-l px-1 py-1.5 text-center ${isToday ? "ring-1 ring-inset ring-primary/40" : ""}`}
                         style={cellStyle(allocated, capacity)}
                         onMouseEnter={c ? (e) => setHover({ c, name: userName(uid), date: d, x: e.clientX, y: e.clientY }) : undefined}
                         onMouseMove={c ? (e) => setHover((h) => (h ? { ...h, x: e.clientX, y: e.clientY } : h)) : undefined}

@@ -443,6 +443,170 @@ export interface UsDeliveryReport {
   available_assignees: Array<{ id: string; name: string }>
 }
 
+// ── Painel de Desempenho do Time (Devs + POs) ───────────────────────────────
+
+export type DevLoadStatus = "livre" | "equilibrado" | "sobrecarregado" | "sem_dados"
+export type DevAbsenceBottleneck = "none" | "provavel" | "confirmado"
+
+export interface DevAbsenceInfo {
+  type_name: string
+  start_date: string
+  end_date: string
+  status: string
+  partial_hours: number | null
+  conflicting_tasks: number
+  conflicting_hours: number | null
+  undated_wip: number
+  bottleneck: DevAbsenceBottleneck
+  conflict_titles: string[]
+}
+
+export interface DevUsBreakdownItem {
+  task_id: string
+  title: string
+  status_name: string | null
+  status_color: string | null
+  due_date: string | null
+}
+
+export interface DevUsFeatureGroup {
+  feature_title: string
+  items: DevUsBreakdownItem[]
+}
+
+export interface DevUsProjectGroup {
+  project_title: string
+  features: DevUsFeatureGroup[]
+}
+
+export interface DevUsBreakdown {
+  projects: DevUsProjectGroup[]
+}
+
+export interface DevPerformanceRow {
+  person_id: string
+  full_name: string
+  position_label: string | null
+  is_mapped: boolean
+  delivered: number
+  on_time: number
+  on_time_pct: number | null
+  overdue: number
+  wip: number
+  avg_aging_days: number | null
+  avg_cycle_time_days: number | null
+  avg_lead_time_days: number | null
+  utilization_pct: number | null
+  allocated_hours_total: number | null
+  capacity_hours_total: number | null
+  free_hours_total: number | null
+  status: DevLoadStatus
+  absences: DevAbsenceInfo[]
+  delivered_breakdown: DevUsBreakdown
+  overdue_breakdown: DevUsBreakdown
+  next_absence: string | null
+}
+
+export interface PoRag {
+  verde: number
+  amarelo: number
+  vermelho: number
+}
+
+export interface PoPerformanceRow {
+  po_id: string
+  full_name: string
+  projetos: number
+  on_time_pct: number | null
+  avg_progress_pct: number | null
+  avg_exec_pct: number | null
+  em_risco: number
+  atrasados: number
+  overallocated_user_days: number
+  rag: PoRag
+}
+
+export interface TeamPerfKpis {
+  throughput_total: number
+  on_time_delivery_pct: number | null
+  avg_lead_time_days: number | null
+  avg_cycle_time_days: number | null
+  wip_total: number
+  avg_aging_days: number | null
+  say_do_ratio: number | null
+  devs_livres: number
+  devs_sobrecarregados: number
+  pos_em_risco: number
+  overdue_total: number
+}
+
+export interface TeamPerfMonthPoint {
+  month: string
+  count: number
+  avg_days?: number | null
+}
+
+export interface TeamPerfScatterPoint {
+  person_id: string
+  full_name: string
+  utilization_pct: number
+  allocated_hours_total?: number | null
+  capacity_hours_total?: number | null
+  free_hours_total?: number | null
+  delivered: number
+  status: DevLoadStatus
+}
+
+export interface TeamPerfSeries {
+  throughput_by_month: TeamPerfMonthPoint[]
+  lead_time_trend: TeamPerfMonthPoint[]
+  load_vs_delivery: TeamPerfScatterPoint[]
+}
+
+export interface TeamPerfSwimlaneRow {
+  funnel_name: string
+  status_name: string
+  status_color: string
+  count: number
+  avg_aging_days: number | null
+  overdue: number
+}
+
+export interface TeamPerfPositionOption {
+  value: string
+  label: string
+}
+
+export interface TeamPerfTeamOption {
+  value: string
+  label: string
+  short_label: string
+  context?: string | null
+}
+
+export interface TeamPerfMeta {
+  generated_at: string
+  date_from: string
+  date_to: string
+  area: string | null
+  diretoria: string | null
+  positions: string[]
+  team_area_ids: string[]
+  available_areas: string[]
+  available_diretorias: string[]
+  available_positions: TeamPerfPositionOption[]
+  available_teams: TeamPerfTeamOption[]
+}
+
+export interface TeamPerformance {
+  meta: TeamPerfMeta
+  kpis: TeamPerfKpis
+  devs: DevPerformanceRow[]
+  pos: PoPerformanceRow[]
+  series: TeamPerfSeries
+  swimlanes: TeamPerfSwimlaneRow[]
+}
+
 // ── Layout do card (quadro) ─────────────────────────────────────────────────
 
 export type CardFieldKey =
@@ -1625,6 +1789,29 @@ export const projetosApi = {
       params: {
         period: params?.period ?? "today",
         ...(params?.assignee ? { assignee: params.assignee } : {}),
+      },
+    }).then((r) => r.data),
+
+  getTeamPerformance: (params: {
+    from: string
+    to: string
+    area?: string | null
+    diretoria?: string | null
+    positions?: string[] | null
+    teams?: string[] | null
+  }) =>
+    api.get<TeamPerformance>(`/projetos/reports/team-performance`, {
+      params: {
+        from: params.from,
+        to: params.to,
+        ...(params.area ? { area: params.area } : {}),
+        ...(params.diretoria ? { diretoria: params.diretoria } : {}),
+        ...(params.positions && params.positions.length
+          ? { positions: params.positions.join(",") }
+          : {}),
+        ...(params.teams && params.teams.length
+          ? { teams: params.teams.join(",") }
+          : {}),
       },
     }).then((r) => r.data),
 

@@ -54,6 +54,7 @@ from app.modules.projetos.schemas import (
     ProjectMemberResponse,
     ProjectReportsResponse,
     UsDeliveryReportResponse,
+    TeamPerformanceResponse,
     ProjectResponse,
     ProjectScheduleBindingResponse,
     ProjectScheduleBindingsUpsert,
@@ -132,6 +133,7 @@ from app.modules.projetos.service import (
     ProjectMemberService,
     ProjectReportsService,
     UsDeliveryReportService,
+    TeamPerformanceService,
     ProjectScheduleBindingService,
     ProjectStageAgentService,
     ProjectService,
@@ -158,6 +160,7 @@ _can_form_manage = require_permission("projetos.form.manage")
 _can_automation_manage = require_permission("projetos.automation.manage")
 _can_priority_manage = require_permission("projetos.priority.manage")
 _can_priority_score = require_permission("projetos.priority.score")
+_can_view_performance = require_permission("projetos.performance.view")
 
 
 async def _has_permission(ctx: ModuleContext, code: str) -> bool:
@@ -706,6 +709,52 @@ async def get_us_delivery_report(
 ):
     """Entregas de User Story por responsável no período + lista de atrasadas."""
     return await UsDeliveryReportService.build(ctx.db, period=period, assignee=assignee)
+
+
+@router.get("/reports/team-performance", response_model=TeamPerformanceResponse)
+async def get_team_performance(
+    date_from: str = Query(..., alias="from", description="Início da janela (ISO date)."),
+    date_to: str = Query(..., alias="to", description="Fim da janela, inclusivo (ISO date)."),
+    area: Optional[str] = Query(None, description="Recorta pela área (string do card)."),
+    diretoria: Optional[str] = Query(None, description="Recorta pela diretoria (string do card)."),
+    positions: Optional[str] = Query(
+        None,
+        description="Slugs de cargo separados por vírgula (multi-seleção). Ex.: dev_backend,qa",
+    ),
+    teams: Optional[str] = Query(
+        None,
+        description="UUIDs de time (área folha TeamOps), vírgula-separados.",
+    ),
+    position: Optional[str] = Query(
+        None,
+        description="(legado) um único slug de cargo; preferir `positions`.",
+    ),
+    ctx: ModuleContext = Depends(_ctx),
+    _perf=Depends(_can_view_performance),
+):
+    """Painel de desempenho do time: linhas por Dev e por PO, KPIs de fluxo, séries de
+    tendência e raias de WIP/aging. Restrito à gestão (`projetos.performance.view`)."""
+    from datetime import date as _date
+
+    pos_list: list[str] = []
+    if positions:
+        pos_list.extend(p.strip() for p in positions.split(",") if p.strip())
+    if position and position.strip() and position.strip() not in pos_list:
+        pos_list.append(position.strip())
+
+    team_list: list[str] = []
+    if teams:
+        team_list.extend(t.strip() for t in teams.split(",") if t.strip())
+
+    return await TeamPerformanceService.build(
+        ctx.db,
+        _date.fromisoformat(date_from),
+        _date.fromisoformat(date_to),
+        area=area,
+        diretoria=diretoria,
+        positions=pos_list or None,
+        team_area_ids=team_list or None,
+    )
 
 
 @router.get("/pos", response_model=list[PoOption])
