@@ -1651,7 +1651,19 @@ export default function ProjectBoardPage() {
     poByOriginTaskId,
     matchPoIdsByForm,
   }
-  const funnelTasks = tasks.filter((t) => taskMatches(t, filterState))
+  const funnelAllowedTypeIds = (() => {
+    const ids = selectedFunnel?.allowed_demand_type_ids
+    return ids && ids.length > 0 ? new Set(ids) : null
+  })()
+  const funnelTasks = tasks.filter((t) => {
+    if (!taskMatches(t, filterState)) return false
+    // Kanban com tipos permitidos: esconde Feature/US (etc.) no funil errado.
+    // Cards sem tipo (etapas de cronograma) continuam visíveis.
+    if (funnelAllowedTypeIds && t.demand_type_id && !funnelAllowedTypeIds.has(t.demand_type_id)) {
+      return false
+    }
+    return true
+  })
 
   return (
     <div className="afx kanban-page-root flex min-h-0 w-full min-w-0 flex-col gap-4 overflow-hidden">

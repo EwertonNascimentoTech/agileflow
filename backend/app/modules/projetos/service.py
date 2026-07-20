@@ -1926,16 +1926,68 @@ class ProjectTaskService:
         return bool(name and "feature" in str(name).lower())
 
     @staticmethod
+    def _is_planning_funnel_name(name: Optional[str]) -> bool:
+        """Kanban de Projetos/Programas (não Features/US)."""
+        if not name:
+            return False
+        n = str(name).strip().lower()
+        return ("projeto" in n or "programa" in n) and "feature" not in n and "user story" not in n
+
+    @staticmethod
+    async def _status_in_funnel(
+        db: AsyncSession, status_id: uuid.UUID, funnel_id: uuid.UUID
+    ) -> bool:
+        row = await db.execute(
+            select(ProjectStatusConfig.id).where(
+                ProjectStatusConfig.id == status_id,
+                ProjectStatusConfig.funnel_id == funnel_id,
+            )
+        )
+        return row.scalar_one_or_none() is not None
+
+    @staticmethod
+    async def _coerce_status_for_demand_type(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        demand_type_id: Optional[uuid.UUID],
+        status_id: uuid.UUID,
+    ) -> uuid.UUID:
+        """Garante que Feature/US nascem/ficam no kanban do próprio tipo.
+
+        Se o tipo tem `funnel_id` e a etapa pedida é de outro funil, redireciona para
+        a etapa inicial do funil canônico do tipo (evita Feature/US no kanban Projetos).
+        """
+        if demand_type_id is None:
+            return status_id
+        dt = await db.get(ProjectDemandType, demand_type_id)
+        if not dt or not dt.funnel_id:
+            return status_id
+        # Funil do tipo precisa pertencer ao mesmo project container.
+        fn = await db.execute(
+            select(ProjectFunnel).where(
+                ProjectFunnel.id == dt.funnel_id,
+                ProjectFunnel.project_id == project_id,
+            )
+        )
+        funnel = fn.scalar_one_or_none()
+        if not funnel:
+            return status_id
+        if await ProjectTaskService._status_in_funnel(db, status_id, funnel.id):
+            return status_id
+        init = await ProjectTaskService._initial_status_of_funnel(db, funnel.id)
+        return init.id
+
+    @staticmethod
     async def _guard_feature_us_kanban_affinity(
         db: AsyncSession,
         task: ProjectTask,
         target_status: ProjectStatusConfig,
         source_status: Optional[ProjectStatusConfig] = None,
     ) -> None:
-        """Impede Feature ir para o kanban User Story (e o inverso).
+        """Impede Feature/US trocarem de kanban indevidamente.
 
-        Features e User Story costumam ter etapas com o mesmo nome (ex.: Homologação).
-        Sem esta trava, um status_id errado move o card para o kanban irmão.
+        - Feature ↔ User Story (etapas com nomes iguais, ex. Homologação)
+        - Feature/US → Projetos e Programas (e o inverso quando o card já é Feature/US)
         """
         target_funnel_name: Optional[str] = None
         if target_status.funnel_id:
@@ -1956,6 +2008,7 @@ class ProjectTaskService:
 
         target_is_feature = ProjectTaskService._is_feature_funnel_name(target_funnel_name)
         target_is_us = ProjectTaskService._is_user_story_funnel_name(target_funnel_name)
+        target_is_planning = ProjectTaskService._is_planning_funnel_name(target_funnel_name)
 
         if is_feature and target_is_us:
             raise HTTPException(
@@ -1971,6 +2024,15 @@ class ProjectTaskService:
                 detail=(
                     "Este card é uma User Story e não pode ir para o kanban de Features. "
                     "Escolha a etapa correspondente no kanban User Story."
+                ),
+            )
+        if (is_feature or is_us) and target_is_planning:
+            kind = "Feature" if is_feature else "User Story"
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Este card é uma {kind} e não pode ir para o kanban de Projetos e Programas. "
+                    f"Use o kanban de {kind}s."
                 ),
             )
 
@@ -2937,9 +2999,17 @@ class ProjectTaskService:
         enforce_funnel_access: bool = True,
     ) -> ProjectTask:
         await ProjectService.get(db, project_id)
+        payload = data.model_dump()
+        form_values = payload.pop("form_values", None)
+        demand_type_id = payload.get("demand_type_id")
+        # Feature/US sempre no kanban do próprio tipo — mesmo se a UI mandou etapa de Projetos.
+        if demand_type_id and payload.get("status_id"):
+            payload["status_id"] = await ProjectTaskService._coerce_status_for_demand_type(
+                db, project_id, demand_type_id, payload["status_id"],
+            )
         status_row = await db.execute(
             select(ProjectStatusConfig).where(
-                ProjectStatusConfig.id == data.status_id,
+                ProjectStatusConfig.id == payload["status_id"],
                 ProjectStatusConfig.project_id == project_id,
             )
         )
@@ -2952,9 +3022,6 @@ class ProjectTaskService:
         if enforce_funnel_access:
             await ProjectTaskService._check_funnel_writable(db, status_obj.funnel_id, current_user)
 
-        payload = data.model_dump()
-        form_values = payload.pop("form_values", None)
-        demand_type_id = payload.get("demand_type_id")
         if demand_type_id:
             demand_type = await ProjectDemandTypeService.get(db, demand_type_id)
             if not demand_type.is_active:
@@ -2975,6 +3042,14 @@ class ProjectTaskService:
                 raise HTTPException(
                     status_code=400,
                     detail="Card do tipo User Story não pode ser criado no kanban de Features.",
+                )
+            if (is_feat_type or is_us_type) and ProjectTaskService._is_planning_funnel_name(funnel_name):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Feature e User Story não podem ser criadas no kanban de Projetos e Programas. "
+                        "Use o kanban Features ou User Story."
+                    ),
                 )
         await ProjectTaskService._validate_parent(
             db,
@@ -3195,6 +3270,11 @@ class ProjectTaskService:
             demand_type = await ProjectDemandTypeService.get(db, target_demand_type_id)
             if not demand_type.is_active:
                 raise HTTPException(status_code=400, detail="Tipo de demanda está inativo.")
+        # Feature/US: se alguém mandar etapa de Projetos, redireciona para o kanban do tipo.
+        if "status_id" in payload and payload["status_id"] is not None and target_demand_type_id:
+            payload["status_id"] = await ProjectTaskService._coerce_status_for_demand_type(
+                db, project_id, target_demand_type_id, payload["status_id"],
+            )
         if "parent_task_id" in payload:
             await ProjectTaskService._validate_parent(
                 db,
@@ -9074,12 +9154,22 @@ class ProjectImportService:
                 )
             )).scalar_one_or_none()
 
-        # Etapa das Features (target_status_id) e etapa das US (us_status_id).
-        # Se a etapa das US não for informada, as US herdam a etapa das Features.
-        feature_status = await _load_status(target_status_id)
-        if not feature_status:
-            raise HTTPException(status_code=400, detail="Etapa de destino das Features inválida para este projeto.")
-        if us_status_id is None or us_status_id == target_status_id:
+        demand_types = await ProjectDemandTypeService.list(db, active_only=True)
+        feature_t, us_t = cls._resolve_demand_types(demand_types)
+        if not feature_t or not us_t:
+            raise HTTPException(status_code=400, detail="Crie os tipos de demanda 'Feature' e 'User Story' antes de importar.")
+
+        # Sempre usa o kanban canônico do tipo (Features / User Story), mesmo se a importação
+        # foi disparada a partir do board de Projetos com uma etapa daquele funil.
+        if feature_t.funnel_id:
+            feature_status = await ProjectTaskService._initial_status_of_funnel(db, feature_t.funnel_id)
+        else:
+            feature_status = await _load_status(target_status_id)
+            if not feature_status:
+                raise HTTPException(status_code=400, detail="Etapa de destino das Features inválida para este projeto.")
+        if us_t.funnel_id:
+            us_status = await ProjectTaskService._initial_status_of_funnel(db, us_t.funnel_id)
+        elif us_status_id is None or us_status_id == target_status_id:
             us_status = feature_status
         else:
             us_status = await _load_status(us_status_id)
@@ -9093,11 +9183,6 @@ class ProjectImportService:
             )).scalar_one_or_none()
             if not parent_ok:
                 raise HTTPException(status_code=400, detail="Projeto/Programa de destino inválido para este projeto.")
-
-        demand_types = await ProjectDemandTypeService.list(db, active_only=True)
-        feature_t, us_t = cls._resolve_demand_types(demand_types)
-        if not feature_t or not us_t:
-            raise HTTPException(status_code=400, detail="Crie os tipos de demanda 'Feature' e 'User Story' antes de importar.")
 
         try:
             wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
