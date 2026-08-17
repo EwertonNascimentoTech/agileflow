@@ -32,6 +32,7 @@ from app.modules.teamops.schemas import (
     PersonStackResponse,
     PersonStackUpdate,
     PersonUpdate,
+    OffboardingPreviewResponse,
     TeamMemberResponse,
     CatalogPermission,
     PositionPermissionsUpdate,
@@ -389,6 +390,16 @@ async def create_person(
 @router.get("/persons/{person_id}", response_model=PersonResponse)
 async def get_person(person_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
     return await PersonService.get(ctx.db, person_id)
+
+
+@router.get("/persons/{person_id}/offboarding-preview", response_model=OffboardingPreviewResponse)
+async def offboarding_preview(
+    person_id: uuid.UUID,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_person_manage),
+):
+    """Prévia ao desligar: tarefas em aberto vs concluídas + colegas do mesmo cargo."""
+    return await PersonService.offboarding_preview(ctx.db, person_id)
 
 
 @router.patch("/persons/{person_id}", response_model=PersonResponse)

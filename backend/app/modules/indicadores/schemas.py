@@ -13,7 +13,15 @@ _GRANULARIDADE = Literal["mensal", "bimestral", "trimestral", "semestral", "anua
 _SENTIDO = Literal["maior_melhor", "menor_melhor", "faixa_ideal"]
 _STATUS = Literal["ativo", "inativo"]
 _FONTE = Literal["manual", "portfolio"]
-_FONTE_METRICA = Literal["servicos_publicados", "documentos_natos_digitais"]
+_FONTE_METRICA = Literal[
+    # Produtos
+    "servicos_publicados", "documentos_natos_digitais",
+    # Projetos (indicadores táticos — ver portfolio_projetos.py)
+    "cronograma_desenvolvimento", "cronograma_implantacao",
+    "desvio_trabalho_desenvolvimento", "desvio_trabalho_implantacao",
+    "pct_desenvolvimento", "tempo_analise_oportunidade", "lead_time_us",
+    "pct_sla_estourado", "taxa_impedimento", "pct_projetos_ia",
+]
 _ACOMP_STATUS = Literal["pendente", "atingido", "em_atencao", "nao_atingido"]
 
 
@@ -69,6 +77,7 @@ class _IndicadorFields(BaseModel):
     categoria: _CATEGORIA
     descricao: Optional[str] = None
     objetivo_estrategico: Optional[str] = None
+    sub_processo: Optional[str] = None
     area_id: Optional[uuid.UUID] = None
     responsavel_person_id: Optional[uuid.UUID] = None
     unidade_medida: Optional[str] = None
@@ -105,6 +114,7 @@ class IndicadorUpdate(BaseModel):
     categoria: Optional[_CATEGORIA] = None
     descricao: Optional[str] = None
     objetivo_estrategico: Optional[str] = None
+    sub_processo: Optional[str] = None
     area_id: Optional[uuid.UUID] = None
     responsavel_person_id: Optional[uuid.UUID] = None
     unidade_medida: Optional[str] = None
@@ -190,6 +200,7 @@ class IndicadorResponse(BaseModel):
     categoria: _CATEGORIA
     descricao: Optional[str] = None
     objetivo_estrategico: Optional[str] = None
+    sub_processo: Optional[str] = None
     area: Optional[AreaRefMini] = None
     responsavel: Optional[PersonMini] = None
     unidade_medida: Optional[str] = None
@@ -222,6 +233,7 @@ class IndicadorListItem(BaseModel):
     codigo: str
     nome: str
     categoria: _CATEGORIA
+    sub_processo: Optional[str] = None
     area_id: Optional[uuid.UUID] = None
     area_name: Optional[str] = None
     responsavel_person_id: Optional[uuid.UUID] = None
@@ -266,6 +278,12 @@ class DashboardChartIndicador(BaseModel):
     categoria: _CATEGORIA
     unidade_medida: Optional[str] = None
     area_name: Optional[str] = None
+    sub_processo: Optional[str] = None
+    formula_calculo: Optional[str] = None
+    sentido: Optional[_SENTIDO] = None
+    granularidade: Optional[_GRANULARIDADE] = None
+    meta_min: Optional[float] = None
+    meta_max: Optional[float] = None
     periodos: list[DashboardChartPeriodo] = Field(default_factory=list)
 
 

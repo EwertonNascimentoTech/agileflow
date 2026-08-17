@@ -16,7 +16,10 @@ import {
   moduleNavConfig, getActiveModuleSlug, firstAccessibleModuleRoute,
 } from "@/modules/crm/moduleNavConfig"
 import { settingsNav } from "@/modules/crm/admin/settingsNav"
-import { canAccessModuleConfig, hasAnyPermission, isConfigNavPath } from "@/lib/permissions"
+import {
+  canAccessModuleConfig, hasAnyPermission, isConfigNavPath,
+  isExternalProductOwner, EXTERNAL_PO_BLOCKED_MODULES,
+} from "@/lib/permissions"
 import { ModuleRail, type RailItem } from "@/modules/crm/shell/ModuleRail"
 import { ContextualSidebar, type SidebarKanbanItem, type SidebarSection } from "@/modules/crm/shell/ContextualSidebar"
 
@@ -34,6 +37,8 @@ const MODULE_PERM_SLUGS: Record<string, string[]> = {
 
 /** Usuário enxerga o módulo se tem ["*"] ou ≥1 permissão em algum prefixo do módulo. */
 function canSeeModule(permissions: string[] | undefined, slug: string): boolean {
+  // Documentação é módulo de plataforma — todos os utilizadores autenticados veem.
+  if (slug === "documentacao") return true
   if (!permissions || permissions.length === 0) return false
   if (permissions.includes("*")) return true
   const prefixes = MODULE_PERM_SLUGS[slug] ?? [slug]
@@ -72,6 +77,8 @@ export default function AppLayout() {
   // dedicado "Solicitações" no rail (com uma sidebar mínima: Nova + Minhas).
   // Coordenadores (cargo TeamOps) sempre ganham o atalho, mantendo seus demais módulos.
   const isCoordenador = (user?.position_slug ?? "") === "coordenador"
+  // Product Owner (Externo): opera os kanbans dos seus projetos, sem as visões consolidadas.
+  const isExternalPO = isExternalProductOwner(user)
   const canSeeProjetos = isAdmin || canSeeModule(user?.permissions, "projetos")
   const needsSolicitacoesShortcut = !isBasicUser && hasProjetosModule && (!canSeeProjetos || isCoordenador)
   const inSolicitacoes =
@@ -148,16 +155,33 @@ export default function AppLayout() {
 
   // Itens do rail: Visão geral + módulos da API + Configurações (rodapé)
   const railItems: RailItem[] = useMemo(() => {
+    const docModule = modules.find((m) => m.slug === "documentacao")
+    const docRailItem: RailItem = {
+      key: "documentacao",
+      label: docModule?.name ?? "Documentação",
+      icon: resolveIcon(docModule?.icon ?? "BookOpen"),
+      to: firstAccessibleModuleRoute("documentacao", user?.permissions, true),
+      color: docModule?.color ?? "#0F766E",
+    }
+
     if (isBasicUser) {
       return [
         { key: "home", label: "Solicitações", icon: ClipboardList, to: basicMyRequestsRoute },
+        docRailItem,
       ]
     }
 
     // Admin vê tudo (["*"]); demais só os módulos onde o cargo tem ≥1 permissão.
+    // documentacao já passa em canSeeModule para todos.
     const visibleModules = isAdmin
       ? modules
-      : modules.filter((m) => canSeeModule(user?.permissions, m.slug))
+      : modules.filter(
+          (m) =>
+            canSeeModule(user?.permissions, m.slug) &&
+            // PO Externo é de fora da casa: Pessoas, Indicadores e RTD ficam fora do rail
+            // (a role dele já não recebe essas permissões; isto cobre roles legadas).
+            !(isExternalPO && EXTERNAL_PO_BLOCKED_MODULES.includes(m.slug)),
+        )
 
     const items: RailItem[] = [
       { key: "home", label: "Visão geral", icon: LayoutDashboard, to: "/app/dashboard" },
@@ -171,10 +195,12 @@ export default function AppLayout() {
         to: firstAccessibleModuleRoute(m.slug, user?.permissions, isAdmin),
         color: m.color,
       })),
+      // Garante o módulo mesmo se o registry ainda não tiver sido seeded neste restart
+      ...(visibleModules.some((m) => m.slug === "documentacao") ? [] : [docRailItem]),
       { key: "settings", label: "Configurações", icon: Settings, to: "/app/settings", pinBottom: true },
     ]
     return items
-  }, [isBasicUser, isAdmin, modules, user?.permissions, basicMyRequestsRoute, needsSolicitacoesShortcut])
+  }, [isBasicUser, isAdmin, modules, user?.permissions, basicMyRequestsRoute, needsSolicitacoesShortcut, isExternalPO])
 
   // Cabeçalho + seções da sidebar conforme o contexto ativo
   const { sidebarTitle, sidebarIcon, sidebarColor, sections } = useMemo(() => {
@@ -209,16 +235,19 @@ export default function AppLayout() {
         if (isConfigNavPath(item.to)) {
           return isAdmin || canAccessModuleConfig(user?.permissions, activeModuleSlug)
         }
+        // PO Externo não tem visão do portfólio inteiro — só dos projetos que lidera.
+        if (item.hiddenForExternalPO && isExternalPO) return false
         // Itens com permissão exigida só aparecem se a função tiver alguma delas.
         if (item.requiredAnyPermission && !isAdmin) {
           return hasAnyPermission(user?.permissions, item.requiredAnyPermission)
         }
         return true
       })
+      const isDocs = activeModuleSlug === "documentacao"
       return {
-        sidebarTitle: activeModule?.name ?? activeModuleSlug,
-        sidebarIcon: resolveIcon(activeModule?.icon),
-        sidebarColor: activeModule?.color as string | undefined,
+        sidebarTitle: activeModule?.name ?? (isDocs ? "Documentação" : activeModuleSlug),
+        sidebarIcon: resolveIcon(activeModule?.icon ?? (isDocs ? "BookOpen" : null)),
+        sidebarColor: (activeModule?.color as string | undefined) ?? (isDocs ? "#0F766E" : undefined),
         sections: navItems,
       }
     }
@@ -238,7 +267,7 @@ export default function AppLayout() {
       sidebarColor: undefined,
       sections: homeSections,
     }
-  }, [activeModuleSlug, activeModule, inSettings, isAdmin, isBasicUser, basicNewRequestRoute, basicMyRequestsRoute, user?.permissions, needsSolicitacoesShortcut, inSolicitacoes])
+  }, [activeModuleSlug, activeModule, inSettings, isAdmin, isBasicUser, basicNewRequestRoute, basicMyRequestsRoute, user?.permissions, needsSolicitacoesShortcut, inSolicitacoes, isExternalPO])
 
   // Seção atual (para o breadcrumb) — match mais específico vence
   const currentSectionLabel = useMemo(() => {
@@ -332,7 +361,7 @@ export default function AppLayout() {
         </header>
         {searchOpen && <GlobalSearch onClose={() => setSearchOpen(false)} />}
 
-        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6">
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto p-4 md:p-6">
           <Outlet />
         </main>
       </div>

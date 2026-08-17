@@ -16,7 +16,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.indicadores import schemas
+from app.modules.indicadores import portfolio_projetos, schemas
 from app.modules.indicadores.models import (
     AcompanhamentoStatus,
     FonteDados,
@@ -115,12 +115,34 @@ async def _portfolio_documentos_rows(
 
 async def _portfolio_rows(
     db: AsyncSession, metrica: Optional[FontePortfolioMetrica] = None,
-) -> list[tuple]:
-    """Dataset base para cálculo de % conforme a métrica do indicador."""
+):
+    """Dataset base para cálculo conforme a métrica do indicador.
+
+    Retorno é um cache opaco: list[tuple] para métricas de Produtos, ou
+    `portfolio_projetos.ProjetosDataset` para métricas de Projetos — consumir
+    sempre via `_calc_realizado`, nunca via `_pct_ate` direto."""
     m = metrica or FontePortfolioMetrica.SERVICOS_PUBLICADOS
+    if m in portfolio_projetos.PROJETOS_METRICAS:
+        return await portfolio_projetos.load_dataset(db)
     if m == FontePortfolioMetrica.DOCUMENTOS_NATOS_DIGITAIS:
         return await _portfolio_documentos_rows(db, metrica)
     return await _portfolio_servicos_rows(db, metrica)
+
+
+def _calc_realizado(
+    metrica: Optional[FontePortfolioMetrica],
+    cache,
+    periodo_inicio: date,
+    periodo_fim: date,
+) -> Optional[tuple[float, float, Optional[float]]]:
+    """(num, den, valor) do período para qualquer métrica de portfólio.
+
+    `None` (sentinela) = não computável agora — o chamador deve PRESERVAR o valor
+    gravado (métricas de estado corrente fora do período que contém hoje)."""
+    m = metrica or FontePortfolioMetrica.SERVICOS_PUBLICADOS
+    if m in portfolio_projetos.PROJETOS_METRICAS:
+        return portfolio_projetos.calc(m, cache, periodo_inicio, periodo_fim, date.today())
+    return _pct_ate(cache, periodo_fim)
 
 
 def _pct_ate(rows: list[tuple], ate: date) -> tuple[int, int, Optional[float]]:
@@ -497,6 +519,9 @@ async def _portfolio_evidencias(
     list[schemas.PortfolioLinkRef],
 ]:
     m = metrica or FontePortfolioMetrica.SERVICOS_PUBLICADOS
+    if m in portfolio_projetos.PROJETOS_METRICAS:
+        # Métricas de Projetos: sem evidências automáticas por enquanto (fase 2).
+        return [], [], [], [], [], [], [], []
     if m == FontePortfolioMetrica.DOCUMENTOS_NATOS_DIGITAIS:
         doc_novos, doc_acum, anexos_novos, anexos_acum, links_novos, links_acum = (
             await _portfolio_evidencias_documentos(db, periodo_inicio, periodo_fim, metrica)
@@ -521,6 +546,9 @@ async def _portfolio_preload(
         Product, ProductDocumento, ProductLifecycle, ProductRelease, ProductServico,
     )
     m = metrica or FontePortfolioMetrica.SERVICOS_PUBLICADOS
+    if m in portfolio_projetos.PROJETOS_METRICAS:
+        # Métricas de Projetos: evidências vazias (fase 2) — kind próprio p/ _mem.
+        return ("projetos",)
     if m == FontePortfolioMetrica.DOCUMENTOS_NATOS_DIGITAIS:
         drows = (await db.execute(
             select(
@@ -627,6 +655,9 @@ def _portfolio_anexos_e_links_mem(
 def _portfolio_evidencias_mem(cache: tuple, periodo_inicio: date, periodo_fim: date):
     """Versão em memória de _portfolio_evidencias a partir do dataset pré-carregado."""
     kind = cache[0]
+    if kind == "projetos":
+        # Métricas de Projetos: sem evidências automáticas (fase 2).
+        return [], [], [], [], [], [], [], []
     if kind == "documentos":
         doc_rows = cache[1]
         novos_rows = [r for r in doc_rows if r[5] is not None and periodo_inicio <= r[5] <= periodo_fim]
@@ -790,7 +821,11 @@ class IndicadorService:
         for ac in alvo:
             if ac.bloqueado:
                 continue
-            _num, _den, pct = _pct_ate(rows, ac.periodo_fim)
+            res = _calc_realizado(ind.fonte_metrica, rows, ac.periodo_inicio, ac.periodo_fim)
+            if res is None:
+                # Não computável (estado corrente fora do mês vigente) — preserva o gravado.
+                continue
+            _num, _den, pct = res
             novo = float(pct) if pct is not None else None
             atual = _f(ac.realizado)
             p, st = calc_status(
@@ -811,13 +846,16 @@ class IndicadorService:
     def _effective(
         ac: IndicadorAcompanhamento,
         ind: Indicador,
-        portfolio_rows: Optional[list[tuple]] = None,
+        portfolio_rows=None,
     ) -> tuple[Optional[float], Optional[float], AcompanhamentoStatus]:
         """Valor efetivo de um acompanhamento (sobrepõe portfólio em memória)."""
         realizado = _f(ac.realizado)
         if ac.fonte == FonteDados.PORTFOLIO and portfolio_rows is not None:
-            _n, _d, pct_mes = _pct_ate(portfolio_rows, ac.periodo_fim)
-            realizado = float(pct_mes) if pct_mes is not None else None
+            res = _calc_realizado(ind.fonte_metrica, portfolio_rows, ac.periodo_inicio, ac.periodo_fim)
+            if res is not None:
+                _n, _d, pct_mes = res
+                realizado = float(pct_mes) if pct_mes is not None else None
+            # res None: mantém o valor gravado (fechado ao vivo mês a mês).
         pct, st = calc_status(
             ind.sentido, realizado, _f(ac.meta),
             _f(ind.meta_min), _f(ind.meta_max), _f(ind.tolerancia_pct),
@@ -872,6 +910,7 @@ class IndicadorService:
             categoria=IndicadorCategoria(data.categoria),
             descricao=data.descricao,
             objetivo_estrategico=data.objetivo_estrategico,
+            sub_processo=data.sub_processo,
             area_id=data.area_id,
             responsavel_person_id=data.responsavel_person_id,
             unidade_medida=data.unidade_medida,
@@ -1018,8 +1057,11 @@ class IndicadorService:
 
         if ac.fonte == FonteDados.PORTFOLIO:
             rows = await _portfolio_rows(db, ind.fonte_metrica)
-            _num, _den, pct = _pct_ate(rows, ac.periodo_fim)
-            ac.realizado = float(pct) if pct is not None else None
+            res = _calc_realizado(ind.fonte_metrica, rows, ac.periodo_inicio, ac.periodo_fim)
+            if res is not None:
+                _num, _den, pct = res
+                ac.realizado = float(pct) if pct is not None else None
+            # res None (estado corrente fora do mês vigente): preserva o valor gravado.
         elif data.limpar_realizado:
             ac.realizado = None
         elif "realizado" in payload:
@@ -1059,7 +1101,16 @@ class IndicadorService:
         p_num = p_den = p_pct = None
         if ind.fonte == FonteDados.PORTFOLIO:
             rows = await _portfolio_rows(db, ind.fonte_metrica)
-            p_num, p_den, p_pct = _pct_ate(rows, date.today())
+            m = ind.fonte_metrica or FontePortfolioMetrica.SERVICOS_PUBLICADOS
+            if m in portfolio_projetos.PROJETOS_METRICAS:
+                # Métricas de Projetos são por-período: o header mostra o MÊS corrente.
+                hoje = date.today()
+                fim_mes = date(hoje.year, hoje.month, calendar.monthrange(hoje.year, hoje.month)[1])
+                res = _calc_realizado(m, rows, hoje.replace(day=1), fim_mes)
+                if res is not None:
+                    p_num, p_den, p_pct = res
+            else:
+                p_num, p_den, p_pct = _pct_ate(rows, date.today())
 
         # Pré-carrega o dataset de portfólio uma vez SE algum acompanhamento for
         # PORTFOLIO. ac.fonte é por-acompanhamento e independe de ind.fonte — um
@@ -1080,6 +1131,7 @@ class IndicadorService:
             categoria=_ev(ind.categoria),
             descricao=ind.descricao,
             objetivo_estrategico=ind.objetivo_estrategico,
+            sub_processo=ind.sub_processo,
             area=area_ref,
             responsavel=schemas.PersonMini.model_validate(ind.responsavel) if ind.responsavel else None,
             unidade_medida=ind.unidade_medida,
@@ -1179,7 +1231,9 @@ class IndicadorService:
         rows = (await db.execute(q)).scalars().all()
         index = await _areas_index(db)
 
-        portfolio_cache: dict[Optional[FontePortfolioMetrica], list[tuple]] = {}
+        # Cache por DATASET (não por métrica): as 10 métricas de projetos compartilham
+        # o mesmo load_dataset — carregar 1× por request.
+        portfolio_cache: dict[str, object] = {}
 
         out: list[schemas.IndicadorListItem] = []
         for ind in rows:
@@ -1190,9 +1244,10 @@ class IndicadorService:
             portfolio_rows = None
             if ind.fonte == FonteDados.PORTFOLIO or any(a.fonte == FonteDados.PORTFOLIO for a in acs):
                 m = ind.fonte_metrica or FontePortfolioMetrica.SERVICOS_PUBLICADOS
-                if m not in portfolio_cache:
-                    portfolio_cache[m] = await _portfolio_rows(db, m)
-                portfolio_rows = portfolio_cache[m]
+                key = portfolio_projetos.dataset_key(m)
+                if key not in portfolio_cache:
+                    portfolio_cache[key] = await _portfolio_rows(db, m)
+                portfolio_rows = portfolio_cache[key]
 
             eff = [cls._effective(a, ind, portfolio_rows) for a in acs]
             preenchidos = [(a, r, p, s) for a, (r, p, s) in zip(acs, eff) if r is not None]
@@ -1205,6 +1260,7 @@ class IndicadorService:
                 codigo=ind.codigo,
                 nome=ind.nome,
                 categoria=_ev(ind.categoria),
+                sub_processo=ind.sub_processo,
                 area_id=ind.area_id,
                 area_name=index[ind.area_id].name if ind.area_id and ind.area_id in index else None,
                 responsavel_person_id=ind.responsavel_person_id,
@@ -1301,7 +1357,9 @@ class IndicadorService:
         rows = (await db.execute(q)).scalars().all()
         index = await _areas_index(db)
 
-        portfolio_cache: dict[Optional[FontePortfolioMetrica], list[tuple]] = {}
+        # Cache por DATASET (não por métrica): as 10 métricas de projetos compartilham
+        # o mesmo load_dataset — carregar 1× por request.
+        portfolio_cache: dict[str, object] = {}
         indicadores: list[schemas.DashboardChartIndicador] = []
 
         for ind in rows:
@@ -1313,9 +1371,10 @@ class IndicadorService:
             portfolio_rows = None
             if ind.fonte == FonteDados.PORTFOLIO or any(a.fonte == FonteDados.PORTFOLIO for a in acs):
                 m = ind.fonte_metrica or FontePortfolioMetrica.SERVICOS_PUBLICADOS
-                if m not in portfolio_cache:
-                    portfolio_cache[m] = await _portfolio_rows(db, m)
-                portfolio_rows = portfolio_cache[m]
+                key = portfolio_projetos.dataset_key(m)
+                if key not in portfolio_cache:
+                    portfolio_cache[key] = await _portfolio_rows(db, m)
+                portfolio_rows = portfolio_cache[key]
 
             periodos = []
             for ac in acs:
@@ -1336,6 +1395,12 @@ class IndicadorService:
                 categoria=_ev(ind.categoria),
                 unidade_medida=ind.unidade_medida,
                 area_name=index[ind.area_id].name if ind.area_id and ind.area_id in index else None,
+                sub_processo=ind.sub_processo,
+                formula_calculo=ind.formula_calculo,
+                sentido=_ev(ind.sentido),
+                granularidade=_ev(ind.granularidade),
+                meta_min=_f(ind.meta_min),
+                meta_max=_f(ind.meta_max),
                 periodos=periodos,
             ))
 

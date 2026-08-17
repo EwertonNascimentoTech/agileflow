@@ -32,6 +32,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { CapacityDayDetailDialog } from "@/modules/projetos/CapacityDayDetailDialog"
 import { parseDefaultFieldOptions } from "@/modules/projetos/defaultFormOptions"
 import { WorkloadView } from "@/modules/projetos/WorkloadView"
 
@@ -580,6 +581,8 @@ export default function TeamPerformancePage() {
   const [heatmap, setHeatmap] = useState<CapacityHeatmapResponse | null>(null)
   const [free, setFree] = useState<FreePeopleResponse | null>(null)
   const [capLoading, setCapLoading] = useState(false)
+  // Célula do heatmap aberta no modal de detalhamento do dia.
+  const [dayDetail, setDayDetail] = useState<{ personId: string; date: string } | null>(null)
 
   const range = useMemo(() => windowRange(preset), [preset])
   const capRange = useMemo(() => capacityWindow(preset), [preset])
@@ -624,10 +627,17 @@ export default function TeamPerformancePage() {
           setTeams(stillValidTeams)
         }
       })
-      .catch(() => {
-        if (alive) {
-          setData(null)
-          setError("Não foi possível carregar o painel de desempenho. Verifique se você tem a permissão de gestão.")
+      .catch((err: unknown) => {
+        if (!alive) return
+        setData(null)
+        const status = (err as { response?: { status?: number } })?.response?.status
+        const code = (err as { code?: string })?.code
+        if (status === 403) {
+          setError("Sem permissão para ver o painel de desempenho. Peça a um admin para liberar `projetos.performance.view` no seu cargo.")
+        } else if (code === "ECONNABORTED" || status === 504) {
+          setError("O painel demorou demais para responder. Tente um período menor ou recarregue a página.")
+        } else {
+          setError("Não foi possível carregar o painel de desempenho. Tente novamente em instantes.")
         }
       })
       .finally(() => alive && setLoading(false))
@@ -889,6 +899,7 @@ export default function TeamPerformancePage() {
                     nameForUser={nameForUser}
                     dateFrom={capRange.from}
                     dateTo={capRange.to}
+                    onCellClick={(personId, date) => setDayDetail({ personId, date })}
                   />
                 ) : (
                   <EmptyState icon={Activity} title="Sem dados de carga" description="Nenhuma alocação com horas estimadas na janela." />
@@ -902,6 +913,13 @@ export default function TeamPerformancePage() {
           </Tabs>
         </>
       )}
+
+      <CapacityDayDetailDialog
+        personId={dayDetail?.personId ?? null}
+        date={dayDetail?.date ?? null}
+        personName={dayDetail ? nameForUser(dayDetail.personId) : undefined}
+        onClose={() => setDayDetail(null)}
+      />
     </div>
   )
 }

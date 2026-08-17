@@ -1107,3 +1107,214 @@ ProductResponse.model_rebuild()
 ContratoCreate.model_rebuild()
 ContratoUpdate.model_rebuild()
 ContratoResponse.model_rebuild()
+
+
+# ─────────────────────────────────────────────
+# Repositórios de código e commits
+# ─────────────────────────────────────────────
+
+_REPO_PROVIDER = Literal["azure_devops", "github"]
+_REPO_SYNC_STATUS = Literal["nunca", "ok", "erro", "not_found"]
+_LINK_KIND = Literal["azure_repo", "azure_projeto", "outro_provider", "nao_repositorio"]
+
+
+class ProductMini(BaseModel):
+    id: uuid.UUID
+    name: str
+    sigla: Optional[str] = None
+
+
+class RepositoryCreate(BaseModel):
+    organization: Optional[str] = None  # vazio = usa a org padrão do .env
+    project: str = Field(..., min_length=1, max_length=200)
+    repository: str = Field(..., min_length=1, max_length=200)
+    provider: _REPO_PROVIDER = "azure_devops"
+    product_ids: list[uuid.UUID] = Field(default_factory=list)
+    web_url: Optional[str] = None
+
+
+class RepositoryUpdate(BaseModel):
+    sync_enabled: Optional[bool] = None
+    is_active: Optional[bool] = None
+    product_ids: Optional[list[uuid.UUID]] = None
+
+
+class RepositoryResponse(BaseModel):
+    id: uuid.UUID
+    provider: str
+    organization: str
+    project: str
+    repository: str
+    remote_repo_id: Optional[str] = None
+    web_url: Optional[str] = None
+    default_branch: Optional[str] = None
+    is_active: bool
+    sync_enabled: bool
+    first_synced_at: Optional[datetime] = None
+    last_sync_at: Optional[datetime] = None
+    last_sync_status: str
+    last_sync_error: Optional[str] = None
+    last_commit_at: Optional[datetime] = None
+    commits_count: int
+    produtos: list[ProductMini] = Field(default_factory=list)
+
+
+class RepoLinkPreviewItem(BaseModel):
+    """Uma URL do `link_repositorio` de um produto, já classificada pelo parser."""
+    product_id: uuid.UUID
+    product_name: str
+    url: str
+    kind: _LINK_KIND
+    organization: Optional[str] = None
+    project: Optional[str] = None
+    repository: Optional[str] = None
+    provider: Optional[str] = None
+    ja_vinculado: bool = False
+
+
+class RepoImportPreview(BaseModel):
+    itens: list[RepoLinkPreviewItem] = Field(default_factory=list)
+    total_produtos_com_link: int = 0
+    total_importaveis: int = 0
+    total_repos_novos: int = 0
+    resumo_por_tipo: dict[str, int] = Field(default_factory=dict)
+
+
+class RepoImportApply(BaseModel):
+    """Cada item confirmado vira (ou reaproveita) um repositório e o vincula ao produto."""
+    itens: list[RepoLinkPreviewItem] = Field(default_factory=list)
+
+
+class RepoImportResult(BaseModel):
+    repos_criados: int = 0
+    vinculos_criados: int = 0
+    ignorados: int = 0
+
+
+class AzureProjectMini(BaseModel):
+    id: str
+    name: str
+
+
+class AzureRepoMini(BaseModel):
+    id: str
+    name: str
+    project: str
+    web_url: Optional[str] = None
+    default_branch: Optional[str] = None
+    ja_cadastrado: bool = False
+
+
+class RepoSyncResult(BaseModel):
+    repositorios: int = 0
+    commits_novos: int = 0
+    erros: list[str] = Field(default_factory=list)
+
+
+class CommitAuthorResponse(BaseModel):
+    id: uuid.UUID
+    email: str
+    display_name: Optional[str] = None
+    person_id: Optional[uuid.UUID] = None
+    person_name: Optional[str] = None
+    ignored: bool
+    commits_count: int
+    last_commit_at: Optional[datetime] = None
+
+
+class CommitAuthorUpdate(BaseModel):
+    person_id: Optional[uuid.UUID] = None
+    ignored: Optional[bool] = None
+
+
+class RepoCommitItem(BaseModel):
+    id: uuid.UUID
+    commit_id: str
+    short_id: str
+    author_name: Optional[str] = None
+    author_email: Optional[str] = None
+    author_date: datetime
+    comment: Optional[str] = None
+    add_count: int = 0
+    edit_count: int = 0
+    delete_count: int = 0
+    is_merge: bool = False
+    is_bot: bool = False
+    person_id: Optional[uuid.UUID] = None
+    person_name: Optional[str] = None
+    repository: str
+    project: str
+    remote_url: Optional[str] = None
+    produtos: list[str] = Field(default_factory=list)
+
+
+class RepoCommitPage(BaseModel):
+    items: list[RepoCommitItem] = Field(default_factory=list)
+    total: int = 0
+    page: int = 1
+    page_size: int = 50
+
+
+class MonthPoint(BaseModel):
+    month: str  # "2026-08"
+    commits: int = 0
+
+
+class DevCommitRow(BaseModel):
+    person_id: Optional[uuid.UUID] = None
+    person_name: str
+    position: Optional[str] = None
+    teams: list[str] = Field(default_factory=list)
+    commits: int = 0
+    # changeCounts do Azure conta ARQUIVOS tocados, não linhas.
+    arquivos_add: int = 0
+    arquivos_edit: int = 0
+    arquivos_delete: int = 0
+    repos_tocados: int = 0
+    produtos_tocados: int = 0
+    dias_com_commit: int = 0
+    merges: int = 0
+    primeiro_commit: Optional[datetime] = None
+    ultimo_commit: Optional[datetime] = None
+    series: list[MonthPoint] = Field(default_factory=list)
+
+
+class ProductCommitRow(BaseModel):
+    product_id: uuid.UUID
+    product_name: str
+    sigla: Optional[str] = None
+    repos: int = 0
+    commits: int = 0
+    devs: int = 0
+    ultimo_commit_at: Optional[datetime] = None
+    dias_sem_commit: Optional[int] = None
+    series: list[MonthPoint] = Field(default_factory=list)
+
+
+class RepoOverviewKpis(BaseModel):
+    commits_total: int = 0
+    devs_ativos: int = 0
+    repos_ativos: int = 0
+    repos_sem_commit: int = 0
+    produtos_com_repo: int = 0
+    produtos_sem_commit: int = 0
+    commits_sem_autor: int = 0
+    autores_pendentes: int = 0
+    # Quebra por ambiente. Branch main → prod · preview → hml · demais → dev.
+    # Um commit que chegou em main conta como prod mesmo tendo passado por preview,
+    # então `hml` é a fila do que está homologado e ainda não subiu.
+    commits_prod: int = 0
+    commits_hml: int = 0
+    commits_dev: int = 0
+    ultimo_sync_at: Optional[datetime] = None
+
+
+class RepoOverviewResponse(BaseModel):
+    kpis: RepoOverviewKpis
+    by_dev: list[DevCommitRow] = Field(default_factory=list)
+    by_product: list[ProductCommitRow] = Field(default_factory=list)
+    series: list[MonthPoint] = Field(default_factory=list)
+    position_options: list[dict] = Field(default_factory=list)
+    team_options: list[dict] = Field(default_factory=list)
+    repo_options: list[dict] = Field(default_factory=list)
+    integracao_configurada: bool = True

@@ -7,7 +7,21 @@ export type Granularidade = "mensal" | "bimestral" | "trimestral" | "semestral" 
 export type Sentido = "maior_melhor" | "menor_melhor" | "faixa_ideal"
 export type IndicadorStatus = "ativo" | "inativo"
 export type FonteDados = "manual" | "portfolio"
-export type FonteMetrica = "servicos_publicados" | "documentos_natos_digitais"
+export type FonteMetrica =
+  // Produtos
+  | "servicos_publicados"
+  | "documentos_natos_digitais"
+  // Projetos (indicadores táticos)
+  | "cronograma_desenvolvimento"
+  | "cronograma_implantacao"
+  | "desvio_trabalho_desenvolvimento"
+  | "desvio_trabalho_implantacao"
+  | "pct_desenvolvimento"
+  | "tempo_analise_oportunidade"
+  | "lead_time_us"
+  | "pct_sla_estourado"
+  | "taxa_impedimento"
+  | "pct_projetos_ia"
 export type AcompStatus = "pendente" | "atingido" | "em_atencao" | "nao_atingido"
 
 export interface AreaRefMini {
@@ -101,6 +115,7 @@ export interface Indicador {
   categoria: Categoria
   descricao: string | null
   objetivo_estrategico: string | null
+  sub_processo: string | null
   area: AreaRefMini | null
   responsavel: PersonMini | null
   unidade_medida: string | null
@@ -132,6 +147,7 @@ export interface IndicadorCreate {
   categoria: Categoria
   descricao?: string | null
   objetivo_estrategico?: string | null
+  sub_processo?: string | null
   area_id?: string | null
   responsavel_person_id?: string | null
   unidade_medida?: string | null
@@ -157,6 +173,7 @@ export interface IndicadorListItem {
   codigo: string
   nome: string
   categoria: Categoria
+  sub_processo: string | null
   area_id: string | null
   area_name: string | null
   responsavel_person_id: string | null
@@ -210,6 +227,9 @@ export interface DashboardChartIndicador {
   categoria: Categoria
   unidade_medida: string | null
   area_name: string | null
+  sub_processo: string | null
+  formula_calculo: string | null
+  sentido: Sentido | null
   periodos: DashboardChartPeriodo[]
 }
 

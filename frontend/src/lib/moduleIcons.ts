@@ -7,7 +7,7 @@ import {
   GitBranch, Layers, List, Target, Activity, Gauge, Zap, Bell, Mail,
   MessageSquare, Phone, Headphones, UserCog, ShieldCheck, Wrench, Cpu,
   Database, Server, Cloud, Globe, Home, Star, Heart, Tag, Tags, Archive,
-  Clipboard, CheckSquare, Folder, FolderOpen,
+  Clipboard, CheckSquare, Folder, FolderOpen, BookOpen, Gavel,
 } from "lucide-react"
 
 // Mapa explícito dos ícones de módulo (o campo `icon` do registry é texto livre —
@@ -22,7 +22,7 @@ const MODULE_ICONS: Record<string, ElementType> = {
   GitBranch, Layers, List, Target, Activity, Gauge, Zap, Bell, Mail,
   MessageSquare, Phone, Headphones, UserCog, ShieldCheck, Wrench, Cpu,
   Database, Server, Cloud, Globe, Home, Star, Heart, Tag, Tags, Archive,
-  Clipboard, CheckSquare, Folder, FolderOpen,
+  Clipboard, CheckSquare, Folder, FolderOpen, BookOpen, Gavel,
 }
 
 export function resolveModuleIcon(name: string | null | undefined): ElementType {

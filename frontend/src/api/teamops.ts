@@ -136,8 +136,12 @@ export interface Person {
   whatsapp: string | null
   birth_date: string | null
   position_id: string
-  area_id: string | null
-  po_person_id: string | null
+  /** @deprecated use area_ids / areas — mantido por compat com formulários antigos */
+  area_id?: string | null
+  area_ids?: string[]
+  /** @deprecated use po_person_ids / pos */
+  po_person_id?: string | null
+  po_person_ids?: string[]
   tech_reference_person_id: string | null
   manager_person_id: string | null
   employment_type: EmploymentType
@@ -150,15 +154,33 @@ export interface Person {
   created_at: string
   updated_at: string
   position: PositionMini | null
-  area: AreaMini | null
+  area?: AreaMini | null
   areas?: AreaMini[]
-  po_person: PersonMini | null
+  po_person?: PersonMini | null
+  pos?: PersonMini[]
   tech_reference_person: PersonMini | null
   manager_person: PersonMini | null
   // Acesso ao sistema (derivado do usuário vinculado)
   access_level: AccessLevel
   user_active: boolean | null
   user_email: string | null
+}
+
+export interface OffboardingPeer {
+  id: string
+  full_name: string
+  email: string
+}
+
+/** Prévia ao desligar: abertas vão para o substituto; concluídas ficam no histórico. */
+export interface OffboardingPreview {
+  person_id: string
+  full_name: string
+  position_id: string | null
+  position_name: string | null
+  open_tasks: number
+  completed_tasks: number
+  peers: OffboardingPeer[]
 }
 
 export type AccessLevel = "none" | "com_acesso" | "executor" | "gestor"
@@ -176,8 +198,17 @@ export interface TeamMember {
 /** Slugs conhecidos do cargo Product Owner no TeamOps. */
 export const PRODUCT_OWNER_POSITION_SLUGS = new Set(["po", "product_owner"])
 
+/** Product Owner (Externo): também é PO (pode ser responsável por projetos), mas só
+ * enxerga os projetos que lidera. O recorte de dados é aplicado pelo backend. */
+export const EXTERNAL_PRODUCT_OWNER_POSITION_SLUGS = new Set(["po_externo", "product_owner_externo"])
+
+export function isExternalProductOwnerPosition(slug: string | null | undefined): boolean {
+  return !!slug && EXTERNAL_PRODUCT_OWNER_POSITION_SLUGS.has(slug)
+}
+
 export function isProductOwnerPosition(slug: string | null | undefined, name?: string | null): boolean {
   if (slug && PRODUCT_OWNER_POSITION_SLUGS.has(slug)) return true
+  if (isExternalProductOwnerPosition(slug)) return true
   const n = (name ?? "").trim().toLowerCase()
   return n === "product owner" || n.includes("product owner")
 }
@@ -429,8 +460,15 @@ export const teamopsApi = {
   getPerson: (id: string) => api.get<Person>(`/teamops/persons/${id}`).then((r) => r.data),
   createPerson: (data: Partial<Person> & { full_name: string; email: string; access_level?: AccessLevel; password?: string }) =>
     api.post<Person>("/teamops/persons", data).then((r) => r.data),
-  updatePerson: (id: string, data: Partial<Person> & { access_level?: AccessLevel; password?: string; reset_password?: string }) =>
+  updatePerson: (id: string, data: Partial<Person> & {
+    access_level?: AccessLevel
+    password?: string
+    reset_password?: string
+    reassign_open_tasks_to?: string | null
+  }) =>
     api.patch<Person>(`/teamops/persons/${id}`, data).then((r) => r.data),
+  getOffboardingPreview: (id: string) =>
+    api.get<OffboardingPreview>(`/teamops/persons/${id}/offboarding-preview`).then((r) => r.data),
   deletePerson: (id: string) => api.delete<void>(`/teamops/persons/${id}`).then((r) => r.data),
 
   // Membros do time (pessoas com login ativo) — para o seletor de responsável do kanban
@@ -502,6 +540,22 @@ export const PERSON_STATUS_LABELS: Record<PersonStatus, string> = {
 
 /** Status editáveis manualmente na ficha. Férias e afastado vêm das Ausências. */
 export const MANUAL_PERSON_STATUSES: PersonStatus[] = ["ativo", "desligado"]
+
+/** Rótulo de área(s) da pessoa (API usa `areas[]`, não `area`). */
+export function personAreasLabel(p: Pick<Person, "areas" | "area"> | null | undefined): string {
+  if (!p) return "—"
+  if (p.areas && p.areas.length > 0) return p.areas.map((a) => a.name).join(", ")
+  if (p.area?.name) return p.area.name
+  return "—"
+}
+
+/** Rótulo do(s) PO(s) vinculados (API usa `pos[]`, não `po_person`). */
+export function personPosLabel(p: Pick<Person, "pos" | "po_person"> | null | undefined): string {
+  if (!p) return "—"
+  if (p.pos && p.pos.length > 0) return p.pos.map((x) => x.full_name).join(", ")
+  if (p.po_person?.full_name) return p.po_person.full_name
+  return "—"
+}
 
 export const STACK_LEVEL_LABELS: Record<StackLevel, string> = {
   basico: "Básico",

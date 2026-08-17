@@ -1,0 +1,46 @@
+﻿Produto,Sigla,Status,Categoria,Tipo desenvolvimento,Plataforma,Tipo do link,Host,Organizacao Azure,Projeto Azure,Repositorio Azure,Link,Multiplos links
+Abertura de Oportunidade,,,sistema_interno_dev,interno,Azure DevOps,Repositorio Git,dev.azure.com,processostotecnologia,moskit,abertura-oportunidade,https://dev.azure.com/processostotecnologia/moskit/_git/abertura-oportunidade,Nao
+Análise de vulnerabilidades,,,sistema_interno_dev,interno,Azure DevOps,Repositorio Git,dev.azure.com,processostotecnologia,anav,api,https://dev.azure.com/processostotecnologia/anav/_git/api,Nao
+Athena,,,sistema_interno_dev,interno,Azure DevOps,Repositorio Git,dev.azure.com,processostotecnologia,AgentesAI,athena-front,https://dev.azure.com/processostotecnologia/AgentesAI/_git/athena-front,Sim
+Athena,,,sistema_interno_dev,interno,Azure DevOps,Repositorio Git,dev.azure.com,processostotecnologia,AgentesAI,athena-api,https://dev.azure.com/processostotecnologia/AgentesAI/_git/athena-api,Sim
+Avaliação FRPRT,,,sistema_interno_dev,interno,Azure DevOps,Link do projeto (sem /_git/),dev.azure.com,processostotecnologia,Avaliacao FRPRT,,https://dev.azure.com/processostotecnologia/Avaliacao%20FRPRT,Nao
+Cadastro de Aluno SESI,,,sistema_interno_dev,interno,Azure DevOps,Repositorio Git,dev.azure.com,processostotecnologia,SGE,cadastro-alunos-sesi,https://processostotecnologia@dev.azure.com/processostotecnologia/SGE/_git/cadastro-alunos-sesi,Nao
+Calculadora de Desempenho,,,sistema_interno_dev,interno,Azure DevOps,Repositorio Git,dev.azure.com,processostotecnologia,SGE,calculadora-desempenho-sesi-v2,https://processostotecnologia@dev.azure.com/processostotecnologia/SGE/_git/calculadora-desempenho-sesi-v2,Nao
+Cartão Sesi,,,sistema_interno_dev,interno,Azure DevOps,Repositorio Git,dev.azure.com,processostotecnologia,cartão sesi,api,https://dev.azure.com/processostotecnologia/cart%C3%A3o%20sesi/_git/api,Nao
+Certificado de Conclusão de Curso,,,sistema_interno_dev,interno,Azure DevOps,Repositorio Git,dev.azure.com,processostotecnologia,SGE,portal-aluno-sge-customizacao,https://processostotecnologia@dev.azure.com/processostotecnologia/SGE/_git/portal-aluno-sge-customizacao,Nao
+E-commerce,,,sistema_interno_dev,interno,Azure DevOps,Repositorio Git,dev.azure.com,processostotecnologia,portais,senai,https://dev.azure.com/processostotecnologia/portais/_git/senai,Nao
+Form | Cadastro de Aluno SENAI,,,sistema_interno_dev,interno,Azure DevOps,Repositorio Git,dev.azure.com,processostotecnologia,SGE,cadastro-aluno-senai,https://processostotecnologia@dev.azure.com/processostotecnologia/SGE/_git/cadastro-aluno-senai,Nao
+Form | Gratuidade SENAI,,,sistema_interno_dev,interno,Azure DevOps,Repositorio Git,dev.azure.com,processostotecnologia,SGE,form-gratuidade-senai,https://processostotecnologia@dev.azure.com/processostotecnologia/SGE/_git/form-gratuidade-senai,Nao
+Form | Matrícula PJ,,,sistema_interno_dev,interno,Azure DevOps,Repositorio Git,dev.azure.com,processostotecnologia,SGE,form-matricula-turmas-proposta,https://processostotecnologia@dev.azure.com/processostotecnologia/SGE/_git/form-matricula-turmas-proposta,Nao
+Gestor de inconsistências do eSocial,,,sistema_interno_dev,interno,Azure DevOps,Repositorio Git,dev.azure.com,processostotecnologia,inconsistências esocial,api,https://dev.azure.com/processostotecnologia/inconsist%C3%AAncias%20esocial/_git/api,Nao
+Grauidade SESI,,,sistema_interno_dev,interno,Azure DevOps,Repositorio Git,dev.azure.com,processostotecnologia,SGE,form-gratuidade-sesi,https://processostotecnologia@dev.azure.com/processostotecnologia/SGE/_git/form-gratuidade-sesi,Nao
+ID-Docs,,,sistema_interno_dev,interno,Azure DevOps,Repositorio Git,dev.azure.com,processostotecnologia,idigital,api,https://dev.azure.com/processostotecnologia/idigital/_git/api,Nao
+ID-Sign,,,sistema_interno_dev,interno,Azure DevOps,Repositorio Git,dev.azure.com,processostotecnologia,iddocs,front,https://dev.azure.com/processostotecnologia/iddocs/_git/front,Nao
+Idigital,,,sistema_interno_dev,interno,Azure DevOps,Repositorio Git,dev.azure.com,processostotecnologia,idigital,api,https://dev.azure.com/processostotecnologia/idigital/_git/api,Nao
+IEL Frequência,,,sistema_interno_dev,interno,Azure DevOps,Link do projeto (sem /_git/),dev.azure.com,processostotecnologia,Projeto IEL,,https://dev.azure.com/processostotecnologia/Projeto%20IEL,Nao
+Importação de Matrícula,,,sistema_interno_dev,interno,Azure DevOps,Repositorio Git,dev.azure.com,processostotecnologia,Genus-API,genus-api,https://processostotecnologia@dev.azure.com/processostotecnologia/Genus-API/_git/genus-api,Nao
+Ivy,,,sistema_interno_dev,interno,Azure DevOps,Repositorio Git,dev.azure.com,processostotecnologia,AgentesAI,ivy-api,https://dev.azure.com/processostotecnologia/AgentesAI/_git/ivy-api,Sim
+Ivy,,,sistema_interno_dev,interno,Azure DevOps,Repositorio Git,dev.azure.com,processostotecnologia,AgentesAI,ivy-front,https://dev.azure.com/processostotecnologia/AgentesAI/_git/ivy-front,Sim
+MOSKIT,,,sistema_externo_implantacao,externo,Azure DevOps,Repositorio Git,dev.azure.com,processostotecnologia,moskit,integration,https://dev.azure.com/processostotecnologia/moskit/_git/integration,Nao
+Orçamento Plurianual,,,sistema_externo_ia,externo,Azure DevOps,Link do projeto (sem /_git/),dev.azure.com,processostotecnologia,Orçamento Plurianual,,https://dev.azure.com/processostotecnologia/Or%C3%A7amento%20Plurianual,Nao
+Painel de Gestão de Vendas E-commerce,,,sistema_interno_dev,interno,Azure DevOps,Repositorio Git,dev.azure.com,processostotecnologia,SGE,dashboard-ecommerce,https://processostotecnologia@dev.azure.com/processostotecnologia/SGE/_git/dashboard-ecommerce,Nao
+Portal SENAI,,,sistema_interno_dev,interno,Azure DevOps,Link do projeto (sem /_git/),dev.azure.com,processostotecnologia,portais,,https://dev.azure.com/processostotecnologia/portais,Nao
+Rubeus,,,sistema_externo_implantacao,externo,Azure DevOps,Link do projeto (sem /_git/),dev.azure.com,processostotecnologia,Rubeus,,https://dev.azure.com/processostotecnologia/Rubeus,Nao
+Senai Conecta,,,sistema_interno_dev,interno,Azure DevOps,Repositorio Git,dev.azure.com,processostotecnologia,SGE,senai-conecta,https://dev.azure.com/processostotecnologia/SGE/_git/senai-conecta,Nao
+Sesi Saúde +,,,sistema_interno_ia,interno,Azure DevOps,Repositorio Git,dev.azure.com,processostotecnologia,SESI Saude,SESI Saude,https://dev.azure.com/processostotecnologia/SESI%20Saude/_git/SESI%20Saude,Nao
+SGE | API,,,sistema_interno_dev,interno,Azure DevOps,Repositorio Git,dev.azure.com,processostotecnologia,SGE,sge_api,https://dev.azure.com/processostotecnologia/SGE/_git/sge_api,Nao
+Sistema de Gerenciamento de Absenteísmo,,,sistema_interno_dev,interno,Azure DevOps,Repositorio Git,dev.azure.com,processostotecnologia,absenteismo,api,https://dev.azure.com/processostotecnologia/absenteismo/_git/api,Nao
+Site SENAI,,,sistema_interno_dev,interno,Azure DevOps,Link do projeto (sem /_git/),dev.azure.com,processostotecnologia,portais,,https://dev.azure.com/processostotecnologia/portais,Nao
+Transparencia,,,sistema_interno_dev,interno,Azure DevOps,Link do projeto (sem /_git/),dev.azure.com,processostotecnologia,portais,,https://dev.azure.com/processostotecnologia/portais,Nao
+Transportes,,,sistema_interno_dev,interno,Azure DevOps,Link do projeto (sem /_git/),dev.azure.com,processostotecnologia,transporte,,https://dev.azure.com/processostotecnologia/transporte,Nao
+FormTrack,,,sistema_interno_ia,interno,GitHub,Repositorio Git,github.com,,,,https://github.com/FIEA-IA/FormTrack.git,Nao
+Gestão de Atividades,,,sistema_interno_ia,interno,GitHub,Repositorio Git,github.com,,,,https://github.com/FIEA-IA/gest-o-de-atividades,Nao
+Gestão de Risco Operacionais,,,sistema_interno_dev,interno,GitHub,Repositorio Git,github.com,,,,https://github.com/maxsuelrl/Mapeamento-de-Risco,Nao
+Metrolims,,,sistema_interno_dev,interno,GitHub,Repositorio Git,github.com,,,,https://github.com/FIEA-IA/MetroLIMS,Nao
+Riscos Estratégicos,,,sistema_externo_ia,externo,GitHub,Repositorio Git,github.com,,,,https://github.com/FIEA-IA/riscos_estrategicos,Nao
+Binds,,,sistema_externo_implantacao,externo,Nao e repositorio (URL de sistema/portal),URL de aplicacao/suporte,n8n.io,,,,https://n8n.io/,Nao
+Capacita Mais,,,sistema_interno_dev,interno,Nao e repositorio (URL de sistema/portal),URL de aplicacao/suporte,capacitamais-dev.sistemafiea.com.br,,,,https://capacitamais-dev.sistemafiea.com.br/,Nao
+Educonnect,,,sistema_externo_implantacao,externo,Nao e repositorio (URL de sistema/portal),URL de aplicacao/suporte,www.sesieducacao.com.br,,,,https://www.sesieducacao.com.br/publico/,Nao
+Histórico Escolar,,,sistema_interno_dev,interno,Nao e repositorio (URL de sistema/portal),URL de aplicacao/suporte,apiblockchain.sistemafiea.com.br,,,,https://apiblockchain.sistemafiea.com.br,Nao
+LG,,,sistema_externo_implantacao,externo,Nao e repositorio (URL de sistema/portal),URL de aplicacao/suporte,lg-lugardegente.zendesk.com,,,,http://lg-lugardegente.zendesk.com/access/return_to?return_to=https%3A%2F%2Fsuporte.lg.com.br%2Fhc%2Fpt-br%2Frequests,Nao
+Serviços Educacionais - Calculadora de desempenho,,,sistema_interno_dev,interno,Nao e repositorio (URL de sistema/portal),URL de aplicacao/suporte,servicoseducacionais-dev.sistemafiea.com.br,,,,https://servicoseducacionais-dev.sistemafiea.com.br/home,Nao

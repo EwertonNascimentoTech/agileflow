@@ -16,6 +16,8 @@ import {
 import {
   teamopsApi,
   PERSON_STATUS_LABELS,
+  personAreasLabel,
+  personPosLabel,
   type Area,
   type Person,
   type Position,
@@ -157,8 +159,8 @@ export default function PeoplePage() {
                         <div className="text-xs text-muted-foreground">{p.email}</div>
                       </td>
                       <td className="px-4 py-2">{p.position?.name ?? "—"}</td>
-                      <td className="px-4 py-2">{p.area?.name ?? "—"}</td>
-                      <td className="px-4 py-2">{p.po_person?.full_name ?? "—"}</td>
+                      <td className="px-4 py-2">{personAreasLabel(p)}</td>
+                      <td className="px-4 py-2">{personPosLabel(p)}</td>
                       <td className="px-4 py-2">
                         {p.access_level === "none" ? (
                           <span className="text-xs text-muted-foreground">Sem acesso</span>

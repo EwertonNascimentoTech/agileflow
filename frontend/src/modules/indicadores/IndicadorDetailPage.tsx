@@ -93,7 +93,7 @@ export default function IndicadorDetailPage() {
           <ArrowLeft size={16} />
         </Button>
         <div className="flex-1 min-w-0">
-          <h2 className="text-lg font-bold truncate">{ind.codigo} — {ind.nome}</h2>
+          <h2 className="text-lg font-bold truncate">{ind.nome}</h2>
           <div className="flex flex-wrap items-center gap-1.5 mt-1">
             <Badge variant="outline" className="text-[10px]">{CATEGORIA_LABEL[ind.categoria]}</Badge>
             <Badge variant="outline" className="text-[10px]">{GRANULARIDADE_LABEL[ind.granularidade]}</Badge>
@@ -127,6 +127,7 @@ export default function IndicadorDetailPage() {
         <MetaItem label="Unidade" value={ind.unidade_medida ?? "—"} />
         <MetaItem label="Periodicidade" value={ind.periodicidade_atualizacao ?? "—"} />
         <MetaItem label="Fonte de dados" value={ind.fonte_dados ?? "—"} />
+        <MetaItem label="Sub-processo do portfólio" value={ind.sub_processo ?? "—"} />
         {ind.fonte === "portfolio" && (
           <>
             <MetaItem label="Métrica" value={ind.fonte_metrica ? METRICA_LABEL[ind.fonte_metrica] : "—"} />

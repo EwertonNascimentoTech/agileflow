@@ -70,6 +70,26 @@ async def get_my_tenant(
                 "color": m.color,
             })
 
+    # Documentação é módulo de plataforma: sempre disponível a todos os tenants
+    # autenticados (não depende de ativação no plano / tenant_modules).
+    if not any(m["slug"] == "documentacao" for m in active_modules):
+        doc_row = (
+            await db.execute(
+                select(Module).where(
+                    Module.slug == "documentacao",
+                    Module.is_active == True,
+                )
+            )
+        ).scalar_one_or_none()
+        if doc_row is not None:
+            active_modules.append({
+                "slug": doc_row.slug,
+                "name": doc_row.name,
+                "description": doc_row.description,
+                "icon": doc_row.icon,
+                "color": doc_row.color,
+            })
+
     return {
         "id": str(tenant.id),
         "name": tenant.name,

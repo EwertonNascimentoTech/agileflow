@@ -41,6 +41,23 @@ export function isConfigNavPath(path: string): boolean {
   return path.includes("/config")
 }
 
+/** Cargos (TeamOps) do Product Owner (Externo): PO que só enxerga os projetos onde é o
+ * responsável. As visões consolidadas do portfólio ficam fora do menu dele — e o backend
+ * responde 403 nesses endpoints, então isto é só o espelho da regra na navegação. */
+export const EXTERNAL_PO_POSITION_SLUGS: readonly string[] = ["po_externo", "product_owner_externo"]
+
+/** Módulos inteiros vedados ao PO Externo — espelha PO_EXTERNAL_BLOCKED_MODULES
+ * (backend/app/core/dependencies.py), que responde 403 nesses módulos. */
+export const EXTERNAL_PO_BLOCKED_MODULES: readonly string[] = ["teamops", "indicadores", "rtd"]
+
+export function isExternalProductOwner(
+  user: { role?: string; position_slug?: string | null } | null | undefined,
+): boolean {
+  if (!user) return false
+  if (user.role === "super_admin" || user.role === "company_admin") return false
+  return EXTERNAL_PO_POSITION_SLUGS.includes((user.position_slug ?? "").trim())
+}
+
 /** Nível de acesso de um usuário a um kanban (funil) conforme o access_control por função. */
 export type FunnelAccessLevel = "manage" | "view" | "none"
 

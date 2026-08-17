@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { AlertTriangle, ArrowUpRight, BarChart3, Bot, CalendarRange, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Eye, GitBranch, KanbanSquare, List as ListIcon, Loader2, Plus, Search, X } from "lucide-react"
 import {
@@ -9,12 +9,11 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
-  type DragStartEvent,
 } from "@dnd-kit/core"
 import { CSS } from "@dnd-kit/utilities"
 
 import { teamopsApi, type Person } from "@/api/teamops"
-import { projetosApi, type CardClassification, type Project, type ProjectCardField, type ProjectDefaultFormField, type ProjectDemandFormField, type ProjectDemandFormSection, type ProjectDemandType, type ProjectFunnel, type ProjectStatus, type ProjectStatusSectionLink, type ProjectTask, type PriorityQuadrant, type QuadrantCode } from "@/api/projetos"
+import { projetosApi, type CardClassification, type ProjectCardField, type ProjectDefaultFormField, type ProjectDemandFormField, type ProjectDemandFormSection, type ProjectDemandType, type ProjectFunnel, type ProjectStatus, type ProjectStatusSectionLink, type ProjectTask, type PriorityQuadrant, type QuadrantCode } from "@/api/projetos"
 import {
   formatCardCustomFieldValue,
   formatDiretoriaAreaLabel,
@@ -31,6 +30,7 @@ import {
   planningRootTasks,
   buildEffectivePoByTaskId,
   buildEffectiveProgramByTaskId,
+  buildEffectiveDimensionByTaskId,
   buildPoByOriginTaskId,
   buildPoMatchByFormDimensions,
   taskMatches,
@@ -118,6 +118,14 @@ const CLASSIFICATION_COLORS: Record<NonNullable<ProjectTask["card_classification
   melhoria: { bg: "#7c3aed", color: "#fff" },
 }
 
+/** Tooltip com o resumo de IA dos cards: com auxílio, sem auxílio e não classificados. */
+function iaSummaryTitle(tasks: ProjectTask[]): string {
+  const comIa = tasks.filter((t) => t.ia_assisted === true).length
+  const semIa = tasks.filter((t) => t.ia_assisted === false).length
+  const naoClassificado = tasks.length - comIa - semIa
+  return `Com auxílio de IA: ${comIa}\nSem auxílio de IA: ${semIa}\nNão classificado: ${naoClassificado}`
+}
+
 function ClassificationChip({ value }: { value: ProjectTask["card_classification"] }) {
   if (!value) return null
   const colors = CLASSIFICATION_COLORS[value]
@@ -136,6 +144,27 @@ function SlaChip({ state }: { state: ProjectTask["sla_state"] }) {
   if (state === "warning") return <span className="chip warning">SLA: alerta</span>
   if (state === "breached") return <span className="chip destructive">SLA: atrasado</span>
   return null
+}
+
+// Quantos card-raiz concluídos vêm na primeira carga do board. O resto fica atrás
+// de "carregar mais" — no portfólio medido isso tira 56% dos cards do primeiro paint.
+const DEFAULT_DONE_LIMIT = 25
+
+// Referência estável: uma coluna vazia não deve gerar um array novo a cada render
+// (com BoardColumn memoizado, isso invalidaria a memo sem que nada tenha mudado).
+const EMPTY_TASKS: ProjectTask[] = []
+
+// Formatadores Intl compartilhados: criar um por card, por render, custa caro —
+// e o resultado é idêntico. `todayStart` idem, recalculado só quando o módulo carrega.
+const DM_FORMAT = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit" })
+const DMY_FORMAT = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" })
+
+/** Início do dia de hoje, em ms. Base da comparação de atraso, calculada uma vez
+ *  por render do board em vez de três vezes por card. */
+function startOfTodayMs(): number {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
 }
 
 const CARD_FIELD_FULL_WIDTH = new Set(["title", "description", "children_progress"])
@@ -169,9 +198,14 @@ type CardCtx = {
   planningTag: (task: ProjectTask) => { kind: "projeto" | "programa"; programName: string | null } | null
   /** Barras Feature / User Stories / Outros sob cards Projeto/Programa. */
   planningProgressBars: (taskId: string) => PlanningProgressBar[]
+  /** Início do dia de hoje (ms) — base compartilhada da marcação de atraso. */
+  todayStartMs: number
 }
 
-function BoardCard({
+// Memoizados: o dnd-kit re-renderiza todo o contexto sempre que o card sob o cursor
+// muda durante um arraste, então sem memo o board inteiro repinta a cada fronteira
+// de coluna cruzada.
+const BoardCard = memo(function BoardCard({
   task,
   ctx,
   onOpen,
@@ -180,11 +214,15 @@ function BoardCard({
   ctx: CardCtx
   onOpen: (task: ProjectTask) => void
 }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: `task-${task.id}` })
-  const style = { transform: CSS.Translate.toString(transform) }
+  const locked = !!task.procurement_locked
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: `task-${task.id}`,
+    disabled: locked,
+  })
+  const style = { transform: CSS.Translate.toString(transform), ...(locked ? { opacity: 0.92, cursor: "default" } : {}) }
   const assignee = ctx.resolveAssignee(task.assigned_to)
   const isOverdue = task.due_date && !task.completed_at
-    ? new Date(task.due_date) < new Date(new Date().toDateString())
+    ? new Date(task.due_date).getTime() < ctx.todayStartMs
     : false
 
   function renderField(key: string, label: string) {
@@ -262,7 +300,7 @@ function BoardCard({
         return task.due_date ? (
           <span className={`due-pill ${isOverdue ? "overdue" : ""}`}>
             <span className="dot" />
-            {new Date(task.due_date).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}
+            {DM_FORMAT.format(new Date(task.due_date))}
           </span>
         ) : null
       case "assignee":
@@ -275,6 +313,23 @@ function BoardCard({
             {assignee ? initialsOf(assignee.full_name) : "?"}
           </span>
         )
+      case "requester": {
+        if (!task.requester_name) return null
+        return (
+          <span
+            style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+            title={`${label}: ${task.requester_name}`}
+          >
+            <span
+              className="assignee-avatar"
+              style={{ background: colorForUser(task.requester_name), width: 18, height: 18, fontSize: 8 }}
+            >
+              {initialsOf(task.requester_name)}
+            </span>
+            <span className="chip muted">{task.requester_name}</span>
+          </span>
+        )
+      }
       default: {
         if (!key.startsWith(CARD_CUSTOM_PREFIX)) return null
         const fieldKey = key.slice(CARD_CUSTOM_PREFIX.length)
@@ -285,7 +340,30 @@ function BoardCard({
           raw,
           (id) => ctx.resolveAssignee(id)?.full_name ?? null,
         )
-        return text ? <span className="chip muted">{text}</span> : null
+        if (!text) return null
+        // Requisitante / campos de pessoa: mesmo bloco visual do Solicitante (avatar + nome).
+        const personType = normalizeFieldType(meta?.field_type ?? "")
+        const isPersonLike =
+          fieldKey === "requisitante" ||
+          personType === "user" ||
+          personType === "current_user"
+        if (isPersonLike) {
+          return (
+            <span
+              style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+              title={`${label}: ${text}`}
+            >
+              <span
+                className="assignee-avatar"
+                style={{ background: colorForUser(text), width: 18, height: 18, fontSize: 8 }}
+              >
+                {initialsOf(text)}
+              </span>
+              <span className="chip muted">{text}</span>
+            </span>
+          )
+        }
+        return <span className="chip muted">{text}</span>
       }
     }
   }
@@ -311,7 +389,7 @@ function BoardCard({
       className={`task-card ${isDragging ? "dragging" : ""}`}
       onClick={() => onOpen(task)}
       {...attributes}
-      {...listeners}
+      {...(locked ? {} : listeners)}
     >
       {planningTag && (
         <div style={{ marginBottom: 4, display: "flex", flexWrap: "wrap", gap: 4 }}>
@@ -328,6 +406,13 @@ function BoardCard({
           {planningTag.kind === "programa" && planningTag.programName && (
             <span className="chip muted" title="Programa vinculado">{planningTag.programName}</span>
           )}
+        </div>
+      )}
+      {locked && (
+        <div style={{ marginBottom: 4, display: "flex", flexWrap: "wrap", gap: 4 }}>
+          <span className="chip" style={{ background: "#ea580c", color: "#fff" }} title="Aguardando conclusão no kanban Contratar">
+            Aguardando contratação
+          </span>
         </div>
       )}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
@@ -371,23 +456,31 @@ function BoardCard({
       )}
     </article>
   )
-}
+})
 
 // ─────────── Column (estilo do protótipo) ───────────
-function BoardColumn({
+const BoardColumn = memo(function BoardColumn({
   status,
   tasks,
   ctx,
   hasAgent,
   onOpen,
+  hiddenCount = 0,
+  onLoadMore,
 }: {
   status: ProjectStatus
   tasks: ProjectTask[]
   ctx: CardCtx
   hasAgent?: boolean
   onOpen: (task: ProjectTask) => void
+  /** Concluídos que ficaram fora da carga inicial desta coluna. */
+  hiddenCount?: number
+  onLoadMore?: () => void
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `column-${status.id}` })
+  // O contador da coluna precisa refletir o total real, não só o que foi baixado.
+  const shownCount = tasks.length
+  const totalCount = shownCount + hiddenCount
   return (
     <section className={`column ${isOver ? "drag-over" : ""}`}>
       <div className="col-bar" style={{ background: status.color }} />
@@ -402,7 +495,14 @@ function BoardColumn({
               <Bot size={15} />
             </span>
           )}
-          <span className="col-count">{tasks.length}</span>
+          <span
+            className="col-count"
+            title={hiddenCount > 0
+              ? `Mostrando ${shownCount} de ${totalCount} — os mais recentes primeiro.`
+              : iaSummaryTitle(tasks)}
+          >
+            {hiddenCount > 0 ? `${shownCount}/${totalCount}` : shownCount}
+          </span>
         </div>
       </header>
       <div ref={setNodeRef} className="col-body">
@@ -411,10 +511,15 @@ function BoardColumn({
         ) : tasks.map((task) => (
           <BoardCard key={task.id} task={task} ctx={ctx} onOpen={onOpen} />
         ))}
+        {hiddenCount > 0 && onLoadMore && (
+          <button type="button" className="btn ghost" style={{ width: "100%", marginTop: 6 }} onClick={onLoadMore}>
+            Carregar mais {hiddenCount}
+          </button>
+        )}
       </div>
     </section>
   )
-}
+})
 
 // ─────────── View tabs (Quadro / Lista / Gantt / Calendário) ───────────
 type BoardView = "board" | "list" | "cal"
@@ -500,7 +605,7 @@ function ListView({
               {collapsed[s.id] ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
               <span className="status-dot" style={{ background: s.color }} />
               <span>{s.name}</span>
-              <span style={{ color: "var(--af-muted-fg)", fontWeight: 500 }}>{stTasks.length}</span>
+              <span style={{ color: "var(--af-muted-fg)", fontWeight: 500 }} title={iaSummaryTitle(stTasks)}>{stTasks.length}</span>
             </div>
             {!collapsed[s.id] && stTasks.map((t) => {
               const a = resolveAssignee(t.assigned_to)
@@ -521,9 +626,14 @@ function ListView({
                       </span>
                     )}
                     {lastDue && (
-                      <span className="chip muted">Última entrega: {new Date(lastDue).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" })}</span>
+                      <span className="chip muted">Última entrega: {DMY_FORMAT.format(new Date(lastDue))}</span>
                     )}
                     {t.card_classification && <ClassificationChip value={t.card_classification} />}
+                    {t.procurement_locked && (
+                      <span className="chip" style={{ background: "#ea580c", color: "#fff" }}>
+                        Aguardando contratação
+                      </span>
+                    )}
                     {canSendToDev && t.parent_task_id && (
                       <button
                         type="button"
@@ -680,7 +790,6 @@ export default function ProjectBoardPage() {
   const { projectId } = useParams<{ projectId: string }>()
   const funnelFromQuery = searchParams.get("funnel")
   const taskFromQuery = searchParams.get("task")
-  const [projects, setProjects] = useState<Project[]>([])
   const [funnels, setFunnels] = useState<ProjectFunnel[]>([])
   const [statuses, setStatuses] = useState<ProjectStatus[]>([])
   // status_ids que têm um agente de IA ativo vinculado (ícone de robô na raia).
@@ -689,6 +798,10 @@ export default function ProjectBoardPage() {
   const [formSections, setFormSections] = useState<ProjectDemandFormSection[]>([])
   const [fieldsBySection, setFieldsBySection] = useState<Record<string, ProjectDemandFormField[]>>({})
   const [tasks, setTasks] = useState<ProjectTask[]>([])
+  // Coluna final (Concluído) costuma concentrar metade do board e ninguém a rola até o
+  // fim. Carrega os mais recentes; `null` = já pediram todos via "carregar mais".
+  const [doneLimit, setDoneLimit] = useState<number | null>(DEFAULT_DONE_LIMIT)
+  const [doneTotal, setDoneTotal] = useState(0)
   const [users, setUsers] = useState<User[]>([])
   const [persons, setPersons] = useState<Person[]>([])
   // Subconjunto de usuários com cargo PO (Product Owner) — para o campo de responsável na conversão.
@@ -698,6 +811,10 @@ export default function ProjectBoardPage() {
   const [quadrants, setQuadrants] = useState<PriorityQuadrant[]>([])
   const [quadrantByTask, setQuadrantByTask] = useState<Record<string, QuadrantCode>>({})
   const [loading, setLoading] = useState(true)
+  // Falha no carregamento inicial (processos). Fica visível com botão de nova tentativa,
+  // em vez de deixar o quadro numa mensagem morta.
+  const [bootError, setBootError] = useState<string | null>(null)
+  const [bootAttempt, setBootAttempt] = useState(0)
   const [openCreate, setOpenCreate] = useState(false)
   const [savingCreate, setSavingCreate] = useState(false)
   const [selectedTask, setSelectedTask] = useState<ProjectTask | null>(null)
@@ -738,11 +855,7 @@ export default function ProjectBoardPage() {
     mode: "backlog_exit" | "late"
   } | null>(null)
 
-  const selectedProject = useMemo(
-    () => projects.find((p) => p.id === projectId) ?? null,
-    [projects, projectId]
-  )
-  const projectRouteBase = selectedProject ? `/app/modules/projetos/${selectedProject.id}` : "/app/modules/projetos"
+  const projectRouteBase = projectId ? `/app/modules/projetos/${projectId}` : "/app/modules/projetos"
   // Tipos que são "filhos" de algum outro tipo: criados pela hierarquia (dentro do card pai),
   // não diretamente pelo "Nova Demanda".
   const childTypeIds = useMemo(
@@ -926,6 +1039,8 @@ export default function ProjectBoardPage() {
 
   const effectivePoByTaskId = useMemo(() => buildEffectivePoByTaskId(tasks), [tasks])
   const effectiveProgramByTaskId = useMemo(() => buildEffectiveProgramByTaskId(tasks), [tasks])
+  const effectiveDiretoriaByTaskId = useMemo(() => buildEffectiveDimensionByTaskId(tasks, "diretoria"), [tasks])
+  const effectiveAreaByTaskId = useMemo(() => buildEffectiveDimensionByTaskId(tasks, "area"), [tasks])
 
   const poByOriginTaskId = useMemo(() => buildPoByOriginTaskId(tasks), [tasks])
 
@@ -962,6 +1077,19 @@ export default function ProjectBoardPage() {
   const selectedFunnelName = funnels.find((f) => f.id === selectedFunnelId)?.name ?? null
 
   const taskProgressById = useMemo(() => buildTaskProgressById(tasks), [tasks])
+  // Recalculado quando a lista muda — mais que suficiente para marcar atraso, e evita
+  // três alocações de Date por card a cada render.
+  const todayStartMs = useMemo(() => startOfTodayMs(), [tasks])
+
+  // Nº de filhos por card, calculado UMA vez. Antes cada card varria a lista inteira
+  // atrás dos próprios filhos — O(N) por card, ou seja O(N²) no board.
+  const childCountByParent = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const t of tasks) {
+      if (t.parent_task_id) counts.set(t.parent_task_id, (counts.get(t.parent_task_id) ?? 0) + 1)
+    }
+    return counts
+  }, [tasks])
 
   const demandTypeMeta = useMemo(() => {
     const m = new Map<string, { name: string; slug?: string | null }>()
@@ -1029,7 +1157,7 @@ export default function ProjectBoardPage() {
     isUsKanban: isUserStoryKanbanFunnel(selectedFunnelName),
     isFeatureKanban: isFeatureKanbanFunnel(selectedFunnelName),
     featureUsProgress: (taskId: string) => {
-      const total = tasks.filter((t) => t.parent_task_id === taskId).length
+      const total = childCountByParent.get(taskId) ?? 0
       if (total === 0) return null
       return { pct: taskProgressById.get(taskId) ?? 0, total }
     },
@@ -1047,6 +1175,7 @@ export default function ProjectBoardPage() {
       }
     },
     planningProgressBars: (taskId: string) => planningProgressBarsById.get(taskId) ?? [],
+    todayStartMs,
   }), [
     visibleCardFields,
     demandTypeName,
@@ -1060,6 +1189,7 @@ export default function ProjectBoardPage() {
     formFieldMeta,
     defaultFormFields,
     selectedFunnelName,
+    todayStartMs,
     taskProgressById,
     tasks,
     programNameById,
@@ -1090,6 +1220,7 @@ export default function ProjectBoardPage() {
   }, [location.pathname])
 
   useEffect(() => {
+    setBootError(null)
     Promise.all([
       projetosApi.listProjects(true),
       teamopsApi.listPersons().catch(() => [] as Person[]),
@@ -1098,7 +1229,6 @@ export default function ProjectBoardPage() {
       projetosApi.getDefaultFormFields().catch(() => [] as ProjectDefaultFormField[]),
     ])
       .then(([ps, personsList, dts, qd, df]) => {
-        setProjects(ps)
         setPersons(personsList)
         setUsers(personsList.map(personToUser))
         setPoUsers(productOwnerPersons(personsList).map(personToUser))
@@ -1108,9 +1238,15 @@ export default function ProjectBoardPage() {
         if (!projectId && ps[0]) {
           navigate(`/app/modules/projetos/${ps[0].id}/board`, { replace: true })
         }
+        if (!projectId && ps.length === 0) {
+          setBootError("Nenhum processo ativo encontrado para o seu usuário.")
+        }
+      })
+      .catch((err) => {
+        setBootError(getApiError(err) || "Não foi possível carregar os processos.")
       })
       .finally(() => setLoading(false))
-  }, [navigate, projectId])
+  }, [navigate, projectId, bootAttempt])
 
   useEffect(() => {
     if (availableDemandTypes.length === 0) {
@@ -1138,29 +1274,54 @@ export default function ProjectBoardPage() {
     projetosApi.listPrograms(projectId)
       .then(setPrograms)
       .catch(() => setPrograms([]))
-    Promise.all([
-      projetosApi.listFunnels(projectId, true),
-      projetosApi.listTasks(projectId),
-      projetosApi.getProjectFormValues(projectId).catch(() => ({})),
-    ]).then(([fs, ts, formVals]) => {
-      const orderedFunnels = [...fs].sort((a, b) => a.order - b.order)
-      setFunnels(orderedFunnels)
-      setTasks(ts)
-      setFormValuesByTask(formVals)
-      const fromQuery =
-        funnelFromQuery && orderedFunnels.some((f) => f.id === funnelFromQuery)
-          ? funnelFromQuery
-          : null
-      const defaultFunnel = orderedFunnels.find((f) => f.is_default) ?? orderedFunnels[0]
-      setSelectedFunnelId(fromQuery ?? defaultFunnel?.id ?? "")
-    })
+  }, [projectId])
+
+  // Funis + kanban selecionado. Separado dos cards: a lista de funis é pequena e
+  // precisa resolver antes das colunas, senão o quadro fica em "Sem colunas".
+  useEffect(() => {
+    if (!projectId) return
+    projetosApi.listFunnels(projectId, true)
+      .then((fs) => {
+        const orderedFunnels = [...fs].sort((a, b) => a.order - b.order)
+        setFunnels(orderedFunnels)
+        const fromQuery =
+          funnelFromQuery && orderedFunnels.some((f) => f.id === funnelFromQuery)
+            ? funnelFromQuery
+            : null
+        const defaultFunnel = orderedFunnels.find((f) => f.is_default) ?? orderedFunnels[0]
+        setSelectedFunnelId(fromQuery ?? defaultFunnel?.id ?? "")
+      })
+      .catch((err) => {
+        toast.error(getApiError(err) || "Não foi possível carregar os kanbans.")
+      })
   }, [projectId, funnelFromQuery])
+
+  // Cards e valores de formulário: dependem só do projeto. Trocar de kanban não
+  // rebaixa o quadro nem redispara o download da lista inteira.
+  useEffect(() => {
+    if (!projectId) return
+    loadBoardTasks(doneLimit).catch((err) => {
+      toast.error(getApiError(err) || "Não foi possível carregar os cards do kanban.")
+    })
+    projetosApi.getProjectFormValues(projectId)
+      .then(setFormValuesByTask)
+      .catch(() => setFormValuesByTask({}))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, doneLimit])
 
   useEffect(() => {
     if (!projectId || !selectedFunnelId) return
-    projetosApi.listStatuses(projectId, selectedFunnelId, true).then((ss) => {
-      setStatuses([...ss].sort((a, b) => a.order - b.order))
-    })
+    let current = true
+    projetosApi.listStatuses(projectId, selectedFunnelId, true)
+      .then((ss) => {
+        if (!current) return
+        setStatuses([...ss].sort((a, b) => a.order - b.order))
+      })
+      .catch((err) => {
+        if (!current) return
+        toast.error(getApiError(err) || "Não foi possível carregar as etapas deste kanban.")
+      })
+    return () => { current = false }
   }, [projectId, selectedFunnelId])
 
   // Raias com agente de IA ativo (para exibir o ícone de robô no cabeçalho da coluna).
@@ -1273,7 +1434,6 @@ export default function ProjectBoardPage() {
   const demandFormCache = useRef<Map<string, { sections: ProjectDemandFormSection[]; fieldsBySection: Record<string, ProjectDemandFormField[]> }>>(new Map())
   const sectionLinksCache = useRef<Map<string, ProjectStatusSectionLink[]>>(new Map())
   const formValuesCache = useRef<Map<string, Record<string, unknown>>>(new Map())
-  const [, setActiveDragTaskId] = useState<string | null>(null)
 
   async function loadDemandForm(demandTypeId: string) {
     const cached = demandFormCache.current.get(demandTypeId)
@@ -1311,10 +1471,19 @@ export default function ProjectBoardPage() {
     return values
   }
 
-  async function reloadTasks() {
+  /** Carga do board: payload enxuto e coluna final paginada.
+   *  `limit === null` = trazer todos os concluídos ("carregar mais"). */
+  async function loadBoardTasks(limit: number | null) {
     if (!projectId) return
-    const next = await projetosApi.listTasks(projectId)
+    const { tasks: next, doneTotal: total } = await projetosApi.listBoardTasks(projectId, {
+      done_limit: limit ?? undefined,
+    })
     setTasks(next)
+    if (!Number.isNaN(total)) setDoneTotal(total)
+  }
+
+  async function reloadTasks() {
+    await loadBoardTasks(doneLimit)
   }
 
   // Etapa do funil atual que transita para outro kanban (= "ir para desenvolvimento").
@@ -1334,10 +1503,56 @@ export default function ProjectBoardPage() {
     }
   }
 
+  /** Avanço no fluxo: mesma raia = order maior; entre kanbans = order do kanban.
+   *  Espelha `_is_forward_status_move` do backend. */
+  function isForwardMove(from?: ProjectStatus, to?: ProjectStatus): boolean {
+    if (!from || !to || from.id === to.id) return false
+    if (from.funnel_id === to.funnel_id) return to.order > from.order
+    const orderOf = (id?: string) => funnels.find((f) => f.id === id)?.order ?? 0
+    return orderOf(to.funnel_id) > orderOf(from.funnel_id)
+  }
+
+  /** Feature/US pelo kanban em que o card está (mesmo critério de `useEstimatedHoursOnCard`). */
+  function isFeatureOrUsTask(task: ProjectTask): boolean {
+    const funnelId = statusFunnel[task.status_id]
+    return isFeatureOrUsKanbanFunnel(funnels.find((f) => f.id === funnelId)?.name ?? null)
+  }
+
+  /** Sobe pela cadeia de pais até o card-raiz de planejamento (projeto/programa). */
+  function planningRootOf(task: ProjectTask): ProjectTask | null {
+    const byId = new Map(tasks.map((t) => [t.id, t]))
+    let cur: ProjectTask | undefined = task
+    const seen = new Set<string>()
+    while (cur && !seen.has(cur.id)) {
+      seen.add(cur.id)
+      if (isPlanningRootTask(cur.planning_kind)) return cur
+      cur = cur.parent_task_id ? byId.get(cur.parent_task_id) : undefined
+    }
+    return null
+  }
+
   async function handleMove(task: ProjectTask, toStatusId: string) {
+    if (task.procurement_locked) {
+      toast.error("Card aguardando contratação — abra o kanban Contratar para avançar.")
+      return
+    }
     if (!projectId || task.status_id === toStatusId) return
     const fromStatus = statuses.find((s) => s.id === task.status_id)
     const toStatus = statuses.find((s) => s.id === toStatusId)
+    // Trava de cronograma (Feature/US só avançam com o projeto em desenvolvimento).
+    // Só a 1ª condição é checada aqui — é um campo do card-raiz, já em memória. A
+    // conferência etapa a etapa fica no servidor, que responde 423 dizendo o que falta;
+    // duplicá-la no cliente só criaria duas versões da mesma regra para divergir.
+    if (isForwardMove(fromStatus, toStatus) && isFeatureOrUsTask(task)) {
+      const root = planningRootOf(task)
+      if (root && !root.schedule_committed_at) {
+        toast.error(
+          `O projeto "${root.title}" ainda não entrou em desenvolvimento. ` +
+          "Mova o card do projeto para uma etapa de desenvolvimento antes de avançar Features e User Stories.",
+        )
+        return
+      }
+    }
     const isAssignee = isUserAssignee(task)
     if (!canMoveTaskOnBoard(
       user,
@@ -1350,6 +1565,13 @@ export default function ProjectBoardPage() {
       return
     }
     const moveFunnelName = funnels.find((f) => f.id === (fromStatus?.funnel_id ?? selectedFunnelId))?.name ?? selectedFunnelName
+    // No kanban User Story só o responsável ou a coordenação (admin) movem. Espelha
+    // `_check_us_move_authorship` no backend, que é quem de fato decide (403).
+    const ehAdmin = user?.role === "super_admin" || user?.role === "company_admin"
+    if (isUserStoryKanbanFunnel(moveFunnelName) && !ehAdmin && !isAssignee) {
+      toast.error("Só o responsável pela User Story ou a coordenação podem movê-la.")
+      return
+    }
     if (isFeatureOrUsKanbanFunnel(moveFunnelName) && !task.assigned_to) {
       toast.error("Defina um responsável no card antes de movê-lo.")
       setSelectedTask(task)
@@ -1418,15 +1640,25 @@ export default function ProjectBoardPage() {
       items: Array<{ title: string; description: string; start_date: string; due_date: string }>
       programId?: string | null
     },
-    classification?: { value: CardClassification; productId: string; releaseId: string | null },
+    classification?: {
+      value: CardClassification
+      iaAssisted: boolean
+      productId: string
+      releaseId: string | null
+      procurementRequired?: boolean | null
+    },
   ) {
     if (!projectId) return
     try {
       const payload: Parameters<typeof projetosApi.updateTask>[2] = { status_id: toStatusId }
       if (classification) {
         payload.card_classification = classification.value
+        payload.ia_assisted = classification.iaAssisted
         payload.linked_product_id = classification.productId
         payload.linked_release_id = classification.releaseId
+        if (classification.procurementRequired !== undefined && classification.procurementRequired !== null) {
+          payload.procurement_required = classification.procurementRequired
+        }
       }
       if (conversionTitle !== undefined) payload.conversion_title = conversionTitle
       if (conversion) {
@@ -1443,21 +1675,29 @@ export default function ProjectBoardPage() {
       // Se a etapa de destino transita o card para outro kanban (moves_to_funnel_id),
       // o status retornado não pertence ao funil atual: o card sai desta visão.
       const leftFunnel = !statuses.some((s) => s.id === updated.status_id)
+      // Só recarrega quando o servidor mexeu em OUTROS cards além deste: cascata de
+      // família Feature/US, conversão (cria card em outro funil) ou contratação.
+      // Cada condição disparava seu próprio reloadTasks(), então um mesmo movimento
+      // chegava a baixar a lista inteira duas vezes.
+      const serverTouchedOtherCards =
+        syncFeatureUsFamily ||
+        conversionTitle !== undefined ||
+        classification?.procurementRequired === true ||
+        updated.procurement_locked
+
       if (leftFunnel) {
         setTasks((prev) => prev.filter((t) => t.id !== updated.id))
         toast.success("Card enviado para o próximo kanban.")
         await reloadTasks()
+      } else if (serverTouchedOtherCards) {
+        await reloadTasks()
       } else {
-        if (syncFeatureUsFamily) {
-          await reloadTasks()
-        } else {
-          setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
-        }
-        // Conversão cria um card novo em outro funil — recarrega para refletir.
-        if (conversionTitle !== undefined) await reloadTasks()
+        setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
       }
     } catch (err) {
-      alert(getApiError(err))
+      // Inclui o 423 da trava de cronograma, cuja mensagem lista as etapas pendentes —
+      // longa demais para um alert() do browser.
+      toast.error(getApiError(err) || "Não foi possível mover o card.")
     }
   }
 
@@ -1505,19 +1745,34 @@ export default function ProjectBoardPage() {
     }
   }
 
-  async function confirmClassification(result: { classification: CardClassification; productId: string; releaseId: string | null }) {
+  async function confirmClassification(result: {
+    classification: CardClassification
+    iaAssisted: boolean
+    productId: string
+    releaseId: string | null
+    procurementRequired: boolean | null
+  }) {
     if (!classificationPrompt) return
     if (classificationPrompt.mode === "late" || !classificationPrompt.toStatusId) {
       if (!projectId) return
       try {
         const updated = await projetosApi.updateTask(projectId, classificationPrompt.task.id, {
           card_classification: result.classification,
+          ia_assisted: result.iaAssisted,
           linked_product_id: result.productId,
           linked_release_id: result.releaseId,
+          ...(result.procurementRequired !== null
+            ? { procurement_required: result.procurementRequired }
+            : {}),
         })
         setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
         if (selectedTask?.id === updated.id) setSelectedTask(updated)
-        toast.success("Projeto classificado.")
+        if (result.procurementRequired) await reloadTasks()
+        toast.success(
+          result.procurementRequired
+            ? "Classificado — card na Contratação e demanda criada em Contratar."
+            : "Projeto classificado.",
+        )
       } catch (err) {
         toast.error(getApiError(err))
       }
@@ -1526,8 +1781,10 @@ export default function ProjectBoardPage() {
     }
     await performMove(classificationPrompt.task, classificationPrompt.toStatusId, undefined, undefined, {
       value: result.classification,
+      iaAssisted: result.iaAssisted,
       productId: result.productId,
       releaseId: result.releaseId,
+      procurementRequired: result.procurementRequired,
     })
     setClassificationPrompt(null)
   }
@@ -1587,13 +1844,7 @@ export default function ProjectBoardPage() {
 
   const boardSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
 
-  function onBoardDragStart(event: DragStartEvent) {
-    const id = String(event.active.id)
-    if (id.startsWith("task-")) setActiveDragTaskId(id.slice(5))
-  }
-
   function onBoardDragEnd(event: DragEndEvent) {
-    setActiveDragTaskId(null)
     const { active, over } = event
     if (!over) return
     const activeId = String(active.id)
@@ -1606,6 +1857,12 @@ export default function ProjectBoardPage() {
     void handleMove(task, toStatusId)
   }
 
+  // Callbacks estáveis: passados a componentes memoizados, uma função nova por render
+  // anularia a memo de todas as colunas. Declarados ANTES dos early returns abaixo —
+  // hook depois de `return` condicional muda a contagem de hooks entre renders (#310).
+  const openTask = useCallback((task: ProjectTask) => setSelectedTask(task), [])
+  const loadAllDone = useCallback(() => setDoneLimit(null), [])
+
   if (loading) {
     return (
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -1614,10 +1871,18 @@ export default function ProjectBoardPage() {
     )
   }
 
-  if (!selectedProject || !projectId) {
+  // O quadro só precisa do id do processo (na URL). A lista de processos serve para o
+  // redirect inicial e para o nome — se ela falhar, o kanban ainda abre.
+  if (!projectId) {
     return (
-      <div className="text-sm text-muted-foreground">
-        Não foi possível carregar o kanban. Recarregue a página em instantes.
+      <div className="space-y-3 text-sm text-muted-foreground">
+        <p>{bootError ?? "Não foi possível carregar o kanban. Recarregue a página em instantes."}</p>
+        <button
+          className="btn primary"
+          onClick={() => { setLoading(true); setBootAttempt((n) => n + 1) }}
+        >
+          Tentar novamente
+        </button>
       </div>
     )
   }
@@ -1645,6 +1910,8 @@ export default function ProjectBoardPage() {
     deliveryPeriod: showDeliveryPeriodFilter ? deliveryPeriod : null,
     programIds,
     effectiveProgramByTaskId,
+    effectiveDiretoriaByTaskId,
+    effectiveAreaByTaskId,
     planningScopeIds,
     groupedChildIds,
     effectivePoByTaskId,
@@ -1664,6 +1931,29 @@ export default function ProjectBoardPage() {
     }
     return true
   })
+
+  // Agrupa por etapa UMA vez. Antes cada coluna refazia filter+sort sobre a lista
+  // inteira — O(colunas × N) a cada render, ou seja ~12k comparações por tecla
+  // digitada na busca, com 1,5k cards e 8 colunas.
+  //
+  // Cálculo puro, não useMemo: este trecho roda DEPOIS dos early returns de `loading`
+  // e `!projectId`, então um hook aqui mudaria a contagem de hooks entre renders
+  // (React #310). O ganho algorítmico independe de memoização.
+  const tasksByStatus = (() => {
+    const map = new Map<string, ProjectTask[]>()
+    for (const task of funnelTasks) {
+      const bucket = map.get(task.status_id)
+      if (bucket) bucket.push(task)
+      else map.set(task.status_id, [task])
+    }
+    for (const bucket of map.values()) bucket.sort((a, b) => a.order - b.order)
+    return map
+  })()
+
+  // Quantos card-raiz concluídos o servidor deixou de fora. Derivado do limite pedido
+  // (e não do que sobrou depois dos filtros do funil): o corte é por projeto, então
+  // comparar com a lista já filtrada superestimaria o que falta carregar.
+  const hiddenDoneCount = doneLimit === null ? 0 : Math.max(0, doneTotal - doneLimit)
 
   return (
     <div className="afx kanban-page-root flex min-h-0 w-full min-w-0 flex-col gap-4 overflow-hidden">
@@ -1689,7 +1979,7 @@ export default function ProjectBoardPage() {
         <div className="board-title">
           <h1>Kanban</h1>
           {selectedFunnel && (<><span className="slash">/</span><span className="funnel-name">{selectedFunnel.name}</span></>)}
-          <span className="count-pill">{funnelTasks.length}</span>
+          <span className="count-pill" title={iaSummaryTitle(funnelTasks)}>{funnelTasks.length}</span>
         </div>
 
         <div className="tb-search">
@@ -1874,24 +2164,21 @@ export default function ProjectBoardPage() {
             <p>Este funil ainda não possui colunas de kanban.</p>
           </div>
         ) : (
-          <DndContext sensors={boardSensors} onDragStart={onBoardDragStart} onDragEnd={onBoardDragEnd}>
+          <DndContext sensors={boardSensors} onDragEnd={onBoardDragEnd}>
             <div className="kanban-board-shell">
             <div className="board board-viewport-height scrollbar-thin">
-              {statuses.map((status) => {
-                const columnTasks = funnelTasks
-                  .filter((t) => t.status_id === status.id)
-                  .sort((a, b) => a.order - b.order)
-                return (
-                  <BoardColumn
-                    key={status.id}
-                    status={status}
-                    tasks={columnTasks}
-                    ctx={cardCtx}
-                    hasAgent={agentStatusIds.has(status.id)}
-                    onOpen={(t) => setSelectedTask(t)}
-                  />
-                )
-              })}
+              {statuses.map((status) => (
+                <BoardColumn
+                  key={status.id}
+                  status={status}
+                  tasks={tasksByStatus.get(status.id) ?? EMPTY_TASKS}
+                  ctx={cardCtx}
+                  hasAgent={agentStatusIds.has(status.id)}
+                  onOpen={openTask}
+                  hiddenCount={status.is_final ? hiddenDoneCount : 0}
+                  onLoadMore={status.is_final ? loadAllDone : undefined}
+                />
+              ))}
               <button className="btn ghost" style={{ flexShrink: 0, alignSelf: "flex-start", marginTop: 8 }}>
                 <Plus size={14} /> Nova coluna
               </button>
@@ -2056,12 +2343,43 @@ export default function ProjectBoardPage() {
         isBasicUser={isBasicUser}
         canEditTask={canEditSelectedTask}
         kanbanFunnelName={selectedFunnelName}
+        // Evita o segundo download da lista inteira ao abrir um card.
+        boardTasks={tasks}
+        onOpenTask={(taskId) => {
+          const openFound = (t: ProjectTask) => {
+            setSelectedTask(t)
+            const targetFunnelId = statusFunnel[t.status_id]
+            if (targetFunnelId && targetFunnelId !== selectedFunnelId) {
+              setSelectedFunnelId(targetFunnelId)
+            }
+          }
+          const found = tasks.find((t) => t.id === taskId)
+          if (found) {
+            openFound(found)
+            return
+          }
+          void Promise.all([
+            projetosApi.listTasks(projectId),
+            projetosApi.listStatuses(projectId),
+          ]).then(([all, allSt]) => {
+            const t = all.find((x) => x.id === taskId)
+            if (!t) {
+              toast.error("Card de contratação não encontrado neste processo.")
+              return
+            }
+            setTasks(all)
+            setStatusFunnel(Object.fromEntries(allSt.map((s) => [s.id, s.funnel_id])))
+            openFound(t)
+          }).catch(() => toast.error("Não foi possível abrir o card de contratação."))
+        }}
         onSaved={(updated) => {
           setTasks((prev) => prev.map((t) => t.id === updated.id ? updated : t))
+          setSelectedTask((prev) => (prev?.id === updated.id ? updated : prev))
           void reloadTasks()
         }}
         onDeleted={(taskId) => {
           setTasks((prev) => prev.filter((t) => t.id !== taskId))
+          setSelectedTask(null)
         }}
       />
 

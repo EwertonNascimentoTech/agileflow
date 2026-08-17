@@ -104,6 +104,32 @@ def perm_key(role_id: Any, code: str) -> str:
     return f"auth:perm:{role_id}:{code}"
 
 
+def po_external_key(user_id: Any) -> str:
+    """Cargo Product Owner (Externo) do usuário — decide o bloqueio de módulos inteiros."""
+    return f"auth:po_external:{user_id}"
+
+
+def person_key(user_id: Any) -> str:
+    """person_id (teamops) do login — sondado em toda carga de kanban."""
+    return f"auth:person:{user_id}"
+
+
+def po_external_person_key(user_id: Any) -> str:
+    """person_id quando o login é PO Externo; sentinela quando não é.
+
+    Separado de `po_external_key` porque ali guardamos um booleano; aqui o próprio
+    id, que é o que o recorte de visibilidade do kanban precisa.
+    """
+    return f"auth:po_person:{user_id}"
+
+
+async def invalidate_po_external(user_id: Any) -> None:
+    """Chamar após mudar o Cargo de uma Pessoa (ou seu vínculo com um login)."""
+    await cache_delete(
+        po_external_key(user_id), person_key(user_id), po_external_person_key(user_id)
+    )
+
+
 async def invalidate_user(user_id: Any) -> None:
     """Chamar após mudar role, role_id, is_active ou tenant de um usuário."""
     await cache_delete(user_key(user_id))
@@ -122,3 +148,25 @@ async def invalidate_module_registry(module_slug: str) -> None:
 async def invalidate_role_permissions(role_id: Any) -> None:
     """Chamar após alterar as permissões de uma Role."""
     await cache_delete_pattern(f"auth:perm:{role_id}:*")
+
+
+# ─────────────────────────────────────────────
+# Marcadores de bootstrap idempotente
+# ─────────────────────────────────────────────
+
+def bootstrap_key(schema: str, name: str, scope_id: Any) -> str:
+    """Marca que um bootstrap idempotente já rodou, para tirá-lo do caminho de leitura.
+
+    Alguns GETs disparam um `ensure_*` que faz dezenas de queries e um commit a cada
+    request só para garantir que uma estrutura existe. O marcador transforma isso em
+    "uma vez por TTL" em vez de "toda leitura".
+
+    Como o cache é fail-open, perder a chave só custa uma re-execução do bootstrap —
+    que é idempotente por construção. Nunca é fonte de verdade.
+    """
+    return f"bootstrap:{name}:{schema}:{scope_id}"
+
+
+async def invalidate_bootstrap(schema: str, name: str, scope_id: Any) -> None:
+    """Força a próxima leitura a rodar o bootstrap de novo."""
+    await cache_delete(bootstrap_key(schema, name, scope_id))

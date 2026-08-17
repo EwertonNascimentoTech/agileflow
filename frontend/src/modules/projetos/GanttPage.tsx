@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import {
-  BarChart3, Calendar, CalendarCheck, Check, ChevronDown, Clock, Folder, GitBranch, Link2, Loader2, Plus, Users, X,
+  BarChart3, Calendar, CalendarCheck, Check, ChevronDown, Clock, FlaskConical, Folder, GitBranch, Link2, Loader2, Maximize2, Plus, Users, Wand2, X, ZoomIn, ZoomOut,
 } from "lucide-react"
 
 const DEP_LABELS: Record<DependencyType, string> = {
@@ -13,13 +13,15 @@ import {
   projetosApi,
   type AssigneeAbsenceItem, type CriticalPathItem, type DependencyType, type Project, type ProjectDemandType, type ProjectFunnel, type ProjectScheduleBinding,
   type ProjectStatus, type ProjectTask, type ProjectTaskDependency,
-  type ScheduleBaseline, type ScheduleLockState,
+  type ScheduleBaseline, type ScheduleLockState, type ScheduleOverloadRow,
 } from "@/api/projetos"
 import type { User } from "@/types"
 import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyState } from "@/components/EmptyState"
-import { GanttChart } from "@/modules/projetos/GanttChart"
+import { GanttChart, clampDayWidth, zoomLabel, DEFAULT_DAY_W, MIN_DAY_W, MAX_DAY_W, ZOOM_STEP } from "@/modules/projetos/GanttChart"
 import { WorkloadView } from "@/modules/projetos/WorkloadView"
+import { ScheduleScenarioPanel } from "@/modules/projetos/ScheduleScenarioPanel"
+import { AssigneeCapacityPanel, type CapacitySummary } from "@/modules/projetos/AssigneeCapacityPanel"
 import { ScheduleLockBanner } from "@/modules/projetos/ScheduleLockBanner"
 import { BaselineAlertsDialog } from "@/modules/projetos/BaselineAlertsDialog"
 import { computeBaselineDiff } from "@/modules/projetos/baselineDiff"
@@ -108,19 +110,23 @@ export default function GanttPage() {
   const [users, setUsers] = useState<User[]>([])
   const [persons, setPersons] = useState<Person[]>([])
   const [loading, setLoading] = useState(true)
-  const [scale, setScale] = useState<"day" | "week">("day")
-  const [view, setView] = useState<"schedule" | "resources">("schedule")
+  // Zoom do cronograma: largura de um dia em px (o cabeçalho dia/semana/mês se adapta).
+  const [dayWidth, setDayWidth] = useState(DEFAULT_DAY_W)
+  const [fitSignal, setFitSignal] = useState(0)
+  const [view, setView] = useState<"schedule" | "resources" | "scenario">("schedule")
   const [projOpen, setProjOpen] = useState(false)
   const [cardOpen, setCardOpen] = useState(false)
   const [editing, setEditing] = useState<ProjectTask | null>(null)
   const [criticalById, setCriticalById] = useState<Map<string, CriticalPathItem>>(new Map())
   const [calendar, setCalendar] = useState<WorkCalendar | null>(null)
   const [absencesByUser, setAbsencesByUser] = useState<Record<string, AssigneeAbsenceItem[]>>({})
+  const [overloadByTask, setOverloadByTask] = useState<Map<string, ScheduleOverloadRow>>(new Map())
   // Controle de baseline / travamento do cronograma.
   const [lockState, setLockState] = useState<ScheduleLockState | null>(null)   // raiz selecionada (modo escopado)
   const [lockStates, setLockStates] = useState<ScheduleLockState[]>([])         // todas as raízes (cronograma completo)
   const [compareBaseline, setCompareBaseline] = useState<ScheduleBaseline | null>(null) // baseline em comparação
   const locked = lockState?.state === "locked"
+  const [rescheduling, setRescheduling] = useState(false)  // recálculo automático sob demanda
 
   const [alertsOpen, setAlertsOpen] = useState(false)
 
@@ -218,19 +224,20 @@ export default function GanttPage() {
 
   async function handleUpdate(id: string, patch: Partial<Pick<ProjectTask, "title" | "description" | "start_date" | "due_date" | "assigned_to" | "estimated_hours" | "parent_task_id">>) {
     if (!projectId) return
-    // Mudança de datas/horas pode empurrar sucessoras no servidor (auto-scheduling) —
-    // nesse caso re-buscamos para refletir a cascata.
-    const cascades = "start_date" in patch || "due_date" in patch || "estimated_hours" in patch
-    // Trava de cronograma: bloqueia só alterações de cronograma (datas/horas). Título,
-    // descrição, responsável seguem editáveis mesmo travado.
-    if (locked && cascades) {
+    // Cronograma manual: nenhuma edição desloca outras tarefas. O refetch serve só para
+    // trazer o rollup do card-pai (span de datas, soma de horas, progresso).
+    const scheduleFields =
+      "start_date" in patch || "due_date" in patch || "estimated_hours" in patch || "assigned_to" in patch
+    // Trava de cronograma: bloqueia datas, horas e responsável. Título e descrição seguem
+    // editáveis mesmo travado.
+    if (locked && scheduleFields) {
       toast.error("Cronograma travado. Salve um baseline com justificativa para liberar a edição.")
       return
     }
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)))
     try {
       await projetosApi.updateTask(projectId, id, patch)
-      if (cascades) await refetchTasks()
+      if (scheduleFields) await refetchTasks()
     } catch (err) {
       const e = err as { response?: { data?: { detail?: unknown } } }
       toast.error(typeof e.response?.data?.detail === "string" ? e.response.data.detail : "Não foi possível salvar.")
@@ -246,8 +253,7 @@ export default function GanttPage() {
     setTasks((prev) => prev.map((t) => (orderById.has(t.id) ? { ...t, order: orderById.get(t.id)! } : t)))
     try {
       await projetosApi.reorderTasks(projectId, items)
-      // Reordenar recalcula as datas no servidor — recarrega para refletir a cascata.
-      await refetchTasks()
+      // Ordem é só sequência na WBS — nenhuma data muda.
     } catch (err) {
       const e = err as { response?: { data?: { detail?: unknown } } }
       toast.error(typeof e.response?.data?.detail === "string" ? e.response.data.detail : "Não foi possível reordenar.")
@@ -262,7 +268,8 @@ export default function GanttPage() {
       await projetosApi.createDependency(projectId, {
         predecessor_id: predecessorId, successor_id: successorId, dep_type: depType, lag_hours: lagHours,
       })
-      await Promise.all([refetchDependencies(), refetchTasks()])
+      // A dependência é informativa (seta + caminho crítico): nenhuma data é deslocada.
+      await refetchDependencies()
     } catch (err) {
       const e = err as { response?: { data?: { detail?: unknown } } }
       toast.error(typeof e.response?.data?.detail === "string" ? e.response.data.detail : "Não foi possível criar a dependência.")
@@ -274,11 +281,37 @@ export default function GanttPage() {
     if (locked) { toast.error("Cronograma travado. Salve um baseline com justificativa para liberar a edição."); return }
     try {
       await projetosApi.deleteDependency(projectId, depId)
-      // Remover dependência pode liberar a sucessora — recarrega datas e dependências.
-      await Promise.all([refetchDependencies(), refetchTasks()])
+      // Remover a dependência não move nenhuma data — só some a seta.
+      await refetchDependencies()
     } catch (err) {
       const e = err as { response?: { data?: { detail?: unknown } } }
       toast.error(typeof e.response?.data?.detail === "string" ? e.response.data.detail : "Não foi possível remover a dependência.")
+    }
+  }
+
+  // Recálculo automático SOB DEMANDA — a única porta que restou para o motor. Sobrescreve
+  // as datas manuais da subárvore, por isso exige confirmação explícita.
+  async function handleReschedule() {
+    if (!projectId || !rootTask) return
+    if (locked) { toast.error("Cronograma travado. Salve um baseline com justificativa para liberar a edição."); return }
+    const ok = confirm(
+      `Recalcular as datas de "${rootTask.title}" automaticamente?\n\n` +
+      "As datas que você definiu manualmente nas etapas serão SUBSTITUÍDAS pelo cálculo " +
+      "a partir das horas estimadas, do responsável de cada tarefa, das dependências e do " +
+      "calendário corporativo. Tarefas concluídas não são alteradas.",
+    )
+    if (!ok) return
+    setRescheduling(true)
+    try {
+      const next = await projetosApi.rescheduleTasks(projectId, rootTask.id)
+      setTasks(next)
+      toast.success("Datas recalculadas.")
+    } catch (err) {
+      const e = err as { response?: { data?: { detail?: unknown } } }
+      toast.error(typeof e.response?.data?.detail === "string" ? e.response.data.detail : "Não foi possível recalcular as datas.")
+      await refetchTasks()
+    } finally {
+      setRescheduling(false)
     }
   }
 
@@ -388,6 +421,19 @@ export default function GanttPage() {
       .catch(() => { if (!cancelled) setAbsencesByUser({}) })
     return () => { cancelled = true }
   }, [projectId, tasks])
+
+  // Sobrecarga do responsável no período de cada etapa (cruza TODO o portfólio) — marca o
+  // avatar no Gantt. Mesma cadência das ausências: refaz quando as tarefas mudam.
+  useEffect(() => {
+    // Escopado ao card-raiz em tela (o Gantt só renderiza com um): payload enxuto e
+    // sem calcular sobrecarga de subárvores que ninguém está vendo.
+    if (!projectId || !rootTaskId) { setOverloadByTask(new Map()); return }
+    let cancelled = false
+    projetosApi.getScheduleOverload(projectId, rootTaskId)
+      .then((r) => { if (!cancelled) setOverloadByTask(new Map(r.rows.map((x) => [x.task_id, x]))) })
+      .catch(() => { if (!cancelled) setOverloadByTask(new Map()) })
+    return () => { cancelled = true }
+  }, [projectId, rootTaskId, tasks])
 
   // Amarração de tipos: tipo EFETIVO de um item no cronograma seguindo a corrente de
   // allowed_child_type_ids a partir do ancestral tipado mais próximo. Etapas (sem tipo)
@@ -517,6 +563,33 @@ export default function GanttPage() {
     return sortSib(tasks).map((t) => ({ task: t, level: 0 }))
   }, [rootTask, tasks])
 
+  // Zoom: afastar/aproximar em passos e "ajustar" (todo o cronograma na tela).
+  // Ctrl/⌘ + roda do mouse faz o mesmo direto no gráfico, ancorado no cursor.
+  const zoomControl = (
+    <div className="scale-toggle" style={{ marginLeft: 8, alignItems: "center" }}>
+      <button
+        onClick={() => setDayWidth((w) => clampDayWidth(w / ZOOM_STEP))}
+        disabled={dayWidth <= MIN_DAY_W}
+        title="Afastar (Ctrl + roda do mouse)"
+      >
+        <ZoomOut size={13} />
+      </button>
+      <span style={{ padding: "0 6px", fontSize: 12, fontWeight: 600, color: "var(--af-muted-fg)", minWidth: 62, textAlign: "center" }}>
+        {zoomLabel(dayWidth)}
+      </span>
+      <button
+        onClick={() => setDayWidth((w) => clampDayWidth(w * ZOOM_STEP))}
+        disabled={dayWidth >= MAX_DAY_W}
+        title="Aproximar (Ctrl + roda do mouse)"
+      >
+        <ZoomIn size={13} />
+      </button>
+      <button onClick={() => setFitSignal((n) => n + 1)} title="Ajustar todo o cronograma à tela">
+        <Maximize2 size={13} />
+      </button>
+    </div>
+  )
+
   const cardPicker = (
     <div className="relative" style={{ marginLeft: 8 }}>
       <button className="filter-btn" onClick={() => setCardOpen((o) => !o)}>
@@ -629,20 +702,31 @@ export default function GanttPage() {
             <span className="project-name">{rootTask?.title ?? project?.name ?? ""}</span>
           </div>
           {cardPicker}
-          {view === "schedule" && (
-            <div className="scale-toggle" style={{ marginLeft: 8 }}>
-              <button className={scale === "day" ? "on" : ""} onClick={() => setScale("day")}>Dia</button>
-              <button className={scale === "week" ? "on" : ""} onClick={() => setScale("week")}>Semana</button>
-            </div>
-          )}
+          {view === "schedule" && zoomControl}
           <div className="scale-toggle" style={{ marginLeft: 8 }}>
             <button className={view === "schedule" ? "on" : ""} onClick={() => setView("schedule")}><Calendar size={12} /> Cronograma</button>
             <button className={view === "resources" ? "on" : ""} onClick={() => setView("resources")}><Users size={12} /> Recursos</button>
+            <button className={view === "scenario" ? "on" : ""} onClick={() => setView("scenario")}><FlaskConical size={12} /> Cenário</button>
           </div>
           <span className="spacer" />
           {view === "schedule" && (
             <button
+              className="btn ghost"
+              disabled={!rootTask || locked || rescheduling}
+              title={
+                locked
+                  ? "Cronograma travado — libere a alteração para recalcular."
+                  : "Recalcula as datas da subárvore pelo motor (horas + responsável + dependências + calendário), substituindo as datas manuais."
+              }
+              onClick={() => void handleReschedule()}
+            >
+              {rescheduling ? <Loader2 size={14} className="spin" /> : <Wand2 size={14} />} Recalcular datas
+            </button>
+          )}
+          {view === "schedule" && (
+            <button
               className="btn primary"
+              style={{ marginLeft: 8 }}
               disabled={!rootTask || !canAddChild(rootTask)}
               title={rootTask && !canAddChild(rootTask) ? "Este item não tem um nível-filho definido na amarração de tipos." : undefined}
               onClick={() => rootTask && void addStage(rootTask.id)}
@@ -699,7 +783,23 @@ export default function GanttPage() {
         )}
 
         {view === "resources" ? (
-          <WorkloadView projectId={projectId} users={users} />
+          <WorkloadView projectId={projectId} rootTaskId={rootTaskId} users={users} />
+        ) : view === "scenario" ? (
+          rootTaskId ? (
+            <ScheduleScenarioPanel
+              projectId={projectId}
+              rootTaskId={rootTaskId}
+              rootTitle={rootTask?.title}
+              defaultStart={rootTask?.start_date}
+              persons={persons}
+            />
+          ) : (
+            <EmptyState
+              icon={FlaskConical}
+              title="Selecione o projeto"
+              description="Abra o cronograma de um projeto/programa para montar o cenário de fim."
+            />
+          )
         ) : rootTask ? (
           <>
             <GanttLegend />
@@ -708,11 +808,14 @@ export default function GanttPage() {
               tasks={tasks}
               users={users}
               dependencies={dependencies}
-              scale={scale}
+              dayWidth={dayWidth}
+              onDayWidthChange={setDayWidth}
+              fitSignal={fitSignal}
               progressById={progressById}
               criticalById={criticalById}
               calendar={calendar}
               absencesByUser={absencesByUser}
+              overloadByTask={overloadByTask}
               onOpenTask={(t) => setEditing(t)}
               onAddChild={(t) => void addStage(t.id)}
               canAddChild={canAddChild}
@@ -787,10 +890,7 @@ export default function GanttPage() {
 
         <span className="spacer" />
 
-        <div className="scale-toggle">
-          <button className={scale === "day" ? "on" : ""} onClick={() => setScale("day")}>Dia</button>
-          <button className={scale === "week" ? "on" : ""} onClick={() => setScale("week")}>Semana</button>
-        </div>
+        {zoomControl}
       </div>
 
       {lockStates.filter((l) => l.state !== "open").map((l) => (
@@ -975,6 +1075,7 @@ function GanttEditModal({
   const [due, setDue] = useState(task.due_date ? task.due_date.slice(0, 10) : "")
   const [hours, setHours] = useState(task.estimated_hours != null ? String(task.estimated_hours) : "")
   const [assignee, setAssignee] = useState(task.assigned_to ?? "")
+  const [capacitySummary, setCapacitySummary] = useState<CapacitySummary | null>(null)
   const [saving, setSaving] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [newPred, setNewPred] = useState("")
@@ -1012,21 +1113,23 @@ function GanttEditModal({
     () => overlappingAbsences(absencesByUser, assignee || null, isoFromInput(start), isoFromInput(due)),
     [absencesByUser, assignee, start, due],
   )
-  // Ao mudar o início, recalcula o vencimento pelas horas (dias úteis) — espelha o servidor.
-  function recalcDue(startVal: string, hoursVal: string, assigneeId: string) {
+  // Cronograma: início, horas e responsável recalculam o vencimento. A duração usa
+  // ceil(horas / taxa diária) e addBusinessDays pula sábado e domingo.
+  function recalcDueFromStart(startVal: string, hoursVal: string, assigneeId: string) {
     const person = persons.find((p) => p.id === assigneeId)
     const hpd = projectHoursPerDay(person, calHpd)
-    return deriveDue(startVal, hoursVal, hpd)
-  }
-  function changeStart(v: string) { setStart(v); const nd = recalcDue(v, hours, assignee); if (nd) setDue(nd) }
-  function changeHours(v: string) { setHours(v); const nd = recalcDue(start, v, assignee); if (nd) setDue(nd) }
-  function changeAssignee(v: string) {
-    setAssignee(v)
-    const nd = recalcDue(start, hours, v)
+    const nd = deriveDue(startVal, hoursVal, hpd)
     if (nd) setDue(nd)
   }
+  function changeStart(v: string) { setStart(v); recalcDueFromStart(v, hours, assignee) }
+  function changeHours(v: string) { setHours(v); recalcDueFromStart(start, v, assignee) }
+  function changeAssignee(v: string) { setAssignee(v); recalcDueFromStart(start, hours, v) }
   // Progresso é derivado dos filhos (rollup de conclusão), não editável aqui.
   const hasChildren = allTasks.some((t) => t.parent_task_id === task.id)
+  // Datas de um item COM FILHOS são o span dos filhos (rollup) — read-only. No card-raiz,
+  // só o término é derivado: o início é a data-base do projeto, definida manualmente.
+  const startDerived = hasChildren && !isRoot
+  const dueDerived = hasChildren
   const rolledProgress = progressById.get(task.id) ?? (task.completed_at ? 100 : (task.percent_complete ?? 0))
   // Feature/grupo (parent que não é projeto/programa): responsável é AGREGADO das US (read-only).
   const isAggregatedParent = hasChildren && !isRoot
@@ -1087,6 +1190,16 @@ function GanttEditModal({
                 </span>
               )
             })()}
+            {/* Sobrecarga do responsável: sinal sempre visível, mesmo com o painel fora da viewport. */}
+            {capacitySummary?.overloaded && (
+              <span
+                className="gx-badge"
+                style={{ background: "#fdece4", color: "var(--af-destructive)" }}
+                title="A alocação desta tarefa estoura a capacidade do responsável no período — veja o detalhe em Responsável."
+              >
+                ⚠ Sobrecarga{capacitySummary.utilizationPct != null ? ` ${Math.round(capacitySummary.utilizationPct)}%` : ""}
+              </span>
+            )}
           </div>
         </div>
 
@@ -1114,17 +1227,24 @@ function GanttEditModal({
           <div className="grid2">
             <div className="field">
               <label>{isRoot ? "Início (data-base)" : "Início"}</label>
-              <div className="inp"><Calendar size={14} className="ic" /><input type="date" value={start} onChange={(e) => changeStart(e.target.value)} /></div>
+              <div className="inp"><Calendar size={14} className="ic" /><input type="date" value={start} onChange={(e) => changeStart(e.target.value)} disabled={startDerived} /></div>
             </div>
             <div className="field">
               <label>Vencimento</label>
-              <div className="inp"><CalendarCheck size={14} className="ic" /><input type="date" value={due} onChange={(e) => setDue(e.target.value)} disabled={isRoot} /></div>
+              <div className="inp"><CalendarCheck size={14} className="ic" /><input type="date" value={due} onChange={(e) => setDue(e.target.value)} disabled={dueDerived} /></div>
             </div>
           </div>
-          {isRoot ? (
-            <div className="hint"><Check size={13} style={{ color: "var(--af-success)" }} /> Esta é a data-base do projeto. O término e as datas das etapas são recalculados automaticamente a partir das horas estimadas.</div>
-          ) : inverted && (
+          {hasChildren ? (
+            <div className="hint">
+              <Check size={13} style={{ color: "var(--af-success)" }} />
+              {isRoot
+                ? " O início é a data-base do projeto. O término é o maior vencimento das etapas filhas."
+                : " Datas derivadas das tarefas filhas (menor início, maior vencimento) — edite as datas em cada filha."}
+            </div>
+          ) : inverted ? (
             <div className="hint" style={{ color: "var(--af-destructive)" }}>⚠ Início é posterior ao vencimento.</div>
+          ) : (
+            <div className="hint">O vencimento é recalculado pelas horas estimadas e considera somente dias úteis (segunda a sexta).</div>
           )}
 
           {!isRoot && (
@@ -1142,7 +1262,7 @@ function GanttEditModal({
                   <Check size={13} style={{ color: "var(--af-success)" }} />
                   {" "}Equivale a <b>{durationDays} dia{durationDays > 1 ? "s" : ""} úteis</b>
                   {" "}(1 dia ≈ {effectiveProjectHpd}h de projeto{assigneePerson ? ` · ${assigneePerson.full_name}` : ""})
-                  {" "}· vencimento calculado a partir do início
+                  {" "}· o excedente passa para o próximo dia útil
                 </div>
               )}
             </div>
@@ -1198,6 +1318,19 @@ function GanttEditModal({
                     ⚠ {selUser?.full_name ?? "Responsável"} tem ausência no período:{" "}
                     {liveAbsences.map((a) => `${a.type_name} · ${a.status} (${a.start_date} → ${a.end_date})`).join("; ")}
                   </div>
+                )}
+                {/* Carga × capacidade do responsável escolhido no período da tarefa. Fora do
+                    card-raiz e de pais agregados: lá as horas são rollup dos filhos e o motor
+                    de capacidade os ignora — mostrar capacidade seria contagem dupla. */}
+                {!isRoot && assignee && start && due && (
+                  <AssigneeCapacityPanel
+                    personId={assignee}
+                    start={start}
+                    due={due}
+                    hours={hours}
+                    excludeTaskId={task.id}
+                    onSummary={setCapacitySummary}
+                  />
                 )}
               </>
             )}

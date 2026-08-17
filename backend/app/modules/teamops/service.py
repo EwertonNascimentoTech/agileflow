@@ -63,6 +63,19 @@ EXECUTOR_PERMISSIONS = [
 # O acesso fino aos kanbans (ex.: "Triagem" somente leitura) é configurado por
 # kanban em Processos → Configurações → Kanbans (access_control por função).
 PO_POSITION_SLUGS = {"po", "product_owner"}
+
+# Product Owner (Externo): mesmo papel operacional do PO — gerencia cards nos kanbans —
+# porém enxerga APENAS os projetos em que é o responsável (card-raiz de planejamento) e
+# a árvore de trabalho abaixo deles. Não acessa as visões consolidadas do portfólio
+# (PO Sync, PMO, Capacidade, Status Reports). O escopo de dados é aplicado no módulo
+# Projetos por `po_external_scope_task_ids`.
+# Não conta como PO de Área no organograma (papel de área continua sendo do PO interno).
+PO_EXTERNAL_POSITION_SLUGS = {"po_externo", "product_owner_externo"}
+
+# Todo mundo que exerce o papel de PO — usado onde "é PO" basta (seletor de responsável
+# do projeto, permissões padrão do cargo, bloqueio de configurações).
+ALL_PO_POSITION_SLUGS = PO_POSITION_SLUGS | PO_EXTERNAL_POSITION_SLUGS
+
 PO_PERMISSIONS = [
     # Processos: gerenciar cards nos kanbans.
     "projetos.project.view",
@@ -72,6 +85,19 @@ PO_PERMISSIONS = [
     # Pessoas: apenas as próprias ausências.
     "teamops.absence.view_own",
     "teamops.absence.request",
+]
+
+# Módulos inteiros vedados ao PO Externo (ele é de fora da casa): Pessoas, Indicadores e
+# RTD não aparecem no menu dele nem respondem à API. Fonte da verdade do bloqueio duro é
+# `PO_EXTERNAL_BLOCKED_MODULES` em core/dependencies.py; aqui a lista serve para nunca
+# gravar essas permissões na role do cargo.
+PO_EXTERNAL_BLOCKED_MODULE_PREFIXES = ("teamops.", "indicadores.", "rtd.")
+
+# Permissões padrão do PO Externo: só Processos. Sem as ausências do módulo Pessoas,
+# que o PO interno tem.
+PO_EXTERNAL_PERMISSIONS = [
+    c for c in PO_PERMISSIONS
+    if not c.startswith(PO_EXTERNAL_BLOCKED_MODULE_PREFIXES)
 ]
 
 # Permissões que liberam telas/APIs de configuração — PO nunca pode receber.
@@ -227,7 +253,12 @@ class PositionService:
         )
         db.add(role)
         await db.flush()
-        default_codes = PO_PERMISSIONS if position.slug in PO_POSITION_SLUGS else EXECUTOR_PERMISSIONS
+        if position.slug in PO_EXTERNAL_POSITION_SLUGS:
+            default_codes = PO_EXTERNAL_PERMISSIONS
+        elif position.slug in PO_POSITION_SLUGS:
+            default_codes = PO_PERMISSIONS
+        else:
+            default_codes = EXECUTOR_PERMISSIONS
         for code in default_codes:
             db.add(RolePermission(role_id=role.id, permission_code=code))
         position.role_id = role.id
@@ -261,8 +292,12 @@ class PositionService:
         role = await PositionService._get_or_create_role(db, pos, tenant_id)
         valid = {c for (c,) in (await db.execute(select(ModulePermission.code))).all()}
         clean = [c for c in dict.fromkeys(codes) if c in valid]
-        if pos.slug in PO_POSITION_SLUGS:
+        if pos.slug in ALL_PO_POSITION_SLUGS:
             clean = [c for c in clean if c not in CONFIG_MANAGE_PERMISSIONS]
+        if pos.slug in PO_EXTERNAL_POSITION_SLUGS:
+            # Pessoas / Indicadores / RTD são vedados ao PO Externo — nem por engano
+            # pela tela de Acesso do cargo.
+            clean = [c for c in clean if not c.startswith(PO_EXTERNAL_BLOCKED_MODULE_PREFIXES)]
         await db.execute(sa_delete(RolePermission).where(RolePermission.role_id == role.id))
         for c in clean:
             db.add(RolePermission(role_id=role.id, permission_code=c))
@@ -693,8 +728,10 @@ class PersonService:
                 db, [p.id for p in items], commit=True,
             )
             if changed:
+                # Refresh só das colunas de status — refresh() cheio expira os
+                # selectinloads (areas/pos) e no async a lazy load falha/volta vazio.
                 for p in items:
-                    await db.refresh(p)
+                    await db.refresh(p, attribute_names=["status", "updated_at"])
         await PersonService._enrich_access(db, items)
         return items
 
@@ -715,7 +752,7 @@ class PersonService:
         if not person:
             raise HTTPException(status_code=404, detail="Pessoa não encontrada.")
         if await PersonStatusSync.sync_one(db, person_id, commit=True):
-            await db.refresh(person)
+            await db.refresh(person, attribute_names=["status", "updated_at"])
         await PersonService._enrich_access(db, [person])
         return person
 
@@ -766,6 +803,8 @@ class PersonService:
         access_level = payload.pop("access_level", "none")
         password = payload.pop("password", None)
         payload.pop("reset_password", None)
+        payload.pop("area_id", None)
+        payload.pop("po_person_id", None)
         payload["email"] = payload["email"].lower()
         PersonService._reject_manual_absence_status(payload)
         await PersonService._validate_refs(db, payload)
@@ -796,6 +835,9 @@ class PersonService:
         access_level = payload.pop("access_level", None)
         password = payload.pop("password", None)
         reset_password = payload.pop("reset_password", None)
+        reassign_to = payload.pop("reassign_open_tasks_to", None)
+        payload.pop("area_id", None)
+        payload.pop("po_person_id", None)
         if "email" in payload and payload["email"]:
             payload["email"] = payload["email"].lower()
         PersonService._reject_manual_absence_status(payload)
@@ -812,6 +854,16 @@ class PersonService:
             if person_id in po_person_ids:
                 raise HTTPException(status_code=400, detail="Pessoa não pode ser PO de si mesma.")
             item.pos = await PersonService._resolve_people(db, po_person_ids)
+
+        becoming_offboarded = (
+            payload.get("status") == PersonStatus.DESLIGADO
+            and item.status != PersonStatus.DESLIGADO
+        )
+        if becoming_offboarded:
+            await PersonService._apply_offboarding_reassign(
+                db, item, reassign_to=reassign_to,
+            )
+
         for key, value in payload.items():
             setattr(item, key, value)
         item.updated_at = datetime.utcnow()
@@ -822,7 +874,127 @@ class PersonService:
         except IntegrityError:
             await db.rollback()
             raise HTTPException(status_code=400, detail="Não foi possível salvar (e-mail já em uso).")
+        # Cargo/vínculo de login podem ter mudado — o bloqueio de módulos do PO Externo
+        # é cacheado por usuário e precisa ser recalculado no próximo request.
+        if item.user_id:
+            from app.core.cache import invalidate_po_external
+            await invalidate_po_external(item.user_id)
         return await PersonService.get(db, item.id)
+
+    @staticmethod
+    async def _project_tasks_table_exists(db: AsyncSession) -> bool:
+        from sqlalchemy import text
+        reg = (await db.execute(text("SELECT to_regclass('project_tasks')"))).scalar_one_or_none()
+        return reg is not None
+
+    @staticmethod
+    def _task_is_open(task) -> bool:
+        if task.completed_at is not None:
+            return False
+        status = getattr(task, "status", None)
+        if status is not None and bool(getattr(status, "is_final", False)):
+            return False
+        return True
+
+    @staticmethod
+    async def _load_assigned_tasks(db: AsyncSession, person_id: uuid.UUID) -> list:
+        if not await PersonService._project_tasks_table_exists(db):
+            return []
+        from app.modules.projetos.models import ProjectTask
+        rows = await db.execute(
+            select(ProjectTask)
+            .options(selectinload(ProjectTask.status))
+            .where(ProjectTask.assigned_to == person_id)
+        )
+        return list(rows.scalars().all())
+
+    @staticmethod
+    async def offboarding_preview(db: AsyncSession, person_id: uuid.UUID) -> dict:
+        """Contagem de tarefas abertas/concluídas + colegas ativos do mesmo cargo."""
+        from app.modules.teamops.schemas import OffboardingPeer
+
+        item = await PersonService.get(db, person_id)
+        tasks = await PersonService._load_assigned_tasks(db, person_id)
+        open_n = sum(1 for t in tasks if PersonService._task_is_open(t))
+        done_n = len(tasks) - open_n
+
+        peers: list[OffboardingPeer] = []
+        if item.position_id:
+            peer_rows = await db.execute(
+                select(Person)
+                .where(
+                    Person.position_id == item.position_id,
+                    Person.id != person_id,
+                    Person.status == PersonStatus.ATIVO,
+                )
+                .order_by(Person.full_name.asc())
+            )
+            peers = [
+                OffboardingPeer(id=p.id, full_name=p.full_name, email=p.email)
+                for p in peer_rows.scalars().all()
+            ]
+
+        return {
+            "person_id": item.id,
+            "full_name": item.full_name,
+            "position_id": item.position_id,
+            "position_name": item.position.name if item.position else None,
+            "open_tasks": open_n,
+            "completed_tasks": done_n,
+            "peers": peers,
+        }
+
+    @staticmethod
+    async def _apply_offboarding_reassign(
+        db: AsyncSession,
+        person: Person,
+        reassign_to: Optional[uuid.UUID],
+    ) -> int:
+        """Move tarefas em aberto para o colega do mesmo cargo. Concluídas ficam no histórico.
+
+        Retorna quantas tarefas foram realocadas. Exige substituto se houver abertas.
+        """
+        tasks = await PersonService._load_assigned_tasks(db, person.id)
+        open_tasks = [t for t in tasks if PersonService._task_is_open(t)]
+        if not open_tasks:
+            return 0
+
+        if reassign_to is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Esta pessoa tem {len(open_tasks)} tarefa(s) em aberto. "
+                    "Informe `reassign_open_tasks_to` com um colega do mesmo cargo "
+                    "para receber essas tarefas. As concluídas permanecem no histórico."
+                ),
+            )
+        if reassign_to == person.id:
+            raise HTTPException(
+                status_code=400,
+                detail="Não é possível realocar as tarefas para a própria pessoa desligada.",
+            )
+
+        successor = (
+            await db.execute(select(Person).where(Person.id == reassign_to))
+        ).scalar_one_or_none()
+        if successor is None:
+            raise HTTPException(status_code=400, detail="Pessoa substituta não encontrada.")
+        if successor.status != PersonStatus.ATIVO:
+            raise HTTPException(
+                status_code=400,
+                detail="A pessoa substituta precisa estar com status Ativo.",
+            )
+        if not person.position_id or successor.position_id != person.position_id:
+            raise HTTPException(
+                status_code=400,
+                detail="A pessoa substituta precisa ter o mesmo cargo (função).",
+            )
+
+        now = datetime.utcnow()
+        for t in open_tasks:
+            t.assigned_to = reassign_to
+            t.updated_at = now
+        return len(open_tasks)
 
     @staticmethod
     async def provision_login_from_first_access(

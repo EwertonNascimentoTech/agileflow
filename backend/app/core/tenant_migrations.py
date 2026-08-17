@@ -1646,6 +1646,7 @@ SYSTEM_POSITIONS: list[tuple[str, str, int]] = [
     ("gerente", "Gerente", 0),
     ("coordenador", "Coordenador", 10),
     ("po", "Product Owner", 20),
+    ("po_externo", "Product Owner (Externo)", 25),
     ("scrum_master", "Scrum Master", 30),
     ("tech_reference", "Referência Técnica", 40),
     ("architect", "Arquiteto", 50),
@@ -3698,6 +3699,525 @@ async def _step_108_projetos_left_backlog_at(conn: AsyncConnection, schema: str)
     })
 
 
+async def _step_109_rtd(conn: AsyncConnection, schema: str) -> None:
+    """Cria as tabelas do módulo RTD (Reunião de Tomada de Decisão) nos tenants existentes."""
+    from app.modules.rtd import models as rtd_models
+
+    await conn.execute(text(f"SET search_path TO {schema}, public"))
+    # Ordem importa: reunioes antes de deliberacoes (FK). checkfirst → idempotente.
+    await conn.run_sync(lambda sc: rtd_models.RtdReuniao.__table__.create(sc, checkfirst=True))
+    await conn.run_sync(lambda sc: rtd_models.RtdDeliberacao.__table__.create(sc, checkfirst=True))
+
+
+async def _step_110_projetos_ia_assisted(conn: AsyncConnection, schema: str) -> None:
+    """Classificação do card (dev/implantação/melhoria): pergunta obrigatória
+    'será feito com IA ou auxílio de IA?' (sim/não). NULL = não respondido (legado)."""
+    if not await _table_exists(conn, schema, "project_tasks"):
+        return
+    await _add_columns(conn, schema, "project_tasks", {
+        "ia_assisted": "BOOLEAN",
+    })
+
+
+async def _step_111_indicadores_sub_processo(conn: AsyncConnection, schema: str) -> None:
+    """Vínculo do indicador tático com o sub-processo do portfólio de TI
+    (ex.: Prospectar / Desenvolver / Implantar Soluções de TI). Texto livre."""
+    if not await _table_exists(conn, schema, "indicadores"):
+        return
+    await _add_columns(conn, schema, "indicadores", {
+        "sub_processo": "VARCHAR(160)",
+    })
+
+
+async def _step_112_rtd_indicador_analises(conn: AsyncConnection, schema: str) -> None:
+    """Seção 1 da RTD: análises qualitativas por indicador (fatores/riscos/reversão) +
+    foto dos indicadores congelada no fechamento da reunião (JSONB)."""
+    from app.modules.rtd import models as rtd_models
+
+    if not await _table_exists(conn, schema, "rtd_reunioes"):
+        return
+    await conn.execute(text(f"SET search_path TO {schema}, public"))
+    await conn.run_sync(lambda sc: rtd_models.RtdIndicadorAnalise.__table__.create(sc, checkfirst=True))
+    await _add_columns(conn, schema, "rtd_reunioes", {
+        "snapshot_indicadores": "JSONB",
+    })
+
+
+async def _step_113_rtd_analise_acoes(conn: AsyncConnection, schema: str) -> None:
+    """Plano de ação em LISTA na análise de indicador da RTD (N causas/ações por
+    indicador, com responsável/prazo/resultado por ação)."""
+    if not await _table_exists(conn, schema, "rtd_indicador_analises"):
+        return
+    await _add_columns(conn, schema, "rtd_indicador_analises", {
+        "acoes": "JSONB",
+    })
+
+
+async def _step_114_rtd_epa_planos(conn: AsyncConnection, schema: str) -> None:
+    """Slide de Planos Estratégicos do RTD: códigos dos planos do EPA por reunião."""
+    if not await _table_exists(conn, schema, "rtd_reunioes"):
+        return
+    await _add_columns(conn, schema, "rtd_reunioes", {
+        "epa_planos": "JSONB",
+    })
+
+
+async def _step_115_rtd_epa_planos_taticos(conn: AsyncConnection, schema: str) -> None:
+    """Slide de Planos TÁTICOS do RTD (mesmo conceito do estratégico, lista própria)."""
+    if not await _table_exists(conn, schema, "rtd_reunioes"):
+        return
+    await _add_columns(conn, schema, "rtd_reunioes", {
+        "epa_planos_taticos": "JSONB",
+    })
+
+
+async def _step_116_projetos_procurement(conn: AsyncConnection, schema: str) -> None:
+    """Fluxo de contratação: lock do card de origem + funil Contratar + flags de etapa."""
+    await _add_columns(conn, schema, "project_tasks", {
+        "procurement_required": "BOOLEAN",
+        "procurement_task_id": "UUID",
+        "procurement_locked": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "procurement_cancel_reason": "TEXT",
+        "procurement_meta": "JSONB",
+    })
+    await _add_columns(conn, schema, "project_status_configs", {
+        "is_procurement_hold": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "is_procurement_cancel": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "is_procurement_won": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "is_procurement_lost": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "procurement_stage_key": "VARCHAR(40)",
+    })
+    await _add_columns(conn, schema, "project_funnels", {
+        "is_procurement": "BOOLEAN NOT NULL DEFAULT FALSE",
+    })
+    await _add_columns(conn, schema, "project_demand_types", {
+        "is_procurement": "BOOLEAN NOT NULL DEFAULT FALSE",
+    })
+
+
+async def _step_117_projetos_task_status_history(conn: AsyncConnection, schema: str) -> None:
+    """Timeline de movimentos entre raias: quem arrastou, quando, de/para."""
+    if not await _table_exists(conn, schema, "project_tasks"):
+        return
+    if not await _table_exists(conn, schema, "project_task_status_history"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_task_status_history (
+                id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                task_id           UUID NOT NULL REFERENCES {schema}.project_tasks(id) ON DELETE CASCADE,
+                from_status_id    UUID,
+                to_status_id      UUID,
+                from_status_name  VARCHAR(120),
+                to_status_name    VARCHAR(120),
+                from_funnel_name  VARCHAR(120),
+                to_funnel_name    VARCHAR(120),
+                moved_by          UUID,
+                moved_at          TIMESTAMP DEFAULT now(),
+                source            VARCHAR(30) NOT NULL DEFAULT 'user'
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_task_status_history_task "
+            f"ON {schema}.project_task_status_history(task_id, moved_at DESC)"
+        ))
+
+
+async def _step_118_projetos_pausado_status(conn: AsyncConnection, schema: str) -> None:
+    """Raia 'Pausado' no kanban Projetos e Programas — após Impedimento (âmbar)."""
+    if not await _table_exists(conn, schema, "project_funnels"):
+        return
+    if not await _table_exists(conn, schema, "project_status_configs"):
+        return
+
+    funnels = await conn.execute(text(f"""
+        SELECT id, project_id FROM {schema}.project_funnels
+        WHERE lower(trim(name)) = 'projetos e programas'
+    """))
+    for row in funnels.mappings().all():
+        funnel_id = row["id"]
+        project_id = row["project_id"]
+        exists = await conn.execute(text(f"""
+            SELECT 1 FROM {schema}.project_status_configs
+            WHERE funnel_id = :fid AND lower(trim(name)) = 'pausado'
+            LIMIT 1
+        """), {"fid": funnel_id})
+        if exists.scalar() is not None:
+            continue
+
+        # Posição: logo após Impedimento; se não houver, antes de Cancelado; senão no fim.
+        imped = await conn.execute(text(f"""
+            SELECT "order" FROM {schema}.project_status_configs
+            WHERE funnel_id = :fid AND lower(name) LIKE '%impediment%'
+            ORDER BY "order" ASC LIMIT 1
+        """), {"fid": funnel_id})
+        imped_order = imped.scalar()
+        if imped_order is not None:
+            insert_at = int(imped_order) + 1
+        else:
+            cancel = await conn.execute(text(f"""
+                SELECT "order" FROM {schema}.project_status_configs
+                WHERE funnel_id = :fid AND lower(trim(name)) = 'cancelado'
+                ORDER BY "order" ASC LIMIT 1
+            """), {"fid": funnel_id})
+            cancel_order = cancel.scalar()
+            if cancel_order is not None:
+                insert_at = int(cancel_order)
+            else:
+                mx = await conn.execute(text(f"""
+                    SELECT COALESCE(MAX("order"), -1) FROM {schema}.project_status_configs
+                    WHERE funnel_id = :fid
+                """), {"fid": funnel_id})
+                insert_at = int(mx.scalar() or -1) + 1
+
+        await conn.execute(text(f"""
+            UPDATE {schema}.project_status_configs
+            SET "order" = "order" + 1, updated_at = now()
+            WHERE funnel_id = :fid AND "order" >= :ord
+        """), {"fid": funnel_id, "ord": insert_at})
+
+        await conn.execute(text(f"""
+            INSERT INTO {schema}.project_status_configs
+                (id, project_id, funnel_id, name, color, "order",
+                 is_initial, is_final, is_active, sla_warning_pct,
+                 priority_mode, created_at, updated_at)
+            VALUES
+                (gen_random_uuid(), :pid, :fid, 'Pausado', '#D97706', :ord,
+                 FALSE, FALSE, TRUE, 80,
+                 'edit', now(), now())
+        """), {"pid": project_id, "fid": funnel_id, "ord": insert_at})
+
+
+async def _step_119_teamops_po_externo(conn: AsyncConnection, schema: str) -> None:
+    """Cargo 'Product Owner (Externo)': PO que só enxerga os projetos onde é o responsável."""
+    if not await _table_exists(conn, schema, "team_positions"):
+        return
+    await conn.execute(text(f"""
+        INSERT INTO {schema}.team_positions
+            (id, slug, name, description, is_system, sort_order, is_active, created_at, updated_at)
+        VALUES (gen_random_uuid(), 'po_externo', 'Product Owner (Externo)',
+                'Product Owner com visibilidade restrita aos projetos em que é o responsável.',
+                TRUE, 25, TRUE, now(), now())
+        ON CONFLICT (slug) DO NOTHING
+    """))
+
+
+async def _step_120_po_externo_sem_modulos_vedados(conn: AsyncConnection, schema: str) -> None:
+    """Tira Pessoas/Indicadores/RTD da role do cargo PO Externo.
+
+    Corrige cargos criados antes da regra, cuja role nasceu com o default do PO interno
+    (que inclui `teamops.absence.*`). O bloqueio duro vive em require_module, mas deixar
+    a permissão gravada faria o módulo reaparecer no rail do usuário.
+    """
+    if not await _table_exists(conn, schema, "team_positions"):
+        return
+    await conn.execute(text(f"""
+        DELETE FROM public.role_permissions rp
+        USING {schema}.team_positions po
+        WHERE rp.role_id = po.role_id
+          AND po.slug IN ('po_externo', 'product_owner_externo')
+          AND (rp.permission_code LIKE 'teamops.%'
+            OR rp.permission_code LIKE 'indicadores.%'
+            OR rp.permission_code LIKE 'rtd.%')
+    """))
+
+
+async def _step_121_produtos_repositorios(conn: AsyncConnection, schema: str) -> None:
+    """Integração de commits: repositórios de código, vínculo N:N com produto, commits e
+    mapa de autores.
+
+    O repositório fica em tabela própria porque o mesmo repo serve mais de um produto
+    (ex.: idigital/api atende Idigital e ID-Docs) — assim ele é sincronizado uma única vez.
+    `products.link_repositorio` continua existindo: vira a origem do inventário, não a verdade.
+    """
+    if not await _table_exists(conn, schema, "products"):
+        return
+
+    if not await _table_exists(conn, schema, "code_repositories"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.code_repositories (
+                id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                provider          VARCHAR(20) NOT NULL DEFAULT 'azure_devops',
+                organization      VARCHAR(200) NOT NULL,
+                project           VARCHAR(200) NOT NULL,
+                repository        VARCHAR(200) NOT NULL,
+                remote_repo_id    VARCHAR(64),
+                web_url           TEXT,
+                default_branch    VARCHAR(200),
+                is_active         BOOLEAN NOT NULL DEFAULT TRUE,
+                sync_enabled      BOOLEAN NOT NULL DEFAULT TRUE,
+                first_synced_at   TIMESTAMP,
+                last_sync_at      TIMESTAMP,
+                last_sync_status  VARCHAR(20) NOT NULL DEFAULT 'nunca',
+                last_sync_error   TEXT,
+                last_commit_at    TIMESTAMP,
+                commits_count     INTEGER NOT NULL DEFAULT 0,
+                created_by        UUID,
+                created_at        TIMESTAMP DEFAULT now(),
+                updated_by        UUID,
+                updated_at        TIMESTAMP DEFAULT now()
+            )
+        """))
+        # lower(): o Azure é case-insensitive em nome de projeto/repo e os links reais
+        # misturam `SGE`, `portais`, `AgentesAI`.
+        await conn.execute(text(
+            f"CREATE UNIQUE INDEX uq_code_repositories_path ON {schema}.code_repositories"
+            f"(provider, lower(organization), lower(project), lower(repository))"
+        ))
+        # remote_repo_id é nulo até o primeiro contato com a API — unique parcial.
+        await conn.execute(text(
+            f"CREATE UNIQUE INDEX uq_code_repositories_remote ON {schema}.code_repositories"
+            f"(provider, remote_repo_id) WHERE remote_repo_id IS NOT NULL"
+        ))
+
+    if not await _table_exists(conn, schema, "product_repositories"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.product_repositories (
+                id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                product_id     UUID NOT NULL REFERENCES {schema}.products(id) ON DELETE CASCADE,
+                repository_id  UUID NOT NULL REFERENCES {schema}.code_repositories(id) ON DELETE CASCADE,
+                is_primary     BOOLEAN NOT NULL DEFAULT FALSE,
+                created_by     UUID,
+                created_at     TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_product_repositories UNIQUE (product_id, repository_id)
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_product_repositories_repo "
+            f"ON {schema}.product_repositories(repository_id)"
+        ))
+
+    if not await _table_exists(conn, schema, "repo_commits"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.repo_commits (
+                id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                repository_id     UUID NOT NULL REFERENCES {schema}.code_repositories(id) ON DELETE CASCADE,
+                commit_id         VARCHAR(64) NOT NULL,
+                author_name       VARCHAR(200),
+                author_email      VARCHAR(255),
+                author_date       TIMESTAMP NOT NULL,
+                committer_date    TIMESTAMP,
+                comment           TEXT,
+                comment_truncated BOOLEAN NOT NULL DEFAULT FALSE,
+                add_count         INTEGER NOT NULL DEFAULT 0,
+                edit_count        INTEGER NOT NULL DEFAULT 0,
+                delete_count      INTEGER NOT NULL DEFAULT 0,
+                is_merge          BOOLEAN NOT NULL DEFAULT FALSE,
+                is_bot            BOOLEAN NOT NULL DEFAULT FALSE,
+                person_id         UUID REFERENCES {schema}.team_persons(id) ON DELETE SET NULL,
+                remote_url        TEXT,
+                synced_at         TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_repo_commits UNIQUE (repository_id, commit_id)
+            )
+        """))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_repo_commits_date ON {schema}.repo_commits(author_date DESC)"
+        ))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_repo_commits_person ON {schema}.repo_commits(person_id, author_date DESC)"
+        ))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_repo_commits_repo ON {schema}.repo_commits(repository_id, author_date DESC)"
+        ))
+        await conn.execute(text(
+            f"CREATE INDEX ix_{schema}_repo_commits_email ON {schema}.repo_commits(lower(author_email))"
+        ))
+
+    if not await _table_exists(conn, schema, "repo_commit_authors"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.repo_commit_authors (
+                id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                provider       VARCHAR(20) NOT NULL DEFAULT 'azure_devops',
+                email          VARCHAR(255) NOT NULL,
+                display_name   VARCHAR(200),
+                person_id      UUID REFERENCES {schema}.team_persons(id) ON DELETE SET NULL,
+                resolution     VARCHAR(20) NOT NULL DEFAULT 'pendente',
+                ignored        BOOLEAN NOT NULL DEFAULT FALSE,
+                commits_count  INTEGER NOT NULL DEFAULT 0,
+                last_commit_at TIMESTAMP,
+                created_at     TIMESTAMP DEFAULT now(),
+                updated_by     UUID,
+                updated_at     TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_repo_commit_authors UNIQUE (provider, email)
+            )
+        """))
+
+
+async def _step_122_produtos_repos_view_cargos(conn: AsyncConnection, schema: str) -> None:
+    """Concede `produtos.repos.view` aos cargos de gestão e ao PO.
+
+    Commit por pessoa é insumo de avaliação, então a permissão não entra no `produtos.view`
+    genérico — mas sem conceder a alguém o painel nasce em 403 para todo mundo. Dev,
+    estagiário e PO Externo ficam de fora por decisão de quem opera.
+    """
+    if not await _table_exists(conn, schema, "team_positions"):
+        return
+    await conn.execute(text(f"""
+        INSERT INTO public.role_permissions (id, role_id, permission_code)
+        SELECT gen_random_uuid(), po.role_id, 'produtos.repos.view'
+          FROM {schema}.team_positions po
+         WHERE po.role_id IS NOT NULL
+           AND po.slug IN ('gerente_executivo', 'coord_de_arq_dev_e_sustenta_o',
+                           'refer_ncia_t_cnica', 'product_owner')
+        ON CONFLICT (role_id, permission_code) DO NOTHING
+    """))
+
+
+async def _ensure_index(
+    conn: AsyncConnection,
+    schema: str,
+    name: str,
+    table: str,
+    columns_sql: str,
+    *,
+    columns: tuple[str, ...],
+    where: str | None = None,
+) -> None:
+    """Cria um índice se a tabela e todas as colunas existirem. Idempotente.
+
+    Diferente dos steps antigos, o CREATE INDEX NÃO fica aninhado no guard de
+    criação da tabela/coluna — é justamente esse aninhamento que fez os índices
+    nunca nascerem em tenants que já existiam quando o step foi escrito.
+    """
+    if not await _table_exists(conn, schema, table):
+        return
+    for column in columns:
+        if not await _column_exists(conn, schema, table, column):
+            return
+    suffix = f" WHERE {where}" if where else ""
+    await conn.execute(text(
+        f"CREATE INDEX IF NOT EXISTS ix_{schema}_{name} "
+        f"ON {schema}.{table}({columns_sql}){suffix}"
+    ))
+
+
+# (nome_do_indice, tabela, colunas_sql, colunas_exigidas, where_parcial)
+_INDEX_SPECS: list[tuple[str, str, str, tuple[str, ...], str | None]] = [
+    # ── projetos: o kanban ──────────────────────────────────────────────
+    # Declarados desde sempre, mas ausentes em tenants antigos: o CREATE INDEX
+    # morava dentro de `if not _table_exists(...)` / `if not _column_exists(...)`.
+    ("project_tasks_project", "project_tasks", "project_id, status_id", ("project_id", "status_id"), None),
+    ("project_tasks_assigned", "project_tasks", "assigned_to", ("assigned_to",), None),
+    ("project_tasks_parent", "project_tasks", "parent_task_id", ("parent_task_id",), None),
+    ("project_tasks_origin", "project_tasks", "origin_task_id", ("origin_task_id",), None),
+    ("project_tasks_demand_type", "project_tasks", "demand_type_id", ("demand_type_id",), None),
+    # Novos, para os predicados quentes medidos no diagnóstico de performance:
+    # seed da CTE recursiva do PO Externo e `list_my_requests`.
+    ("project_tasks_created_by", "project_tasks", "created_by", ("created_by",), None),
+    # O composto (project_id, status_id) não atende lookup só por status.
+    ("project_tasks_status", "project_tasks", "status_id", ("status_id",), None),
+    # Árvore de planejamento / índice byParent.
+    ("project_tasks_project_parent", "project_tasks", "project_id, parent_task_id", ("project_id", "parent_task_id"), None),
+    # O board só desenha card-raiz: parcial cobre a consulta principal do kanban.
+    ("project_tasks_board_roots", "project_tasks", "project_id, status_id", ("project_id", "status_id"), "parent_task_id IS NULL"),
+    ("project_task_comments_task", "project_task_comments", "task_id, created_at", ("task_id", "created_at"), None),
+    ("project_automation_status", "project_automation_rules", "status_id, is_active", ("status_id", "is_active"), None),
+    ("project_schedule_bindings_funnel", "project_schedule_bindings", "funnel_id", ("funnel_id",), None),
+    # ── teamops ─────────────────────────────────────────────────────────
+    # user_id é sondado em toda carga do board (_person_id_for_user e
+    # _attach_requester_names) — 187k seq scans acumulados sem ele.
+    ("team_persons_user", "team_persons", "user_id", ("user_id",), None),
+    ("team_persons_area", "team_persons", "area_id", ("area_id",), None),
+    ("team_persons_position", "team_persons", "position_id", ("position_id",), None),
+    ("team_absences_person", "team_absences", "person_id, start_date", ("person_id", "start_date"), None),
+    ("team_absences_status", "team_absences", "status", ("status",), None),
+    ("team_stacks_category", "team_stacks", "category_id", ("category_id",), None),
+    # ── produtos ────────────────────────────────────────────────────────
+    ("products_status", "products", "status_produto", ("status_produto",), None),
+    ("product_processos_product", "product_processos", "product_id", ("product_id",), None),
+    ("product_processos_parent", "product_processos", "parent_id", ("parent_id",), None),
+    # ── notificações ────────────────────────────────────────────────────
+    ("notif_user", "notifications", "user_id, is_read, created_at DESC", ("user_id", "is_read", "created_at"), None),
+    # ── commits por ambiente (PROD/HML/DEV) ─────────────────────────────
+    ("repo_commits_env", "repo_commits", "environment, author_date DESC", ("environment", "author_date"), None),
+    # ── evidência de commit na User Story ───────────────────────────────
+    ("project_task_commits_task", "project_task_commits", "task_id, created_at", ("task_id", "created_at"), None),
+    ("project_task_commits_commit", "project_task_commits", "commit_id", ("commit_id",), None),
+    # ── atendimento/CRM (só existem em tenants com o módulo) ─────────────
+    ("attendance_tags_att", "attendance_tags", "attendance_id", ("attendance_id",), None),
+    ("client_tags_client", "client_tags", "client_id", ("client_id",), None),
+    ("msgatt_attendance", "message_attachments", "attendance_id", ("attendance_id",), None),
+    ("msgatt_message", "message_attachments", "message_id", ("message_id",), None),
+    ("lead_events_attendance", "lead_events", "attendance_id, created_at DESC", ("attendance_id", "created_at"), None),
+    ("automation_rules_trigger", "automation_rules", "trigger, is_active", ("trigger", "is_active"), None),
+    ("followup_stage", "follow_up_templates", "stage_id, is_active", ("stage_id", "is_active"), None),
+    ("tasks_attendance", "tasks", "attendance_id", ("attendance_id",), None),
+    ("tasks_assigned", "tasks", "assigned_to", ("assigned_to",), None),
+]
+
+
+async def _step_125_us_commit_evidence(conn: AsyncConnection, schema: str) -> None:
+    """Evidência de código na conclusão da User Story.
+
+    Para concluir uma US o dev vincula um commit do produto do projeto; quando o produto
+    não tem commit, justifica. `commit_id` é UUID SEM FK de propósito — `repo_commits` é do
+    módulo Produtos, e o padrão do repo para vínculo cross-módulo é o UUID solto (mesma
+    escolha de `project_tasks.linked_product_id`).
+
+    O índice fica em `_INDEX_SPECS`, não aqui dentro: aninhado no guard de criação da tabela
+    ele nunca nasceria num tenant que já existe.
+    """
+    if not await _table_exists(conn, schema, "project_tasks"):
+        return
+    if not await _table_exists(conn, schema, "project_task_commits"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_task_commits (
+                id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                task_id    UUID NOT NULL REFERENCES {schema}.project_tasks(id) ON DELETE CASCADE,
+                commit_id  UUID NOT NULL,
+                linked_by  UUID,
+                created_at TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_project_task_commits UNIQUE (task_id, commit_id)
+            )
+        """))
+    for col, ddl in (
+        ("commit_justificativa", "TEXT"),
+        ("commit_justificativa_por", "UUID"),
+        ("commit_justificativa_em", "TIMESTAMP"),
+    ):
+        if not await _column_exists(conn, schema, "project_tasks", col):
+            await conn.execute(text(
+                f"ALTER TABLE {schema}.project_tasks ADD COLUMN {col} {ddl}"
+            ))
+
+
+async def _step_124_repo_commits_branch(conn: AsyncConnection, schema: str) -> None:
+    """Branch + ambiente do commit.
+
+    Regra do negócio: `main` → PROD, `preview` → HML, qualquer outra branch → DEV.
+    Sem isso o sync só enxergava a branch padrão do repositório — que na prática é
+    `develop`, `master`, `contracts`… em quase metade dos repositórios, misturando
+    tudo num balaio só.
+    """
+    if not await _table_exists(conn, schema, "repo_commits"):
+        return
+    if not await _column_exists(conn, schema, "repo_commits", "branch"):
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.repo_commits ADD COLUMN branch VARCHAR(200)"
+        ))
+    if not await _column_exists(conn, schema, "repo_commits", "environment"):
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.repo_commits ADD COLUMN environment VARCHAR(10)"
+        ))
+
+
+async def _step_123_reconcile_indexes(conn: AsyncConnection, schema: str) -> None:
+    """Reconcilia TODOS os índices de performance, para tenants novos e antigos.
+
+    Nos steps anteriores cada `CREATE INDEX` ficou aninhado dentro do guard que
+    cria a tabela ou a coluna. Num tenant que já existia quando o step foi
+    adicionado, o guard é falso e o índice nunca é criado — foi o que aconteceu
+    aqui: `project_tasks` ficou só com a primary key, e uma tabela de ~1,5k
+    linhas acumulou 166 M de tuplas lidas em seq scan.
+
+    Este step é declarativo e independente: roda sempre, cria o que faltar e
+    ignora o que já existe. Novos índices devem ser adicionados em `_INDEX_SPECS`,
+    não aninhados em guards de DDL.
+    """
+    for name, table, columns_sql, columns, where in _INDEX_SPECS:
+        await _ensure_index(
+            conn, schema, name, table, columns_sql, columns=columns, where=where
+        )
+
+
 # Lista ordenada de steps. Adicionar novos no final.
 STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("001_funnels", _step_001_funnels),
@@ -3808,6 +4328,25 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("106_team_person_project_allocation_pct", _step_106_team_person_project_allocation_pct),
     ("107_produtos_contrato_widen_varchars", _step_107_produtos_contrato_widen_varchars),
     ("108_projetos_left_backlog_at", _step_108_projetos_left_backlog_at),
+    ("109_rtd", _step_109_rtd),
+    ("110_projetos_ia_assisted", _step_110_projetos_ia_assisted),
+    ("111_indicadores_sub_processo", _step_111_indicadores_sub_processo),
+    ("112_rtd_indicador_analises", _step_112_rtd_indicador_analises),
+    ("113_rtd_analise_acoes", _step_113_rtd_analise_acoes),
+    ("114_rtd_epa_planos", _step_114_rtd_epa_planos),
+    ("115_rtd_epa_planos_taticos", _step_115_rtd_epa_planos_taticos),
+    ("116_projetos_procurement", _step_116_projetos_procurement),
+    ("117_projetos_task_status_history", _step_117_projetos_task_status_history),
+    ("118_projetos_pausado_status", _step_118_projetos_pausado_status),
+    ("119_teamops_po_externo", _step_119_teamops_po_externo),
+    ("120_po_externo_sem_modulos_vedados", _step_120_po_externo_sem_modulos_vedados),
+    ("121_produtos_repositorios", _step_121_produtos_repositorios),
+    ("122_produtos_repos_view_cargos", _step_122_produtos_repos_view_cargos),
+    # 124 antes de 123: o passo de índices é declarativo e só cria índice de coluna
+    # existente — se rodasse antes, o índice de `environment` ficaria para o próximo boot.
+    ("124_repo_commits_branch", _step_124_repo_commits_branch),
+    ("125_us_commit_evidence", _step_125_us_commit_evidence),
+    ("123_reconcile_indexes", _step_123_reconcile_indexes),
 ]
 
 

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { ArrowUpRight, CalendarRange, Check, ChevronDown, Clock, FileText, Link as LinkIcon, Loader2, Pencil, Plus, Trash2, X } from "lucide-react"
+import { ArrowUpRight, CalendarRange, Check, ChevronDown, Clock, FileText, GitBranch, Link as LinkIcon, Loader2, Pencil, Plus, Trash2, X } from "lucide-react"
+import { formatApiDateTime } from "@/lib/utils"
 
-import { projetosApi, type CardClassification, type PriorityMode, type ProjectDemandFormField, type ProjectDemandFormSection, type ProjectDemandType, type ProjectFunnel, type ProjectStatus, type ProjectStatusDefaultFormLink, type ProjectStatusSectionLink, type ProjectTask, type ProjectTaskComment, type ProjectUpload, type ScheduleLockState, type UsChecklistItem } from "@/api/projetos"
+import { projetosApi, STATUS_HISTORY_SOURCE_LABELS, type CardClassification, type PriorityMode, type ProjectDemandFormField, type ProjectDemandFormSection, type ProjectDemandType, type ProjectFunnel, type ProjectStatus, type ProjectStatusDefaultFormLink, type ProjectStatusSectionLink, type ProjectTask, type ProjectTaskComment, type ProjectTaskStatusHistory, type ProjectUpload, type ScheduleLockState, type UsChecklistItem } from "@/api/projetos"
 import { ScheduleLockBanner } from "@/modules/projetos/ScheduleLockBanner"
 import { produtosApi } from "@/api/produtos"
 import { Badge } from "@/components/ui/badge"
@@ -29,6 +30,7 @@ import { CommentBody, CommentComposer, commentHasContent } from "@/modules/proje
 import { useAuth } from "@/contexts/AuthContext"
 import { toast } from "@/lib/toast"
 import { UsChecklistSection } from "@/modules/projetos/UsChecklistSection"
+import { UsCommitsSection } from "@/modules/projetos/UsCommitsSection"
 import { fmtEstimatedHours, isFeatureOrUsKanbanFunnel, isPlanningRootTask, isProjectOrProgramKanbanFunnel, isUserStoryDemandType, isUserStoryKanbanFunnel } from "@/modules/projetos/kanbanDisplay"
 
 const NO_ASSIGNEE = "__none__"
@@ -91,6 +93,8 @@ export function ProjectTaskDrawer({
   kanbanFunnelName = null,
   onSaved,
   onDeleted,
+  onOpenTask,
+  boardTasks,
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
@@ -103,6 +107,12 @@ export function ProjectTaskDrawer({
   kanbanFunnelName?: string | null
   onSaved: (task: ProjectTask) => void
   onDeleted: (taskId: string) => void
+  /** Abre outro card do mesmo processo (atalho contratação). */
+  onOpenTask?: (taskId: string) => void
+  /** Lista de cards que o chamador já tem em memória. Quando vem preenchida, o drawer
+   *  NÃO rebaixa a lista do projeto — abrir um card custava outro download completo
+   *  (~2,8 MB no portfólio medido) só para resolver pai/origem/convertidos. */
+  boardTasks?: ProjectTask[]
 }) {
   const readOnly = isBasicUser || !canEditTask
   const showEstimatedHoursHeader = isFeatureOrUsKanbanFunnel(kanbanFunnelName)
@@ -113,6 +123,7 @@ export function ProjectTaskDrawer({
   const [linkedProductName, setLinkedProductName] = useState<string | null>(null)
   const [linkedReleaseVersao, setLinkedReleaseVersao] = useState<string | null>(null)
   const [comments, setComments] = useState<ProjectTaskComment[]>([])
+  const [statusHistory, setStatusHistory] = useState<ProjectTaskStatusHistory[]>([])
   const [selectedDemandTypeId, setSelectedDemandTypeId] = useState("")
   const [formSections, setFormSections] = useState<ProjectDemandFormSection[]>([])
   const [fieldsBySection, setFieldsBySection] = useState<Record<string, ProjectDemandFormField[]>>({})
@@ -130,7 +141,9 @@ export function ProjectTaskDrawer({
   const [area, setArea] = useState<string | null>(null)
   const [parentTaskId, setParentTaskId] = useState<string>(NO_ASSIGNEE)
   const [demandTypes, setDemandTypes] = useState<ProjectDemandType[]>([])
-  const [allTasks, setAllTasks] = useState<ProjectTask[]>([])
+  const [fetchedTasks, setFetchedTasks] = useState<ProjectTask[]>([])
+  // Prefere a lista que o board já tem; só busca quando o chamador não passou nada.
+  const allTasks = boardTasks ?? fetchedTasks
   const [programs, setPrograms] = useState<{ id: string; name: string }[]>([])
   // Editor de classificação Projeto/Programa (propaga ao card convertido).
   const [planningEditOpen, setPlanningEditOpen] = useState(false)
@@ -221,12 +234,15 @@ export function ProjectTaskDrawer({
       .then((ps) => setUsers(ps.map((p) => ({ id: p.id, full_name: p.full_name, email: p.email })) as unknown as User[]))
       .catch(() => setUsers([]))
     projetosApi.listTaskComments(projectId, task.id).then(setComments).catch(() => setComments([]))
+    projetosApi.listTaskStatusHistory(projectId, task.id).then(setStatusHistory).catch(() => setStatusHistory([]))
     projetosApi.getTaskFormSubmission(projectId, task.id).then((submission) => {
-      setFormValues(submission?.values ?? {})
-    }).catch(() => setFormValues({}))
+      setFormValues({ ...(task.procurement_meta ?? {}), ...(submission?.values ?? {}) })
+    }).catch(() => setFormValues({ ...(task.procurement_meta ?? {}) }))
     projetosApi.listDemandTypes().then(setDemandTypes).catch(() => setDemandTypes([]))
     projetosApi.listFunnels(projectId, true).then(setFunnels).catch(() => setFunnels([]))
-    projetosApi.listTasks(projectId).then(setAllTasks).catch(() => setAllTasks([]))
+    if (!boardTasks) {
+      projetosApi.listTasks(projectId).then(setFetchedTasks).catch(() => setFetchedTasks([]))
+    }
     projetosApi.listPrograms(projectId).then(setPrograms).catch(() => setPrograms([]))
     projetosApi.listTaskChildren(projectId, task.id).then(setChildren).catch(() => setChildren([]))
     projetosApi.listStatuses(projectId).then((sts) => {
@@ -288,9 +304,11 @@ export function ProjectTaskDrawer({
   const assigneeLabel = assignedUser?.full_name ?? "Sem responsável"
   const currentStatus = statusMap[statusId]
   const currentStatusConfig = allStatuses.find((s) => s.id === statusId)
+  // Classificação pendente OU classificado sem responder a pergunta de IA.
+  const missingIaAnswer = !!task?.card_classification && task?.ia_assisted == null
   const canLateClassify =
     !readOnly &&
-    !task?.card_classification &&
+    (!task?.card_classification || missingIaAnswer) &&
     !!currentStatusConfig &&
     !currentStatusConfig.is_initial &&
     isPlanningRootTask(task?.planning_kind) &&
@@ -347,7 +365,8 @@ export function ProjectTaskDrawer({
         new_program_desc: planningKindDraft === "programa" && planningProgramMode === "new" ? (planningNewProgramDesc.trim() || null) : null,
       })
       // Atualiza a lista local (o card convertido) e a lista de programas se criou um novo.
-      setAllTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+      // Quando a lista vem do board (`boardTasks`), quem reconcilia é o `onSaved` abaixo.
+      setFetchedTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
       if (updated.linked_program_id && !programs.some((p) => p.id === updated.linked_program_id)) {
         try { setPrograms(await projetosApi.listPrograms(projectId)) } catch { /* mantém */ }
       }
@@ -633,6 +652,7 @@ export function ProjectTaskDrawer({
       })
       setStatusId(updated.status_id)
       onSaved(updated)
+      projetosApi.listTaskStatusHistory(projectId, task.id).then(setStatusHistory).catch(() => null)
       const after = allStatuses.find((s) => s.id === updated.status_id)
       toast.success(after && before && after.funnel_id !== before.funnel_id ? "Card movido para outro kanban." : "Etapa atualizada.")
     } catch (err) {
@@ -646,6 +666,10 @@ export function ProjectTaskDrawer({
 
   async function handleSelectStatus(newStatusId: string) {
     if (!task || newStatusId === statusId) return
+    if (task.procurement_locked) {
+      toast.error("Card aguardando contratação — não é possível alterar a etapa.")
+      return
+    }
     const target = allStatuses.find((s) => s.id === newStatusId)
     const current = allStatuses.find((s) => s.id === statusId)
     if (!target) return
@@ -756,6 +780,10 @@ export function ProjectTaskDrawer({
       })
       onSaved(updated)
       onOpenChange(false)
+    } catch (err) {
+      // Cronograma travado (423) e demais recusas do servidor: mantém o drawer aberto.
+      const e = err as { response?: { data?: { detail?: unknown } } }
+      toast.error(typeof e.response?.data?.detail === "string" ? e.response.data.detail : "Não foi possível salvar a tarefa.")
     } finally {
       setSaving(false)
     }
@@ -776,19 +804,29 @@ export function ProjectTaskDrawer({
 
   async function confirmLateClassification(result: {
     classification: CardClassification
+    iaAssisted: boolean
     productId: string
     releaseId: string | null
+    procurementRequired: boolean | null
   }) {
     if (!task) return
     try {
       const updated = await projetosApi.updateTask(projectId, task.id, {
         card_classification: result.classification,
+        ia_assisted: result.iaAssisted,
         linked_product_id: result.productId,
         linked_release_id: result.releaseId,
+        ...(result.procurementRequired !== null
+          ? { procurement_required: result.procurementRequired }
+          : {}),
       })
       onSaved(updated)
       setClassifyOpen(false)
-      toast.success("Projeto classificado.")
+      toast.success(
+        result.procurementRequired
+          ? "Classificado — card na Contratação e demanda criada em Contratar."
+          : "Projeto classificado.",
+      )
     } catch (err) {
       const e = err as { response?: { data?: { detail?: unknown } } }
       const d = e.response?.data?.detail
@@ -879,6 +917,39 @@ export function ProjectTaskDrawer({
                 compact
               />
             )}
+            {task.procurement_locked && (
+              <div className="rounded-md border border-orange-300 bg-orange-50 px-3 py-2 text-sm text-orange-900">
+                <div className="font-medium">Aguardando contratação</div>
+                <p className="mt-0.5 text-xs text-orange-800/80">
+                  Este card está travado na raia Contratação até o fluxo Contratar ser concluído ou cancelado.
+                </p>
+                {task.procurement_task_id && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-2 h-7 border-orange-300 text-orange-900 hover:bg-orange-100"
+                    onClick={() => onOpenTask?.(task.procurement_task_id!)}
+                  >
+                    <ArrowUpRight size={12} className="mr-1" />
+                    Abrir card de contratação
+                  </Button>
+                )}
+              </div>
+            )}
+            {task.origin_task_id && demandTypes.find((d) => d.id === task.demand_type_id)?.is_procurement && (
+              <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
+                <div className="text-xs text-muted-foreground">Card de origem</div>
+                <Button
+                  type="button"
+                  variant="link"
+                  className="h-auto p-0 text-sm"
+                  onClick={() => onOpenTask?.(task.origin_task_id!)}
+                >
+                  Voltar ao card de origem
+                </Button>
+              </div>
+            )}
             {/* Cabeçalho: tipo, estado, título e meta (estilo Azure DevOps) */}
             <div className="space-y-2 border-b border-border pb-3">
               <div className="flex flex-wrap items-center gap-2">
@@ -886,6 +957,11 @@ export function ProjectTaskDrawer({
                   <FileText size={12} />
                   {demandTypeName(task.demand_type_id) ?? "Card"}
                 </Badge>
+                {task.procurement_locked && (
+                  <Badge className="bg-orange-600 text-[10px] text-white hover:bg-orange-600">
+                    Aguardando contratação
+                  </Badge>
+                )}
                 {task.sla_state && task.sla_state !== "none" && (
                   <Badge variant={task.sla_state === "breached" ? "destructive" : "secondary"} className="text-[10px]">
                     {task.sla_state === "breached" ? "SLA estourado" : task.sla_state === "warning" ? "SLA em alerta" : "No prazo"}
@@ -1099,6 +1175,21 @@ export function ProjectTaskDrawer({
               />
             )}
 
+            {isUserStoryCard && task && (
+              <UsCommitsSection
+                projectId={projectId}
+                taskId={task.id}
+                readOnly={readOnly}
+                justificativa={task.commit_justificativa ?? null}
+                onSaveJustificativa={async (texto) => {
+                  const updated = await projetosApi.updateTask(projectId, task.id, {
+                    commit_justificativa: texto,
+                  })
+                  onSaved(updated)
+                }}
+              />
+            )}
+
             {(() => {
               const planningFields = defaultFormPlanningFields(defaultFormFields, defaultFormLinks)
               const descriptionField = defaultFieldsByKey.get("description")
@@ -1138,10 +1229,12 @@ export function ProjectTaskDrawer({
                     {canLateClassify && (
                       <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300/60 bg-amber-50 px-3 py-2">
                         <p className="text-xs text-amber-900">
-                          Este projeto ainda não foi classificado no portfólio de Produtos.
+                          {missingIaAnswer
+                            ? "Informe se este projeto será feito com IA ou auxílio de IA."
+                            : "Este projeto ainda não foi classificado no portfólio de Produtos."}
                         </p>
                         <Button type="button" size="sm" variant="outline" className="h-8" onClick={() => setClassifyOpen(true)}>
-                          Classificar agora
+                          {missingIaAnswer ? "Responder agora" : "Classificar agora"}
                         </Button>
                       </div>
                     )}
@@ -1180,6 +1273,12 @@ export function ProjectTaskDrawer({
                               onOpen={(path) => navigate(path)}
                             />
                           </div>
+                        )}
+                        {task.ia_assisted !== null && task.ia_assisted !== undefined && (
+                          <ClassificationReadonlyField
+                            label="Com IA ou auxílio de IA"
+                            value={task.ia_assisted ? "Sim" : "Não"}
+                          />
                         )}
                       </div>
                     )}
@@ -1419,6 +1518,55 @@ export function ProjectTaskDrawer({
               <div className="flex items-center gap-2">
                 <span className="h-4 w-1 rounded-full bg-primary" />
                 <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">
+                  Timeline de raias
+                </p>
+              </div>
+              <div className="max-h-64 overflow-y-auto space-y-0 rounded-md border p-2">
+                {statusHistory.length === 0 ? (
+                  <p className="text-xs text-muted-foreground px-1 py-2">
+                    Nenhum movimento registrado ainda. A partir de agora, cada troca de raia aparece aqui.
+                  </p>
+                ) : (
+                  <ol className="relative ms-2 border-s border-border/70 ps-4">
+                    {statusHistory.map((h) => {
+                      const fromLabel = h.from_status_name
+                        ? `${h.from_funnel_name ? `${h.from_funnel_name} · ` : ""}${h.from_status_name}`
+                        : "—"
+                      const toLabel = h.to_status_name
+                        ? `${h.to_funnel_name ? `${h.to_funnel_name} · ` : ""}${h.to_status_name}`
+                        : "—"
+                      const who = h.moved_by_name ?? (h.source === "user" ? "Usuário" : "Sistema")
+                      const sourceLabel = STATUS_HISTORY_SOURCE_LABELS[h.source] ?? h.source
+                      return (
+                        <li key={h.id} className="mb-3 last:mb-0">
+                          <span className="absolute -start-[5px] mt-1.5 h-2.5 w-2.5 rounded-full border-2 border-background bg-primary" />
+                          <div className="rounded bg-muted/40 px-2.5 py-2">
+                            <p className="text-sm font-medium leading-snug">
+                              <span className="text-muted-foreground">{fromLabel}</span>
+                              {" → "}
+                              <span>{toLabel}</span>
+                            </p>
+                            <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[11px] text-muted-foreground">
+                              <GitBranch className="inline h-3 w-3 shrink-0" />
+                              <span className="font-medium text-foreground">{who}</span>
+                              <span>·</span>
+                              <span>{formatApiDateTime(h.moved_at)}</span>
+                              <span>·</span>
+                              <span>{sourceLabel}</span>
+                            </p>
+                          </div>
+                        </li>
+                      )
+                    })}
+                  </ol>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-3 border-t border-border pt-4">
+              <div className="flex items-center gap-2">
+                <span className="h-4 w-1 rounded-full bg-primary" />
+                <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">
                   Comentários
                 </p>
               </div>
@@ -1438,7 +1586,7 @@ export function ProjectTaskDrawer({
                       <p className="text-[11px] text-muted-foreground mt-1">
                         <span className="font-medium text-foreground">{c.author_name ?? "Sistema"}</span>
                         {" · "}
-                        {new Date(c.created_at).toLocaleString("pt-BR")}
+                        {formatApiDateTime(c.created_at)}
                       </p>
                     </div>
                   </div>

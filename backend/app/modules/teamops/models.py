@@ -75,6 +75,7 @@ SYSTEM_POSITION_SLUGS: dict[str, str] = {
     "gerente": "Gerente",
     "coordenador": "Coordenador",
     "po": "Product Owner",
+    "po_externo": "Product Owner (Externo)",
     "scrum_master": "Scrum Master",
     "tech_reference": "Referência Técnica",
     "dev_backend": "Dev Backend",

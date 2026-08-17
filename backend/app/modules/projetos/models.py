@@ -146,6 +146,16 @@ class ProjectStatusConfig(TenantBase):
     # do projeto é "comprometido" e passa a exigir baseline + justificativa para alterar
     # (ver ScheduleBaselineService). Marca tipicamente a etapa "Em Desenvolvimento".
     locks_schedule: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Fluxo de contratação: raia "Contratação" no kanban de projetos/programas (origem travada).
+    is_procurement_hold: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Raia "Cancelado" no kanban de projetos/programas (origem quando a contratação perde).
+    is_procurement_cancel: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Etapa "Concluído" do funil Contratar (ganhou → libera origem + anexa contrato).
+    is_procurement_won: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Etapa "Cancelado" do funil Contratar (perdeu → cancela origem).
+    is_procurement_lost: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Slug estável da etapa no funil Contratar (backlog|prospectar|aderencia|proposta|negociacao|concluido|cancelado).
+    procurement_stage_key: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -200,10 +210,27 @@ class ProjectTask(TenantBase):
     # Classificação obrigatória ao sair do backlog: 'desenvolvimento' | 'implantacao' |
     # 'melhoria' | NULL. Define o vínculo exigido com o portfólio de PRODUTOS.
     card_classification: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    # Pergunta obrigatória na classificação (qualquer tipo): será feito com IA ou
+    # auxílio de IA? True=sim · False=não · NULL=não respondido (cards legados).
+    ia_assisted: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     # Vínculos cross-módulo com PRODUTOS — UUID SEM FK (padrão origin_task_id), preserva
     # o desacoplamento entre módulos. Produtos vive no mesmo schema de tenant.
     linked_product_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     linked_release_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # Contratação (implantação/melhoria + produto sistema externo):
+    # procurement_required = resposta "Será contratado?"; locked trava o card de origem.
+    procurement_required: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    procurement_task_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    procurement_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    procurement_cancel_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Evidência de código na conclusão da US: ou existe commit vinculado
+    # (project_task_commits), ou o dev justifica por que não há. Autor e data ficam
+    # registrados para o apontamento ser auditável.
+    commit_justificativa: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    commit_justificativa_por: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    commit_justificativa_em: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Metadados do card Contratar: proposta, valor, fornecedor, contrato (anexo MinIO).
+    procurement_meta: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     diretoria: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     area: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     start_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -225,6 +252,9 @@ class ProjectTask(TenantBase):
     us_codereview_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # Transiente (não é coluna): nome de quem criou a solicitação de origem, preenchido por
+    # ProjectTaskService._attach_requester_names. Default None garante from_attributes em toda rota.
+    requester_name = None
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     # Primeira saída de etapa is_initial (backlog) — só User Story; não sobrescreve.
     left_backlog_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -351,6 +381,58 @@ class ProjectTaskComment(TenantBase):
     task: Mapped["ProjectTask"] = relationship(back_populates="comments")
 
 
+class ProjectTaskCommit(TenantBase):
+    """Commit vinculado a uma User Story como evidência do código entregue.
+
+    `commit_id` aponta para `repo_commits.id` (módulo Produtos) SEM foreign key — mesma
+    convenção de `ProjectTask.linked_product_id`, que preserva o desacoplamento entre
+    módulos. Um commit pode ser evidência de mais de uma US.
+    """
+
+    __tablename__ = "project_task_commits"
+    __table_args__ = (UniqueConstraint("task_id", "commit_id", name="uq_project_task_commits"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("project_tasks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    commit_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    linked_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ProjectTaskStatusHistory(TenantBase):
+    """Timeline de movimentação entre raias (etapas) do kanban.
+
+    Uma linha por mudança de status_id: quem arrastou, quando, de onde → para onde.
+    Nomes denormalizados para a UI continuar legível se a raia for renomeada/apagada.
+    """
+
+    __tablename__ = "project_task_status_history"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("project_tasks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    from_status_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    to_status_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    from_status_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    to_status_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    from_funnel_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    to_funnel_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    # public.users.id — null quando move automático (agente, reconcile, cascata).
+    moved_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    moved_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    # user | automation | agent | reconcile | procurement | cascade | funnel_transition | system
+    source: Mapped[str] = mapped_column(String(30), nullable=False, default="user")
+
+
 class ProjectMember(TenantBase):
     __tablename__ = "project_members"
     __table_args__ = (UniqueConstraint("project_id", "user_id"),)
@@ -400,6 +482,8 @@ class ProjectFunnel(TenantBase):
     classification_enforcement_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False,
     )
+    # Funil dedicado ao fluxo de contratação (Backlog → … → Concluído/Cancelado).
+    is_procurement: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -431,6 +515,8 @@ class ProjectDemandType(TenantBase):
     available_for_basic: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # Se False, itens deste tipo não aparecem no Cronograma.
     show_in_schedule: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Tipo usado pelo fluxo de contratação deste projeto (card no funil Contratar).
+    is_procurement: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

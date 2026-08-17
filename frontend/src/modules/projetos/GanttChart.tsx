@@ -4,7 +4,7 @@ import {
   type DragEndEvent,
 } from "@dnd-kit/core"
 import { Calendar, ChevronRight, Clock, GripVertical, Plus, Trash2 } from "lucide-react"
-import type { ProjectTask, ProjectTaskDependency } from "@/api/projetos"
+import type { ProjectTask, ProjectTaskDependency, ScheduleOverloadRow } from "@/api/projetos"
 import type { User } from "@/types"
 
 // ── Constantes de layout (do protótipo prototipo2) ──────────────────────────
@@ -21,6 +21,27 @@ const MONTHS_FULL = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
 const WD_LETTER = ["D", "S", "T", "Q", "Q", "S", "S"]
 
 const AVATAR_PALETTE = ["#7C3AED", "#008BD2", "#6AB42F", "#E84E0F", "#014898", "#DB2777", "#0F766E", "#64748B"]
+
+// ── Zoom ────────────────────────────────────────────────────────────────────
+// Largura de um dia em px. O mínimo cobre cronogramas de vários anos numa tela só;
+// o máximo dá espaço para arrastar barras com precisão de horas.
+export const MIN_DAY_W = 1.5
+export const MAX_DAY_W = 120
+export const DEFAULT_DAY_W = 44
+export const ZOOM_STEP = 1.35
+
+export function clampDayWidth(px: number): number {
+  if (!Number.isFinite(px)) return DEFAULT_DAY_W
+  return Math.max(MIN_DAY_W, Math.min(MAX_DAY_W, px))
+}
+
+/** Nome legível da densidade atual, para rotular o controle de zoom. */
+export function zoomLabel(dayWidth: number): string {
+  if (dayWidth >= 30) return "Dia"
+  if (dayWidth >= 12) return "Semana"
+  if (dayWidth >= 4) return "Mês"
+  return "Trimestre"
+}
 
 type Status = { key: "done" | "risk" | "ontrack"; color: string; soft: string; label: string }
 function statusOf(task: ProjectTask): Status {
@@ -94,31 +115,69 @@ type DragState = { taskId: string; mode: "move" | "start" | "end"; startX: numbe
 type Row = { task: ProjectTask; level: number; hasKids: boolean; isLast: boolean; ancestorLines: boolean[] }
 type TipData = { task: ProjectTask; x: number; y: number }
 
+// Texto do tooltip de sobrecarga: quantos dias estouram, o pior dia e o que o ocupa.
+function overloadTitle(row: ScheduleOverloadRow): string {
+  const h = (v: number) => `${v.toFixed(1).replace(".", ",")}h`
+  const d = new Date(row.worst_date + "T00:00:00")
+  const worst = `${String(d.getDate()).padStart(2, "0")}/${MONTHS_SHORT[d.getMonth()]}`
+  const lines = [
+    `⚠ ${row.person_name ?? "Responsável"} superlotado neste período`,
+    `${row.over_days} de ${row.total_days} dia(s) úteis acima da capacidade`,
+    `Pior dia: ${worst} — ${h(row.worst_allocated_hours)} de ${h(row.worst_capacity_hours)}`,
+  ]
+  if (row.conflicts.length) {
+    lines.push("Ocupam esse dia:")
+    for (const c of row.conflicts) lines.push(`• ${c.project_name} · ${c.task_title} — ${h(c.hours)}`)
+  }
+  return lines.join("\n")
+}
+
 // ── Avatar ──────────────────────────────────────────────────────────────────
-function Avatar({ user, size = 26 }: { user: User | null; size?: number }) {
-  return (
+function Avatar({ user, size = 26, overload }: { user: User | null; size?: number; overload?: ScheduleOverloadRow | null }) {
+  const dot = Math.max(8, Math.round(size * 0.38))
+  const avatar = (
     <span
       className="gx-avatar"
-      title={user?.full_name ?? "Sem responsável"}
+      title={overload ? undefined : (user?.full_name ?? "Sem responsável")}
       style={{ width: size, height: size, fontSize: Math.round(size * 0.4), background: colorForUser(user?.id ?? null) }}
     >
       {ganttInitials(user?.full_name)}
     </span>
   )
+  if (!overload) return avatar
+  // Superlotado: bolinha vermelha no canto do avatar + detalhe no hover.
+  return (
+    <span style={{ position: "relative", display: "inline-flex", flex: "0 0 auto" }} title={overloadTitle(overload)}>
+      {avatar}
+      <i
+        aria-label="Responsável superlotado"
+        style={{
+          position: "absolute", top: -1, right: -1, width: dot, height: dot, borderRadius: "50%",
+          background: "var(--af-destructive, #ef4444)", boxShadow: "0 0 0 1.5px var(--af-bg, #fff)",
+        }}
+      />
+    </span>
+  )
 }
 
 // Cluster de responsáveis (Feature agregada): até 3 avatares sobrepostos + "+N".
-function AvatarCluster({ users, size = 26 }: { users: User[]; size?: number }) {
+// `overloadByPerson` marca quais dos membros estão superlotados nas US filhas.
+function AvatarCluster({ users, size = 26, overloadByPerson }: { users: User[]; size?: number; overloadByPerson?: Map<string, ScheduleOverloadRow> }) {
+  const overOf = (id: string) => overloadByPerson?.get(id) ?? null
   if (users.length === 0) return <Avatar user={null} size={size} />
-  if (users.length === 1) return <Avatar user={users[0]} size={size} />
+  if (users.length === 1) return <Avatar user={users[0]} size={size} overload={overOf(users[0].id)} />
   const shown = users.slice(0, 3)
   const extra = users.length - shown.length
   const overlap = -Math.round(size * 0.38)
+  const over = users.map((u) => overOf(u.id)).filter((r): r is ScheduleOverloadRow => !!r)
+  const clusterTitle = over.length
+    ? `⚠ ${over.length} responsável(is) superlotado(s) nas US:\n${over.map((r) => `• ${r.person_name ?? "—"} — ${r.over_days} dia(s) acima da capacidade`).join("\n")}\n\nEquipe: ${users.map((u) => u.full_name).join(", ")}`
+    : users.map((u) => u.full_name).join(", ")
   return (
-    <span className="gx-avatar-cluster" title={users.map((u) => u.full_name).join(", ")} style={{ display: "inline-flex", alignItems: "center" }}>
+    <span className="gx-avatar-cluster" title={clusterTitle} style={{ display: "inline-flex", alignItems: "center" }}>
       {shown.map((u, i) => (
         <span key={u.id} style={{ marginLeft: i === 0 ? 0 : overlap, zIndex: shown.length - i, borderRadius: "50%", boxShadow: "0 0 0 1.5px var(--af-bg, #fff)" }}>
-          <Avatar user={u} size={size} />
+          <Avatar user={u} size={size} overload={overOf(u.id)} />
         </span>
       ))}
       {extra > 0 && (
@@ -174,10 +233,14 @@ export function GanttChart({
   users = [],
   dependencies = [],
   scale = "day",
+  dayWidth: dayWidthProp,
+  onDayWidthChange,
+  fitSignal,
   progressById,
   criticalById,
   calendar,
   absencesByUser,
+  overloadByTask,
   onOpenTask,
   onAddChild,
   canAddChild,
@@ -193,10 +256,18 @@ export function GanttChart({
   users?: User[]
   dependencies?: ProjectTaskDependency[]
   scale?: "day" | "week"
+  // Zoom: largura de um dia em px. Manda no lugar de `scale` quando informado — o
+  // cabeçalho (dia/semana/mês) se adapta sozinho à densidade resultante.
+  dayWidth?: number
+  onDayWidthChange?: (px: number) => void
+  // Trocar este número dispara "ajustar à tela" (só o gráfico sabe o span total).
+  fitSignal?: number
   progressById?: Map<string, number>
   criticalById?: Map<string, { is_critical: boolean; total_float_hours: number }>
   calendar?: { day_start: string; day_end: string; lunch_start: string | null; lunch_end: string | null } | null
   absencesByUser?: Record<string, { start_date: string; end_date: string; type_name: string; status: string; partial_hours: number | null }[]>
+  // task_id → sobrecarga do responsável no período daquela tarefa (marcador no avatar).
+  overloadByTask?: Map<string, ScheduleOverloadRow>
   onOpenTask?: (t: ProjectTask) => void
   onAddChild?: (t: ProjectTask) => void
   canAddChild?: (t: ProjectTask) => boolean
@@ -217,7 +288,9 @@ export function GanttChart({
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
   const root = tasks.find((t) => t.id === rootId)
-  const dayWidth = scale === "week" ? 20 : 44
+  const dayWidth = clampDayWidth(dayWidthProp ?? (scale === "week" ? 20 : 44))
+  // Densidade do sub-cabeçalho conforme o zoom: dias legíveis → semanas → só meses.
+  const subMode: "day" | "week" | "month" = dayWidth >= 18 ? "day" : dayWidth * 7 >= 26 ? "week" : "month"
 
   const usersById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users])
   const progressOf = (task: ProjectTask): number => progressById?.get(task.id) ?? (task.completed_at ? 100 : 0)
@@ -256,6 +329,26 @@ export function GanttChart({
         .map((uid) => usersById.get(uid))
         .filter((u): u is User => !!u)
   }, [byParent, usersById])
+
+  // Sobrecarga dos descendentes (Feature agregada), por pessoa — a pior linha de cada um.
+  const subtreeOverload = useMemo(() => {
+    return (id: string): Map<string, ScheduleOverloadRow> => {
+      const out = new Map<string, ScheduleOverloadRow>()
+      if (!overloadByTask) return out
+      const walk = (pid: string) => {
+        for (const k of byParent.get(pid) ?? []) {
+          const row = overloadByTask.get(k.id)
+          if (row) {
+            const cur = out.get(row.person_id)
+            if (!cur || row.over_days > cur.over_days) out.set(row.person_id, row)
+          }
+          walk(k.id)
+        }
+      }
+      walk(id)
+      return out
+    }
+  }, [byParent, overloadByTask])
 
   const sortSiblings = (list: ProjectTask[]): ProjectTask[] =>
     list.slice().sort((a, b) => {
@@ -311,7 +404,11 @@ export function GanttChart({
       const today = startOfDay(new Date())
       const start = startOfDay(new Date(today.getTime() - 7 * DAY_MS))
       const days = 35
-      const ms = [{ label: `${MONTHS_FULL[start.getMonth()]} ${start.getFullYear()}`, days }]
+      const ms = [{
+        label: `${MONTHS_FULL[start.getMonth()]} ${start.getFullYear()}`,
+        short: `${MONTHS_SHORT[start.getMonth()]}/${String(start.getFullYear()).slice(2)}`,
+        days,
+      }]
       return { rangeStart: start, totalDays: days, months: ms }
     }
     let min = dates[0], max = dates[0]
@@ -319,12 +416,16 @@ export function GanttChart({
     const start = startOfDay(new Date(min.getTime() - 2 * DAY_MS))
     const end = startOfDay(new Date(max.getTime() + 2 * DAY_MS))
     const days = Math.max(1, daysBetween(start, end) + 1)
-    const ms: { label: string; days: number }[] = []
+    const ms: { label: string; short: string; days: number }[] = []
     let cursor = new Date(start)
     while (cursor <= end) {
       const monthEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0)
       const segEnd = monthEnd < end ? monthEnd : end
-      ms.push({ label: `${MONTHS_FULL[cursor.getMonth()]} ${cursor.getFullYear()}`, days: daysBetween(cursor, segEnd) + 1 })
+      ms.push({
+        label: `${MONTHS_FULL[cursor.getMonth()]} ${cursor.getFullYear()}`,
+        short: `${MONTHS_SHORT[cursor.getMonth()]}/${String(cursor.getFullYear()).slice(2)}`,
+        days: daysBetween(cursor, segEnd) + 1,
+      })
       cursor = new Date(monthEnd.getTime() + DAY_MS)
     }
     return { rangeStart: start, totalDays: days, months: ms }
@@ -336,10 +437,26 @@ export function GanttChart({
   // Sub-cabeçalho (dias ou semanas).
   const subs = useMemo(() => {
     const out: { left: number; width: number; label: string; wd?: string; we?: boolean; day?: boolean }[] = []
-    if (scale === "week") {
+    const end = new Date(rangeStart.getTime() + (totalDays - 1) * DAY_MS)
+    if (subMode === "month") {
+      // Zoom bem afastado: o mês vira o sub-cabeçalho (o topo já mostra mês/ano).
+      const cur = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1)
+      while (cur <= end) {
+        const monthEnd = new Date(cur.getFullYear(), cur.getMonth() + 1, 0)
+        const from = cur < rangeStart ? rangeStart : cur
+        const to = monthEnd > end ? end : monthEnd
+        const off = daysBetween(rangeStart, from)
+        out.push({
+          left: off * dayWidth,
+          width: (daysBetween(from, to) + 1) * dayWidth,
+          label: `${MONTHS_SHORT[cur.getMonth()]}/${String(cur.getFullYear()).slice(2)}`,
+        })
+        cur.setMonth(cur.getMonth() + 1)
+      }
+    } else if (subMode === "week") {
       const cur = new Date(rangeStart)
       while (cur.getDay() !== 1) cur.setDate(cur.getDate() - 1) // volta até segunda
-      while (cur <= new Date(rangeStart.getTime() + (totalDays - 1) * DAY_MS)) {
+      while (cur <= end) {
         const off = daysBetween(rangeStart, cur)
         out.push({ left: off * dayWidth, width: 7 * dayWidth, label: fmtShortIso(cur.toISOString()) })
         cur.setDate(cur.getDate() + 7)
@@ -352,10 +469,12 @@ export function GanttChart({
       }
     }
     return out
-  }, [scale, rangeStart, totalDays, dayWidth])
+  }, [subMode, rangeStart, totalDays, dayWidth])
 
+  // Faixas de fim de semana: só fazem sentido (e valem o custo) com o dia visível.
   const bands = useMemo(() => {
     const out: { left: number; width: number }[] = []
+    if (dayWidth < 5) return out
     for (let i = 0; i < totalDays; i++) {
       const d = new Date(rangeStart.getTime() + i * DAY_MS)
       if (d.getDay() === 0 || d.getDay() === 6) out.push({ left: i * dayWidth, width: dayWidth })
@@ -363,12 +482,12 @@ export function GanttChart({
     return out
   }, [totalDays, rangeStart, dayWidth])
 
+  // Uma linha vertical por coluna do sub-cabeçalho — acompanha o zoom sem poluir.
   const glines = useMemo(() => {
-    const out: number[] = []
-    const stepDays = scale === "week" ? 7 : 1
-    for (let i = 0; i <= totalDays; i += stepDays) out.push(i * dayWidth)
+    const out = subs.map((s) => s.left)
+    out.push(totalDays * dayWidth)
     return out
-  }, [totalDays, dayWidth, scale])
+  }, [subs, totalDays, dayWidth])
 
   const today = startOfDay(new Date())
   const todayX = daysBetween(rangeStart, today) * dayWidth
@@ -443,11 +562,46 @@ export function GanttChart({
     return m
   }, [rows, baselineById, rangeStart, dayWidth, dayFrac])
 
-  // Auto-scroll até "hoje" ao montar / mudar escala.
+  // Auto-scroll até "hoje" ao montar / trocar de projeto. O zoom NÃO reposiciona aqui:
+  // ele preserva o ponto sob o cursor (ver onWheel) ou o começo (ajustar à tela).
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollLeft = Math.max(0, todayX - dayWidth * 4)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scale, rootId])
+  }, [rootId])
+
+  // "Ajustar à tela": só o gráfico conhece o span total, então o botão vira um sinal.
+  const fitRef = useRef(fitSignal)
+  useEffect(() => {
+    if (fitSignal === fitRef.current) return
+    fitRef.current = fitSignal
+    const el = scrollRef.current
+    if (!el || !onDayWidthChange || totalDays <= 0) return
+    onDayWidthChange(clampDayWidth((el.clientWidth - LABEL_W - 24) / totalDays))
+    el.scrollLeft = 0
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fitSignal, totalDays])
+
+  // Ctrl/⌘ + roda = zoom ancorado no ponto sob o cursor (a data sob o mouse não sai do lugar).
+  // Listener nativo com passive:false — o onWheel do React é passivo e não deixaria
+  // cancelar o zoom do navegador.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el || !onDayWidthChange) return
+    const onWheel = (e: globalThis.WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return
+      e.preventDefault()
+      const next = clampDayWidth(dayWidth * (e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP))
+      if (next === dayWidth) return
+      const cursorInView = e.clientX - el.getBoundingClientRect().left
+      const dayAtCursor = (el.scrollLeft + cursorInView - LABEL_W) / dayWidth
+      onDayWidthChange(next)
+      requestAnimationFrame(() => {
+        if (scrollRef.current) scrollRef.current.scrollLeft = Math.max(0, dayAtCursor * next + LABEL_W - cursorInView)
+      })
+    }
+    el.addEventListener("wheel", onWheel, { passive: false })
+    return () => el.removeEventListener("wheel", onWheel)
+  }, [dayWidth, onDayWidthChange])
 
   function toggleCollapse(id: string) {
     setCollapsed((c) => { const n = new Set(c); n.has(id) ? n.delete(id) : n.add(id); return n })
@@ -478,8 +632,14 @@ export function GanttChart({
     if (mode === "move") {
       onUpdateDates(task, { start_date: addDaysToIso(task.start_date, dd), due_date: addDaysToIso(task.due_date, dd) })
     } else if (mode === "start") {
+      // Ao puxar o início: só envia start_date — o backend recalcula o vencimento
+      // com base nas horas estimadas (dias úteis). Sem horas, mantém o due atual
+      // (com clamp para não passar do fim).
       let ns = addDaysToIso(task.start_date, dd)
-      if (ns.slice(0, 10) > task.due_date.slice(0, 10)) ns = isoFromDateStr(task.due_date.slice(0, 10))
+      const hours = Number(task.estimated_hours)
+      if (!Number.isFinite(hours) || hours <= 0) {
+        if (ns.slice(0, 10) > task.due_date.slice(0, 10)) ns = isoFromDateStr(task.due_date.slice(0, 10))
+      }
       onUpdateDates(task, { start_date: ns })
     } else {
       let nd = addDaysToIso(task.due_date, dd)
@@ -528,16 +688,20 @@ export function GanttChart({
               <div className="gx-corner" style={{ width: LABEL_W, height: HEAD_H }}><span className="lbl">Item / Etapa</span></div>
               <div className="gx-thead" style={{ width: timelineWidth, height: HEAD_H }}>
                 <div className="months">
-                  {months.map((m, i) => <div key={i} className="mo" style={{ width: m.days * dayWidth }}>{m.label}</div>)}
+                  {/* Rótulo do mês encolhe (e some) conforme o zoom, para não transbordar a coluna. */}
+                  {months.map((m, i) => {
+                    const w = m.days * dayWidth
+                    return <div key={i} className="mo" style={{ width: w }}>{w < 30 ? "" : w < 96 ? m.short : m.label}</div>
+                  })}
                 </div>
                 <div className="subs">
-                  {scale === "week"
-                    ? subs.map((s, i) => <div key={i} className="wk" style={{ left: s.left, width: s.width }}>{s.label}</div>)
-                    : subs.map((s, i) => (
+                  {subMode === "day"
+                    ? subs.map((s, i) => (
                       <div key={i} className={`day${s.we ? " we" : ""}`} style={{ left: s.left, width: s.width }}>
                         <span>{s.label}</span><span className="wd">{s.wd}</span>
                       </div>
-                    ))}
+                    ))
+                    : subs.map((s, i) => <div key={i} className="wk" style={{ left: s.left, width: s.width }}>{s.label}</div>)}
                 </div>
               </div>
             </div>
@@ -574,7 +738,9 @@ export function GanttChart({
                             >
                               <ChevronRight size={14} />
                             </button>
-                            {aggregated ? <AvatarCluster users={clusterUsers ?? []} size={26} /> : <Avatar user={assignee} size={26} />}
+                            {aggregated
+                              ? <AvatarCluster users={clusterUsers ?? []} size={26} overloadByPerson={subtreeOverload(node.id)} />
+                              : <Avatar user={assignee} size={26} overload={overloadByTask?.get(node.id) ?? null} />}
                             <div className="lmain">
                               <div className="tline">
                                 <button className="title" title={node.title} onClick={() => onOpenTask?.(node)}>{node.title}</button>
@@ -712,14 +878,15 @@ export function GanttChart({
                       onClick={() => { if (!movedRef.current) onOpenTask?.(node) }}
                     >
                       <div className="fill" style={{ width: pct + "%", background: st.color }} />
-                      <span className="blabel" style={{ color: pct > 55 ? "#fff" : st.color }}>{pct}%</span>
+                      {/* Com zoom afastado a barra não comporta o rótulo — o % segue no tooltip. */}
+                      {bw >= 34 && <span className="blabel" style={{ color: pct > 55 ? "#fff" : st.color }}>{pct}%</span>}
                       {draggable && <>
                         <div className="hnd l" onPointerDown={(e) => startDrag(e, node, "start")} />
                         <div className="hnd r" onPointerDown={(e) => startDrag(e, node, "end")} />
                       </>}
                     </div>
                     <div className="gx-barside" style={{ left: bl + bw + 9, top, height: BAR_H }}>
-                      <Avatar user={usersById.get(node.assigned_to ?? "") ?? null} size={20} />
+                      <Avatar user={usersById.get(node.assigned_to ?? "") ?? null} size={20} overload={overloadByTask?.get(node.id) ?? null} />
                     </div>
                   </div>
                 )
@@ -753,6 +920,18 @@ export function GanttChart({
             <div className="th" style={{ marginBottom: 6 }}><span className="t">{tip.task.title}</span></div>
             <div className="trow"><span>Período</span><b>{tip.task.start_date ? fmtDateTimeIso(tip.task.start_date) : "—"} → {tip.task.due_date ? fmtDateTimeIso(tip.task.due_date) : "—"}</b></div>
             <div className="trow"><span>{tipAggregated ? "Responsáveis (US)" : "Responsável"}</span><b>{tipAggregated ? (tipAssignees.length ? tipAssignees.map((x) => x.full_name).join(", ") : "—") : (u?.full_name ?? "—")}</b></div>
+            {(() => {
+              const ov = overloadByTask?.get(tip.task.id)
+              if (!ov) return null
+              return (
+                <div className="trow">
+                  <span>Carga</span>
+                  <b style={{ color: "var(--af-destructive, #ef4444)" }}>
+                    ⚠ {ov.over_days} de {ov.total_days} dia(s) acima da capacidade
+                  </b>
+                </div>
+              )
+            })()}
             {cp && !cp.is_critical && <div className="trow"><span>Folga</span><b>{cp.total_float_hours}h</b></div>}
             <div className="trow"><span>Concluído</span><b>{pct}%</b></div>
             <div className="pbar"><i style={{ width: pct + "%", background: st.color }} /></div>

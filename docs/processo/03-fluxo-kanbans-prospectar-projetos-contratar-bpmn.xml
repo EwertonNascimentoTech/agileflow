@@ -1,0 +1,313 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+             xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+             xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             id="Definitions_KanbansProspectarProjetoContratar"
+             targetNamespace="https://agileflow.local/processo/kanbans"
+             exporter="agileflow"
+             exporterVersion="1.0">
+
+  <!--
+    BPMN � Fluxo das etapas com bifurca??es
+    Kanbans: Prospectar Solu??es | Projetos e Programas | Contratar
+    Fonte: etapas reais do tenant (processo TD) + regra de contrata??o.
+  -->
+
+  <collaboration id="Collab_Kanbans">
+    <participant id="Part_Prospectar" name="Kanban: Prospectar Solu??es" processRef="Proc_Prospectar"/>
+    <participant id="Part_Projetos" name="Kanban: Projetos e Programas" processRef="Proc_Projetos"/>
+    <participant id="Part_Contratar" name="Kanban: Contratar" processRef="Proc_Contratar"/>
+
+    <!-- Handoff Prospectar conclu?do ? cria card em Projetos/Programas -->
+    <messageFlow id="MF_Prospectar_to_Projetos"
+                 name="Convers?o: cria Projeto/Programa"
+                 sourceRef="Task_P_Concluido"
+                 targetRef="Task_J_Backlog"/>
+
+    <!-- Bifurca??o contrata??o: origem fica em Contrata??o; nasce card Contratar -->
+    <messageFlow id="MF_Origem_to_Contratar"
+                 name="Ser? contratado? = Sim ? cria card Contratar"
+                 sourceRef="Task_Hold_Contrata??o"
+                 targetRef="Task_C_Backlog"/>
+
+    <!-- Desfecho Contratar ? libera ou cancela origem -->
+    <messageFlow id="MF_Contratar_Win"
+                 name="Ganhou: contrato no Produto + libera origem"
+                 sourceRef="Task_C_Concluido"
+                 targetRef="Gateway_PosHold"/>
+    <messageFlow id="MF_Contratar_Lose"
+                 name="Perdeu: origem ? Cancelado"
+                 sourceRef="Task_C_Cancelado"
+                 targetRef="Task_Origem_Cancelado"/>
+  </collaboration>
+
+  <!-- ???????????????????????????????????????????
+       PROSPECTAR SOLU??ES
+       ??????????????????????????????????????????? -->
+  <process id="Proc_Prospectar" name="Prospectar Solu??es" isExecutable="false">
+    <startEvent id="Start_Prospectar" name="Nova demanda"/>
+    <sequenceFlow id="SF_P01" sourceRef="Start_Prospectar" targetRef="Task_P_Backlog"/>
+
+    <userTask id="Task_P_Backlog" name="Backlog"/>
+    <sequenceFlow id="SF_P02" sourceRef="Task_P_Backlog" targetRef="Gateway_Classificar"/>
+
+    <exclusiveGateway id="Gateway_Classificar" name="Classificar card"/>
+    <sequenceFlow id="SF_P03" name="Desenvolvimento" sourceRef="Gateway_Classificar" targetRef="Task_P_Classificacao"/>
+    <sequenceFlow id="SF_P04" name="Implanta??o / Melhoria" sourceRef="Gateway_Classificar" targetRef="Gateway_Externo"/>
+
+    <exclusiveGateway id="Gateway_Externo" name="Produto sistema externo?"/>
+    <sequenceFlow id="SF_P05" name="N?o" sourceRef="Gateway_Externo" targetRef="Task_P_Classificacao"/>
+    <sequenceFlow id="SF_P06" name="Sim" sourceRef="Gateway_Externo" targetRef="Gateway_SeraContratado"/>
+
+    <exclusiveGateway id="Gateway_SeraContratado" name="Ser? contratado?"/>
+    <sequenceFlow id="SF_P07" name="N?o" sourceRef="Gateway_SeraContratado" targetRef="Task_P_Classificacao"/>
+    <sequenceFlow id="SF_P08" name="Sim" sourceRef="Gateway_SeraContratado" targetRef="Task_Hold_Contrata??o"/>
+
+    <!-- Origem travada na raia Contrata??o (pode estar em Prospectar ou Projetos) -->
+    <userTask id="Task_Hold_Contrata??o" name="Contrata??o (origem travada)"/>
+    <sequenceFlow id="SF_P09" sourceRef="Task_Hold_Contrata??o" targetRef="Gateway_PosHold"/>
+
+    <exclusiveGateway id="Gateway_PosHold" name="Desfecho da contrata??o"/>
+    <sequenceFlow id="SF_P10" name="Ganhou ? segue fluxo" sourceRef="Gateway_PosHold" targetRef="Task_P_Classificacao"/>
+    <sequenceFlow id="SF_P11" name="Perdeu" sourceRef="Gateway_PosHold" targetRef="Task_Origem_Cancelado"/>
+
+    <userTask id="Task_Origem_Cancelado" name="Cancelado (origem)"/>
+    <sequenceFlow id="SF_P12" sourceRef="Task_Origem_Cancelado" targetRef="End_P_Cancelado"/>
+    <endEvent id="End_P_Cancelado" name="Demanda cancelada"/>
+
+    <userTask id="Task_P_Classificacao" name="Classifica??o"/>
+    <sequenceFlow id="SF_P13" sourceRef="Task_P_Classificacao" targetRef="Task_P_Avaliar"/>
+
+    <userTask id="Task_P_Avaliar" name="Avaliar Classifica??o"/>
+    <sequenceFlow id="SF_P14" sourceRef="Task_P_Avaliar" targetRef="Gateway_Avaliacao"/>
+
+    <exclusiveGateway id="Gateway_Avaliacao" name="Resultado da avalia??o"/>
+    <sequenceFlow id="SF_P15" name="Ajustes" sourceRef="Gateway_Avaliacao" targetRef="Task_P_Ajustes"/>
+    <sequenceFlow id="SF_P16" name="Impedimento" sourceRef="Gateway_Avaliacao" targetRef="Task_P_Impedimento"/>
+    <sequenceFlow id="SF_P17" name="Rejeitado" sourceRef="Gateway_Avaliacao" targetRef="Task_P_Rejeitado"/>
+    <sequenceFlow id="SF_P18" name="Aprovado" sourceRef="Gateway_Avaliacao" targetRef="Task_P_Concluido"/>
+
+    <userTask id="Task_P_Ajustes" name="Ajustes"/>
+    <sequenceFlow id="SF_P19" sourceRef="Task_P_Ajustes" targetRef="Task_P_Avaliar"/>
+
+    <userTask id="Task_P_Impedimento" name="Impedimento"/>
+    <sequenceFlow id="SF_P20" sourceRef="Task_P_Impedimento" targetRef="Task_P_Avaliar"/>
+
+    <userTask id="Task_P_Rejeitado" name="Rejeitado"/>
+    <sequenceFlow id="SF_P21" sourceRef="Task_P_Rejeitado" targetRef="End_P_Rejeitado"/>
+    <endEvent id="End_P_Rejeitado" name="Prospec??o rejeitada"/>
+
+    <userTask id="Task_P_Concluido" name="Conclu?do (converte p/ Projeto)"/>
+    <sequenceFlow id="SF_P22" sourceRef="Task_P_Concluido" targetRef="End_P_Ok"/>
+    <endEvent id="End_P_Ok" name="Handoff para Projetos e Programas"/>
+  </process>
+
+  <!-- ???????????????????????????????????????????
+       PROJETOS E PROGRAMAS
+       ??????????????????????????????????????????? -->
+  <process id="Proc_Projetos" name="Projetos e Programas" isExecutable="false">
+    <startEvent id="Start_Projetos" name="Card convertido / aberto"/>
+    <sequenceFlow id="SF_J01" sourceRef="Start_Projetos" targetRef="Task_J_Backlog"/>
+
+    <userTask id="Task_J_Backlog" name="Backlog"/>
+    <sequenceFlow id="SF_J02" sourceRef="Task_J_Backlog" targetRef="Gateway_J_Externo"/>
+
+    <!-- Mesma regra se classifica??o/contrata??o ocorrer neste kanban -->
+    <exclusiveGateway id="Gateway_J_Externo" name="Precisa contratar (externo)?"/>
+    <sequenceFlow id="SF_J03" name="Sim" sourceRef="Gateway_J_Externo" targetRef="Task_J_Hold"/>
+    <sequenceFlow id="SF_J04" name="N?o" sourceRef="Gateway_J_Externo" targetRef="Task_J_Agendar"/>
+
+    <userTask id="Task_J_Hold" name="Contrata??o (origem travada)"/>
+    <sequenceFlow id="SF_J05" sourceRef="Task_J_Hold" targetRef="Gateway_J_PosHold"/>
+
+    <exclusiveGateway id="Gateway_J_PosHold" name="Desfecho contrata??o"/>
+    <sequenceFlow id="SF_J06" name="Ganhou" sourceRef="Gateway_J_PosHold" targetRef="Task_J_Agendar"/>
+    <sequenceFlow id="SF_J07" name="Perdeu" sourceRef="Gateway_J_PosHold" targetRef="Task_J_Cancelado"/>
+
+    <userTask id="Task_J_Agendar" name="Agendar Reuni?o"/>
+    <sequenceFlow id="SF_J08" sourceRef="Task_J_Agendar" targetRef="Task_J_Conduzir"/>
+
+    <userTask id="Task_J_Conduzir" name="Conduzir Reuni?o de Levantamento"/>
+    <sequenceFlow id="SF_J09" sourceRef="Task_J_Conduzir" targetRef="Gateway_J_Imped"/>
+
+    <exclusiveGateway id="Gateway_J_Imped" name="H? impedimento?"/>
+    <sequenceFlow id="SF_J10" name="Sim" sourceRef="Gateway_J_Imped" targetRef="Task_J_Impedimento"/>
+    <sequenceFlow id="SF_J11" name="N?o" sourceRef="Gateway_J_Imped" targetRef="Task_J_Requisitos"/>
+
+    <userTask id="Task_J_Impedimento" name="Impedimento"/>
+    <sequenceFlow id="SF_J12" sourceRef="Task_J_Impedimento" targetRef="Task_J_Conduzir"/>
+
+    <userTask id="Task_J_Requisitos" name="Requisitos / Prot?tipo"/>
+    <sequenceFlow id="SF_J13" sourceRef="Task_J_Requisitos" targetRef="Task_J_Refinamento"/>
+
+    <userTask id="Task_J_Refinamento" name="Refinamento PO e Tech"/>
+    <sequenceFlow id="SF_J14" sourceRef="Task_J_Refinamento" targetRef="Task_J_Validar"/>
+
+    <userTask id="Task_J_Validar" name="Validar Escopo (Cliente)"/>
+    <sequenceFlow id="SF_J15" sourceRef="Task_J_Validar" targetRef="Gateway_J_Escopo"/>
+
+    <exclusiveGateway id="Gateway_J_Escopo" name="Escopo ok?"/>
+    <sequenceFlow id="SF_J16" name="N?o" sourceRef="Gateway_J_Escopo" targetRef="Task_J_Requisitos"/>
+    <sequenceFlow id="SF_J17" name="Sim" sourceRef="Gateway_J_Escopo" targetRef="Task_J_Pronto"/>
+
+    <userTask id="Task_J_Pronto" name="Pronto para Desenvolvimento"/>
+    <sequenceFlow id="SF_J18" sourceRef="Task_J_Pronto" targetRef="Task_J_Dev"/>
+
+    <userTask id="Task_J_Dev" name="Em Desenvolvimento"/>
+    <sequenceFlow id="SF_J19" sourceRef="Task_J_Dev" targetRef="Task_J_DevOps"/>
+
+    <userTask id="Task_J_DevOps" name="DevOps (HML)"/>
+    <sequenceFlow id="SF_J20" sourceRef="Task_J_DevOps" targetRef="Task_J_HML"/>
+
+    <userTask id="Task_J_HML" name="Homologando (Cliente)"/>
+    <sequenceFlow id="SF_J21" sourceRef="Task_J_HML" targetRef="Gateway_J_HML"/>
+
+    <exclusiveGateway id="Gateway_J_HML" name="Homologa??o ok?"/>
+    <sequenceFlow id="SF_J22" name="N?o" sourceRef="Gateway_J_HML" targetRef="Task_J_Dev"/>
+    <sequenceFlow id="SF_J23" name="Sim" sourceRef="Gateway_J_HML" targetRef="Task_J_Prod"/>
+
+    <userTask id="Task_J_Prod" name="DEVSECOPS (PROD)"/>
+    <sequenceFlow id="SF_J24" sourceRef="Task_J_Prod" targetRef="Task_J_Concluido"/>
+
+    <userTask id="Task_J_Concluido" name="Conclu?do"/>
+    <sequenceFlow id="SF_J25" sourceRef="Task_J_Concluido" targetRef="End_J_Ok"/>
+    <endEvent id="End_J_Ok" name="Projeto entregue"/>
+
+    <userTask id="Task_J_Cancelado" name="Cancelado"/>
+    <sequenceFlow id="SF_J26" sourceRef="Task_J_Cancelado" targetRef="End_J_Cancel"/>
+    <endEvent id="End_J_Cancel" name="Projeto cancelado"/>
+  </process>
+
+  <!-- ???????????????????????????????????????????
+       CONTRATAR
+       ??????????????????????????????????????????? -->
+  <process id="Proc_Contratar" name="Contratar" isExecutable="false">
+    <startEvent id="Start_Contratar" name="Card criado (origem travada)"/>
+    <sequenceFlow id="SF_C01" sourceRef="Start_Contratar" targetRef="Task_C_Backlog"/>
+
+    <userTask id="Task_C_Backlog" name="Backlog"/>
+    <sequenceFlow id="SF_C02" sourceRef="Task_C_Backlog" targetRef="Task_C_Prospectar"/>
+
+    <userTask id="Task_C_Prospectar" name="Prospectar"/>
+    <sequenceFlow id="SF_C03" sourceRef="Task_C_Prospectar" targetRef="Task_C_Aderencia"/>
+
+    <userTask id="Task_C_Aderencia" name="An?lise de ader?ncia"/>
+    <sequenceFlow id="SF_C04" sourceRef="Task_C_Aderencia" targetRef="Task_C_Proposta"/>
+
+    <userTask id="Task_C_Proposta" name="Proposta (anexo + valor)"/>
+    <sequenceFlow id="SF_C05" sourceRef="Task_C_Proposta" targetRef="Gateway_C_Proposta"/>
+
+    <exclusiveGateway id="Gateway_C_Proposta" name="Proposta e valor ok?"/>
+    <sequenceFlow id="SF_C06" name="N?o" sourceRef="Gateway_C_Proposta" targetRef="Task_C_Proposta"/>
+    <sequenceFlow id="SF_C07" name="Sim ? Negocia??o" sourceRef="Gateway_C_Proposta" targetRef="Task_C_Negociacao"/>
+
+    <userTask id="Task_C_Negociacao" name="Negocia??o"/>
+    <sequenceFlow id="SF_C08" sourceRef="Task_C_Negociacao" targetRef="Gateway_C_WinLose"/>
+
+    <exclusiveGateway id="Gateway_C_WinLose" name="Ganhou a contrata??o?"/>
+    <sequenceFlow id="SF_C09" name="Sim (fornecedor + contrato)" sourceRef="Gateway_C_WinLose" targetRef="Task_C_Concluido"/>
+    <sequenceFlow id="SF_C10" name="N?o (motivo)" sourceRef="Gateway_C_WinLose" targetRef="Task_C_Cancelado"/>
+
+    <userTask id="Task_C_Concluido" name="Conclu?do (anexa contrato no Produto)"/>
+    <sequenceFlow id="SF_C11" sourceRef="Task_C_Concluido" targetRef="End_C_Win"/>
+    <endEvent id="End_C_Win" name="Contrata??o conclu?da"/>
+
+    <userTask id="Task_C_Cancelado" name="Cancelado (justificativa)"/>
+    <sequenceFlow id="SF_C12" sourceRef="Task_C_Cancelado" targetRef="End_C_Lose"/>
+    <endEvent id="End_C_Lose" name="Contrata??o perdida"/>
+  </process>
+
+  <!-- ???????????????????????????????????????????
+       DIAGRAMA (layout simplificado p/ bpmn-js)
+       ??????????????????????????????????????????? -->
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Collab_Kanbans">
+
+      <bpmndi:BPMNShape id="Shape_Part_Prospectar" bpmnElement="Part_Prospectar" isHorizontal="true">
+        <dc:Bounds x="160" y="80" width="1400" height="320"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Part_Projetos" bpmnElement="Part_Projetos" isHorizontal="true">
+        <dc:Bounds x="160" y="440" width="1400" height="300"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Part_Contratar" bpmnElement="Part_Contratar" isHorizontal="true">
+        <dc:Bounds x="160" y="780" width="1400" height="260"/>
+      </bpmndi:BPMNShape>
+
+      <!-- Prospectar nodes (y ~120-360) -->
+      <bpmndi:BPMNShape id="S_Start_P" bpmnElement="Start_Prospectar"><dc:Bounds x="200" y="200" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_P_Backlog" bpmnElement="Task_P_Backlog"><dc:Bounds x="270" y="178" width="110" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_Gw_Class" bpmnElement="Gateway_Classificar" isMarkerVisible="true"><dc:Bounds x="420" y="193" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_Gw_Ext" bpmnElement="Gateway_Externo" isMarkerVisible="true"><dc:Bounds x="520" y="193" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_Gw_Contr" bpmnElement="Gateway_SeraContratado" isMarkerVisible="true"><dc:Bounds x="620" y="193" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_Hold" bpmnElement="Task_Hold_Contrata??o"><dc:Bounds x="710" y="100" width="140" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_Gw_PosHold" bpmnElement="Gateway_PosHold" isMarkerVisible="true"><dc:Bounds x="890" y="115" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_OrigCancel" bpmnElement="Task_Origem_Cancelado"><dc:Bounds x="980" y="100" width="120" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_End_PCancel" bpmnElement="End_P_Cancelado"><dc:Bounds x="1140" y="122" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_P_Class" bpmnElement="Task_P_Classificacao"><dc:Bounds x="710" y="250" width="120" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_P_Avaliar" bpmnElement="Task_P_Avaliar"><dc:Bounds x="870" y="250" width="130" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_Gw_Aval" bpmnElement="Gateway_Avaliacao" isMarkerVisible="true"><dc:Bounds x="1040" y="265" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_P_Ajustes" bpmnElement="Task_P_Ajustes"><dc:Bounds x="980" y="340" width="100" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_P_Imped" bpmnElement="Task_P_Impedimento"><dc:Bounds x="1100" y="340" width="110" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_P_Rejeit" bpmnElement="Task_P_Rejeitado"><dc:Bounds x="1240" y="250" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_End_PRej" bpmnElement="End_P_Rejeitado"><dc:Bounds x="1380" y="272" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_P_Conc" bpmnElement="Task_P_Concluido"><dc:Bounds x="1240" y="160" width="140" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_End_POk" bpmnElement="End_P_Ok"><dc:Bounds x="1420" y="177" width="36" height="36"/></bpmndi:BPMNShape>
+
+      <!-- Projetos nodes (y ~480-700) -->
+      <bpmndi:BPMNShape id="S_Start_J" bpmnElement="Start_Projetos"><dc:Bounds x="200" y="540" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_J_Backlog" bpmnElement="Task_J_Backlog"><dc:Bounds x="270" y="518" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_Gw_JExt" bpmnElement="Gateway_J_Externo" isMarkerVisible="true"><dc:Bounds x="410" y="533" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_J_Hold" bpmnElement="Task_J_Hold"><dc:Bounds x="500" y="460" width="130" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_Gw_JPos" bpmnElement="Gateway_J_PosHold" isMarkerVisible="true"><dc:Bounds x="670" y="465" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_J_Agendar" bpmnElement="Task_J_Agendar"><dc:Bounds x="500" y="560" width="120" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_J_Conduzir" bpmnElement="Task_J_Conduzir"><dc:Bounds x="650" y="560" width="140" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_Gw_JImp" bpmnElement="Gateway_J_Imped" isMarkerVisible="true"><dc:Bounds x="820" y="565" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_J_Imped" bpmnElement="Task_J_Impedimento"><dc:Bounds x="800" y="650" width="100" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_J_Req" bpmnElement="Task_J_Requisitos"><dc:Bounds x="910" y="560" width="120" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_J_Ref" bpmnElement="Task_J_Refinamento"><dc:Bounds x="1050" y="560" width="120" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_J_Val" bpmnElement="Task_J_Validar"><dc:Bounds x="1190" y="560" width="130" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_Gw_JEsc" bpmnElement="Gateway_J_Escopo" isMarkerVisible="true"><dc:Bounds x="1350" y="565" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_J_Pronto" bpmnElement="Task_J_Pronto"><dc:Bounds x="910" y="650" width="130" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_J_Dev" bpmnElement="Task_J_Dev"><dc:Bounds x="1060" y="650" width="120" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_J_DevOps" bpmnElement="Task_J_DevOps"><dc:Bounds x="1200" y="650" width="100" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_J_HML" bpmnElement="Task_J_HML"><dc:Bounds x="1320" y="650" width="120" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_Gw_JHML" bpmnElement="Gateway_J_HML" isMarkerVisible="true"><dc:Bounds x="1460" y="652" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_J_Prod" bpmnElement="Task_J_Prod"><dc:Bounds x="1320" y="480" width="120" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_J_Conc" bpmnElement="Task_J_Concluido"><dc:Bounds x="1460" y="480" width="80" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_End_JOk" bpmnElement="End_J_Ok"><dc:Bounds x="1480" y="560" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_J_Cancel" bpmnElement="Task_J_Cancelado"><dc:Bounds x="760" y="460" width="100" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_End_JCancel" bpmnElement="End_J_Cancel"><dc:Bounds x="900" y="467" width="36" height="36"/></bpmndi:BPMNShape>
+
+      <!-- Contratar nodes (y ~820-1000) -->
+      <bpmndi:BPMNShape id="S_Start_C" bpmnElement="Start_Contratar"><dc:Bounds x="200" y="880" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_C_Backlog" bpmnElement="Task_C_Backlog"><dc:Bounds x="270" y="858" width="90" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_C_Pros" bpmnElement="Task_C_Prospectar"><dc:Bounds x="390" y="858" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_C_Ader" bpmnElement="Task_C_Aderencia"><dc:Bounds x="520" y="858" width="130" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_C_Prop" bpmnElement="Task_C_Proposta"><dc:Bounds x="680" y="858" width="130" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_Gw_CProp" bpmnElement="Gateway_C_Proposta" isMarkerVisible="true"><dc:Bounds x="850" y="873" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_C_Neg" bpmnElement="Task_C_Negociacao"><dc:Bounds x="940" y="858" width="110" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_Gw_CWin" bpmnElement="Gateway_C_WinLose" isMarkerVisible="true"><dc:Bounds x="1090" y="873" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_C_Conc" bpmnElement="Task_C_Concluido"><dc:Bounds x="1180" y="820" width="160" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_End_CWin" bpmnElement="End_C_Win"><dc:Bounds x="1380" y="837" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_C_Cancel" bpmnElement="Task_C_Cancelado"><dc:Bounds x="1180" y="920" width="150" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="S_End_CLose" bpmnElement="End_C_Lose"><dc:Bounds x="1380" y="937" width="36" height="36"/></bpmndi:BPMNShape>
+
+      <!-- Message flows -->
+      <bpmndi:BPMNEdge id="E_MF1" bpmnElement="MF_Prospectar_to_Projetos">
+        <di:waypoint x="1310" y="230"/><di:waypoint x="1310" y="400"/><di:waypoint x="320" y="400"/><di:waypoint x="320" y="518"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="E_MF2" bpmnElement="MF_Origem_to_Contratar">
+        <di:waypoint x="780" y="180"/><di:waypoint x="780" y="420"/><di:waypoint x="250" y="420"/><di:waypoint x="250" y="880"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="E_MF3" bpmnElement="MF_Contratar_Win">
+        <di:waypoint x="1260" y="820"/><di:waypoint x="1260" y="140"/><di:waypoint x="915" y="140"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="E_MF4" bpmnElement="MF_Contratar_Lose">
+        <di:waypoint x="1255" y="990"/><di:waypoint x="1040" y="990"/><di:waypoint x="1040" y="180"/>
+      </bpmndi:BPMNEdge>
+
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</definitions>

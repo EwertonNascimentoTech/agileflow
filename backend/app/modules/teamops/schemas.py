@@ -255,6 +255,9 @@ class PersonCreate(BaseModel):
     position_id: uuid.UUID
     area_ids: list[uuid.UUID] = []
     po_person_ids: list[uuid.UUID] = []
+    # Aliases legados do formulário (singular) — normalizados para as listas.
+    area_id: Optional[uuid.UUID] = None
+    po_person_id: Optional[uuid.UUID] = None
     tech_reference_person_id: Optional[uuid.UUID] = None
     manager_person_id: Optional[uuid.UUID] = None
     employment_type: EmploymentType = EmploymentType.CLT
@@ -269,6 +272,14 @@ class PersonCreate(BaseModel):
     access_level: AccessLevel = "none"
     password: Optional[str] = None
 
+    @model_validator(mode="after")
+    def _normalize_singular_links(self):
+        if self.area_id and self.area_id not in self.area_ids:
+            self.area_ids = [*self.area_ids, self.area_id]
+        if self.po_person_id and self.po_person_id not in self.po_person_ids:
+            self.po_person_ids = [*self.po_person_ids, self.po_person_id]
+        return self
+
 
 class PersonUpdate(BaseModel):
     full_name: Optional[str] = Field(None, min_length=2, max_length=200)
@@ -279,6 +290,8 @@ class PersonUpdate(BaseModel):
     position_id: Optional[uuid.UUID] = None
     area_ids: Optional[list[uuid.UUID]] = None
     po_person_ids: Optional[list[uuid.UUID]] = None
+    area_id: Optional[uuid.UUID] = None
+    po_person_id: Optional[uuid.UUID] = None
     tech_reference_person_id: Optional[uuid.UUID] = None
     manager_person_id: Optional[uuid.UUID] = None
     employment_type: Optional[EmploymentType] = None
@@ -294,6 +307,40 @@ class PersonUpdate(BaseModel):
     access_level: Optional[AccessLevel] = None
     password: Optional[str] = None
     reset_password: Optional[str] = None
+    # Ao marcar DESLIGADO: Person.id do colega (mesmo cargo) que recebe as tarefas em aberto.
+    # Concluídas permanecem com a pessoa desligada (histórico).
+    reassign_open_tasks_to: Optional[uuid.UUID] = None
+
+    @model_validator(mode="after")
+    def _normalize_singular_links(self):
+        if self.area_id is not None:
+            base = list(self.area_ids or [])
+            if self.area_id not in base:
+                base.append(self.area_id)
+            self.area_ids = base
+        if self.po_person_id is not None:
+            base = list(self.po_person_ids or [])
+            if self.po_person_id not in base:
+                base.append(self.po_person_id)
+            self.po_person_ids = base
+        return self
+
+
+class OffboardingPeer(BaseModel):
+    id: uuid.UUID
+    full_name: str
+    email: str
+
+
+class OffboardingPreviewResponse(BaseModel):
+    """Resumo ao desligar: tarefas em aberto (a realocar) vs concluídas (histórico)."""
+    person_id: uuid.UUID
+    full_name: str
+    position_id: Optional[uuid.UUID] = None
+    position_name: Optional[str] = None
+    open_tasks: int = 0
+    completed_tasks: int = 0
+    peers: list[OffboardingPeer] = Field(default_factory=list)
 
 
 class AreaMini(BaseModel):
@@ -337,6 +384,21 @@ class PersonResponse(BaseModel):
     user_email: Optional[str] = None
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _fill_ids_from_relations(cls, value, handler):
+        """Popula area_ids/po_person_ids a partir dos relacionamentos ORM."""
+        data = handler(value)
+        if isinstance(value, dict):
+            return data
+        areas = getattr(value, "areas", None) or []
+        pos = getattr(value, "pos", None) or []
+        if not data.area_ids and areas:
+            data.area_ids = [a.id for a in areas]
+        if not data.po_person_ids and pos:
+            data.po_person_ids = [p.id for p in pos]
+        return data
 
 
 class TeamMemberResponse(BaseModel):

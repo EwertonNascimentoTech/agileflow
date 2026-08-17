@@ -1,6 +1,10 @@
 """
 MinIO storage client.
 Usado para upload de anexos (imagens, áudios, PDFs) de mensagens e propostas.
+
+Upload/delete usam o endpoint interno (Docker). Presigned URLs usam
+MINIO_PUBLIC_ENDPOINT (domínio acessível no browser), com nginx fazendo
+proxy path-style `/{bucket}/...` → MinIO.
 """
 import io
 import uuid
@@ -13,6 +17,7 @@ from minio.error import S3Error
 from app.core.config import settings
 
 _client: Optional[Minio] = None
+_presign_client: Optional[Minio] = None
 
 
 def get_minio() -> Minio:
@@ -23,8 +28,30 @@ def get_minio() -> Minio:
             access_key=settings.MINIO_ACCESS_KEY,
             secret_key=settings.MINIO_SECRET_KEY,
             secure=settings.MINIO_SECURE,
+            region=settings.MINIO_REGION or None,
         )
     return _client
+
+
+def get_presign_minio() -> Minio:
+    """Cliente só para assinar URLs com o host que o browser vai abrir."""
+    global _presign_client
+    if _presign_client is None:
+        endpoint = (settings.MINIO_PUBLIC_ENDPOINT or "").strip() or settings.MINIO_ENDPOINT
+        secure = (
+            settings.MINIO_PUBLIC_SECURE
+            if (settings.MINIO_PUBLIC_ENDPOINT or "").strip()
+            else settings.MINIO_SECURE
+        )
+        # region explícita evita lookup HTTP no host público (que pode ser o SPA).
+        _presign_client = Minio(
+            endpoint,
+            access_key=settings.MINIO_ACCESS_KEY,
+            secret_key=settings.MINIO_SECRET_KEY,
+            secure=secure,
+            region=settings.MINIO_REGION or "us-east-1",
+        )
+    return _presign_client
 
 
 def ensure_bucket(bucket: str) -> None:
@@ -62,9 +89,9 @@ def upload_file(
 
 
 def get_presigned_url(object_name: str, bucket: Optional[str] = None, expires_hours: int = 24) -> str:
-    """Gera presigned URL para leitura (GET) do objeto."""
+    """Gera presigned URL para leitura (GET) do objeto (host público quando configurado)."""
     bucket = bucket or settings.MINIO_BUCKET_DEFAULT
-    client = get_minio()
+    client = get_presign_minio()
     try:
         return client.presigned_get_object(
             bucket, object_name, expires=timedelta(hours=expires_hours)

@@ -20,8 +20,10 @@ import type { CardClassification, ProjectTask } from "@/api/projetos"
 
 type ClassificationResult = {
   classification: CardClassification
+  iaAssisted: boolean
   productId: string
   releaseId: string | null
+  procurementRequired: boolean | null
 }
 
 interface Props {
@@ -154,6 +156,8 @@ function ProductSearchSelect({
 
 export function BacklogClassificationDialog({ open, task, mode = "backlog_exit", onCancel, onConfirm }: Props) {
   const [classification, setClassification] = useState<CardClassification | null>(null)
+  // Pergunta obrigatória (os três tipos): será feito com IA ou auxílio de IA?
+  const [iaAssisted, setIaAssisted] = useState<boolean | null>(null)
   const [products, setProducts] = useState<ProductListItem[]>([])
   const [loadingProducts, setLoadingProducts] = useState(false)
   const [moduleError, setModuleError] = useState<string | null>(null)
@@ -174,11 +178,13 @@ export function BacklogClassificationDialog({ open, task, mode = "backlog_exit",
   const [relTipo, setRelTipo] = useState<ReleaseTipo>("melhoria")
   const [relDescricao, setRelDescricao] = useState("")
   const [saving, setSaving] = useState(false)
+  const [procurementRequired, setProcurementRequired] = useState<boolean | null>(null)
 
   // Pré-preenche a partir do card (reclassificação após voltar ao backlog) e carrega produtos.
   useEffect(() => {
     if (!open || !task) return
     setClassification(task.card_classification ?? null)
+    setIaAssisted(task.ia_assisted ?? null)
     setSelectedProductId(task.linked_product_id ?? "")
     setProductMode("select")
     setNewName("")
@@ -191,6 +197,7 @@ export function BacklogClassificationDialog({ open, task, mode = "backlog_exit",
     setRelNome("")
     setRelTipo("melhoria")
     setRelDescricao("")
+    setProcurementRequired(task.procurement_required ?? null)
     setModuleError(null)
     setLoadingProducts(true)
     produtosApi
@@ -203,19 +210,39 @@ export function BacklogClassificationDialog({ open, task, mode = "backlog_exit",
 
   const needsRelease = classification === "melhoria"
   const allowNewProduct = classification === "desenvolvimento" || classification === "implantacao"
+  const selectedProduct = products.find((p) => p.id === selectedProductId) ?? null
+  const effectiveCategoria =
+    productMode === "new" && allowNewProduct
+      ? newCategoria
+      : (selectedProduct?.categoria ?? null)
+  const askProcurement =
+    (classification === "implantacao" || classification === "melhoria") &&
+    !!effectiveCategoria &&
+    String(effectiveCategoria).startsWith("sistema_externo_")
+  // Card já classificado como melhoria com release vinculada e mesmo produto:
+  // reaproveita a release (ex.: reabrir o diálogo só para responder a pergunta de IA).
+  const reuseExistingRelease =
+    needsRelease &&
+    task?.card_classification === "melhoria" &&
+    !!task?.linked_release_id &&
+    selectedProductId === task?.linked_product_id
 
   const canConfirm = useMemo(() => {
     if (!classification || moduleError) return false
+    // Pergunta IA é obrigatória para os três tipos.
+    if (iaAssisted === null) return false
+    if (askProcurement && procurementRequired === null) return false
     if (allowNewProduct) {
       if (productMode === "new") return newName.trim().length >= 2
       return !!selectedProductId
     }
-    // melhoria: produto existente + release.
-    return !!selectedProductId && relVersao.trim().length >= 1
-  }, [classification, moduleError, allowNewProduct, productMode, newName, selectedProductId, relVersao])
+    // melhoria: produto existente + release (existente ou nova).
+    return !!selectedProductId && (reuseExistingRelease || relVersao.trim().length >= 1)
+  }, [classification, iaAssisted, moduleError, askProcurement, procurementRequired, allowNewProduct, productMode, newName, selectedProductId, relVersao, reuseExistingRelease])
 
   async function handleConfirm() {
-    if (!task || !classification) return
+    if (!task || !classification || iaAssisted === null) return
+    if (askProcurement && procurementRequired === null) return
     setSaving(true)
     try {
       let productId = selectedProductId
@@ -237,7 +264,9 @@ export function BacklogClassificationDialog({ open, task, mode = "backlog_exit",
         return
       }
       let releaseId: string | null = null
-      if (needsRelease) {
+      if (needsRelease && reuseExistingRelease) {
+        releaseId = task.linked_release_id
+      } else if (needsRelease) {
         const release = await produtosApi.addRelease(productId, {
           versao: relVersao.trim(),
           nome: relNome.trim() || null,
@@ -247,13 +276,23 @@ export function BacklogClassificationDialog({ open, task, mode = "backlog_exit",
         })
         releaseId = release.id
       }
-      await onConfirm({ classification, productId, releaseId })
+      await onConfirm({
+        classification,
+        iaAssisted,
+        productId,
+        releaseId,
+        procurementRequired: askProcurement ? procurementRequired : null,
+      })
     } catch (err) {
       toast.error(apiMessage(err, "Não foi possível concluir a classificação."))
     } finally {
       setSaving(false)
     }
   }
+
+  useEffect(() => {
+    if (!askProcurement) setProcurementRequired(null)
+  }, [askProcurement])
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onCancel() }}>
@@ -299,6 +338,30 @@ export function BacklogClassificationDialog({ open, task, mode = "backlog_exit",
               </p>
             )}
           </div>
+
+          {/* Pergunta IA — obrigatória para os três tipos */}
+          {classification && (
+            <div className="space-y-1.5">
+              <Label>Será feito com IA ou auxílio de IA?</Label>
+              <div className="flex gap-2">
+                {([
+                  { value: true, label: "Sim" },
+                  { value: false, label: "Não" },
+                ] as const).map((opt) => (
+                  <button
+                    key={opt.label}
+                    type="button"
+                    onClick={() => setIaAssisted(opt.value)}
+                    className={`flex-1 rounded-md border px-3 py-2 text-sm font-medium transition ${
+                      iaAssisted === opt.value ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Vínculo de produto */}
           {classification && !moduleError && (
@@ -390,8 +453,13 @@ export function BacklogClassificationDialog({ open, task, mode = "backlog_exit",
             </div>
           )}
 
-          {/* Release (melhoria) */}
-          {needsRelease && !moduleError && (
+          {/* Release (melhoria) — reaproveitada quando o card já tem uma vinculada */}
+          {needsRelease && !moduleError && reuseExistingRelease && (
+            <p className="rounded-md border border-dashed px-3 py-2 text-[11px] text-muted-foreground">
+              A release já vinculada ao card será mantida.
+            </p>
+          )}
+          {needsRelease && !moduleError && !reuseExistingRelease && (
             <div className="space-y-2 rounded-md border p-3">
               <Label>Release do produto</Label>
               <div className="grid grid-cols-2 gap-2">
@@ -425,6 +493,34 @@ export function BacklogClassificationDialog({ open, task, mode = "backlog_exit",
               <p className="text-[11px] text-muted-foreground">
                 A release é criada como “planejada” — ajuste depois no módulo Produtos.
               </p>
+            </div>
+          )}
+
+          {askProcurement && (
+            <div className="space-y-1.5 rounded-md border border-orange-200 bg-orange-50/60 p-3">
+              <Label>Será contratado?</Label>
+              <p className="text-[11px] text-muted-foreground">
+                Se sim, o card ficará na raia Contratação até concluir o fluxo no kanban Contratar.
+              </p>
+              <div className="flex gap-2">
+                {([
+                  { value: true, label: "Sim" },
+                  { value: false, label: "Não" },
+                ] as const).map((opt) => (
+                  <button
+                    key={opt.label}
+                    type="button"
+                    onClick={() => setProcurementRequired(opt.value)}
+                    className={`flex-1 rounded-md border px-3 py-2 text-sm font-medium transition ${
+                      procurementRequired === opt.value
+                        ? "border-orange-500 bg-orange-100 text-orange-800"
+                        : "text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </div>

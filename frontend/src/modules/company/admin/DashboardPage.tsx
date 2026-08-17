@@ -9,6 +9,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/EmptyState"
+import { EXTERNAL_PO_BLOCKED_MODULES, isExternalProductOwner } from "@/lib/permissions"
 
 const resolveIcon = resolveModuleIcon
 
@@ -49,6 +50,10 @@ export default function CompanyDashboardPage() {
     user?.role === "company_user" &&
     (userRoleName === "basic" || userRoleName === "")
   const isAdmin = user?.role === "company_admin" || user?.role === "super_admin"
+  const isExternalPO = isExternalProductOwner(user)
+  const visibleModules = (tenant?.active_modules ?? []).filter(
+    (m) => !(isExternalPO && EXTERNAL_PO_BLOCKED_MODULES.includes(m.slug)),
+  )
   const basicNewRequestRoute = "/app/modules/projetos/solicitacoes"
   const basicMyRequestsRoute = "/app/modules/projetos/minhas"
 
@@ -69,7 +74,7 @@ export default function CompanyDashboardPage() {
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 size={14} className="animate-spin" /> Carregando…
             </div>
-          ) : !tenant || tenant.active_modules.length === 0 ? (
+          ) : visibleModules.length === 0 ? (
             <Card className="border-dashed">
               <EmptyState
                 icon={Package}
@@ -80,7 +85,7 @@ export default function CompanyDashboardPage() {
             </Card>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {tenant.active_modules.map((m) => {
+              {visibleModules.map((m) => {
                 const Icon = resolveIcon(m.icon)
                 return (
                   <Card
@@ -141,13 +146,13 @@ export default function CompanyDashboardPage() {
                   <Users2 size={13} className="mr-1.5" /> Gerenciar usuários
                 </Button>
               )}
-              {tenant && tenant.active_modules[0] && (
+              {visibleModules[0] && (
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => navigate(moduleHomePath(tenant.active_modules[0]))}
+                  onClick={() => navigate(moduleHomePath(visibleModules[0]))}
                 >
-                  <Package size={13} className="mr-1.5" /> Abrir {tenant.active_modules[0].name}
+                  <Package size={13} className="mr-1.5" /> Abrir {visibleModules[0].name}
                 </Button>
               )}
             </>

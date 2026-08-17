@@ -2,7 +2,7 @@ import { useState } from "react"
 import { NavLink, Outlet, useNavigate } from "react-router-dom"
 import {
   Building2, LayoutDashboard, LogOut,
-  Menu, Package, ShieldCheck, X, Moon, Sun,
+  Menu, Package, ShieldCheck, X, Moon, Sun, BookOpen,
 } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import { useTheme } from "@/contexts/ThemeContext"
@@ -14,6 +14,7 @@ const navItems = [
   { to: "/admin/tenants",   icon: Building2,       label: "Empresas" },
   { to: "/admin/modules",   icon: Package,         label: "Módulos" },
   { to: "/admin/admins",    icon: ShieldCheck,     label: "Super Admins" },
+  { to: "/admin/docs",      icon: BookOpen,        label: "Documentação" },
 ]
 
 export default function AdminLayout() {

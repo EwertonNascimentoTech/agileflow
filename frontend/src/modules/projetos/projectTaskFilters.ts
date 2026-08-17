@@ -48,6 +48,10 @@ export type BoardFilterState = {
   programIds: string[]
   /** Programa efetivo por card (próprio ou herdado do ancestral). */
   effectiveProgramByTaskId: Map<string, string | null>
+  /** Diretoria efetiva por card (própria ou herdada do ancestral). */
+  effectiveDiretoriaByTaskId: Map<string, string | null>
+  /** Área efetiva por card (própria ou herdada do ancestral). */
+  effectiveAreaByTaskId: Map<string, string | null>
   groupedChildIds: Set<string>
   /** PO efetivo por card (herdado do projeto/programa ancestral). */
   effectivePoByTaskId: Map<string, string | null>
@@ -223,6 +227,42 @@ export function buildEffectivePoByTaskId(tasks: ProjectTask[]): Map<string, stri
   return cache
 }
 
+/** Diretoria/Área efetiva de cada card: valor próprio ou herdado do ancestral.
+ * Feature/US não preenchem esses campos — herdam do projeto/solicitação pai,
+ * senão o filtro de Diretoria/Área esvazia os kanbans Features e User Story.
+ */
+export function buildEffectiveDimensionByTaskId(
+  tasks: ProjectTask[],
+  key: "diretoria" | "area",
+): Map<string, string | null> {
+  const byId = new Map(tasks.map((t) => [t.id, t]))
+  const cache = new Map<string, string | null>()
+
+  function resolve(taskId: string): string | null {
+    if (cache.has(taskId)) return cache.get(taskId)!
+    const task = byId.get(taskId)
+    if (!task) {
+      cache.set(taskId, null)
+      return null
+    }
+    const own = task[key]
+    if (own) {
+      cache.set(taskId, own)
+      return own
+    }
+    if (task.parent_task_id) {
+      const v = resolve(task.parent_task_id)
+      cache.set(taskId, v)
+      return v
+    }
+    cache.set(taskId, null)
+    return null
+  }
+
+  for (const t of tasks) resolve(t.id)
+  return cache
+}
+
 /** PO do projeto/programa gerado na conversão (origin_task_id → assigned_to). */
 export function buildPoByOriginTaskId(tasks: ProjectTask[]): Map<string, string> {
   const map = new Map<string, string>()
@@ -310,9 +350,15 @@ export function taskMatches(t: ProjectTask, f: BoardFilterState): boolean {
     const vals = requesterValuesForTask(f.formValuesByTask, t.id, f.requesterFieldKey)
     if (!requesterValuesMatchFilter(vals, f.requisitantes, f.resolveRequisitanteLabel)) return false
   }
-  if (f.diretorias.length && !f.diretorias.includes(t.diretoria ?? "__none__")) return false
+  if (f.diretorias.length) {
+    const dir = f.effectiveDiretoriaByTaskId.get(t.id) ?? t.diretoria ?? null
+    if (!f.diretorias.includes(dir ?? "__none__")) return false
+  }
   if (f.planningScopeIds && !f.planningScopeIds.has(t.id)) return false
-  if (f.areas.length && !(t.area ? f.areas.includes(t.area) : false)) return false
+  if (f.areas.length) {
+    const area = f.effectiveAreaByTaskId.get(t.id) ?? t.area ?? null
+    if (!(area ? f.areas.includes(area) : false)) return false
+  }
   if (f.deliveryPeriod && !dueDateInDeliveryPeriod(t.due_date, f.deliveryPeriod)) return false
   if (f.programIds.length) {
     const prog = f.effectiveProgramByTaskId.get(t.id) ?? null

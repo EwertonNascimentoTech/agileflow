@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import {
-  AlertTriangle, Boxes, Building2, Clock, FileQuestion, FileWarning, FileX, Loader2, type LucideIcon,
+  AlertTriangle, Boxes, Building2, Clock, FileQuestion, FileWarning, FileX, GitBranch, Loader2, type LucideIcon,
   PackageX, Plus, ShieldAlert, Sparkles, Trash2, UserX,
 } from "lucide-react"
 
@@ -57,6 +57,7 @@ const ALERTA_ICON: Record<ProductAlertaCode, LucideIcon> = {
   tecnico_nao_referencia: UserX,
   produto_parado: Clock,
   doc_desatualizada: FileWarning,
+  repositorio_sem_commits: GitBranch,
 }
 
 const ALERTA_LEGENDA: { code: ProductAlertaCode; label: string; nivel: "alto" | "medio" }[] = [
@@ -66,6 +67,7 @@ const ALERTA_LEGENDA: { code: ProductAlertaCode; label: string; nivel: "alto" | 
   { code: "sem_documentacao", label: "Sem documentação", nivel: "medio" },
   { code: "tecnico_nao_referencia", label: "Téc. não é Referência Técnica", nivel: "medio" },
   { code: "doc_desatualizada", label: "Documentação desatualizada", nivel: "medio" },
+  { code: "repositorio_sem_commits", label: "Repositório sem commits (>6m)", nivel: "medio" },
 ]
 
 export default function ProductsPage() {

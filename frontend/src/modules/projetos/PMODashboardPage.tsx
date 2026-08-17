@@ -32,7 +32,7 @@ export default function PMODashboardPage({ initialTab = "portfolio" }: { initial
       </div>
 
       <Tabs defaultValue={initialTab}>
-        <TabsList>
+        <TabsList className="h-auto w-full flex-wrap justify-start gap-1">
           <TabsTrigger value="portfolio" className="gap-1.5">
             <LayoutGrid className="h-4 w-4" /> Portfólio
           </TabsTrigger>
@@ -44,14 +44,14 @@ export default function PMODashboardPage({ initialTab = "portfolio" }: { initial
           <TabsTrigger value="po-sync" className="gap-1.5">
             <Users className="h-4 w-4" /> PO Sync
           </TabsTrigger>
+          <TabsTrigger value="status-reports" className="gap-1.5">
+            <FileText className="h-4 w-4" /> Status Reports
+          </TabsTrigger>
           <TabsTrigger value="relatorios" className="gap-1.5">
             <BarChart3 className="h-4 w-4" /> Relatórios
           </TabsTrigger>
           <TabsTrigger value="entregas-us" className="gap-1.5">
-            <PackageCheck className="h-4 w-4" /> Entregas US
-          </TabsTrigger>
-          <TabsTrigger value="status-reports" className="gap-1.5">
-            <FileText className="h-4 w-4" /> Status Reports
+            <PackageCheck className="h-4 w-4" /> Entregas
           </TabsTrigger>
         </TabsList>
 

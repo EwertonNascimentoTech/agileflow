@@ -1,11 +1,11 @@
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Literal, Optional
 
 PriorityMode = Literal["edit", "view", "hidden"]
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_serializer, field_validator, model_validator
 
 from app.modules.projetos.models import ProjectAutomationAction
 
@@ -77,6 +77,7 @@ class ProjectFunnelResponse(BaseModel):
     allowed_demand_type_ids: Optional[list[uuid.UUID]] = None
     access_control: Optional[dict[str, str]] = None
     classification_enforcement_enabled: bool = False
+    is_procurement: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -95,6 +96,7 @@ class ProjectDemandTypeCreate(BaseModel):
     allowed_child_type_ids: Optional[list[uuid.UUID]] = None
     available_for_basic: bool = True
     show_in_schedule: bool = True
+    is_procurement: bool = False
     order: int = Field(0, ge=0)
     is_active: bool = True
 
@@ -107,6 +109,7 @@ class ProjectDemandTypeUpdate(BaseModel):
     allowed_child_type_ids: Optional[list[uuid.UUID]] = None
     available_for_basic: Optional[bool] = None
     show_in_schedule: Optional[bool] = None
+    is_procurement: Optional[bool] = None
     order: Optional[int] = Field(None, ge=0)
     is_active: Optional[bool] = None
 
@@ -129,6 +132,7 @@ class ProjectDemandTypeResponse(BaseModel):
     allowed_child_type_ids: Optional[list[uuid.UUID]] = None
     available_for_basic: bool = True
     show_in_schedule: bool = True
+    is_procurement: bool = False
     order: int
     is_active: bool
     created_at: datetime
@@ -300,6 +304,11 @@ class ProjectStatusCreate(BaseModel):
     children_to_funnel_id: Optional[uuid.UUID] = None
     grandchildren_to_funnel_id: Optional[uuid.UUID] = None
     locks_schedule: bool = False
+    is_procurement_hold: bool = False
+    is_procurement_cancel: bool = False
+    is_procurement_won: bool = False
+    is_procurement_lost: bool = False
+    procurement_stage_key: Optional[str] = None
 
 
 class ProjectStatusUpdate(BaseModel):
@@ -323,6 +332,11 @@ class ProjectStatusUpdate(BaseModel):
     children_to_funnel_id: Optional[uuid.UUID] = None
     grandchildren_to_funnel_id: Optional[uuid.UUID] = None
     locks_schedule: Optional[bool] = None
+    is_procurement_hold: Optional[bool] = None
+    is_procurement_cancel: Optional[bool] = None
+    is_procurement_won: Optional[bool] = None
+    is_procurement_lost: Optional[bool] = None
+    procurement_stage_key: Optional[str] = None
 
 
 class ProjectStatusReorder(BaseModel):
@@ -353,6 +367,11 @@ class ProjectStatusResponse(BaseModel):
     children_to_funnel_id: Optional[uuid.UUID] = None
     grandchildren_to_funnel_id: Optional[uuid.UUID] = None
     locks_schedule: bool = False
+    is_procurement_hold: bool = False
+    is_procurement_cancel: bool = False
+    is_procurement_won: bool = False
+    is_procurement_lost: bool = False
+    procurement_stage_key: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -411,6 +430,8 @@ class ProjectTaskReorder(BaseModel):
 
 class ProjectTaskUpdate(BaseModel):
     status_id: Optional[uuid.UUID] = None
+    # Justificativa de ausência de commit na conclusão da US. String vazia limpa.
+    commit_justificativa: Optional[str] = Field(None, max_length=2000)
     demand_type_id: Optional[uuid.UUID] = None
     parent_task_id: Optional[uuid.UUID] = None
     title: Optional[str] = Field(None, min_length=2, max_length=200)
@@ -442,8 +463,14 @@ class ProjectTaskUpdate(BaseModel):
     conversion_program_id: Optional[uuid.UUID] = None
     # Classificação exigida ao sair do backlog + vínculo com o portfólio de PRODUTOS.
     card_classification: Optional[Literal["desenvolvimento", "implantacao", "melhoria"]] = None
+    # Será feito com IA ou auxílio de IA? (obrigatório junto com a classificação)
+    ia_assisted: Optional[bool] = None
     linked_product_id: Optional[uuid.UUID] = None
     linked_release_id: Optional[uuid.UUID] = None
+    # Contratação: "Será contratado?" + metadados do card Contratar.
+    procurement_required: Optional[bool] = None
+    procurement_cancel_reason: Optional[str] = None
+    procurement_meta: Optional[dict] = None
 
 
 class PlanningClassificationUpdate(BaseModel):
@@ -470,8 +497,14 @@ class ProjectTaskResponse(BaseModel):
     planning_kind: Optional[str] = None
     linked_program_id: Optional[uuid.UUID] = None
     card_classification: Optional[str] = None
+    ia_assisted: Optional[bool] = None
     linked_product_id: Optional[uuid.UUID] = None
     linked_release_id: Optional[uuid.UUID] = None
+    procurement_required: Optional[bool] = None
+    procurement_task_id: Optional[uuid.UUID] = None
+    procurement_locked: bool = False
+    procurement_cancel_reason: Optional[str] = None
+    procurement_meta: Optional[dict] = None
     diretoria: Optional[str]
     area: Optional[str]
     start_date: Optional[datetime]
@@ -480,11 +513,15 @@ class ProjectTaskResponse(BaseModel):
     actual_hours: Optional[Decimal] = None
     percent_complete: int = 0
     us_checklist: Optional[list] = None
+    commit_justificativa: Optional[str] = None
+    commit_justificativa_em: Optional[datetime] = None
     # Rollups das US filhas (usados pelos selos no card da Feature).
     us_impediment_active: bool = False
     us_codereview_active: bool = False
     order: int
     created_by: Optional[uuid.UUID]
+    # Nome de quem criou a solicitação de origem (fallback: criador do próprio card). Resolvido no service.
+    requester_name: Optional[str] = None
     completed_at: Optional[datetime]
     left_backlog_at: Optional[datetime] = None
     status_entered_at: Optional[datetime] = None
@@ -496,6 +533,19 @@ class ProjectTaskResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ProjectTaskCardResponse(ProjectTaskResponse):
+    """Card do kanban: tudo do card completo, menos os campos pesados que ele não desenha.
+
+    `description` sozinha responde por ~2/3 do peso da lista do board (773 kB de 1,2 MB
+    de linhas num portfólio de 1,5k cards) e nenhum card a exibe — só o drawer e o Gantt.
+    Herda de `ProjectTaskResponse` de propósito: campo novo no card completo aparece aqui
+    automaticamente, e só é omitido quem estiver explicitamente na lista abaixo.
+    """
+    description: Optional[str] = Field(default=None, exclude=True)
+    anexos: Optional[list] = Field(default=None, exclude=True)
+    procurement_meta: Optional[dict] = Field(default=None, exclude=True)
 
 
 class TaskDependencyCreate(BaseModel):
@@ -614,6 +664,39 @@ class CapacityHeatmapResponse(BaseModel):
     summary: CapacitySummary
 
 
+class CapacityDayTask(BaseModel):
+    """User Story no detalhamento do dia (clique na célula do heatmap de carga)."""
+    task_id: uuid.UUID
+    project_id: uuid.UUID          # container ('TD') — usado no deep-link do card
+    project_name: str              # card-raiz de planejamento (projeto/programa)
+    feature_title: Optional[str] = None
+    task_title: str
+    hours: float = 0.0             # horas alocadas NO dia clicado (0 nas atrasadas fora do dia)
+    estimated_hours: Optional[float] = None
+    status_name: Optional[str] = None
+    status_color: Optional[str] = None
+    start_date: Optional[date] = None
+    due_date: Optional[date] = None
+    sla_state: Optional[str] = None
+    is_overdue: bool = False
+    days_late: Optional[int] = None
+    in_day: bool = False           # atrasada que também consome horas no dia clicado
+
+
+class CapacityDayDetailResponse(BaseModel):
+    """O que a pessoa faz no dia (com etapa) + snapshot das US atrasadas dela."""
+    person_id: uuid.UUID
+    person_name: Optional[str] = None
+    date: date
+    is_working_day: bool
+    capacity_hours: float
+    allocated_hours: float
+    overallocated: bool
+    items: list[CapacityDayTask] = []
+    overdue: list[CapacityDayTask] = []
+    overdue_reference: date         # data-base do snapshot de atrasadas (hoje)
+
+
 class CapacityProjectRow(BaseModel):
     project_id: uuid.UUID
     project_name: str
@@ -664,6 +747,66 @@ class FreePersonRow(BaseModel):
 
 class FreePeopleResponse(BaseModel):
     rows: list[FreePersonRow]
+
+
+# ── Capacidade de UM responsável numa janela (painel do cronograma) ──
+class PersonCapacityDay(BaseModel):
+    date: date
+    capacity_hours: float      # já com ausências aprovadas descontadas
+    allocated_hours: float     # OUTRAS demandas (exclui a tarefa em edição)
+
+
+class PersonCapacityWindowResponse(BaseModel):
+    """Carga × capacidade de um responsável no período de uma tarefa do cronograma.
+
+    `allocated_*` exclui a tarefa em edição (`exclude_task`) — o front soma a
+    estimativa candidata por cima, sem contagem dupla."""
+    person_id: uuid.UUID
+    full_name: Optional[str] = None      # None = assignee sem cadastro no teamops
+    project_hours_per_day: float         # daily_hours × project_allocation_pct
+    work_days: int
+    capacity_hours_total: float
+    allocated_hours_total: float
+    days: list[PersonCapacityDay] = []   # só dias úteis do calendário
+    top_demands: list[WorkloadCellItem] = []   # o que já ocupa a pessoa na janela
+    task_counts_in_capacity: bool = True       # False = tarefa não é US (fora do motor)
+
+
+# ── Cenário de fim do projeto (aba Cenário do cronograma) ──
+class ScheduleScenarioRequest(BaseModel):
+    """What-if: início + time → data de fim projetada pela capacidade livre agregada."""
+    root_task_id: uuid.UUID
+    start_date: date
+    person_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class ScheduleScenarioPersonRow(BaseModel):
+    person_id: uuid.UUID
+    full_name: Optional[str] = None
+    capacity_hours: float
+    allocated_elsewhere_hours: float
+    free_hours: float
+    utilization_pct: float
+
+
+class ScheduleScenarioDay(BaseModel):
+    date: date
+    team_free: float
+    consumed: float
+    remaining_demand: float
+
+
+class ScheduleScenarioResponse(BaseModel):
+    """Cenário hipotético — não altera o cronograma."""
+    start_date: date
+    projected_end_date: Optional[date] = None
+    demand_hours: float
+    work_days: int = 0
+    team_capacity_hours: float = 0.0
+    team_free_hours: float = 0.0
+    persons: list[ScheduleScenarioPersonRow] = []
+    days: list[ScheduleScenarioDay] = []
+    warnings: list[str] = []
 
 
 # ── Fase 2: simulador de cenários (what-if efêmero) ──
@@ -773,6 +916,30 @@ class CrossTeamPersonRow(BaseModel):
 
 class CrossTeamResponse(BaseModel):
     rows: list[CrossTeamPersonRow]
+
+
+class ScheduleOverloadConflict(BaseModel):
+    """Uma demanda que disputa o dia mais crítico do responsável."""
+    project_name: str
+    task_title: str
+    hours: float
+
+
+class ScheduleOverloadRow(BaseModel):
+    """Sobrecarga do responsável de uma tarefa, no período dela — sinal direto no Gantt."""
+    task_id: uuid.UUID
+    person_id: uuid.UUID
+    person_name: Optional[str] = None
+    over_days: int                   # dias úteis do período com carga acima da capacidade
+    total_days: int                  # dias úteis do período
+    worst_date: date                 # pior dia (maior excedente)
+    worst_allocated_hours: float
+    worst_capacity_hours: float
+    conflicts: list[ScheduleOverloadConflict] = []   # o que ocupa o pior dia
+
+
+class ScheduleOverloadResponse(BaseModel):
+    rows: list[ScheduleOverloadRow]
 
 
 class AssigneeAbsenceItem(BaseModel):
@@ -944,6 +1111,39 @@ class ProjectMyRequestResponse(ProjectTaskWithContextResponse):
     model_config = {"from_attributes": True}
 
 
+class UsCommitItem(BaseModel):
+    """Commit exibido como evidência da User Story (dados achatados de repo_commits)."""
+    id: uuid.UUID
+    commit_id: str
+    short_id: str
+    comment: Optional[str] = None
+    author_name: Optional[str] = None
+    author_date: Optional[datetime] = None
+    branch: Optional[str] = None
+    environment: Optional[str] = None
+    repository: Optional[str] = None
+    remote_url: Optional[str] = None
+    linked: bool = False
+
+    @field_serializer("author_date")
+    def _ser_author_date(self, v: Optional[datetime]):
+        return v.replace(tzinfo=timezone.utc).isoformat() if v else None
+
+
+class UsCommitLinkIn(BaseModel):
+    commit_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class UsCommitEvidenceState(BaseModel):
+    """O que falta para a US poder ser concluída."""
+    tem_produto: bool
+    commits_vinculados: int
+    commits_disponiveis: int
+    justificativa: Optional[str] = None
+    justificativa_em: Optional[datetime] = None
+    pode_concluir: bool
+
+
 class ProjectTaskCommentCreate(BaseModel):
     content: str = Field(..., min_length=1)
 
@@ -957,6 +1157,30 @@ class ProjectTaskCommentResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ProjectTaskStatusHistoryResponse(BaseModel):
+    id: uuid.UUID
+    task_id: uuid.UUID
+    from_status_id: Optional[uuid.UUID] = None
+    to_status_id: Optional[uuid.UUID] = None
+    from_status_name: Optional[str] = None
+    to_status_name: Optional[str] = None
+    from_funnel_name: Optional[str] = None
+    to_funnel_name: Optional[str] = None
+    moved_by: Optional[uuid.UUID] = None
+    moved_by_name: Optional[str] = None
+    moved_at: datetime
+    source: str = "user"
+
+    model_config = {"from_attributes": True}
+
+    @field_serializer("moved_at")
+    def _serialize_moved_at(self, value: datetime) -> str:
+        # Gravação é UTC naive; expõe com offset para o browser converter ao fuso local.
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.isoformat()
 
 
 class ProjectMemberCreate(BaseModel):
@@ -1073,7 +1297,8 @@ class ProjectReportsResponse(BaseModel):
 # ─────────────────────────────────────────────
 
 UsDeliveryPeriod = Literal[
-    "today", "tomorrow", "this_week", "next_week", "this_month", "next_month"
+    "today", "tomorrow", "this_week", "next_week",
+    "last_month", "this_month", "next_month",
 ]
 
 
@@ -1097,12 +1322,48 @@ class UsDeliveryAssigneeGroup(BaseModel):
     overdue_count: int = 0
 
 
+class ProjectDeliveryLinkItem(BaseModel):
+    """Item de vínculo (serviço / processo / documento) para tooltip."""
+    name: str
+    item_date: Optional[date] = None
+
+
+class ProjectDeliveryItem(BaseModel):
+    """Projeto/programa concluído no período, com vínculos de produto."""
+    id: uuid.UUID
+    title: str
+    planning_kind: Optional[str] = None
+    completed_at: Optional[datetime] = None
+    due_date: Optional[datetime] = None
+    po_name: Optional[str] = None
+    product_id: Optional[uuid.UUID] = None
+    product_name: Optional[str] = None
+    has_servicos: bool = False
+    has_processos: bool = False
+    has_documentos: bool = False
+    servicos_count: int = 0
+    processos_count: int = 0
+    documentos_count: int = 0
+    servicos: list[ProjectDeliveryLinkItem] = Field(default_factory=list)
+    processos: list[ProjectDeliveryLinkItem] = Field(default_factory=list)
+    documentos: list[ProjectDeliveryLinkItem] = Field(default_factory=list)
+
+
+class ProjectDeliveryKpis(BaseModel):
+    total: int = 0
+    com_servicos: int = 0
+    com_processos_e_documentos: int = 0
+
+
 class UsDeliveryReportResponse(BaseModel):
     period: UsDeliveryPeriod
     range_start: datetime
     range_end: datetime
     by_assignee: list[UsDeliveryAssigneeGroup]
     available_assignees: list[dict] = Field(default_factory=list)
+    # Entregas = projetos/programas concluídos + indicadores de vínculo produto.
+    project_deliveries: list[ProjectDeliveryItem] = Field(default_factory=list)
+    project_kpis: ProjectDeliveryKpis = Field(default_factory=ProjectDeliveryKpis)
 
 
 # ─────────────────────────────────────────────

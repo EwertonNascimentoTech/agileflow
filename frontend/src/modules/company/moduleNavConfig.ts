@@ -10,6 +10,7 @@ import {
   Code2,
   CalendarOff,
   Gauge,
+  FileText,
 } from "lucide-react"
 import type { ElementType } from "react"
 
@@ -29,6 +30,7 @@ export const moduleNavConfig: Record<string, ModuleNavItem[]> = {
     { to: "/app/modules/projetos/calendario", icon: CalendarRange, label: "Calendário" },
     { to: "/app/modules/projetos/programas", icon: Layers, label: "Programa" },
     { to: "/app/modules/projetos/relatorios", icon: BarChart3, label: "Relatórios" },
+    { to: "/app/modules/projetos/status-reports", icon: FileText, label: "Status Reports" },
     { to: "/app/modules/projetos/config", icon: Settings2, label: "Configurações" },
   ],
   teamops: [

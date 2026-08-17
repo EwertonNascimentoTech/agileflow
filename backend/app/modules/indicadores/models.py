@@ -74,12 +74,36 @@ class FonteDados(str, enum.Enum):
 
 
 class FontePortfolioMetrica(str, enum.Enum):
-    """Métrica do portfólio de Produtos usada quando fonte = portfolio (extensível)."""
+    """Métrica calculada automaticamente quando fonte = portfolio (extensível).
+
+    Dois datasets: Produtos (métricas originais) e Projetos (indicadores táticos de TI,
+    calculados em portfolio_projetos.py sobre o período de cada acompanhamento)."""
+    # ── Produtos ──
     # % de serviços de produtos publicados (lifecycle=producao) sobre publicados + em desenvolvimento.
     SERVICOS_PUBLICADOS = "servicos_publicados"
     # % de documentos nato-digital cadastrados (prod. produção) sobre cadastrados (prod. + desenv.).
     # data_documento é sincronizada com data_publicacao dos serviços do produto.
     DOCUMENTOS_NATOS_DIGITAIS = "documentos_natos_digitais"
+    # ── Projetos (táticos) ──
+    # ▲ % de entregas do período concluídas dentro do prazo, por classificação do projeto-raiz.
+    CRONOGRAMA_DESENVOLVIMENTO = "cronograma_desenvolvimento"
+    CRONOGRAMA_IMPLANTACAO = "cronograma_implantacao"
+    # ▼ % de tarefas criadas após o comprometimento do cronograma sobre as planejadas (baseline v1).
+    DESVIO_TRABALHO_DESENVOLVIMENTO = "desvio_trabalho_desenvolvimento"
+    DESVIO_TRABALHO_IMPLANTACAO = "desvio_trabalho_implantacao"
+    # ▲ % de desenvolvimentos sobre desenvolvimentos + implantações do portfólio
+    # classificado existente até o fim do período (mix da carteira, acumulado).
+    PCT_DESENVOLVIMENTO = "pct_desenvolvimento"
+    # ▼ dias médios entre a criação da demanda de origem e o projeto nascer (origin_task_id).
+    TEMPO_ANALISE_OPORTUNIDADE = "tempo_analise_oportunidade"
+    # ▼ dias médios do backlog à entrega das US concluídas no período (left_backlog_at → completed_at).
+    LEAD_TIME_US = "lead_time_us"
+    # ▼ % de US ativas com SLA estourado — ESTADO CORRENTE: só computa no período que contém hoje.
+    PCT_SLA_ESTOURADO = "pct_sla_estourado"
+    # ▼ % de US ativas em etapa de impedimento — ESTADO CORRENTE: só computa no período que contém hoje.
+    TAXA_IMPEDIMENTO = "taxa_impedimento"
+    # ▲ % de projetos com auxílio de IA sobre os que responderam ia_assisted.
+    PCT_PROJETOS_IA = "pct_projetos_ia"
 
 
 # ─────────────────────────────────────────────
@@ -100,6 +124,9 @@ class Indicador(TenantBase):
     )
     descricao: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     objetivo_estrategico: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Sub-processo do portfólio de TI ao qual o indicador (tático) está atrelado
+    # (ex.: Prospectar / Desenvolver / Implantar Soluções de TI). Texto livre.
+    sub_processo: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
 
     # Org (reusa teamops)
     area_id: Mapped[Optional[uuid.UUID]] = mapped_column(

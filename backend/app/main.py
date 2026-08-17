@@ -16,7 +16,10 @@ from app.modules.company.api.routes import router as company_admin_router
 from app.modules.projetos.api.routes import router as projetos_router
 from app.modules.teamops.api.routes import router as teamops_router
 from app.modules.produtos.api.routes import router as produtos_router
+from app.modules.produtos.api.webhooks import router as produtos_webhooks_router
 from app.modules.indicadores.api.routes import router as indicadores_router
+from app.modules.rtd.api.routes import router as rtd_router
+from app.modules.docs.api.routes import router as docs_router
 
 
 # Chave arbitrária (int64) para o advisory lock de startup. Com múltiplos workers
@@ -121,6 +124,24 @@ async def _seed_known_modules() -> None:
             "backend_path": "backend/app/modules/indicadores",
             "frontend_path": "frontend/src/modules/indicadores",
         },
+        {
+            "slug": "rtd",
+            "name": "Reunião de Tomada de Decisão",
+            "description": "Cerimônia de comitê por competência (mensal/trimestral): panorama do portfólio, evolução por PO, impacto em indicadores e deliberações registradas (ata).",
+            "icon": "Gavel",
+            "color": "#B45309",
+            "backend_path": "backend/app/modules/rtd",
+            "frontend_path": "frontend/src/modules/rtd",
+        },
+        {
+            "slug": "documentacao",
+            "name": "Documentação",
+            "description": "Guias de utilizador, processo de negócio e referência técnica da plataforma.",
+            "icon": "BookOpen",
+            "color": "#0F766E",
+            "backend_path": "backend/app/modules/docs",
+            "frontend_path": "frontend/src/modules/documentacao",
+        },
     ]
 
     async with AsyncSessionLocal() as db:
@@ -169,7 +190,11 @@ app.include_router(company_admin_router, prefix="/api/v1")
 app.include_router(projetos_router, prefix="/api/v1")
 app.include_router(teamops_router, prefix="/api/v1")
 app.include_router(produtos_router, prefix="/api/v1")
+# Fora de require_module: o Azure DevOps não manda JWT (autenticação por Basic no hook).
+app.include_router(produtos_webhooks_router, prefix="/api/v1")
 app.include_router(indicadores_router, prefix="/api/v1")
+app.include_router(rtd_router, prefix="/api/v1")
+app.include_router(docs_router, prefix="/api/v1")
 
 
 @app.get("/health")

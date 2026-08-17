@@ -17,11 +17,13 @@ from sqlalchemy import (
     DateTime,
     Enum as SAEnum,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -933,4 +935,163 @@ class ProductHealthConfig(TenantBase):
     limiar_atencao: Mapped[int] = mapped_column(Integer, nullable=False, default=40)
     updated_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ─────────────────────────────────────────────
+# Repositórios de código e commits (integração Azure DevOps)
+# ─────────────────────────────────────────────
+
+class RepoProvider(str, enum.Enum):
+    AZURE_DEVOPS = "azure_devops"
+    GITHUB = "github"
+
+
+class RepoSyncStatus(str, enum.Enum):
+    NUNCA = "nunca"
+    OK = "ok"
+    ERRO = "erro"
+    NOT_FOUND = "not_found"
+
+
+class CodeRepository(TenantBase):
+    """Repositório de código sincronizado. Vive separado do produto porque o mesmo repo pode
+    servir a mais de um produto (ex.: idigital/api) — o vínculo fica em `product_repositories`.
+    Guarda também o estado do sync, para que um repo compartilhado seja lido uma única vez."""
+    __tablename__ = "code_repositories"
+    # Índices funcionais com lower(): o Azure DevOps é case-insensitive em nome de projeto e
+    # de repositório, e os links reais misturam `SGE`, `portais`, `AgentesAI`.
+    __table_args__ = (
+        Index(
+            "uq_code_repositories_path",
+            "provider", text("lower(organization)"), text("lower(project)"), text("lower(repository)"),
+            unique=True,
+        ),
+        Index(
+            "uq_code_repositories_remote", "provider", "remote_repo_id",
+            unique=True, postgresql_where=text("remote_repo_id IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    provider: Mapped[RepoProvider] = mapped_column(
+        SAEnum(RepoProvider, native_enum=False, values_callable=_enum_values),
+        nullable=False, default=RepoProvider.AZURE_DEVOPS,
+    )
+    organization: Mapped[str] = mapped_column(String(200), nullable=False)
+    project: Mapped[str] = mapped_column(String(200), nullable=False)
+    repository: Mapped[str] = mapped_column(String(200), nullable=False)
+    # GUID do repositório no provider — sobrevive a renomeação; nulo até o primeiro contato.
+    remote_repo_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    web_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    default_branch: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    sync_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    first_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_sync_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_sync_status: Mapped[RepoSyncStatus] = mapped_column(
+        SAEnum(RepoSyncStatus, native_enum=False, values_callable=_enum_values),
+        nullable=False, default=RepoSyncStatus.NUNCA,
+    )
+    last_sync_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    last_commit_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    commits_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    links: Mapped[list["ProductRepository"]] = relationship(
+        back_populates="repository_ref", cascade="all, delete-orphan", lazy="selectin",
+    )
+
+
+class ProductRepository(TenantBase):
+    """Vínculo N:N produto ↔ repositório."""
+    __tablename__ = "product_repositories"
+    __table_args__ = (
+        UniqueConstraint("product_id", "repository_id", name="uq_product_repositories"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    product_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    repository_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("code_repositories.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    # Repo que representa o produto nas visões resumidas (quando há mais de um).
+    is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    repository_ref: Mapped["CodeRepository"] = relationship(back_populates="links", lazy="selectin")
+
+
+class RepoCommit(TenantBase):
+    """Commit importado do provider. `person_id` é o autor resolvido (e-mail → team_persons),
+    podendo ficar nulo até o gestor vincular o e-mail em `repo_commit_authors`."""
+    __tablename__ = "repo_commits"
+    __table_args__ = (
+        UniqueConstraint("repository_id", "commit_id", name="uq_repo_commits"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    repository_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("code_repositories.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    commit_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    author_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    author_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    author_date: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    committer_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    comment_truncated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Branch em que o commit foi encontrado e o ambiente que ela representa.
+    # main → prod · preview → hml · qualquer outra → dev.
+    branch: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    environment: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    # changeCounts do Azure conta ARQUIVOS tocados, não linhas — contar linhas exigiria
+    # um GET por commit. A UI precisa dizer "arquivos".
+    add_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    edit_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    delete_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Heurística pelo prefixo da mensagem — a API de listagem não devolve `parents`.
+    is_merge: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_bot: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    person_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("team_persons.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    remote_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class RepoCommitAuthor(TenantBase):
+    """Mapa e-mail do commit → pessoa. Recebe automaticamente os e-mails que não casaram com
+    `team_persons.email`; o gestor vincula ou marca como ignorado (bot/pipeline)."""
+    __tablename__ = "repo_commit_authors"
+    __table_args__ = (
+        UniqueConstraint("provider", "email", name="uq_repo_commit_authors"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    provider: Mapped[RepoProvider] = mapped_column(
+        SAEnum(RepoProvider, native_enum=False, values_callable=_enum_values),
+        nullable=False, default=RepoProvider.AZURE_DEVOPS,
+    )
+    email: Mapped[str] = mapped_column(String(255), nullable=False)  # sempre lowercase
+    display_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    person_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("team_persons.id", ondelete="SET NULL"), nullable=True,
+    )
+    # pendente = nunca triado | auto = casou por e-mail | manual = vínculo do gestor (congelado,
+    # o match automático não sobrescreve) | ignorado = bot/pipeline, sai da fila de pendências.
+    resolution: Mapped[str] = mapped_column(String(20), nullable=False, default="pendente")
+    ignored: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    commits_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_commit_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { CapacityDayDetailDialog } from "@/modules/projetos/CapacityDayDetailDialog"
 import { WorkloadView } from "@/modules/projetos/WorkloadView"
 import { CapacitySimulator } from "@/modules/projetos/CapacitySimulator"
 import { CapacityTeamView } from "@/modules/projetos/CapacityTeamView"
@@ -108,6 +109,8 @@ export function CapacityCockpitPage() {
   const [free, setFree] = useState<FreePeopleResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Célula do heatmap aberta no modal de detalhamento do dia.
+  const [dayDetail, setDayDetail] = useState<{ personId: string; date: string } | null>(null)
 
   useEffect(() => {
     teamopsApi.listAreas(true).then(setAreas).catch(() => setAreas([]))
@@ -310,7 +313,11 @@ export function CapacityCockpitPage() {
                 <p className="text-xs text-muted-foreground">
                   Demanda = horas das <strong>User Stories</strong> (Features ficam de fora — já carregam o rollup das US).
                 </p>
-                <WorkloadView cells={heatmap.cells} nameForUser={nameFor} />
+                <WorkloadView
+                  cells={heatmap.cells}
+                  nameForUser={nameFor}
+                  onCellClick={(personId, date) => setDayDetail({ personId, date })}
+                />
               </div>
             ) : (
               <EmptyState icon={Users} title="Sem carga no período"
@@ -428,6 +435,13 @@ export function CapacityCockpitPage() {
           )}
         </SectionCard>
       )}
+
+      <CapacityDayDetailDialog
+        personId={dayDetail?.personId ?? null}
+        date={dayDetail?.date ?? null}
+        personName={dayDetail ? nameFor(dayDetail.personId) : undefined}
+        onClose={() => setDayDetail(null)}
+      />
     </div>
   )
 }

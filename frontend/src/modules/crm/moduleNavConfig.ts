@@ -10,6 +10,7 @@ import {
   ShoppingCart, Wallet, ReceiptText,
   Network, Code2, CalendarOff,
   CirclePlus, ClipboardList, Gauge, TrendingUp, ListChecks, PackageCheck,
+  Gavel, BookOpen, GitBranch, Wrench,
 } from "lucide-react"
 import type { ElementType } from "react"
 
@@ -20,6 +21,9 @@ export type ModuleNavItem = {
   /** Item visível só se a função tiver ALGUMA destas permissões. Ausente = sempre visível.
    * Admins (super_admin/company_admin) sempre veem. */
   requiredAnyPermission?: readonly string[]
+  /** Visão consolidada do portfólio: fora do menu do Product Owner (Externo), que só
+   * enxerga os projetos onde é o responsável. O backend também barra esses endpoints. */
+  hiddenForExternalPO?: boolean
 }
 
 export const moduleNavConfig: Record<string, ModuleNavItem[]> = {
@@ -51,10 +55,11 @@ export const moduleNavConfig: Record<string, ModuleNavItem[]> = {
   projetos: [
     { to: "/app/modules/projetos/solicitacoes", icon: CirclePlus, label: "Nova Solicitação" },
     { to: "/app/modules/projetos/minhas", icon: ClipboardList, label: "Minhas Solicitações" },
-    { to: "/app/modules/projetos/programas", icon: Layers, label: "Programa" },
-    { to: "/app/modules/projetos/capacidade", icon: Gauge, label: "Capacidade" },
-    { to: "/app/modules/projetos/relatorios", icon: BarChart3, label: "Relatórios" },
-    { to: "/app/modules/projetos/entregas-us", icon: PackageCheck, label: "Entregas US" },
+    { to: "/app/modules/projetos/programas", icon: Layers, label: "Programa", hiddenForExternalPO: true },
+    { to: "/app/modules/projetos/capacidade", icon: Gauge, label: "Capacidade", hiddenForExternalPO: true },
+    { to: "/app/modules/projetos/relatorios", icon: BarChart3, label: "Relatórios", hiddenForExternalPO: true },
+    { to: "/app/modules/projetos/entregas-us", icon: PackageCheck, label: "Entregas", hiddenForExternalPO: true },
+    { to: "/app/modules/projetos/status-reports", icon: FileText, label: "Status Reports", hiddenForExternalPO: true },
     { to: "/app/modules/projetos/config", icon: Settings2, label: "Configurações" },
   ],
   produtos: [
@@ -64,12 +69,16 @@ export const moduleNavConfig: Record<string, ModuleNavItem[]> = {
     { to: "/app/modules/produtos/processos-portfolio", icon: Network, label: "Portfólio de Processos", requiredAnyPermission: ["produtos.view"] },
     { to: "/app/modules/produtos/indicadores", icon: BarChart3, label: "Indicadores", requiredAnyPermission: ["produtos.view"] },
     { to: "/app/modules/produtos/fornecedores", icon: Building2, label: "Fornecedores", requiredAnyPermission: ["produtos.view"] },
+    { to: "/app/modules/produtos/repositorios", icon: GitBranch, label: "Repositórios", requiredAnyPermission: ["produtos.repos.view"] },
     { to: "/app/modules/produtos/config", icon: Settings2, label: "Configurações" },
   ],
   indicadores: [
     { to: "/app/modules/indicadores/dashboard", icon: TrendingUp, label: "Painel", requiredAnyPermission: ["indicadores.view"] },
     { to: "/app/modules/indicadores/indicadores", icon: ListChecks, label: "Indicadores", requiredAnyPermission: ["indicadores.view"] },
     { to: "/app/modules/indicadores/config", icon: Settings2, label: "Configurações" },
+  ],
+  rtd: [
+    { to: "/app/modules/rtd/reunioes", icon: Gavel, label: "Reuniões", requiredAnyPermission: ["rtd.view"] },
   ],
   teamops: [
     { to: "/app/modules/teamops",          icon: BarChart3,   label: "Dashboard",    requiredAnyPermission: ["teamops.view"] },
@@ -78,6 +87,11 @@ export const moduleNavConfig: Record<string, ModuleNavItem[]> = {
     { to: "/app/modules/teamops/stacks",   icon: Code2,       label: "Stacks",       requiredAnyPermission: ["teamops.stack.view"] },
     { to: "/app/modules/teamops/absences", icon: CalendarOff, label: "Ausências",    requiredAnyPermission: ["teamops.absence.view_own", "teamops.absence.view_team", "teamops.absence.request"] },
     { to: "/app/modules/teamops/config",   icon: Settings2,   label: "Configurações" },
+  ],
+  documentacao: [
+    { to: "/app/modules/documentacao/usuario",  icon: BookOpen,  label: "Utilizador" },
+    { to: "/app/modules/documentacao/processo", icon: GitBranch, label: "Processo" },
+    { to: "/app/modules/documentacao/tecnico",  icon: Wrench,    label: "Técnico" },
   ],
 }
 

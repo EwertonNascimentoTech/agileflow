@@ -298,6 +298,7 @@ export type ContratoUpdate = Partial<
 export type ProductAlertaCode =
   | "producao_sem_servico" | "tecnico_nao_referencia" | "sem_documentacao"
   | "externo_sem_contrato" | "produto_parado" | "doc_desatualizada"
+  | "repositorio_sem_commits"
 
 export interface ProductAlerta {
   code: ProductAlertaCode
@@ -1113,4 +1114,285 @@ export const produtosApi = {
         item_lineage_ids: itemLineageIds,
       })
       .then((r) => r.data),
+}
+
+// ── Repositórios de código e commits ──────────
+
+export type RepoProvider = "azure_devops" | "github"
+export type RepoSyncStatus = "nunca" | "ok" | "erro" | "not_found"
+export type RepoLinkKind = "azure_repo" | "azure_projeto" | "outro_provider" | "nao_repositorio"
+
+export interface ProductMini {
+  id: string
+  name: string
+  sigla?: string | null
+}
+
+export interface Repositorio {
+  id: string
+  provider: string
+  organization: string
+  project: string
+  repository: string
+  remote_repo_id?: string | null
+  web_url?: string | null
+  default_branch?: string | null
+  is_active: boolean
+  sync_enabled: boolean
+  first_synced_at?: string | null
+  last_sync_at?: string | null
+  last_sync_status: RepoSyncStatus
+  last_sync_error?: string | null
+  last_commit_at?: string | null
+  commits_count: number
+  produtos: ProductMini[]
+}
+
+export interface RepoLinkPreviewItem {
+  product_id: string
+  product_name: string
+  url: string
+  kind: RepoLinkKind
+  organization?: string | null
+  project?: string | null
+  repository?: string | null
+  provider?: string | null
+  ja_vinculado: boolean
+}
+
+export interface RepoImportPreview {
+  itens: RepoLinkPreviewItem[]
+  total_produtos_com_link: number
+  total_importaveis: number
+  total_repos_novos: number
+  resumo_por_tipo: Record<string, number>
+}
+
+export interface RepoImportResult {
+  repos_criados: number
+  vinculos_criados: number
+  ignorados: number
+}
+
+export interface AzureRepoMini {
+  id: string
+  name: string
+  project: string
+  web_url?: string | null
+  default_branch?: string | null
+  ja_cadastrado: boolean
+}
+
+export interface RepoSyncResult {
+  repositorios: number
+  commits_novos: number
+  erros: string[]
+}
+
+export interface CommitAuthor {
+  id: string
+  email: string
+  display_name?: string | null
+  person_id?: string | null
+  person_name?: string | null
+  ignored: boolean
+  commits_count: number
+  last_commit_at?: string | null
+}
+
+export interface RepoCommitItem {
+  id: string
+  commit_id: string
+  short_id: string
+  author_name?: string | null
+  author_email?: string | null
+  author_date: string
+  comment?: string | null
+  add_count: number
+  edit_count: number
+  delete_count: number
+  is_merge: boolean
+  is_bot: boolean
+  person_id?: string | null
+  person_name?: string | null
+  repository: string
+  project: string
+  remote_url?: string | null
+  produtos: string[]
+}
+
+export interface RepoCommitPage {
+  items: RepoCommitItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface MonthPoint {
+  month: string
+  commits: number
+}
+
+export interface DevCommitRow {
+  person_id?: string | null
+  person_name: string
+  position?: string | null
+  teams: string[]
+  commits: number
+  /** changeCounts do Azure conta ARQUIVOS tocados, não linhas. */
+  arquivos_add: number
+  arquivos_edit: number
+  arquivos_delete: number
+  repos_tocados: number
+  produtos_tocados: number
+  dias_com_commit: number
+  merges: number
+  primeiro_commit?: string | null
+  ultimo_commit?: string | null
+  series: MonthPoint[]
+}
+
+export interface ProductCommitRow {
+  product_id: string
+  product_name: string
+  sigla?: string | null
+  repos: number
+  commits: number
+  devs: number
+  ultimo_commit_at?: string | null
+  dias_sem_commit?: number | null
+  series: MonthPoint[]
+}
+
+export interface RepoOverview {
+  kpis: {
+    commits_total: number
+    devs_ativos: number
+    repos_ativos: number
+    repos_sem_commit: number
+    produtos_com_repo: number
+    produtos_sem_commit: number
+    commits_sem_autor: number
+    autores_pendentes: number
+    /** Quebra por ambiente: branch main → prod, preview → hml, demais → dev.
+     *  Commit que chegou em main conta como prod, então hml é a fila do que
+     *  está homologado e ainda não subiu para produção. */
+    commits_prod: number
+    commits_hml: number
+    commits_dev: number
+    ultimo_sync_at?: string | null
+  }
+  by_dev: DevCommitRow[]
+  by_product: ProductCommitRow[]
+  series: MonthPoint[]
+  position_options: { slug: string; name: string }[]
+  team_options: { id: string; name: string }[]
+  repo_options: { id: string; name: string }[]
+  integracao_configurada: boolean
+}
+
+export interface CommitFilters {
+  from: string
+  to: string
+  products?: string[]
+  repositories?: string[]
+  persons?: string[]
+  teams?: string[]
+  positions?: string[]
+  incluir_bots?: boolean
+  /** prod (main) · hml (preview) · dev (demais branches). Vazio = todos. */
+  environments?: CommitEnvironment[]
+}
+
+export type CommitEnvironment = "prod" | "hml" | "dev"
+
+const csv = (v?: string[]) => (v && v.length ? v.join(",") : undefined)
+
+export const reposApi = {
+  list: () => api.get<Repositorio[]>("/produtos/repositorios").then((r) => r.data),
+
+  get: (id: string) => api.get<Repositorio>(`/produtos/repositorios/${id}`).then((r) => r.data),
+
+  create: (data: {
+    project: string
+    repository: string
+    organization?: string
+    provider?: RepoProvider
+    product_ids?: string[]
+  }) => api.post<Repositorio>("/produtos/repositorios", data).then((r) => r.data),
+
+  update: (id: string, data: { sync_enabled?: boolean; is_active?: boolean; product_ids?: string[] }) =>
+    api.patch<Repositorio>(`/produtos/repositorios/${id}`, data).then((r) => r.data),
+
+  remove: (id: string, purgar = false) =>
+    api.delete<void>(`/produtos/repositorios/${id}`, { params: { purgar } }).then((r) => r.data),
+
+  previewImport: () =>
+    api.get<RepoImportPreview>("/produtos/repositorios/import/preview").then((r) => r.data),
+
+  applyImport: (itens: RepoLinkPreviewItem[]) =>
+    api.post<RepoImportResult>("/produtos/repositorios/import/apply", { itens }).then((r) => r.data),
+
+  listAzureProjects: () =>
+    api.get<{ id: string; name: string }[]>("/produtos/repositorios/azure/projetos").then((r) => r.data),
+
+  descobrirRepos: (project: string) =>
+    api
+      .get<AzureRepoMini[]>(`/produtos/repositorios/azure/projetos/${encodeURIComponent(project)}/repos`)
+      .then((r) => r.data),
+
+  // Sync roda inline no backend: janela generosa, como no painel de desempenho.
+  sync: (id: string, full = false) =>
+    api
+      .post<RepoSyncResult>(`/produtos/repositorios/${id}/sync`, null, {
+        params: { full },
+        timeout: 300_000,
+      })
+      .then((r) => r.data),
+
+  syncAll: () =>
+    api.post<RepoSyncResult>("/produtos/repositorios/sync", null, { timeout: 300_000 }).then((r) => r.data),
+
+  overview: (f: CommitFilters) =>
+    api
+      .get<RepoOverview>("/produtos/commits/overview", {
+        params: {
+          from: f.from,
+          to: f.to,
+          products: csv(f.products),
+          repositories: csv(f.repositories),
+          persons: csv(f.persons),
+          teams: csv(f.teams),
+          positions: csv(f.positions),
+          incluir_bots: f.incluir_bots,
+          environments: csv(f.environments),
+        },
+        timeout: 120_000,
+      })
+      .then((r) => r.data),
+
+  commits: (f: CommitFilters & { page?: number; page_size?: number }) =>
+    api
+      .get<RepoCommitPage>("/produtos/commits", {
+        params: {
+          from: f.from,
+          to: f.to,
+          products: csv(f.products),
+          repositories: csv(f.repositories),
+          persons: csv(f.persons),
+          incluir_bots: f.incluir_bots,
+          page: f.page ?? 1,
+          page_size: f.page_size ?? 50,
+        },
+        timeout: 120_000,
+      })
+      .then((r) => r.data),
+
+  listAuthors: (apenasPendentes = false) =>
+    api
+      .get<CommitAuthor[]>("/produtos/commits/autores", { params: { apenas_pendentes: apenasPendentes } })
+      .then((r) => r.data),
+
+  updateAuthor: (id: string, data: { person_id?: string | null; ignored?: boolean }) =>
+    api.put<CommitAuthor>(`/produtos/commits/autores/${id}`, data).then((r) => r.data),
 }

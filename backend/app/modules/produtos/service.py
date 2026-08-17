@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import storage
 from app.modules.teamops.models import Area, Person
 from app.modules.produtos import schemas
+from app.modules.produtos.azure_devops_client import azure_devops_configured
 from app.modules.produtos.models import (
     ClassificacaoInformacao,
     Contrato,
@@ -154,6 +155,7 @@ _HEALTH_CHECKS = [
     ("documentacao", "Documentação cadastrada", 15),
     ("sustentacao_sla", "Sustentação cadastrada", 10),
     ("referencia_tecnica", "Referência técnica válida", 15),
+    ("repositorio_ativo", "Repositório vinculado e sincronizando", 10),
 ]
 _HEALTH_DEFAULT_WEIGHTS = {code: w for code, _lbl, w in _HEALTH_CHECKS}
 _HEALTH_APLICABILIDADE = {
@@ -165,6 +167,7 @@ _HEALTH_APLICABILIDADE = {
     "documentacao": "Aplica a produtos em produção.",
     "sustentacao_sla": "Aplica a produtos em produção.",
     "referencia_tecnica": "Aplica a todos os produtos.",
+    "repositorio_ativo": "Só aplica a produtos desenvolvidos internamente (ou híbridos) em produção, e apenas quando a integração com o Azure DevOps está configurada. Exige repositório vinculado e sincronizando sem erro.",
 }
 _HEALTH_DEFAULT_LIMIAR_SAUDAVEL = 75
 _HEALTH_DEFAULT_LIMIAR_ATENCAO = 40
@@ -284,8 +287,48 @@ class ProductService:
         return (cfg.weights or {}, cfg.limiar_saudavel, cfg.limiar_atencao)
 
     @staticmethod
+    async def _repo_stats(db: AsyncSession) -> dict:
+        """Estado dos repositórios por produto: {product_id: {tem_repo, sincronizado, ultimo_commit}}.
+
+        Carregado UMA vez por chamada e repassado a `_health`/`_compute_alertas` — nunca dentro
+        do loop de produtos. Se o schema ainda não tem as tabelas de repositório, devolve vazio:
+        o check simplesmente não passa, em vez de derrubar o portfólio inteiro.
+        """
+        from sqlalchemy import text as _text
+        try:
+            rows = (await db.execute(_text("""
+                SELECT pr.product_id,
+                       bool_or(r.is_active AND r.sync_enabled)  AS tem_repo,
+                       bool_or(r.last_sync_status = 'ok')       AS sincronizado,
+                       max(r.last_commit_at)                    AS ultimo_commit
+                  FROM product_repositories pr
+                  JOIN code_repositories r ON r.id = pr.repository_id
+                 GROUP BY pr.product_id
+            """))).mappings()
+        except Exception:  # noqa: BLE001
+            return {}
+        return {
+            r["product_id"]: {
+                "tem_repo": bool(r["tem_repo"]),
+                "sincronizado": bool(r["sincronizado"]),
+                "ultimo_commit": r["ultimo_commit"],
+            }
+            for r in rows
+        }
+
+    @staticmethod
+    def _requires_repo(p: Product) -> bool:
+        """Produto que a casa desenvolve — só nele faz sentido cobrar repositório."""
+        tipo = _ev(p.tipo_desenvolvimento) if p.tipo_desenvolvimento else None
+        if tipo:
+            return tipo in ("interno", "hibrido")
+        # Sem tipo informado, cai na categoria (os "sistema_interno_*" são feitos aqui).
+        return str(_ev(p.categoria) or "").startswith("sistema_interno")
+
+    @staticmethod
     def _compute_alertas(p: Product, *, has_doc: bool, has_active_contract: bool,
-                         tech_ref_ids: set, today: Optional[date] = None) -> list[schemas.ProductAlerta]:
+                         tech_ref_ids: set, today: Optional[date] = None,
+                         repo_stats: Optional[dict] = None) -> list[schemas.ProductAlerta]:
         """Inteligência de portfólio: problemas de controle derivados do estado do produto."""
         today = today or date.today()
         alertas: list[schemas.ProductAlerta] = []
@@ -331,6 +374,19 @@ class ProductService:
                 code="doc_desatualizada", nivel="medio",
                 message="Documentação obsoleta ou que necessita atualização.",
             ))
+        # 7) Repositório sincronizado, mas sem commit há mais de 6 meses. Só alerta quando o
+        # sync está OK — senão o alerta diria "sem commits" para um repo que nunca foi lido.
+        repo = (repo_stats or {}).get(p.id)
+        if lifecycle == "producao" and repo and repo["sincronizado"]:
+            ultimo = repo["ultimo_commit"]
+            if ultimo is None or _months_ago(ultimo.date(), today, 6):
+                alertas.append(schemas.ProductAlerta(
+                    code="repositorio_sem_commits", nivel="medio",
+                    message=(
+                        "Repositório sem commits há mais de 6 meses."
+                        if ultimo else "Repositório vinculado, mas nenhum commit importado."
+                    ),
+                ))
         return alertas
 
     @staticmethod
@@ -377,7 +433,8 @@ class ProductService:
                 weights: Optional[dict] = None,
                 lim_saud: int = _HEALTH_DEFAULT_LIMIAR_SAUDAVEL,
                 lim_aten: int = _HEALTH_DEFAULT_LIMIAR_ATENCAO,
-                servico_link_counts: Optional[dict[uuid.UUID, int]] = None) -> schemas.ProductHealth:
+                servico_link_counts: Optional[dict[uuid.UUID, int]] = None,
+                repo_stats: Optional[dict] = None) -> schemas.ProductHealth:
         """Score 0–100 ponderado de saúde/maturidade, com breakdown transparente. Puro em memória.
         `weights`/`lim_*` vêm da config do tenant (None => pesos/limiares padrão)."""
         weights = weights or {}
@@ -407,6 +464,11 @@ class ProductService:
             for s in servicos_ativos
         )
 
+        # Repositório: vinculado E sincronizando sem erro. Enquanto não houver PAT configurado
+        # nenhum repo fica "ok", então o check só entra em vigor depois da primeira coleta.
+        repo = (repo_stats or {}).get(p.id)
+        repo_ok = bool(repo and repo["tem_repo"] and repo["sincronizado"])
+
         # (aplicável?, passou?) por code. Checagens de presença só valem em produção
         # (isenta estágios iniciais e descontinuados).
         defs = {
@@ -419,6 +481,11 @@ class ProductService:
             "sustentacao_sla": (mature, cls._supports_ok(supports_ativos)),
             "referencia_tecnica": (True,
                                    bool(p.responsavel_tecnico_person_id) and p.responsavel_tecnico_person_id in tech_ref_ids),
+            # Só cobra repositório quando a coleta existe: sem PAT nenhum repo fica "ok" e o
+            # check puniria 40 produtos por algo que ninguém consegue resolver.
+            "repositorio_ativo": (
+                mature and cls._requires_repo(p) and azure_devops_configured(), repo_ok,
+            ),
         }
 
         checks: list[schemas.HealthCheck] = []
@@ -532,11 +599,12 @@ class ProductService:
         active_supports = [s for s in p.supports if s.is_active]
         tech_ref_ids = await cls._tech_reference_ids(db)
         hw, hsaud, haten = await cls._load_health_params(db)
+        repo_stats = await cls._repo_stats(db)
         active_svc = [s for s in p.servicos if s.is_active]
         link_counts = await cls._servico_link_counts(db, [s.id for s in active_svc])
         health = cls._health(p, today=today, has_active_contract=cls._has_active_contract(p, today),
                              tech_ref_ids=tech_ref_ids, weights=hw, lim_saud=hsaud, lim_aten=haten,
-                             servico_link_counts=link_counts)
+                             servico_link_counts=link_counts, repo_stats=repo_stats)
         return schemas.ProductResponse(
             id=p.id, name=p.name, simbolo=p.simbolo, description=p.description, dominio_funcional=p.dominio_funcional,
             origem=_ev(p.origem), lifecycle=_ev(p.lifecycle), criticidade=_ev(p.criticidade),
@@ -651,6 +719,7 @@ class ProductService:
         index = await _areas_index(db)
         tech_ref_ids = await cls._tech_reference_ids(db)
         hw, hsaud, haten = await cls._load_health_params(db)
+        repo_stats = await cls._repo_stats(db)
         res = await db.execute(select(Product).where(Product.is_active.is_(True)).order_by(Product.created_at.desc()))
         products = list(res.scalars().all())
         all_uuids: list[uuid.UUID] = []
@@ -687,11 +756,11 @@ class ProductService:
             has_active_contract = cls._has_active_contract(p, today)
             alertas = cls._compute_alertas(
                 p, has_doc=len(docs_ativas) > 0, has_active_contract=has_active_contract,
-                tech_ref_ids=tech_ref_ids, today=today,
+                tech_ref_ids=tech_ref_ids, today=today, repo_stats=repo_stats,
             )
             health = cls._health(p, today=today, has_active_contract=has_active_contract,
                                  tech_ref_ids=tech_ref_ids, weights=hw, lim_saud=hsaud, lim_aten=haten,
-                                 servico_link_counts=link_counts)
+                                 servico_link_counts=link_counts, repo_stats=repo_stats)
             servicos_count = sum(1 for s in p.servicos if s.is_active)
             out.append(schemas.ProductListItem(
                 id=p.id, name=p.name, simbolo=p.simbolo, origem=_ev(p.origem), lifecycle=_ev(p.lifecycle),
@@ -1299,6 +1368,7 @@ class ProductService:
         today = date.today()
         tech_ref_ids = await cls._tech_reference_ids(db)
         hw, hsaud, haten = await cls._load_health_params(db)
+        repo_stats = await cls._repo_stats(db)
         products = list((await db.execute(select(Product).where(Product.is_active.is_(True)))).scalars().all())
         link_counts = await cls._servico_link_counts(
             db, [s.id for p in products for s in p.servicos if s.is_active],
@@ -1318,7 +1388,7 @@ class ProductService:
             docs_ativas = [d for d in p.documentations if d.is_active]
             health = cls._health(p, today=today, has_active_contract=has_active_contract,
                                  tech_ref_ids=tech_ref_ids, weights=hw, lim_saud=hsaud, lim_aten=haten,
-                                 servico_link_counts=link_counts)
+                                 servico_link_counts=link_counts, repo_stats=repo_stats)
             scored.append((p, health))
             soma += health.score
             distribuicao[health.classe] += 1
@@ -1327,7 +1397,8 @@ class ProductService:
 
             for a in cls._compute_alertas(p, has_doc=len(docs_ativas) > 0,
                                           has_active_contract=has_active_contract,
-                                          tech_ref_ids=tech_ref_ids, today=today):
+                                          tech_ref_ids=tech_ref_ids, today=today,
+                                          repo_stats=repo_stats):
                 pend_counts[a.code] = pend_counts.get(a.code, 0) + 1
                 pend_meta[a.code] = a.nivel
 
@@ -1388,10 +1459,11 @@ class ProductService:
 
     @staticmethod
     def _empty_po_agg() -> dict:
-        faixa = lambda: {"total": 0, "soma": 0}
+        faixa = lambda: {"total": 0, "soma": 0, "produtos": []}
         return {
             "total": 0, "soma": 0, "saudavel": 0, "atencao": 0, "critico": 0,
             "producao": faixa(), "desenvolvimento": faixa(), "outros": faixa(),
+            "itens": [],
         }
 
     @staticmethod
@@ -1406,6 +1478,7 @@ class ProductService:
         today = date.today()
         tech_ref_ids = await cls._tech_reference_ids(db)
         hw, hsaud, haten = await cls._load_health_params(db)
+        repo_stats = await cls._repo_stats(db)
         products = list((await db.execute(select(Product).where(Product.is_active.is_(True)))).scalars().all())
         name_by_id = {p.id: p.full_name for p in (await db.execute(select(Person))).scalars().all()}
         link_counts = await cls._servico_link_counts(
@@ -1415,26 +1488,43 @@ class ProductService:
         agg: dict = {}
         soma_geral = 0
         dist_geral = {"saudavel": 0, "atencao": 0, "critico": 0}
-        resumo_faixas = {k: {"total": 0, "soma": 0} for k in ("producao", "desenvolvimento", "outros")}
+        resumo_faixas = {k: {"total": 0, "soma": 0, "produtos": []}
+                         for k in ("producao", "desenvolvimento", "outros")}
+        resumo_criticos: list = []
+        _CLASSE_ORD = {"critico": 0, "atencao": 1, "saudavel": 2}
 
-        def bump(pid, h, faixa: str):
+        def _motivos(h) -> list:
+            """Por que o produto é crítico: os checks de saúde que falharam (rótulos legíveis)."""
+            return [c.label for c in h.checks if c.status == "fail"]
+
+        def bump(pid, h, faixa: str, prod_name: str):
             a = agg.setdefault(pid, cls._empty_po_agg())
             a["total"] += 1
             a["soma"] += h.score
             a[h.classe] += 1
+            a["itens"].append({"name": prod_name, "score": h.score,
+                               "classe": h.classe, "motivos": _motivos(h)})
             fx = a[faixa]
             fx["total"] += 1
             fx["soma"] += h.score
+            fx["produtos"].append({"name": prod_name, "score": h.score, "classe": h.classe})
             resumo_faixas[faixa]["total"] += 1
             resumo_faixas[faixa]["soma"] += h.score
 
         for p in products:
             h = cls._health(p, today=today, has_active_contract=cls._has_active_contract(p, today),
                             tech_ref_ids=tech_ref_ids, weights=hw, lim_saud=hsaud, lim_aten=haten,
-                            servico_link_counts=link_counts)
+                            servico_link_counts=link_counts, repo_stats=repo_stats)
             faixa = cls._faixa_saude_produto(p)
             soma_geral += h.score
             dist_geral[h.classe] += 1
+            # Lista única (uma vez por produto) para o tooltip do resumo, evitando duplicar
+            # produtos corporativos que aparecem em vários POs.
+            resumo_faixas[faixa]["produtos"].append(
+                {"name": p.name, "score": h.score, "classe": h.classe}
+            )
+            if h.classe == "critico":
+                resumo_criticos.append({"name": p.name, "score": h.score, "motivos": _motivos(h)})
             if p.corporativo:
                 po_ids = {s.responsavel_person_id for s in p.servicos if s.is_active and s.responsavel_person_id}
                 if not po_ids:
@@ -1442,12 +1532,15 @@ class ProductService:
             else:
                 po_ids = {p.responsavel_person_id} if p.responsavel_person_id else {None}
             for pid in po_ids:
-                bump(pid, h, faixa)
+                bump(pid, h, faixa, p.name)
 
         def faixa_row(fx: dict) -> dict:
+            # Produtos ordenados do pior para o melhor score (o que precisa de atenção primeiro).
+            produtos = sorted(fx["produtos"], key=lambda x: (x["score"], x["name"] or ""))
             return {
                 "total": fx["total"],
                 "score_medio": cls._score_medio(fx["soma"], fx["total"]),
+                "produtos": produtos,
             }
 
         por_po = [
@@ -1460,6 +1553,8 @@ class ProductService:
                 "desenvolvimento": faixa_row(a["desenvolvimento"]),
                 "outros": faixa_row(a["outros"]),
                 "saudavel": a["saudavel"], "atencao": a["atencao"], "critico": a["critico"],
+                "itens": sorted(a["itens"], key=lambda x: (
+                    _CLASSE_ORD.get(x["classe"], 9), x["score"], x["name"] or "")),
             }
             for pid, a in agg.items()
         ]
@@ -1474,6 +1569,7 @@ class ProductService:
                 "desenvolvimento": faixa_row(resumo_faixas["desenvolvimento"]),
                 "outros": faixa_row(resumo_faixas["outros"]),
                 "distribuicao": dist_geral,
+                "criticos": sorted(resumo_criticos, key=lambda x: (x["score"], x["name"] or "")),
             },
         }
 

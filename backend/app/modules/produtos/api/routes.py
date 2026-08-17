@@ -8,7 +8,14 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 
 from app.core import storage
 from app.core.dependencies import ModuleContext, require_module, require_permission
-from app.modules.produtos import schemas
+from app.modules.produtos import azure_devops_client, schemas
+from app.modules.produtos.repos_service import (
+    CommitAuthorService,
+    RepoMetricsService,
+    RepoSyncService,
+    RepositoryImportService,
+    RepositoryService,
+)
 from app.modules.produtos.service import (
     AlertaService,
     DocumentationService,
@@ -26,7 +33,25 @@ router = APIRouter(prefix="/produtos", tags=["Produtos"])
 
 _ctx = require_module("produtos")
 _can_manage = require_permission("produtos.manage")
+_can_view_repos = require_permission("produtos.repos.view")
 _MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+
+
+def _csv(value: Optional[str]) -> Optional[list[str]]:
+    """"a,b, c" → ["a","b","c"] — mesmo formato dos filtros do painel de desempenho."""
+    if not value:
+        return None
+    return [v.strip() for v in value.split(",") if v.strip()] or None
+
+
+def _uuids(value: Optional[str]) -> Optional[list[uuid.UUID]]:
+    items = _csv(value)
+    if not items:
+        return None
+    try:
+        return [uuid.UUID(v) for v in items]
+    except ValueError:
+        raise HTTPException(422, "Lista de identificadores inválida.")
 
 
 # ── Dashboard / lookups / projetos finalizados ──
@@ -288,6 +313,134 @@ async def indicadores_processos(ano: int | None = Query(None),
 @router.get("/alertas/contratos", response_model=list[schemas.AlertaContrato])
 async def alertas_contratos(ctx: ModuleContext = Depends(_ctx)):
     return await AlertaService.contratos(ctx.db)
+
+
+# ── Repositórios de código e commits ──────────
+# Antes das rotas de produto: `/{product_id}` capturaria "repositorios"/"commits" e daria 422.
+@router.get("/repositorios", response_model=list[schemas.RepositoryResponse])
+async def list_repositorios(ctx: ModuleContext = Depends(_ctx), _=Depends(_can_view_repos)):
+    return await RepositoryService.list_repositories(ctx.db)
+
+
+@router.post("/repositorios", response_model=schemas.RepositoryResponse, status_code=201)
+async def create_repositorio(data: schemas.RepositoryCreate, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    return await RepositoryService.create(ctx.db, data, ctx.user.id)
+
+
+@router.get("/repositorios/import/preview", response_model=schemas.RepoImportPreview)
+async def preview_import_repositorios(ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    """Classifica os links de `link_repositorio` sem gravar nada."""
+    return await RepositoryImportService.preview(ctx.db)
+
+
+@router.post("/repositorios/import/apply", response_model=schemas.RepoImportResult)
+async def apply_import_repositorios(data: schemas.RepoImportApply, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    return await RepositoryImportService.apply(ctx.db, data, ctx.user.id)
+
+
+@router.get("/repositorios/azure/projetos", response_model=list[schemas.AzureProjectMini])
+async def list_azure_projetos(_ctx_=Depends(_ctx), __=Depends(_can_manage)):
+    try:
+        return await azure_devops_client.list_projects()
+    except azure_devops_client.AzureDevOpsError as e:
+        raise HTTPException(503, str(e))
+
+
+@router.get("/repositorios/azure/projetos/{project}/repos", response_model=list[schemas.AzureRepoMini])
+async def descobrir_azure_repos(project: str, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    """Repositórios de um projeto Azure — resolve os links que apontam só para o projeto."""
+    try:
+        return await RepositoryImportService.descobrir(ctx.db, project)
+    except azure_devops_client.AzureDevOpsError as e:
+        raise HTTPException(503, str(e))
+
+
+@router.post("/repositorios/sync", response_model=schemas.RepoSyncResult)
+async def sync_todos_repositorios(ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    return await RepoSyncService.sync_schema(ctx.db)
+
+
+@router.get("/repositorios/{repository_id}", response_model=schemas.RepositoryResponse)
+async def get_repositorio(repository_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_view_repos)):
+    return await RepositoryService.get_one(ctx.db, repository_id)
+
+
+@router.patch("/repositorios/{repository_id}", response_model=schemas.RepositoryResponse)
+async def update_repositorio(repository_id: uuid.UUID, data: schemas.RepositoryUpdate,
+                             ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    return await RepositoryService.update(ctx.db, repository_id, data, ctx.user.id)
+
+
+@router.delete("/repositorios/{repository_id}", status_code=204)
+async def delete_repositorio(repository_id: uuid.UUID, purgar: bool = Query(False, description="Apaga também os commits."),
+                             ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    await RepositoryService.delete(ctx.db, repository_id, purgar)
+
+
+@router.post("/repositorios/{repository_id}/sync", response_model=schemas.RepoSyncResult)
+async def sync_repositorio(repository_id: uuid.UUID, full: bool = Query(False, description="Refaz o backfill inteiro."),
+                           ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    return await RepoSyncService.sync_one(ctx.db, repository_id, full=full)
+
+
+@router.get("/commits/overview", response_model=schemas.RepoOverviewResponse)
+async def commits_overview(
+    date_from: str = Query(..., alias="from", description="Início da janela (ISO date)."),
+    date_to: str = Query(..., alias="to", description="Fim da janela, inclusivo (ISO date)."),
+    products: Optional[str] = Query(None, description="UUIDs de produto, vírgula-separados."),
+    repositories: Optional[str] = Query(None, description="UUIDs de repositório, vírgula-separados."),
+    persons: Optional[str] = Query(None, description="UUIDs de pessoa, vírgula-separados."),
+    teams: Optional[str] = Query(None, description="UUIDs de time (área folha do TeamOps)."),
+    positions: Optional[str] = Query(None, description="Slugs de cargo, vírgula-separados."),
+    incluir_bots: bool = Query(False),
+    environments: Optional[str] = Query(
+        None,
+        description="Ambientes, vírgula-separados: prod (main), hml (preview), dev (demais).",
+    ),
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_view_repos),
+):
+    """Painel de commits: KPIs, série mensal, ranking por dev e visão por produto."""
+    return await RepoMetricsService.build(
+        ctx.db, date.fromisoformat(date_from), date.fromisoformat(date_to),
+        environments=[e.strip() for e in environments.split(",") if e.strip()] if environments else None,
+        product_ids=_uuids(products), repository_ids=_uuids(repositories),
+        person_ids=_uuids(persons), team_area_ids=_uuids(teams),
+        positions=_csv(positions), incluir_bots=incluir_bots,
+    )
+
+
+@router.get("/commits/autores", response_model=list[schemas.CommitAuthorResponse])
+async def list_commit_autores(apenas_pendentes: bool = Query(False), ctx: ModuleContext = Depends(_ctx),
+                              _=Depends(_can_view_repos)):
+    return await CommitAuthorService.list_authors(ctx.db, apenas_pendentes)
+
+
+@router.put("/commits/autores/{author_id}", response_model=schemas.CommitAuthorResponse)
+async def update_commit_autor(author_id: uuid.UUID, data: schemas.CommitAuthorUpdate,
+                              ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
+    """Vincula o e-mail a uma pessoa (ou marca como bot) e reaplica ao histórico."""
+    return await CommitAuthorService.update_author(ctx.db, author_id, data, ctx.user.id)
+
+
+@router.get("/commits", response_model=schemas.RepoCommitPage)
+async def list_commits(
+    date_from: str = Query(..., alias="from"),
+    date_to: str = Query(..., alias="to"),
+    products: Optional[str] = Query(None),
+    repositories: Optional[str] = Query(None),
+    persons: Optional[str] = Query(None),
+    incluir_bots: bool = Query(False),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_view_repos),
+):
+    return await RepoMetricsService.list_commits(
+        ctx.db, date.fromisoformat(date_from), date.fromisoformat(date_to),
+        product_ids=_uuids(products), repository_ids=_uuids(repositories),
+        person_ids=_uuids(persons), incluir_bots=incluir_bots, page=page, page_size=page_size,
+    )
 
 
 # ── Produtos (CRUD) ───────────────────────────

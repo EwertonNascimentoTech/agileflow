@@ -28,6 +28,7 @@ export interface ProjectFunnel {
   allowed_demand_type_ids: string[] | null
   access_control: Record<string, FunnelAccessLevel> | null
   classification_enforcement_enabled: boolean
+  is_procurement?: boolean
   created_at: string
   updated_at: string
 }
@@ -58,6 +59,11 @@ export interface ProjectStatus {
   children_to_funnel_id: string | null
   grandchildren_to_funnel_id: string | null
   locks_schedule: boolean
+  is_procurement_hold?: boolean
+  is_procurement_cancel?: boolean
+  is_procurement_won?: boolean
+  is_procurement_lost?: boolean
+  procurement_stage_key?: string | null
   created_at: string
   updated_at: string
 }
@@ -91,8 +97,15 @@ export interface ProjectTask {
   planning_kind: string | null
   linked_program_id: string | null
   card_classification: CardClassification | null
+  // Será feito com IA ou auxílio de IA? true=sim · false=não · null=não respondido
+  ia_assisted: boolean | null
   linked_product_id: string | null
   linked_release_id: string | null
+  procurement_required?: boolean | null
+  procurement_task_id?: string | null
+  procurement_locked?: boolean
+  procurement_cancel_reason?: string | null
+  procurement_meta?: Record<string, unknown> | null
   diretoria: string | null
   area: string | null
   start_date: string | null
@@ -105,13 +118,46 @@ export interface ProjectTask {
   us_codereview_active?: boolean
   order: number
   created_by: string | null
+  requester_name?: string | null
   completed_at: string | null
   left_backlog_at?: string | null
   status_entered_at: string | null
+  /** Justificativa de ausência de commit na conclusão da US (evidência de código). */
+  commit_justificativa?: string | null
+  commit_justificativa_em?: string | null
+  /** Gravado quando o card-raiz de planejamento entra numa etapa `locks_schedule`.
+   *  null = projeto ainda não entrou em desenvolvimento (trava Feature/US de avançar). */
+  schedule_committed_at?: string | null
+  schedule_revision_open?: boolean
   sla_state: "none" | "ok" | "warning" | "breached"
   anexos?: ProjectUpload[] | null
   created_at: string
   updated_at: string
+}
+
+/** Commit exibido como evidência da User Story. */
+export interface UsCommitItem {
+  id: string
+  commit_id: string
+  short_id: string
+  comment: string | null
+  author_name: string | null
+  author_date: string | null
+  branch: string | null
+  environment: "prod" | "hml" | "dev" | null
+  repository: string | null
+  remote_url: string | null
+  linked: boolean
+}
+
+/** O que falta para a US poder ser concluída. */
+export interface UsCommitEvidenceState {
+  tem_produto: boolean
+  commits_vinculados: number
+  commits_disponiveis: number
+  justificativa: string | null
+  justificativa_em: string | null
+  pode_concluir: boolean
 }
 
 export interface ProjectRefMini {
@@ -162,6 +208,32 @@ export interface ProjectTaskComment {
   created_at: string
 }
 
+export interface ProjectTaskStatusHistory {
+  id: string
+  task_id: string
+  from_status_id: string | null
+  to_status_id: string | null
+  from_status_name: string | null
+  to_status_name: string | null
+  from_funnel_name: string | null
+  to_funnel_name: string | null
+  moved_by: string | null
+  moved_by_name: string | null
+  moved_at: string
+  source: string
+}
+
+export const STATUS_HISTORY_SOURCE_LABELS: Record<string, string> = {
+  user: "Arraste / edição",
+  system: "Sistema",
+  automation: "Automação",
+  agent: "Agente",
+  reconcile: "Reconcile",
+  procurement: "Contratação",
+  cascade: "Cascata",
+  funnel_transition: "Troca de kanban",
+}
+
 export interface ProjectDemandTypeFunnelRef {
   id: string
   project_id: string
@@ -178,6 +250,7 @@ export interface ProjectDemandType {
   allowed_child_type_ids: string[] | null
   available_for_basic: boolean
   show_in_schedule: boolean
+  is_procurement?: boolean
   order: number
   is_active: boolean
   created_at: string
@@ -412,6 +485,7 @@ export type UsDeliveryPeriod =
   | "tomorrow"
   | "this_week"
   | "next_week"
+  | "last_month"
   | "this_month"
   | "next_month"
 
@@ -435,12 +509,45 @@ export interface UsDeliveryAssigneeGroup {
   overdue_count: number
 }
 
+export interface ProjectDeliveryLinkItem {
+  name: string
+  item_date: string | null
+}
+
+export interface ProjectDeliveryItem {
+  id: string
+  title: string
+  planning_kind: string | null
+  completed_at: string | null
+  due_date: string | null
+  po_name: string | null
+  product_id: string | null
+  product_name: string | null
+  has_servicos: boolean
+  has_processos: boolean
+  has_documentos: boolean
+  servicos_count: number
+  processos_count: number
+  documentos_count: number
+  servicos: ProjectDeliveryLinkItem[]
+  processos: ProjectDeliveryLinkItem[]
+  documentos: ProjectDeliveryLinkItem[]
+}
+
+export interface ProjectDeliveryKpis {
+  total: number
+  com_servicos: number
+  com_processos_e_documentos: number
+}
+
 export interface UsDeliveryReport {
   period: UsDeliveryPeriod
   range_start: string
   range_end: string
   by_assignee: UsDeliveryAssigneeGroup[]
   available_assignees: Array<{ id: string; name: string }>
+  project_deliveries: ProjectDeliveryItem[]
+  project_kpis: ProjectDeliveryKpis
 }
 
 // ── Painel de Desempenho do Time (Devs + POs) ───────────────────────────────
@@ -623,6 +730,7 @@ export type CardFieldKey =
   | "area"
   | "due_date"
   | "assignee"
+  | "requester"
   | `form:${string}`
 
 export interface ProjectCardField {
@@ -748,6 +856,37 @@ export interface CapacityHeatmapResponse {
   summary: CapacitySummary
 }
 
+export interface CapacityDayTask {
+  task_id: string
+  project_id: string
+  project_name: string
+  feature_title: string | null
+  task_title: string
+  hours: number
+  estimated_hours: number | null
+  status_name: string | null
+  status_color: string | null
+  start_date: string | null
+  due_date: string | null
+  sla_state: string | null
+  is_overdue: boolean
+  days_late: number | null
+  in_day: boolean
+}
+
+export interface CapacityDayDetail {
+  person_id: string
+  person_name: string | null
+  date: string
+  is_working_day: boolean
+  capacity_hours: number
+  allocated_hours: number
+  overallocated: boolean
+  items: CapacityDayTask[]
+  overdue: CapacityDayTask[]
+  overdue_reference: string
+}
+
 export interface CapacityProjectRow {
   project_id: string
   project_name: string
@@ -796,6 +935,83 @@ export interface FreePersonRow {
 
 export interface FreePeopleResponse {
   rows: FreePersonRow[]
+}
+
+// ── Sobrecarga por tarefa do cronograma (marcador no avatar do Gantt) ──
+export interface ScheduleOverloadConflict {
+  project_name: string
+  task_title: string
+  hours: number
+}
+
+export interface ScheduleOverloadRow {
+  task_id: string
+  person_id: string
+  person_name: string | null
+  over_days: number
+  total_days: number
+  worst_date: string
+  worst_allocated_hours: number
+  worst_capacity_hours: number
+  conflicts: ScheduleOverloadConflict[]
+}
+
+export interface ScheduleOverloadResponse {
+  rows: ScheduleOverloadRow[]
+}
+
+// ── Capacidade de UM responsável numa janela (painel do cronograma) ──
+export interface PersonCapacityDay {
+  date: string
+  capacity_hours: number
+  allocated_hours: number   // OUTRAS demandas (exclui a tarefa em edição)
+}
+
+export interface PersonCapacityWindow {
+  person_id: string
+  full_name: string | null           // null = responsável sem cadastro no teamops
+  project_hours_per_day: number
+  work_days: number
+  capacity_hours_total: number
+  allocated_hours_total: number
+  days: PersonCapacityDay[]
+  top_demands: WorkloadCellItem[]
+  task_counts_in_capacity: boolean
+}
+
+// ── Cenário de fim do projeto (aba Cenário do cronograma) ──
+export interface ScheduleScenarioPersonRow {
+  person_id: string
+  full_name: string | null
+  capacity_hours: number
+  allocated_elsewhere_hours: number
+  free_hours: number
+  utilization_pct: number
+}
+
+export interface ScheduleScenarioDay {
+  date: string
+  team_free: number
+  consumed: number
+  remaining_demand: number
+}
+
+export interface ScheduleScenarioResponse {
+  start_date: string
+  projected_end_date: string | null
+  demand_hours: number
+  work_days: number
+  team_capacity_hours: number
+  team_free_hours: number
+  persons: ScheduleScenarioPersonRow[]
+  days: ScheduleScenarioDay[]
+  warnings: string[]
+}
+
+export interface ScheduleScenarioRequest {
+  root_task_id: string
+  start_date: string
+  person_ids: string[]
 }
 
 // ── Fase 2: simulador what-if ──
@@ -1228,7 +1444,15 @@ export interface StatusReportResponse extends StatusReportListItem {
 }
 
 // ── PO Sync (análise de portfólio para a cerimônia) ─────────────────────────────
-export type PoSyncFase = "planejamento" | "execucao" | "encerramento"
+export type PoSyncFase =
+  | "planejamento"
+  | "desenvolvimento"
+  | "homologacao"
+  | "producao"
+  | "concluido"
+  | "impedimento"
+
+export type PoSyncFaseCounts = Record<PoSyncFase, number>
 
 export interface PoSyncOption {
   value: string
@@ -1254,22 +1478,30 @@ export interface PoSyncProjeto {
   comparable: boolean
   prazo_status: "no_prazo" | "atrasado" | "sem_baseline"
   atraso_dias: number | null
+  /** Em andamento com prazo estourado: hoje − planejada (cresce até a entrega). */
+  atraso_corrente_dias: number | null
   subtree_total: number
   subtree_completed: number
   backlog_montado: boolean
   sem_datas_planejadas: boolean
   baseline_inconsistente: boolean
   sem_diretoria: boolean
+  /** Fora da regra de cronograma — a mesma que bloqueia Feature/US de avançar no board. */
+  fora_da_regra: boolean
+  regra_motivo: "project_not_in_development" | "schedule_missing" | "schedule_incomplete" | null
+  regra_motivo_label: string | null
+  regra_etapas_pendentes: number
+  regra_etapas_cronograma: number
 }
 
 export interface PoSyncKpis {
   total: number
-  planejamento: number
-  execucao: number
-  encerramento: number
+  fases: PoSyncFaseCounts
   avg_exec_pct: number | null
   em_risco: number
   atrasados: number
+  /** Projetos do PO fora da regra de cronograma. */
+  fora_da_regra: number
 }
 
 export interface PoSyncPrazoBlock {
@@ -1279,6 +1511,14 @@ export interface PoSyncPrazoBlock {
   atraso_medio: number | null
   atraso_mediana: number | null
   pct_atrasados: number | null
+  /** Em andamento com prazo estourado (atraso corrente = hoje − planejada; piso, ainda cresce). */
+  em_atraso_corrente: number
+  atraso_corrente_medio: number | null
+  atraso_corrente_mediana: number | null
+  /** Em andamento com prazo ainda no futuro — fora do % (ainda pode atrasar). */
+  em_andamento_no_prazo: number
+  /** (entregues atrasados + atraso corrente) / (entregues avaliáveis + atraso corrente). */
+  pct_atrasados_combinado: number | null
 }
 
 export interface PoSyncOutlier {
@@ -1289,6 +1529,12 @@ export interface PoSyncOutlier {
   planejada: string | null
   real: string | null
   atraso_dias: number | null
+}
+
+export interface PoSyncIaCounts {
+  com_ia: number
+  sem_ia: number
+  nao_informado: number
 }
 
 export interface PoSyncResponse {
@@ -1307,14 +1553,33 @@ export interface PoSyncResponse {
     total_concluidos: number
   }
   panorama: {
-    fases: { planejamento: number; execucao: number; encerramento: number }
+    fases: PoSyncFaseCounts
+    classificacoes: { implantacao: number; desenvolvimento: number; melhoria: number; sem_classificacao: number }
+    // Recorte de IA por tipo: com auxílio / sem auxílio / não informado.
+    classificacoes_ia: {
+      implantacao: PoSyncIaCounts
+      desenvolvimento: PoSyncIaCounts
+      melhoria: PoSyncIaCounts
+      sem_classificacao: PoSyncIaCounts
+    }
     backlog_sem_execucao: number
+    backlog_sem_execucao_projetos: Array<{ title: string; po: string | null; diretoria_label: string | null }>
     avg_exec_pct: number | null
   }
   prazo: {
     projetos: PoSyncPrazoBlock | null
     itens: PoSyncPrazoBlock | null
     sem_datas_comparaveis: number
+    sem_datas_comparaveis_projetos: Array<{ title: string; po: string | null }>
+  }
+  entregas_projeto: {
+    mes: number
+    ano: number
+    mes_label: string
+    proximo_mes_label: string
+    concluidas: Array<{ task_id: string; title: string; po: string | null; diretoria_label: string | null; completed_at: string | null; prazo_status: string; atraso_dias: number | null }>
+    previstas: Array<{ task_id: string; title: string; po: string | null; diretoria_label: string | null; due_date: string | null }>
+    riscos: Array<{ task_id: string; title: string; po: string | null; diretoria_label: string | null; fase: string; motivos: string[]; overdue: boolean }>
   }
   ranking_pos: Array<{ po_id: string | null; full_name: string | null } & PoSyncKpis>
   por_po: Array<{
@@ -1326,9 +1591,7 @@ export interface PoSyncResponse {
   por_diretoria: Array<{
     diretoria_label: string
     total: number
-    planejamento: number
-    execucao: number
-    encerramento: number
+    fases: PoSyncFaseCounts
     avg_exec_pct: number | null
     em_risco: number
     sem_baseline: boolean
@@ -1351,15 +1614,36 @@ export interface PoSyncResponse {
       desenvolvimento: PoSyncSaudeProdutosFaixa
       outros: PoSyncSaudeProdutosFaixa
       distribuicao: { saudavel: number; atencao: number; critico: number }
+      criticos: PoSyncSaudeProdutoCritico[]
     }
   }
   available_diretorias: PoSyncOption[]
   available_areas: PoSyncOption[]
 }
 
+export interface PoSyncSaudeProdutoItem {
+  name: string
+  score: number
+  classe: "saudavel" | "atencao" | "critico"
+}
+
 export interface PoSyncSaudeProdutosFaixa {
   total: number
   score_medio: number | null
+  produtos: PoSyncSaudeProdutoItem[]
+}
+
+export interface PoSyncSaudeProdutoCritico {
+  name: string
+  score: number
+  motivos: string[]
+}
+
+export interface PoSyncSaudeProdutoStatus {
+  name: string
+  score: number
+  classe: "saudavel" | "atencao" | "critico"
+  motivos: string[]
 }
 
 export interface PoSyncSaudeProdutosPo {
@@ -1373,6 +1657,7 @@ export interface PoSyncSaudeProdutosPo {
   saudavel: number
   atencao: number
   critico: number
+  itens: PoSyncSaudeProdutoStatus[]
 }
 
 // ── API client ────────────────────────────────────────────────────────────────
@@ -1511,6 +1796,10 @@ export const projetosApi = {
 
   listFunnels: (projectId: string, activeOnly = false) =>
     api.get<ProjectFunnel[]>(`/projetos/projects/${projectId}/funnels`, { params: { active_only: activeOnly } }).then((r) => r.data),
+  ensureProcurement: (projectId: string) =>
+    api.post<{ funnel_id: string; demand_type_id: string; stages: Record<string, string> }>(
+      `/projetos/projects/${projectId}/ensure-procurement`,
+    ).then((r) => r.data),
   createFunnel: (projectId: string, data: {
     name: string
     description?: string
@@ -1593,8 +1882,34 @@ export const projetosApi = {
   deleteStatus: (projectId: string, funnelId: string, statusId: string) =>
     api.delete<void>(`/projetos/projects/${projectId}/funnels/${funnelId}/statuses/${statusId}`).then((r) => r.data),
 
-  listTasks: (projectId: string, params?: { status_id?: string; assigned_to?: string }) =>
-    api.get<ProjectTask[]>(`/projetos/projects/${projectId}/tasks`, { params }).then((r) => r.data),
+  listTasks: (
+    projectId: string,
+    params?: { status_id?: string; assigned_to?: string; slim?: boolean; done_limit?: number },
+  ) =>
+    api
+      .get<ProjectTask[]>(`/projetos/projects/${projectId}/tasks`, {
+        params,
+        // Portfólio grande (~3MB / 1.5k cards) — o timeout global de 20s corta a lista e o quadro fica vazio.
+        timeout: 120_000,
+      })
+      .then((r) => r.data),
+
+  /** Versão do board: sem os campos pesados e com a coluna final paginada.
+   *  Devolve também o total de concluídos (header X-Done-Total) para a coluna
+   *  saber quantos cards ficaram de fora e oferecer "carregar mais". */
+  listBoardTasks: (
+    projectId: string,
+    params?: { status_id?: string; assigned_to?: string; done_limit?: number },
+  ) =>
+    api
+      .get<ProjectTask[]>(`/projetos/projects/${projectId}/tasks`, {
+        params: { ...params, slim: true },
+        timeout: 120_000,
+      })
+      .then((r) => ({
+        tasks: r.data,
+        doneTotal: Number(r.headers["x-done-total"] ?? NaN),
+      })),
   listPrograms: (projectId: string) =>
     api.get<{ id: string; name: string }[]>(`/projetos/projects/${projectId}/programs`).then((r) => r.data),
   createTask: (projectId: string, data: {
@@ -1639,9 +1954,14 @@ export const projetosApi = {
     conversion_assigned_to: string | null
     conversion_program_id: string | null
     card_classification: CardClassification | null
+    ia_assisted: boolean | null
     linked_product_id: string | null
     linked_release_id: string | null
+    procurement_required: boolean | null
+    procurement_cancel_reason: string | null
+    procurement_meta: Record<string, unknown> | null
     us_checklist: UsChecklistItem[] | null
+    commit_justificativa: string | null
   }>) => api.patch<ProjectTask>(`/projetos/projects/${projectId}/tasks/${taskId}`, data).then((r) => r.data),
   setPlanningClassification: (projectId: string, taskId: string, data: {
     kind: "projeto" | "programa"
@@ -1671,10 +1991,12 @@ export const projetosApi = {
   }) => api.post<ProjectTaskDependency>(`/projetos/projects/${projectId}/dependencies`, data).then((r) => r.data),
   deleteDependency: (projectId: string, depId: string) =>
     api.delete<void>(`/projetos/projects/${projectId}/dependencies/${depId}`).then((r) => r.data),
-  getWorkload: (projectId: string, params?: { unit?: "day" | "week"; from?: string; to?: string }) =>
+  getWorkload: (projectId: string, params?: { unit?: "day" | "week"; from?: string; to?: string; root?: string }) =>
     api.get<WorkloadResponse>(`/projetos/projects/${projectId}/workload`, { params }).then((r) => r.data),
   getCapacityHeatmap: (params: { from: string; to: string; unit?: "day" | "week"; area?: string; position?: string }) =>
     api.get<CapacityHeatmapResponse>(`/projetos/capacity/heatmap`, { params }).then((r) => r.data),
+  getCapacityDayDetail: (params: { person: string; date: string }) =>
+    api.get<CapacityDayDetail>(`/projetos/capacity/day-detail`, { params }).then((r) => r.data),
   getCapacityByProject: (params: { from: string; to: string; area?: string }) =>
     api.get<CapacityByProjectResponse>(`/projetos/capacity/by-project`, { params }).then((r) => r.data),
   getCapacityGaps: (params: { from: string; to: string; group_by?: "position" | "area" }) =>
@@ -1688,6 +2010,8 @@ export const projetosApi = {
     min_level?: string
     min_free_hours?: number
   }) => api.get<FreePeopleResponse>(`/projetos/capacity/available-people`, { params }).then((r) => r.data),
+  getPersonCapacityWindow: (params: { person: string; from: string; to: string; exclude_task?: string }) =>
+    api.get<PersonCapacityWindow>(`/projetos/capacity/person-window`, { params }).then((r) => r.data),
   getSimulatableTasks: (params: { from: string; to: string }) =>
     api.get<SimTasksResponse>(`/projetos/capacity/tasks`, { params }).then((r) => r.data),
   simulateScenario: (payload: ScenarioRequest) =>
@@ -1700,6 +2024,17 @@ export const projetosApi = {
     api.get<CriticalPathItem[]>(`/projetos/projects/${projectId}/critical-path`, { params: { root: rootTaskId } }).then((r) => r.data),
   getAssigneeAbsences: (projectId: string) =>
     api.get<AssigneeAbsencesResponse>(`/projetos/projects/${projectId}/assignee-absences`).then((r) => r.data),
+  getScheduleOverload: (projectId: string, rootTaskId?: string) =>
+    api.get<ScheduleOverloadResponse>(`/projetos/projects/${projectId}/schedule-overload`, {
+      params: rootTaskId ? { root: rootTaskId } : undefined,
+    }).then((r) => r.data),
+  /** Cenário hipotético: início + time → fim projetado (não persiste). */
+  postScheduleScenario: (projectId: string, payload: ScheduleScenarioRequest) =>
+    api.post<ScheduleScenarioResponse>(`/projetos/projects/${projectId}/schedule/scenario`, payload).then((r) => r.data),
+  // Recálculo automático SOB DEMANDA: sobrescreve as datas manuais da subárvore com o
+  // motor (sequência por responsável + dependências + calendário). Devolve o projeto todo.
+  rescheduleTasks: (projectId: string, rootTaskId: string) =>
+    api.post<ProjectTask[]>(`/projetos/projects/${projectId}/tasks/${rootTaskId}/reschedule`).then((r) => r.data),
 
   // Controle de baseline / travamento do cronograma.
   getScheduleLock: (projectId: string, rootTaskId: string) =>
@@ -1770,8 +2105,26 @@ export const projetosApi = {
   upsertTaskFormSubmission: (projectId: string, taskId: string, values: Record<string, unknown>) =>
     api.put<ProjectDemandFormSubmission>(`/projetos/projects/${projectId}/tasks/${taskId}/form-submission`, { values }).then((r) => r.data),
 
+  // ── Evidência de commit da User Story ──
+  listUsCommits: (projectId: string, taskId: string) =>
+    api.get<UsCommitItem[]>(`/projetos/projects/${projectId}/tasks/${taskId}/commits`).then((r) => r.data),
+  listUsCommitsAvailable: (projectId: string, taskId: string, params?: { search?: string; limit?: number }) =>
+    api
+      .get<UsCommitItem[]>(`/projetos/projects/${projectId}/tasks/${taskId}/commits/available`, { params })
+      .then((r) => r.data),
+  getUsCommitState: (projectId: string, taskId: string) =>
+    api.get<UsCommitEvidenceState>(`/projetos/projects/${projectId}/tasks/${taskId}/commits/state`).then((r) => r.data),
+  linkUsCommits: (projectId: string, taskId: string, commitIds: string[]) =>
+    api
+      .post<UsCommitItem[]>(`/projetos/projects/${projectId}/tasks/${taskId}/commits`, { commit_ids: commitIds })
+      .then((r) => r.data),
+  unlinkUsCommit: (projectId: string, taskId: string, commitId: string) =>
+    api.delete<void>(`/projetos/projects/${projectId}/tasks/${taskId}/commits/${commitId}`).then((r) => r.data),
+
   listTaskComments: (projectId: string, taskId: string) =>
     api.get<ProjectTaskComment[]>(`/projetos/projects/${projectId}/tasks/${taskId}/comments`).then((r) => r.data),
+  listTaskStatusHistory: (projectId: string, taskId: string) =>
+    api.get<ProjectTaskStatusHistory[]>(`/projetos/projects/${projectId}/tasks/${taskId}/status-history`).then((r) => r.data),
   createTaskComment: (projectId: string, taskId: string, content: string) =>
     api.post<ProjectTaskComment>(`/projetos/projects/${projectId}/tasks/${taskId}/comments`, { content }).then((r) => r.data),
 
@@ -1801,6 +2154,8 @@ export const projetosApi = {
     teams?: string[] | null
   }) =>
     api.get<TeamPerformance>(`/projetos/reports/team-performance`, {
+      // Agrega portfólio + PO Sync + capacidade; pode passar dos 20s padrão do client.
+      timeout: 120_000,
       params: {
         from: params.from,
         to: params.to,
@@ -1858,11 +2213,13 @@ export const projetosApi = {
     api.get<StatusReportResponse>(`/projetos/status-reports/${reportId}`).then((r) => r.data),
 
   // Análise de portfólio para a cerimônia PO Sync (read-only, recortável por diretoria/área).
-  getPoSync: (params?: { diretoria?: string | null; area?: string | null }) =>
+  getPoSync: (params?: { diretoria?: string | null; area?: string | null; mes?: number | null; ano?: number | null }) =>
     api.get<PoSyncResponse>(`/projetos/po-sync`, {
       params: {
         ...(params?.diretoria ? { diretoria: params.diretoria } : {}),
         ...(params?.area ? { area: params.area } : {}),
+        ...(params?.mes ? { mes: params.mes } : {}),
+        ...(params?.ano ? { ano: params.ano } : {}),
       },
     }).then((r) => r.data),
 

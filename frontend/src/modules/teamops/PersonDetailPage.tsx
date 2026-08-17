@@ -23,8 +23,11 @@ import {
   EMPLOYMENT_TYPE_LABELS,
   STACK_LEVEL_LABELS,
   ABSENCE_STATUS_LABELS,
+  personAreasLabel,
+  personPosLabel,
   type Absence,
   type AbsenceType,
+  type Area,
   type Person,
   type PersonStack,
   type Stack,
@@ -44,19 +47,22 @@ export default function PersonDetailPage() {
   const [showAbsenceDlg, setShowAbsenceDlg] = useState(false)
   const [stacks, setStacks] = useState<Stack[]>([])
   const [absenceTypes, setAbsenceTypes] = useState<AbsenceType[]>([])
+  const [areas, setAreas] = useState<Area[]>([])
 
   async function refresh() {
     if (!personId) return
     setLoading(true)
     try {
-      const [p, ps, abs] = await Promise.all([
+      const [p, ps, abs, as] = await Promise.all([
         teamopsApi.getPerson(personId),
         teamopsApi.listPersonStacks(personId),
         teamopsApi.listAbsences({ person_id: personId }),
+        teamopsApi.listAreas(),
       ])
       setPerson(p)
       setPersonStacks(ps)
       setAbsences(abs)
+      setAreas(as)
     } finally {
       setLoading(false)
     }
@@ -126,7 +132,7 @@ export default function PersonDetailPage() {
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Área</p>
-              <p className="font-medium">{person.area?.name ?? "—"}</p>
+              <p className="font-medium">{personAreasLabel(person)}</p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Vínculo</p>
@@ -156,8 +162,8 @@ export default function PersonDetailPage() {
           <Card>
             <CardContent className="grid gap-4 p-6 md:grid-cols-2">
               <Field label="Cargo" value={person.position?.name} />
-              <Field label="Área" value={person.area?.name} />
-              <Field label="PO vinculado" value={person.po_person?.full_name} />
+              <Field label="Área" value={personAreasLabel(person)} />
+              <Field label="PO vinculado" value={personPosLabel(person)} />
               <Field label="Referência técnica" value={person.tech_reference_person?.full_name} />
               <Field label="Superior imediato" value={person.manager_person?.full_name} />
               <Field label="Data de entrada" value={person.start_date ?? null} />
@@ -261,7 +267,7 @@ export default function PersonDetailPage() {
       {editing && (
         <PersonFormDialog
           person={person}
-          areas={[]}
+          areas={areas}
           onClose={() => setEditing(false)}
           onSaved={() => { setEditing(false); refresh() }}
         />

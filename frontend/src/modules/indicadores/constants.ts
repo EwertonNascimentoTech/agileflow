@@ -45,10 +45,45 @@ export const FONTE_LABEL: Record<FonteDados, string> = {
 export const FONTE_OPTS: FonteDados[] = ["manual", "portfolio"]
 
 export const METRICA_LABEL: Record<FonteMetrica, string> = {
+  // Produtos
   servicos_publicados: "Serviços digitais — % publicados (prod. produção) sobre publicados (prod. produção + desenvolvimento)",
   documentos_natos_digitais: "Documentos nato-digital — % cadastrados (prod. produção) sobre cadastrados (prod. produção + desenvolvimento); data = publicação do serviço",
+  // Projetos (indicadores táticos)
+  cronograma_desenvolvimento: "Projetos de desenvolvimento — % de entregas do período concluídas dentro do prazo (▲ %)",
+  cronograma_implantacao: "Projetos de implantação — % de entregas do período concluídas dentro do prazo (▲ %)",
+  desvio_trabalho_desenvolvimento: "Projetos de desenvolvimento — % de tarefas criadas após o comprometimento do cronograma sobre as planejadas (▼ %)",
+  desvio_trabalho_implantacao: "Projetos de implantação — % de tarefas criadas após o comprometimento do cronograma sobre as planejadas (▼ %)",
+  pct_desenvolvimento: "Percentual de desenvolvimento — desenvolvimentos ÷ (desenvolvimentos + implantações) do portfólio até o fim do período (▲ %)",
+  tempo_analise_oportunidade: "Tempo de análise da oportunidade — dias médios da demanda até virar projeto (▼ dias)",
+  lead_time_us: "Lead time de US — dias médios do backlog à entrega das US concluídas no período (▼ dias)",
+  pct_sla_estourado: "% de US ativas com SLA estourado — estado corrente: calcule e feche o mês vigente (▼ %)",
+  taxa_impedimento: "% de US ativas em impedimento — estado corrente: calcule e feche o mês vigente (▼ %)",
+  pct_projetos_ia: "% de projetos com auxílio de IA sobre os que responderam (▲ %)",
 }
-export const METRICA_OPTS: FonteMetrica[] = ["servicos_publicados", "documentos_natos_digitais"]
+export const METRICA_OPTS: FonteMetrica[] = [
+  "servicos_publicados",
+  "documentos_natos_digitais",
+  "cronograma_desenvolvimento",
+  "cronograma_implantacao",
+  "desvio_trabalho_desenvolvimento",
+  "desvio_trabalho_implantacao",
+  "pct_desenvolvimento",
+  "tempo_analise_oportunidade",
+  "lead_time_us",
+  "pct_sla_estourado",
+  "taxa_impedimento",
+  "pct_projetos_ia",
+]
+
+// Sub-processos do portfólio de TI (sugestões — o campo é texto livre).
+// A ordem aqui define a ordem dos agrupamentos no painel e na RTD.
+export const SUB_PROCESSOS_PORTFOLIO = [
+  "Prospectar Solução de TI",
+  "Desenvolver Soluções de TI",
+  "Implantar Soluções de TI de Mercado",
+  "Tratamento de Bugs de Sistemas",
+  "Administrar Melhorias de Sistemas",
+]
 
 export const ACOMP_STATUS_LABEL: Record<AcompStatus, string> = {
   pendente: "Pendente",

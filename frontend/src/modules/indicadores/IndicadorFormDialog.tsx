@@ -16,6 +16,7 @@ import { loadLoggedPersonAutoFill } from "@/lib/loggedPersonContext"
 import {
   ANOS, CATEGORIA_LABEL, CATEGORIA_OPTS, FONTE_LABEL, FONTE_OPTS, GRANULARIDADE_LABEL, GRANULARIDADE_OPTS,
   MESES, METRICA_LABEL, METRICA_OPTS, SENTIDO_LABEL, SENTIDO_OPTS, STATUS_LABEL, STATUS_OPTS,
+  SUB_PROCESSOS_PORTFOLIO,
 } from "@/modules/indicadores/constants"
 
 const NONE = "__none__"
@@ -41,6 +42,7 @@ export function IndicadorFormDialog({ open, onOpenChange, indicador, onSaved }: 
   const [categoria, setCategoria] = useState<Categoria>("estrategico")
   const [descricao, setDescricao] = useState("")
   const [objetivo, setObjetivo] = useState("")
+  const [subProcesso, setSubProcesso] = useState("")
   const [areaId, setAreaId] = useState(NONE)
   const [responsavelId, setResponsavelId] = useState(NONE)
   const [unidade, setUnidade] = useState("")
@@ -93,6 +95,7 @@ export function IndicadorFormDialog({ open, onOpenChange, indicador, onSaved }: 
       setCategoria(indicador?.categoria ?? "estrategico")
       setDescricao(indicador?.descricao ?? "")
       setObjetivo(indicador?.objetivo_estrategico ?? "")
+      setSubProcesso(indicador?.sub_processo ?? "")
       setAreaId(toId(indicador?.area?.id))
       setResponsavelId(toId(indicador?.responsavel?.id))
       setUnidade(indicador?.unidade_medida ?? "")
@@ -155,7 +158,8 @@ export function IndicadorFormDialog({ open, onOpenChange, indicador, onSaved }: 
     const sel = (v: string) => (v === NONE ? null : v)
     const base: IndicadorCreate = {
       codigo: codigo.trim(), nome: nome.trim(), categoria, descricao: descricao.trim() || null,
-      objetivo_estrategico: objetivo.trim() || null, area_id: sel(areaId), responsavel_person_id: sel(responsavelId),
+      objetivo_estrategico: objetivo.trim() || null, sub_processo: subProcesso.trim() || null,
+      area_id: sel(areaId), responsavel_person_id: sel(responsavelId),
       unidade_medida: unidade.trim() || null, formula_calculo: formula.trim() || null, fonte_dados: fonte.trim() || null,
       granularidade, periodicidade_atualizacao: periodicidade.trim() || null, sentido,
       meta_min: sentido === "faixa_ideal" ? num(metaMin) : null,
@@ -213,6 +217,21 @@ export function IndicadorFormDialog({ open, onOpenChange, indicador, onSaved }: 
 
           <div className="space-y-1.5"><Label>Descrição</Label><Textarea rows={2} value={descricao} onChange={(e) => setDescricao(e.target.value)} /></div>
           <div className="space-y-1.5"><Label>Objetivo estratégico relacionado</Label><Textarea rows={2} value={objetivo} onChange={(e) => setObjetivo(e.target.value)} /></div>
+          <div className="space-y-1.5">
+            <Label>Sub-processo do portfólio</Label>
+            <Input
+              list="sub-processos-portfolio"
+              value={subProcesso}
+              onChange={(e) => setSubProcesso(e.target.value)}
+              placeholder="Ex.: Desenvolver Soluções de TI"
+            />
+            <datalist id="sub-processos-portfolio">
+              {SUB_PROCESSOS_PORTFOLIO.map((sp) => <option key={sp} value={sp} />)}
+            </datalist>
+            <p className="text-[11px] text-muted-foreground">
+              Vincula o indicador (tático) ao sub-processo do portfólio de TI. Texto livre com sugestões.
+            </p>
+          </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">

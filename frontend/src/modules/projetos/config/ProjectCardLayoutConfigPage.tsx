@@ -27,6 +27,7 @@ const HINTS: Record<string, string> = {
   area: "Área",
   due_date: "Data de prazo",
   assignee: "Avatar do responsável",
+  requester: "Quem criou a solicitação de origem (útil em Projetos convertidos). Em Prospectar, prefira o campo de formulário “Requisitante”.",
 }
 
 export default function ProjectCardLayoutConfigPage() {

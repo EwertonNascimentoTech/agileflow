@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
-import { AlertTriangle, ArrowLeft, CheckCircle2, Download, ExternalLink, FileText, Link2, Loader2, MinusCircle, Paperclip, Pencil, Plus, ShieldAlert, Trash2, Workflow, XCircle } from "lucide-react"
+import { AlertTriangle, ArrowLeft, CheckCircle2, Download, ExternalLink, FileText, GitBranch, Link2, Loader2, MinusCircle, Paperclip, Pencil, Plus, ShieldAlert, Trash2, Workflow, XCircle } from "lucide-react"
 
 import {
-  produtosApi, type AnexoItem, type Contrato, type ContratoCreate, type ContratoUpdate, type Documento, type Documentation,
-  type PersonMini, type Product, type ProductHealth, type Release, type ReleaseCreate, type Servico,
+  produtosApi, reposApi, type AnexoItem, type Contrato, type ContratoCreate, type ContratoUpdate, type Documento, type Documentation,
+  type PersonMini, type Product, type ProductHealth, type Release, type ReleaseCreate, type Repositorio, type Servico,
   type ServicoStatus, type Support, type SupportCreate, type SupportNivel,
 } from "@/api/produtos"
 import { Button } from "@/components/ui/button"
@@ -176,6 +176,52 @@ function HealthChecklist({ health }: { health: ProductHealth }) {
   )
 }
 
+/** Repositórios vinculados ao produto. O campo "Repositório" acima é texto livre e continua
+ *  existindo; a verdade da sincronização é esta lista. Some para quem não tem permissão. */
+function RepositoriosDoProduto({ productId }: { productId: string }) {
+  const [repos, setRepos] = useState<Repositorio[] | null>(null)
+
+  useEffect(() => {
+    reposApi
+      .list()
+      .then((all) => setRepos(all.filter((r) => r.produtos.some((prod) => prod.id === productId))))
+      .catch(() => setRepos(null))
+  }, [productId])
+
+  if (!repos || repos.length === 0) return null
+  return (
+    <div className="sm:col-span-2 lg:col-span-3">
+      <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+        Repositórios sincronizados
+      </p>
+      <ul className="mt-1 space-y-1">
+        {repos.map((r) => (
+          <li key={r.id} className="flex flex-wrap items-center gap-2 text-sm">
+            <GitBranch size={14} className="shrink-0 text-muted-foreground" />
+            {r.web_url ? (
+              <a href={r.web_url} target="_blank" rel="noreferrer" className="text-primary underline">
+                {r.project}/{r.repository}
+              </a>
+            ) : (
+              <span>{r.project}/{r.repository}</span>
+            )}
+            <span className="text-xs text-muted-foreground">
+              {r.commits_count > 0
+                ? `${r.commits_count} commits · último em ${new Date(r.last_commit_at ?? "").toLocaleDateString("pt-BR")}`
+                : "sem commits importados"}
+            </span>
+            {r.last_sync_status === "erro" || r.last_sync_status === "not_found" ? (
+              <Badge variant="outline" className="text-[10px] text-warning" title={r.last_sync_error ?? ""}>
+                falha no sync
+              </Badge>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 function GeralTab({ p, onChange }: { p: Product; onChange: () => void }) {
   const [fornecedorOpen, setFornecedorOpen] = useState(false)
   const link = (url: string | null) => url ? <a href={url} target="_blank" rel="noreferrer" className="text-primary underline">abrir</a> : null
@@ -202,6 +248,7 @@ function GeralTab({ p, onChange }: { p: Product; onChange: () => void }) {
       <Field label="Ambiente DEV" value={link(p.link_dev)} />
       <Field label="Ambiente HML" value={link(p.link_hml)} />
       <Field label="Ambiente PRD" value={link(p.link_prd)} />
+      <RepositoriosDoProduto productId={p.id} />
       <div className="sm:col-span-2 lg:col-span-3"><Field label="Stacks" value={p.stacks.length ? p.stacks.map((s) => s.name).join(", ") : null} /></div>
       <div className="sm:col-span-2 lg:col-span-3"><Field label="Descrição" value={p.description} /></div>
       </div>

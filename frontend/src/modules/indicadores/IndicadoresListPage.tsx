@@ -64,7 +64,7 @@ export default function IndicadoresListPage() {
     setFormOpen(true)
   }
   async function del(it: IndicadorListItem) {
-    if (!confirm(`Inativar o indicador "${it.codigo} — ${it.nome}"?`)) return
+    if (!confirm(`Inativar o indicador "${it.nome}"?`)) return
     await indicadoresApi.remove(it.id)
     toast.success("Indicador inativado.")
     reload()
@@ -116,7 +116,10 @@ export default function IndicadoresListPage() {
                   <tr key={it.id} className="cursor-pointer border-t hover:bg-muted/40" onClick={() => navigate(`/app/modules/indicadores/indicadores/${it.id}`)}>
                     <td className="px-3 py-2 font-mono text-xs">{it.codigo}</td>
                     <td className="px-3 py-2 font-medium">{it.nome}
-                      <span className="block text-[11px] font-normal text-muted-foreground">{SENTIDO_LABEL[it.sentido]}</span>
+                      <span className="block text-[11px] font-normal text-muted-foreground">
+                        {SENTIDO_LABEL[it.sentido]}
+                        {it.sub_processo ? ` · ${it.sub_processo}` : ""}
+                      </span>
                     </td>
                     <td className="px-3 py-2"><Badge variant="outline" className="text-[10px]">{CATEGORIA_LABEL[it.categoria]}</Badge></td>
                     <td className="px-3 py-2 text-muted-foreground">{it.area_name ?? "—"}</td>

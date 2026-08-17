@@ -203,6 +203,8 @@
 
 /* ─────────── Kanban board ─────────── */
 .afx.kanban-page-root {
+  /* Preenche a área útil do main (header 3.5rem + padding), sem depender de % height
+     na cadeia flex — % height + flex-basis:0 colapsava as colunas e escondia os cards. */
   height: calc(100dvh - 3.5rem - 2rem);
   min-height: 360px;
 }
@@ -212,11 +214,10 @@
   }
 }
 .afx .board { display: flex; gap: 16px; align-items: stretch; padding-bottom: 16px; min-height: 0; }
-/* Quadro principal: preenche o espaço restante da página; colunas scrollam por dentro. */
+/* Quadro principal: preenche o espaço restante; colunas alongam via stretch (não height:100%). */
 .afx .board.board-viewport-height {
   flex: 1 1 0;
-  min-height: 0;
-  height: 100%;
+  min-height: 240px;
   overflow-x: auto;
   overflow-y: hidden;
 }
@@ -224,21 +225,20 @@
   display: flex;
   flex: 1 1 0;
   min-height: 0;
-  height: 100%;
   flex-direction: column;
 }
 .afx .kanban-board-shell > .board.board-viewport-height {
   flex: 1 1 0;
+  min-height: 0;
 }
 .afx .board.board-viewport-height .column {
-  height: 100%;
   max-height: 100%;
   align-self: stretch;
   min-height: 0;
 }
 .afx .board.board-viewport-height .col-body {
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: 80px;
   overflow-y: auto;
 }
 .afx .board.board-viewport-height .col-empty {
@@ -546,7 +546,10 @@
 .afx .gx-gantt { display: flex; flex-direction: column; min-height: 0; background: var(--af-card); border: 1px solid var(--af-border); border-radius: 0 0 var(--af-radius) var(--af-radius); overflow: hidden; }
 .afx .gx-scroll { flex: 1; overflow: auto; position: relative; max-height: calc(100vh - 280px); min-height: 420px; }
 .afx .gx-inner { position: relative; }
-.afx .gx-hrow { display: flex; position: relative; z-index: 4; }
+/* Cabeçalho de tempo congelado: o sticky precisa estar NESTA linha (o `sticky` dos filhos
+   .gx-thead/.gx-corner só gruda dentro da caixa dela, que rolava junto com o conteúdo).
+   z-index acima das linhas (2) e do overlay de barras (1). */
+.afx .gx-hrow { display: flex; position: sticky; top: 0; z-index: 5; box-shadow: 0 1px 0 var(--af-border), 0 6px 12px -8px rgba(16,24,40,.28); }
 .afx .gx-corner { position: sticky; left: 0; top: 0; z-index: 6; background: var(--af-card); border-right: 1px solid var(--af-border); border-bottom: 1px solid var(--af-border); display: flex; align-items: flex-end; padding: 0 16px 10px; }
 .afx .gx-corner .lbl { font-size: 11px; font-weight: 800; letter-spacing: .06em; color: var(--af-faint); text-transform: uppercase; }
 .afx .gx-thead { position: sticky; top: 0; z-index: 3; background: var(--af-card); border-bottom: 1px solid var(--af-border); }

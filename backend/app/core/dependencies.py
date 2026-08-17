@@ -27,6 +27,102 @@ class ModuleContext:
     schema: str
 
 
+# Cargos do Product Owner (Externo). Espelha PO_EXTERNAL_POSITION_SLUGS (teamops.service);
+# repetido aqui para o core não depender de um módulo de negócio.
+_PO_EXTERNAL_SLUGS = ("po_externo", "product_owner_externo")
+
+# Módulos vedados ao PO Externo: ele opera apenas os kanbans dos projetos que lidera.
+# Bloqueio no require_module — não adianta só esconder do menu ou tirar as permissões,
+# porque o módulo inteiro precisa responder 403 mesmo em chamada direta à API.
+PO_EXTERNAL_BLOCKED_MODULES = frozenset({"teamops", "indicadores", "rtd"})
+
+
+async def _is_po_external(user: User, schema: str) -> bool:
+    """True se o usuário tem o Cargo Product Owner (Externo) no tenant.
+
+    Detecta pelo vínculo Pessoa → Cargo e, como fallback (login sem Pessoa), pelo nome
+    da role do cargo ("Cargo · {nome}"). Resultado é cacheado por usuário — invalidar com
+    `invalidate_po_external` ao trocar o cargo de alguém.
+    """
+    if user.role in (UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN):
+        return False
+
+    from app.core.cache import cache_get, cache_set, po_external_key
+    from app.core.config import settings
+
+    if settings.AUTH_CACHE_TTL > 0:
+        cached = await cache_get(po_external_key(user.id))
+        if cached is not None:
+            return bool(cached)
+
+    async with AsyncSessionLocal() as probe:
+        await probe.execute(text("SET search_path TO public"))
+        # Tenant sem o módulo Pessoas não tem as tabelas — to_regclass devolve NULL
+        # em vez de abortar a transação.
+        exists = (await probe.execute(
+            text("SELECT to_regclass(:t)"), {"t": f'"{schema}".team_positions'}
+        )).scalar_one_or_none()
+        if exists is None:
+            result = False
+        else:
+            row = (await probe.execute(text(f"""
+                SELECT EXISTS (
+                    SELECT 1 FROM "{schema}".team_persons p
+                    JOIN "{schema}".team_positions po ON po.id = p.position_id
+                    WHERE p.user_id = :uid AND po.slug = ANY(:slugs)
+                ) OR EXISTS (
+                    SELECT 1 FROM public.roles r
+                    JOIN "{schema}".team_positions po2 ON r.name = 'Cargo · ' || po2.name
+                    WHERE r.id = :role_id AND po2.slug = ANY(:slugs)
+                )
+            """), {
+                "uid": user.id,
+                "role_id": user.role_id,
+                "slugs": list(_PO_EXTERNAL_SLUGS),
+            })).first()
+            result = bool(row and row[0])
+
+    if settings.AUTH_CACHE_TTL > 0:
+        await cache_set(po_external_key(user.id), result, settings.AUTH_CACHE_TTL)
+    return result
+
+
+async def has_permission_cached(user: User, code: str) -> bool:
+    """Versão booleana e cacheada de `require_permission`, para ramificar em rota.
+
+    Rotas que precisam decidir (e não barrar) costumavam consultar `RolePermission`
+    direto no banco, furando o cache `auth:perm:*` e somando round-trips ao caminho
+    quente — o board chega a chamar isso 2-3 vezes por request. A invalidação já
+    existente (`invalidate_role_permissions`) cobre este cache.
+    """
+    if user.role in (UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN):
+        return True
+    if not user.role_id:
+        return False
+
+    from app.core.cache import cache_get, cache_set, perm_key
+    from app.core.config import settings
+
+    if settings.AUTH_CACHE_TTL > 0:
+        cached = await cache_get(perm_key(user.role_id, code))
+        if cached is not None:
+            return bool(cached)
+
+    async with AsyncSessionLocal() as db:
+        await db.execute(text("SET search_path TO public"))
+        result = await db.execute(
+            _select(RolePermission).where(
+                RolePermission.role_id == user.role_id,
+                RolePermission.permission_code == code,
+            )
+        )
+        allowed = result.scalar_one_or_none() is not None
+
+    if settings.AUTH_CACHE_TTL > 0:
+        await cache_set(perm_key(user.role_id, code), allowed, settings.AUTH_CACHE_TTL)
+    return allowed
+
+
 def require_permission(code: str):
     """
     Dependency: garante que o usuário tem a permission `code`.
@@ -161,6 +257,12 @@ def require_module(module_slug: str):
             )
 
         schema_name = facts["schema_name"]
+
+        if module_slug in PO_EXTERNAL_BLOCKED_MODULES and await _is_po_external(current_user, schema_name):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Módulo '{module_slug}' indisponível para Product Owner (Externo).",
+            )
 
         # Abre a sessão da request e aponta para o schema do tenant
         async with AsyncSessionLocal() as db:

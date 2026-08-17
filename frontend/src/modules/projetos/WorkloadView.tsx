@@ -1,7 +1,8 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { AlertTriangle, Loader2, Users } from "lucide-react"
 
 import { projetosApi, type WorkloadCell } from "@/api/projetos"
+import { capacityCellStyle } from "./capacityColors"
 import type { User } from "@/types"
 import { EmptyState } from "@/components/EmptyState"
 
@@ -37,17 +38,9 @@ function weekdayRange(fromIso: string, toIso: string): string[] {
   return out
 }
 
-// Cor da célula por proporção carga/capacidade (paleta inspirada no MS Planner).
-function cellStyle(allocated: number, capacity: number): CSSProperties {
-  if (capacity <= 0) {
-    return allocated > 0 ? { background: "#fecaca", color: "#7f1d1d" } : {}
-  }
-  const ratio = allocated / capacity
-  if (ratio > 1.0001) return { background: "#ef4444", color: "#fff" }
-  if (ratio > 0.8) return { background: "#fde68a", color: "#78350f" }
-  if (ratio > 0) return { background: "#bbf7d0", color: "#14532d" }
-  return {}
-}
+// Cor da célula por proporção carga/capacidade — paleta compartilhada com o painel
+// de capacidade do cronograma (capacityColors.ts).
+const cellStyle = capacityCellStyle
 
 /**
  * Heatmap carga×capacidade por pessoa×dia. Dois modos:
@@ -58,20 +51,26 @@ function cellStyle(allocated: number, capacity: number): CSSProperties {
  */
 export function WorkloadView({
   projectId,
+  rootTaskId,
   users,
   cells: cellsProp,
   nameForUser,
   loading: loadingProp,
   dateFrom,
   dateTo,
+  onCellClick,
 }: {
   projectId?: string
+  // Card-raiz de planejamento: sem ele a carga viria de todos os projetos do container.
+  rootTaskId?: string
   users?: User[]
   cells?: WorkloadCell[]
   nameForUser?: (id: string) => string
   loading?: boolean
   dateFrom?: string
   dateTo?: string
+  // Abre o detalhamento do dia (pessoa × data). Sem handler, a célula não é clicável.
+  onCellClick?: (userId: string, date: string) => void
 }) {
   const controlled = cellsProp !== undefined
   const [fetched, setFetched] = useState<WorkloadCell[]>([])
@@ -80,11 +79,11 @@ export function WorkloadView({
   useEffect(() => {
     if (controlled || !projectId) return
     setFetching(true)
-    projetosApi.getWorkload(projectId, { unit: "day" })
+    projetosApi.getWorkload(projectId, { unit: "day", root: rootTaskId })
       .then((r) => setFetched(r.cells))
       .catch(() => setFetched([]))
       .finally(() => setFetching(false))
-  }, [controlled, projectId])
+  }, [controlled, projectId, rootTaskId])
 
   const cells = controlled ? cellsProp! : fetched
   const loading = controlled ? Boolean(loadingProp) : fetching
@@ -191,6 +190,7 @@ export function WorkloadView({
         {overCount > 0
           ? <span><strong className="text-destructive">{overCount}</strong> dia(s)/pessoa em superlotação (carga acima da capacidade da jornada).</span>
           : <span>Nenhuma superlotação — capacidade pela jornada de cada pessoa, descontando ausências e feriados.</span>}
+        {onCellClick && <span className="text-xs">· clique numa célula para ver as demandas e os atrasos do dia.</span>}
       </div>
       <div ref={scrollRef} className="overflow-x-auto rounded-md border bg-card">
         <table className="border-collapse text-[11px]">
@@ -238,14 +238,30 @@ export function WorkloadView({
                     const allocated = c?.allocated_hours ?? 0
                     const capacity = c?.capacity_hours ?? 8
                     const isToday = d === todayIso
+                    const clickable = Boolean(onCellClick)
                     return (
                       <td
                         key={d}
-                        className={`border-l px-1 py-1.5 text-center ${isToday ? "ring-1 ring-inset ring-primary/40" : ""}`}
+                        className={`border-l px-1 py-1.5 text-center ${isToday ? "ring-1 ring-inset ring-primary/40" : ""} ${
+                          clickable ? "cursor-pointer hover:outline hover:outline-1 hover:-outline-offset-1 hover:outline-primary" : ""
+                        }`}
                         style={cellStyle(allocated, capacity)}
                         onMouseEnter={c ? (e) => setHover({ c, name: userName(uid), date: d, x: e.clientX, y: e.clientY }) : undefined}
                         onMouseMove={c ? (e) => setHover((h) => (h ? { ...h, x: e.clientX, y: e.clientY } : h)) : undefined}
                         onMouseLeave={() => setHover(null)}
+                        onClick={clickable ? () => {
+                          setHover(null)
+                          onCellClick?.(uid, d)
+                        } : undefined}
+                        role={clickable ? "button" : undefined}
+                        tabIndex={clickable ? 0 : undefined}
+                        onKeyDown={clickable ? (e) => {
+                          if (e.key !== "Enter" && e.key !== " ") return
+                          e.preventDefault()
+                          setHover(null)
+                          onCellClick?.(uid, d)
+                        } : undefined}
+                        aria-label={clickable ? `${userName(uid)} — ${d}: ver detalhamento do dia` : undefined}
                       >
                         {allocated > 0 ? allocated.toFixed(allocated % 1 === 0 ? 0 : 1) : ""}
                       </td>
@@ -288,6 +304,11 @@ export function WorkloadView({
             </ul>
           ) : (
             <div className="border-t pt-1.5 text-muted-foreground">Sem detalhamento de demandas.</div>
+          )}
+          {onCellClick && (
+            <div className="mt-1.5 border-t pt-1.5 text-[10px] text-muted-foreground">
+              Clique para abrir o dia com etapas e atrasos.
+            </div>
           )}
         </div>
       )}

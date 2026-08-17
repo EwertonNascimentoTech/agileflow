@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     # Curto de propósito: limita a janela de inconsistência caso alguma
     # invalidação explícita seja perdida. 0 desativa o cache de auth.
     AUTH_CACHE_TTL: int = 30
+    # TTL (segundos) dos marcadores de bootstrap idempotente (ex.: funil Contratar).
+    # Tira o `ensure_*` do caminho de leitura sem torná-lo permanente: se a estrutura
+    # for removida à mão, a próxima leitura após o TTL a recria. 0 desativa o marcador.
+    BOOTSTRAP_CACHE_TTL: int = 3600
 
     @property
     def REDIS_URL(self) -> str:
@@ -85,11 +89,18 @@ class Settings(BaseSettings):
         return self.REDIS_URL
 
     # ── MINIO ────────────────────────────────────
+    # Endpoint interno (rede Docker) — upload/delete/list.
     MINIO_ENDPOINT: str = "localhost:9000"
     MINIO_ACCESS_KEY: str
     MINIO_SECRET_KEY: str
     MINIO_BUCKET_DEFAULT: str = "saas-storage"
     MINIO_SECURE: bool = False
+    # Host público nas URLs pré-assinadas (browser). Sem porta = 443 se secure.
+    # Ex.: agileflow.tdsistemafiea.com.br — o nginx do frontend faz proxy de
+    # /{bucket}/ para o MinIO interno. Vazio = usa MINIO_ENDPOINT (dev local).
+    MINIO_PUBLIC_ENDPOINT: str = ""
+    MINIO_PUBLIC_SECURE: bool = True
+    MINIO_REGION: str = "us-east-1"
 
     # ── Azure AI Foundry — Agent Service (agentes por etapa do kanban) ──
     # Endpoint do PROJETO Foundry (base até antes de "/threads"). Ex.:
@@ -101,6 +112,40 @@ class Settings(BaseSettings):
     AZURE_AI_TENANT_ID: str = ""
     AZURE_AI_CLIENT_ID: str = ""
     AZURE_AI_CLIENT_SECRET: str = ""
+
+    # ── Azure DevOps — commits dos repositórios vinculados aos produtos ──
+    # PAT único da instituição (escopo mínimo: Code → Read). Sem PAT a integração fica
+    # inerte: o job vira no-op e a UI mostra "não configurada".
+    AZURE_DEVOPS_ORG_URL: str = "https://dev.azure.com/processostotecnologia"
+    AZURE_DEVOPS_PAT: str = ""
+    AZURE_DEVOPS_API_VERSION: str = "7.1"
+    # Janela do backfill inicial de cada repositório (dias).
+    AZURE_DEVOPS_BACKFILL_DAYS: int = 365
+    # Basic auth do service hook (git.push). Vazio = webhook recusa tudo.
+    AZURE_DEVOPS_WEBHOOK_USER: str = ""
+    AZURE_DEVOPS_WEBHOOK_SECRET: str = ""
+    # Teto de branches percorridas por repositório no sync. Repos com dezenas de branches
+    # de feature (o maior aqui tem 63) tornariam o backfill lento demais. As de maior
+    # precedência (main/preview) vêm primeiro, então o corte atinge só branches de dev.
+    AZURE_DEVOPS_MAX_BRANCHES: int = 25
+    # Substrings que marcam o autor como bot/pipeline (separadas por vírgula).
+    AZURE_DEVOPS_BOT_EMAIL_PATTERNS: str = "noreply,azuredevops,build@,pipeline,bot@,@bot"
+
+    # ── EPA (Sistema de Planos de Ação — sysepa) ──
+    # Integração usada pelo RTD (slide de Planos Estratégicos). Login/senha únicos da
+    # instituição, definidos no .env; token JWT obtido em /epa/api/api/login e cacheado.
+    EPA_API_BASE_URL: str = "https://sistemafiea.sysepa.com.br"
+    EPA_LOGIN: str = ""
+    EPA_SENHA: str = ""
+    # Códigos dos planos do EPA exibidos por padrão nos slides do RTD (separados por
+    # vírgula). A reunião pode sobrescrever no próprio slide.
+    EPA_PLANOS_ESTRATEGICO: str = ""
+    EPA_PLANOS_TATICOS: str = ""
+
+    # ── Documentação (Markdown em docs/) ─────────
+    # Caminho absoluto da pasta docs/ no host/container. Vazio = auto-detect
+    # (/docs no Docker, ou <repo>/docs em desenvolvimento).
+    DOCS_ROOT: str = ""
 
 
 settings = Settings()

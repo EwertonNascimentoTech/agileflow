@@ -6,6 +6,7 @@ import { ToastContainer } from "@/components/ToastContainer"
 import { ErrorBoundary } from "@/components/ErrorBoundary"
 import ProtectedRoute from "@/components/ProtectedRoute"
 import ModuleConfigGuard from "@/components/ModuleConfigGuard"
+import ExternalPOGuard from "@/components/ExternalPOGuard"
 
 // Todas as páginas/layouts abaixo são carregadas sob demanda (code splitting por
 // rota). Sem isto, o bundle inicial embute o JS de TODOS os módulos (~100 páginas,
@@ -126,12 +127,20 @@ const ProdutosProcessPortfolioPage = lazy(() => import("@/modules/produtos/Proce
 const ProdutosIndicadoresPage = lazy(() => import("@/modules/produtos/IndicadoresPage"))
 const ProdutosInteligenciaPage = lazy(() => import("@/modules/produtos/InteligenciaPage"))
 const ProdutosFornecedoresPage = lazy(() => import("@/modules/produtos/FornecedoresPage"))
+const ProdutosRepositoriosPage = lazy(() => import("@/modules/produtos/RepositoriosPage"))
 const ProdutosConfigPage = lazy(() => import("@/modules/produtos/config/ProdutosConfigPage"))
 const IndicadoresLayout = lazy(() => import("@/modules/indicadores/IndicadoresLayout"))
 const IndicadoresDashboardPage = lazy(() => import("@/modules/indicadores/DashboardPage"))
 const IndicadoresListPage = lazy(() => import("@/modules/indicadores/IndicadoresListPage"))
 const IndicadorDetailPage = lazy(() => import("@/modules/indicadores/IndicadorDetailPage"))
 const IndicadoresConfigPage = lazy(() => import("@/modules/indicadores/config/IndicadoresConfigPage"))
+
+const RtdLayout = lazy(() => import("@/modules/rtd/RtdLayout"))
+const RtdReunioesPage = lazy(() => import("@/modules/rtd/RtdReunioesPage"))
+const RtdReuniaoPage = lazy(() => import("@/modules/rtd/RtdReuniaoPage"))
+
+const DocumentationPage = lazy(() => import("@/pages/DocumentationPage"))
+const DocumentacaoLayout = lazy(() => import("@/modules/documentacao/DocumentacaoLayout"))
 
 function RouteFallback() {
   return (
@@ -165,6 +174,7 @@ export default function App() {
                   <Route path="tenants/:id" element={<TenantDetailPage />} />
                   <Route path="modules" element={<AdminModulesPage />} />
                   <Route path="admins" element={<AdminsPage />} />
+                  <Route path="docs" element={<DocumentationPage />} />
                 </Route>
               </Route>
 
@@ -173,6 +183,7 @@ export default function App() {
                 <Route path="/app" element={<CompanyLayout />}>
                   <Route index element={<Navigate to="/app/dashboard" replace />} />
                   <Route path="dashboard" element={<CompanyDashboardPage />} />
+                  <Route path="docs" element={<Navigate to="/app/modules/documentacao" replace />} />
 
                   {/* Redirects: rotas antigas /app/users e /app/roles → /app/settings/* */}
                   <Route path="users" element={<Navigate to="/app/settings/users" replace />} />
@@ -185,6 +196,12 @@ export default function App() {
                       <Route path="users" element={<UsersPage />} />
                       <Route path="roles" element={<RolesPage />} />
                     </Route>
+                  </Route>
+
+                  {/* Documentação (módulo de plataforma) */}
+                  <Route path="modules/documentacao" element={<DocumentacaoLayout />}>
+                    <Route index element={<Navigate to="usuario" replace />} />
+                    <Route path=":section" element={<DocumentationPage />} />
                   </Route>
 
                   {/* Atendimento (deprecated) → redireciona para CRM */}
@@ -238,18 +255,21 @@ export default function App() {
                     <Route path="calendario" element={<ProjectBoardPage />} />
                     <Route path="gantt" element={<GanttPage />} />
                     <Route path="cronograma" element={<GanttPage />} />
-                    <Route path="capacidade" element={<CapacityCockpitPage />} />
-                    <Route path="relatorios" element={<PMODashboardPage initialTab="relatorios" />} />
-                    <Route path="entregas-us" element={<PMODashboardPage initialTab="entregas-us" />} />
                     <Route path="matriz" element={<ProjectPriorityMatrixPage />} />
-                    <Route path="painel-po" element={<PMODashboardPage />} />
-                    <Route path="po-sync" element={<PMODashboardPage initialTab="po-sync" />} />
-                    <Route path="status-reports" element={<PMODashboardPage initialTab="status-reports" />} />
-                    <Route path="status-reports/new" element={<StatusReportEditorPage />} />
-                    <Route path="status-reports/:id" element={<StatusReportViewPage />} />
+                    {/* Visões consolidadas do portfólio — fora do alcance do PO Externo. */}
+                    <Route element={<ExternalPOGuard />}>
+                      <Route path="capacidade" element={<CapacityCockpitPage />} />
+                      <Route path="relatorios" element={<PMODashboardPage initialTab="relatorios" />} />
+                      <Route path="entregas-us" element={<PMODashboardPage initialTab="entregas-us" />} />
+                      <Route path="painel-po" element={<PMODashboardPage />} />
+                      <Route path="po-sync" element={<PMODashboardPage initialTab="po-sync" />} />
+                      <Route path="status-reports" element={<PMODashboardPage initialTab="status-reports" />} />
+                      <Route path="status-reports/new" element={<StatusReportEditorPage />} />
+                      <Route path="status-reports/:id" element={<StatusReportViewPage />} />
+                      <Route path="programas" element={<ProjectProgramsPage />} />
+                    </Route>
                     <Route path="solicitacoes" element={<BasicNewRequestPage />} />
                     <Route path="minhas" element={<BasicMyRequestsPage />} />
-                    <Route path="programas" element={<ProjectProgramsPage />} />
                     <Route path=":projectId/board" element={<ProjectBoardPage />} />
                     <Route path=":projectId/lista" element={<ProjectBoardPage />} />
                     <Route path=":projectId/calendario" element={<ProjectBoardPage />} />
@@ -290,16 +310,18 @@ export default function App() {
                     </Route>
                   </Route>
 
-                  {/* TeamOps */}
-                  <Route path="modules/teamops" element={<TeamopsLayout />}>
-                    <Route index element={<TeamopsDashboardPage />} />
-                    <Route path="org"           element={<TeamopsOrgPage />} />
-                    <Route path="people"        element={<TeamopsPeoplePage />} />
-                    <Route path="people/:personId" element={<TeamopsPersonDetailPage />} />
-                    <Route path="stacks"        element={<TeamopsStacksPage />} />
-                    <Route path="absences"      element={<TeamopsAbsencesPage />} />
-                    <Route element={<ModuleConfigGuard moduleSlug="teamops" />}>
-                      <Route path="config"        element={<TeamopsConfigPage />} />
+                  {/* TeamOps — módulo inteiro vedado ao PO Externo */}
+                  <Route element={<ExternalPOGuard />}>
+                    <Route path="modules/teamops" element={<TeamopsLayout />}>
+                      <Route index element={<TeamopsDashboardPage />} />
+                      <Route path="org"           element={<TeamopsOrgPage />} />
+                      <Route path="people"        element={<TeamopsPeoplePage />} />
+                      <Route path="people/:personId" element={<TeamopsPersonDetailPage />} />
+                      <Route path="stacks"        element={<TeamopsStacksPage />} />
+                      <Route path="absences"      element={<TeamopsAbsencesPage />} />
+                      <Route element={<ModuleConfigGuard moduleSlug="teamops" />}>
+                        <Route path="config"        element={<TeamopsConfigPage />} />
+                      </Route>
                     </Route>
                   </Route>
 
@@ -313,19 +335,31 @@ export default function App() {
                     <Route path="processos-portfolio" element={<ProdutosProcessPortfolioPage />} />
                     <Route path="indicadores" element={<ProdutosIndicadoresPage />} />
                     <Route path="fornecedores" element={<ProdutosFornecedoresPage />} />
+                    <Route path="repositorios" element={<ProdutosRepositoriosPage />} />
                     <Route element={<ModuleConfigGuard moduleSlug="produtos" />}>
                       <Route path="config" element={<ProdutosConfigPage />} />
                     </Route>
                   </Route>
 
-                  {/* Indicadores */}
-                  <Route path="modules/indicadores" element={<IndicadoresLayout />}>
-                    <Route index element={<IndicadoresDashboardPage />} />
-                    <Route path="dashboard" element={<IndicadoresDashboardPage />} />
-                    <Route path="indicadores" element={<IndicadoresListPage />} />
-                    <Route path="indicadores/:id" element={<IndicadorDetailPage />} />
-                    <Route element={<ModuleConfigGuard moduleSlug="indicadores" />}>
-                      <Route path="config" element={<IndicadoresConfigPage />} />
+                  {/* Indicadores — módulo inteiro vedado ao PO Externo */}
+                  <Route element={<ExternalPOGuard />}>
+                    <Route path="modules/indicadores" element={<IndicadoresLayout />}>
+                      <Route index element={<IndicadoresDashboardPage />} />
+                      <Route path="dashboard" element={<IndicadoresDashboardPage />} />
+                      <Route path="indicadores" element={<IndicadoresListPage />} />
+                      <Route path="indicadores/:id" element={<IndicadorDetailPage />} />
+                      <Route element={<ModuleConfigGuard moduleSlug="indicadores" />}>
+                        <Route path="config" element={<IndicadoresConfigPage />} />
+                      </Route>
+                    </Route>
+                  </Route>
+
+                  {/* RTD — Reunião de Tomada de Decisão. Módulo vedado ao PO Externo. */}
+                  <Route element={<ExternalPOGuard />}>
+                    <Route path="modules/rtd" element={<RtdLayout />}>
+                      <Route index element={<Navigate to="reunioes" replace />} />
+                      <Route path="reunioes" element={<RtdReunioesPage />} />
+                      <Route path="reunioes/:id" element={<RtdReuniaoPage />} />
                     </Route>
                   </Route>
 

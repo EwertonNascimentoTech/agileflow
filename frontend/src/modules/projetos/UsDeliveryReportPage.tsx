@@ -1,14 +1,23 @@
 import { useEffect, useMemo, useState } from "react"
-import { AlertTriangle, CheckCircle2, PackageCheck } from "lucide-react"
+import {
+  AlertTriangle,
+  CheckCircle2,
+  FileText,
+  FolderKanban,
+  GitBranch,
+  PackageCheck,
+} from "lucide-react"
 
 import {
   projetosApi,
+  type ProjectDeliveryItem,
   type UsDeliveryAssigneeGroup,
   type UsDeliveryItem,
   type UsDeliveryPeriod,
   type UsDeliveryReport,
 } from "@/api/projetos"
 import { EmptyState } from "@/components/EmptyState"
+import { KpiCard } from "@/components/KpiCard"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -21,6 +30,7 @@ const PERIOD_OPTS: { value: UsDeliveryPeriod; label: string }[] = [
   { value: "tomorrow", label: "Amanhã" },
   { value: "this_week", label: "Essa semana" },
   { value: "next_week", label: "Próxima semana" },
+  { value: "last_month", label: "Mês passado" },
   { value: "this_month", label: "Mês atual" },
   { value: "next_month", label: "Próximo mês" },
 ]
@@ -45,11 +55,119 @@ function fmtDateTime(iso: string | null | undefined): string {
   })
 }
 
+function LinkBadge({
+  ok,
+  label,
+  count,
+  items,
+}: {
+  ok: boolean
+  label: string
+  count: number
+  items: { name: string; item_date: string | null }[]
+}) {
+  const hasItems = items.length > 0
+  const titleText = hasItems
+    ? items.map((it) => (it.item_date ? `${it.name} — ${fmtDate(it.item_date)}` : it.name)).join("\n")
+    : undefined
+  return (
+    <span className="relative inline-flex group/link" title={titleText}>
+      <Badge
+        variant={ok ? "success" : "outline"}
+        className={`font-normal gap-1 ${hasItems ? "cursor-default" : ""}`}
+      >
+        {label}{count > 0 ? ` ${count}` : ""}
+      </Badge>
+      {hasItems && (
+        <span
+          role="tooltip"
+          className="pointer-events-none absolute left-0 top-full z-50 mt-1.5 hidden w-max max-w-[300px] rounded-md border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-md group-hover/link:block"
+        >
+          <ul className="space-y-1 text-left">
+            {items.map((it, idx) => (
+              <li key={`${it.name}-${idx}`} className="leading-snug">
+                <span className="font-medium">{it.name}</span>
+                {it.item_date && (
+                  <span className="text-muted-foreground"> · {fmtDate(it.item_date)}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </span>
+      )}
+    </span>
+  )
+}
+
+function ProjectDeliveriesTable({ items }: { items: ProjectDeliveryItem[] }) {
+  if (items.length === 0) {
+    return (
+      <p className="py-3 text-sm text-muted-foreground">
+        Nenhum projeto/programa concluído neste período.
+      </p>
+    )
+  }
+  return (
+    <div className="overflow-x-auto rounded-md border">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
+            <th className="px-3 py-2 font-medium">Projeto / Programa</th>
+            <th className="px-3 py-2 font-medium">PO</th>
+            <th className="px-3 py-2 font-medium">Produto</th>
+            <th className="px-3 py-2 font-medium whitespace-nowrap">Concluído em</th>
+            <th className="px-3 py-2 font-medium">Vínculos</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((it) => (
+            <tr key={it.id} className="border-b last:border-b-0 align-top">
+              <td className="px-3 py-2">
+                <div className="font-medium">{it.title}</div>
+                {it.planning_kind && (
+                  <div className="text-xs text-muted-foreground capitalize">{it.planning_kind}</div>
+                )}
+              </td>
+              <td className="px-3 py-2 text-muted-foreground">{it.po_name ?? "—"}</td>
+              <td className="px-3 py-2 text-muted-foreground">{it.product_name ?? "—"}</td>
+              <td className="px-3 py-2 whitespace-nowrap tabular-nums text-muted-foreground">
+                {fmtDateTime(it.completed_at)}
+              </td>
+              <td className="px-3 py-2">
+                <div className="flex flex-wrap gap-1">
+                  <LinkBadge
+                    ok={it.has_servicos}
+                    label="Serviços"
+                    count={it.servicos_count}
+                    items={it.servicos ?? []}
+                  />
+                  <LinkBadge
+                    ok={it.has_processos}
+                    label="Processos"
+                    count={it.processos_count}
+                    items={it.processos ?? []}
+                  />
+                  <LinkBadge
+                    ok={it.has_documentos}
+                    label="Docs"
+                    count={it.documentos_count}
+                    items={it.documentos ?? []}
+                  />
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 function UsTable({ items, mode }: { items: UsDeliveryItem[]; mode: "delivered" | "overdue" }) {
   if (items.length === 0) {
     return (
       <p className="py-3 text-sm text-muted-foreground">
-        {mode === "delivered" ? "Nenhuma entrega neste período." : "Nenhuma US atrasada."}
+        {mode === "delivered" ? "Nenhuma US entregue neste período." : "Nenhuma US atrasada."}
       </p>
     )
   }
@@ -116,13 +234,13 @@ function AssigneeSection({ group }: { group: UsDeliveryAssigneeGroup }) {
       <CardContent className="space-y-4">
         <div>
           <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Entregas no período
+            US no período
           </h4>
           <UsTable items={group.delivered} mode="delivered" />
         </div>
         <div>
           <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Atrasadas
+            US atrasadas
           </h4>
           <UsTable items={group.overdue} mode="overdue" />
         </div>
@@ -164,7 +282,7 @@ export default function UsDeliveryReportPage() {
     }
   }, [period, assignee])
 
-  const totals = useMemo(() => {
+  const usTotals = useMemo(() => {
     if (!data) return { delivered: 0, overdue: 0 }
     return data.by_assignee.reduce(
       (acc, g) => ({
@@ -176,14 +294,16 @@ export default function UsDeliveryReportPage() {
   }, [data])
 
   const periodLabel = PERIOD_OPTS.find((p) => p.value === period)?.label ?? period
+  const kpis = data?.project_kpis ?? { total: 0, com_servicos: 0, com_processos_e_documentos: 0 }
+  const projects = data?.project_deliveries ?? []
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h3 className="text-base font-semibold">Entregas US por responsável</h3>
+          <h3 className="text-base font-semibold">Entregas</h3>
           <p className="text-sm text-muted-foreground">
-            O que foi concluído no período, US atrasadas, data de saída do backlog e conclusão.
+            Projetos concluídos no período (com vínculos de produto) e User Stories por responsável.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -201,7 +321,7 @@ export default function UsDeliveryReportPage() {
             </Select>
           </div>
           <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">Responsável</label>
+            <label className="text-xs text-muted-foreground">Responsável (US)</label>
             <Select value={assignee} onValueChange={setAssignee}>
               <SelectTrigger className="w-52">
                 <SelectValue placeholder="Todos" />
@@ -230,49 +350,90 @@ export default function UsDeliveryReportPage() {
 
       {!loading && !error && data && (
         <>
-          <div className="grid gap-3 sm:grid-cols-3">
+          {/* ── Entregas = projetos ── */}
+          <section className="space-y-3">
+            <div>
+              <h4 className="text-sm font-semibold">Entregas (projetos)</h4>
+              <p className="text-xs text-muted-foreground">
+                Projetos e programas concluídos em {periodLabel.toLowerCase()} · vínculos com o portfólio de produtos.
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <KpiCard
+                label="Projetos entregues"
+                value={kpis.total}
+                icon={FolderKanban}
+                sub={`Período: ${periodLabel}`}
+              />
+              <KpiCard
+                label="Com serviços vinculados"
+                value={kpis.com_servicos}
+                icon={GitBranch}
+                sub={kpis.total > 0 ? `${Math.round((kpis.com_servicos / kpis.total) * 100)}% das entregas` : "sem entregas"}
+              />
+              <KpiCard
+                label="Com processos e documentos"
+                value={kpis.com_processos_e_documentos}
+                icon={FileText}
+                sub={kpis.total > 0 ? `${Math.round((kpis.com_processos_e_documentos / kpis.total) * 100)}% das entregas` : "sem entregas"}
+              />
+            </div>
             <Card>
               <CardHeader className="pb-2">
-                <CardDescription>Período</CardDescription>
-                <CardTitle className="text-lg">{periodLabel}</CardTitle>
+                <CardTitle className="text-base">Lista de entregas</CardTitle>
+                <CardDescription>
+                  Indicadores: serviços do produto · processos (sub-processos do portfólio) · documentos cadastrados.
+                </CardDescription>
               </CardHeader>
-              <CardContent className="text-xs text-muted-foreground">
-                A partir de {fmtDate(data.range_start)}
+              <CardContent>
+                <ProjectDeliveriesTable items={projects} />
               </CardContent>
             </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardDescription>Entregas</CardDescription>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <CheckCircle2 size={18} className="text-emerald-600" />
-                  {totals.delivered}
-                </CardTitle>
-              </CardHeader>
-            </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardDescription>Atrasadas</CardDescription>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <AlertTriangle size={18} className={totals.overdue > 0 ? "text-destructive" : "text-muted-foreground"} />
-                  {totals.overdue}
-                </CardTitle>
-              </CardHeader>
-            </Card>
-          </div>
+          </section>
 
-          {data.by_assignee.length === 0 ? (
-            <EmptyState
-              icon={PackageCheck}
-              title="Nada neste recorte"
-              description="Não há User Stories entregues neste período nem atrasadas para o filtro escolhido."
-            />
-          ) : (
-            <div className="space-y-4">
-              {data.by_assignee.map((g) => (
-                <AssigneeSection key={g.assignee_id ?? "__none__"} group={g} />
-              ))}
+          {/* ── User Stories ── */}
+          <section className="space-y-3">
+            <div>
+              <h4 className="text-sm font-semibold">User Stories por responsável</h4>
+              <p className="text-xs text-muted-foreground">
+                O que foi concluído no período, US atrasadas, saída do backlog e conclusão.
+              </p>
             </div>
-          )}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription>US entregues</CardDescription>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <CheckCircle2 size={18} className="text-emerald-600" />
+                    {usTotals.delivered}
+                  </CardTitle>
+                </CardHeader>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription>US atrasadas</CardDescription>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <AlertTriangle size={18} className={usTotals.overdue > 0 ? "text-destructive" : "text-muted-foreground"} />
+                    {usTotals.overdue}
+                  </CardTitle>
+                </CardHeader>
+              </Card>
+            </div>
+
+            {data.by_assignee.length === 0 ? (
+              <EmptyState
+                icon={PackageCheck}
+                title="Nenhuma US neste recorte"
+                description="Não há User Stories entregues neste período nem atrasadas para o filtro escolhido."
+              />
+            ) : (
+              <div className="space-y-4">
+                {data.by_assignee.map((g) => (
+                  <AssigneeSection key={g.assignee_id ?? "__none__"} group={g} />
+                ))}
+              </div>
+            )}
+          </section>
         </>
       )}
     </div>

@@ -27,8 +27,12 @@ export function formatCardCustomFieldValue(
     return Number.isNaN(d.getTime()) ? raw : d.toLocaleDateString("pt-BR")
   }
   if (type === "user" || type === "current_user") {
-    const id = typeof value === "string" ? value : null
-    return id ? (resolveUserName(id) ?? id) : null
+    const id = typeof value === "string" ? value.trim() : null
+    if (!id) return null
+    // current_user grava o nome; user pode gravar UUID. Só resolve quando parece id.
+    const looksLikeId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+    if (!looksLikeId) return id
+    return resolveUserName(id) ?? id
   }
   if (type === "select") {
     if (field) {

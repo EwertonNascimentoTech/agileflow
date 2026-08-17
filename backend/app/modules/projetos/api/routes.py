@@ -5,7 +5,13 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Respon
 from sqlalchemy import select
 
 from app.core import storage
-from app.core.dependencies import ModuleContext, require_module, require_permission
+from app.core.config import settings
+from app.core.dependencies import (
+    ModuleContext,
+    has_permission_cached,
+    require_module,
+    require_permission,
+)
 from app.modules.projetos.schemas import (
     CriticalPathItem,
     ProjectCardAvailableField,
@@ -73,6 +79,10 @@ from app.modules.projetos.schemas import (
     ProjectStatusUpdate,
     ProjectTaskCommentCreate,
     ProjectTaskCommentResponse,
+    UsCommitEvidenceState,
+    UsCommitItem,
+    UsCommitLinkIn,
+    ProjectTaskStatusHistoryResponse,
     ProjectTaskCreate,
     ScheduleBaselineCreateIn,
     ScheduleBaselineResponse,
@@ -84,6 +94,7 @@ from app.modules.projetos.schemas import (
     ProjectProgramCreate,
     ProjectProgramUpdate,
     ProjectProgramResponse,
+    ProjectTaskCardResponse,
     ProjectTaskResponse,
     ProjectTaskUpdate,
     PlanningClassificationUpdate,
@@ -97,9 +108,14 @@ from app.modules.projetos.schemas import (
     TaskDependencyResponse,
     WorkloadResponse,
     CapacityHeatmapResponse,
+    CapacityDayDetailResponse,
     CapacityByProjectResponse,
     CapacityGapsResponse,
     FreePeopleResponse,
+    PersonCapacityWindowResponse,
+    ScheduleScenarioRequest,
+    ScheduleScenarioResponse,
+    ScheduleOverloadResponse,
     SimTasksResponse,
     ScenarioRequest,
     ScenarioResult,
@@ -140,6 +156,8 @@ from app.modules.projetos.service import (
     ProjectProgramService,
     ProjectStatusService,
     ProjectTaskCommentService,
+    UsCommitEvidenceService,
+    ProjectTaskStatusHistoryService,
     ProjectTaskService,
     ProjectStatusDefaultFormLinkService,
     ProjectStatusSectionLinkService,
@@ -164,17 +182,9 @@ _can_view_performance = require_permission("projetos.performance.view")
 
 
 async def _has_permission(ctx: ModuleContext, code: str) -> bool:
-    if ctx.user.role in (UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN):
-        return True
-    if not ctx.user.role_id:
-        return False
-    result = await ctx.db.execute(
-        select(RolePermission).where(
-            RolePermission.role_id == ctx.user.role_id,
-            RolePermission.permission_code == code,
-        )
-    )
-    return result.scalar_one_or_none() is not None
+    # Delega ao helper cacheado (auth:perm:*). O board consulta permissão 2-3 vezes
+    # por request; sem cache cada consulta era um round-trip ao banco.
+    return await has_permission_cached(ctx.user, code)
 
 
 async def _is_basic_user(ctx: ModuleContext) -> bool:
@@ -195,11 +205,122 @@ def _ensure_uuid(value: Optional[uuid.UUID]) -> Optional[uuid.UUID]:
 _NOBODY = uuid.UUID(int=0)  # sentinela: não casa com nenhum person_id real
 
 
+async def _cached_person_lookup(key: str, resolve) -> Optional[uuid.UUID]:
+    """Memoiza um lookup de person_id que devolve Optional[UUID].
+
+    O valor é embrulhado num dict porque `cache_get` devolve None tanto em miss
+    quanto em valor nulo — sem o envelope não dava para distinguir "não sei" de
+    "sei que é None", e o caso None (a maioria dos usuários) nunca seria cacheado.
+    """
+    from app.core.cache import cache_get, cache_set
+
+    if settings.AUTH_CACHE_TTL <= 0:
+        return await resolve()
+
+    cached = await cache_get(key)
+    if isinstance(cached, dict):
+        raw = cached.get("pid")
+        return uuid.UUID(raw) if raw else None
+
+    person_id = await resolve()
+    await cache_set(key, {"pid": str(person_id) if person_id else None},
+                    settings.AUTH_CACHE_TTL)
+    return person_id
+
+
 async def _person_id_for_user(ctx: ModuleContext) -> Optional[uuid.UUID]:
     """person_id (teamops) do usuário logado — o responsável da tarefa agora é uma Pessoa."""
+    from app.core.cache import person_key
     from app.modules.teamops.models import Person
-    res = await ctx.db.execute(select(Person.id).where(Person.user_id == ctx.user.id))
-    return res.scalar_one_or_none()
+
+    async def _resolve() -> Optional[uuid.UUID]:
+        res = await ctx.db.execute(select(Person.id).where(Person.user_id == ctx.user.id))
+        return res.scalar_one_or_none()
+
+    return await _cached_person_lookup(person_key(ctx.user.id), _resolve)
+
+
+async def _po_external_person_id(ctx: ModuleContext) -> Optional[uuid.UUID]:
+    """person_id do usuário quando ele é um Product Owner (Externo); None caso contrário.
+
+    Admins (super/company) nunca entram no recorte. Um PO Externo sem Pessoa vinculada
+    cai no sentinela _NOBODY, então não enxerga nada — nunca o portfólio inteiro.
+
+    Cacheado: `_assert_task_in_scope` chama isto em TODA rota per-card (comentários,
+    histórico, prioridade, filhos...), então abrir um card fazia o lookup ~10 vezes.
+    Invalidação via `invalidate_po_external` ao trocar o Cargo de uma Pessoa."""
+    from app.core.cache import po_external_person_key
+
+    if ctx.user.role in (UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN):
+        return None
+
+    return await _cached_person_lookup(
+        po_external_person_key(ctx.user.id), lambda: _po_external_person_id_uncached(ctx)
+    )
+
+
+async def _po_external_person_id_uncached(ctx: ModuleContext) -> Optional[uuid.UUID]:
+    from app.modules.teamops.models import Person, Position
+    from app.modules.teamops.service import PO_EXTERNAL_POSITION_SLUGS
+
+    ext_slugs = sorted(PO_EXTERNAL_POSITION_SLUGS)
+    res = await ctx.db.execute(
+        select(Person.id)
+        .join(Position, Position.id == Person.position_id)
+        .where(Person.user_id == ctx.user.id, Position.slug.in_(ext_slugs))
+    )
+    person_id = res.scalar_one_or_none()
+    if person_id is not None:
+        return person_id
+
+    # Login sem Pessoa vinculada: o cargo ainda aparece na role do usuário
+    # ("Cargo · {nome}", criada por PositionService). Sem Pessoa não há projeto sob a
+    # responsabilidade dele — escopo vazio, jamais o portfólio inteiro.
+    if not ctx.user.role_id:
+        return None
+    role_name = (await ctx.db.execute(
+        select(Role.name).where(Role.id == ctx.user.role_id)
+    )).scalar_one_or_none()
+    if not role_name:
+        return None
+    ext_names = (await ctx.db.execute(
+        select(Position.name).where(Position.slug.in_(ext_slugs))
+    )).scalars().all()
+    if role_name.strip() in {f"Cargo · {n}" for n in ext_names}:
+        return _NOBODY
+    return None
+
+
+async def _po_external_scope(ctx: ModuleContext) -> Optional[set[uuid.UUID]]:
+    """Conjunto de cards visíveis se o usuário for PO Externo; None = sem recorte."""
+    person_id = await _po_external_person_id(ctx)
+    if person_id is None:
+        return None
+    return await ProjectTaskService.po_external_scope_task_ids(
+        ctx.db, person_id, user_id=ctx.user.id
+    )
+
+
+async def _deny_po_external(ctx: ModuleContext = Depends(_ctx)) -> None:
+    """Dependency das visões consolidadas do portfólio (PMO, PO Sync, Capacidade,
+    Status Reports, Relatórios). O Product Owner (Externo) enxerga só os projetos que
+    lidera, então esses agregados ficam fora do alcance dele — inclusive por URL direta,
+    já que esconder o item de menu não protege a API."""
+    if await _po_external_person_id(ctx) is not None:
+        raise HTTPException(
+            status_code=403,
+            detail="Visão consolidada do portfólio indisponível para Product Owner (Externo).",
+        )
+
+
+async def _assert_task_in_scope(ctx: ModuleContext, task_id: uuid.UUID) -> None:
+    """Barra o PO Externo em qualquer card fora dos projetos que ele lidera.
+    Responde 404 (e não 403) para não revelar a existência do card."""
+    scope = await _po_external_scope(ctx)
+    if scope is None:
+        return
+    if task_id not in scope:
+        raise HTTPException(status_code=404, detail="Tarefa não encontrada.")
 
 
 @router.get("/projects", response_model=list[ProjectResponse])
@@ -566,7 +687,40 @@ async def list_funnels(
     active_only: bool = Query(False),
     ctx: ModuleContext = Depends(_ctx),
 ):
+    # Bootstrap idempotente do kanban Contratar (aparece em "Kanbans ativos").
+    # Este GET é carregado a cada mount do board e a cada abertura de card, e o
+    # `ensure` custa ~25-40 queries + um commit. O marcador o reduz a uma execução
+    # por TTL; `POST /ensure-procurement` continua forçando quando necessário.
+    from app.core.cache import bootstrap_key, cache_get, cache_set
+
+    marker = bootstrap_key(ctx.schema, "procurement", project_id)
+    if not await cache_get(marker):
+        try:
+            from app.modules.projetos.procurement import ProcurementFlowService
+            await ProcurementFlowService.ensure(ctx.db, project_id)
+            await ctx.db.commit()
+            await cache_set(marker, True, settings.BOOTSTRAP_CACHE_TTL)
+        except Exception:
+            await ctx.db.rollback()
     return await ProjectFunnelService.list(ctx.db, project_id, active_only=active_only, current_user=ctx.user)
+
+
+@router.post("/projects/{project_id}/ensure-procurement")
+async def ensure_procurement_flow(
+    project_id: uuid.UUID,
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Bootstrap idempotente do funil Contratar + raias Contratação/Cancelado."""
+    if not await _has_permission(ctx, "projetos.task.manage"):
+        raise HTTPException(status_code=403, detail="Sem permissão para configurar contratação.")
+    from app.core.cache import bootstrap_key, cache_set
+    from app.modules.projetos.procurement import ProcurementFlowService
+    result = await ProcurementFlowService.ensure(ctx.db, project_id)
+    await ctx.db.commit()
+    # Acabou de rodar: revalida o marcador que o GET de funnels consulta.
+    await cache_set(bootstrap_key(ctx.schema, "procurement", project_id), True,
+                    settings.BOOTSTRAP_CACHE_TTL)
+    return result
 
 
 @router.get("/projects/{project_id}/funnels/{funnel_id}/unclassified-count")
@@ -642,7 +796,9 @@ async def list_all_tasks(
     )
     if not can_view_all:
         raise HTTPException(status_code=403, detail="Sem permissão para visualizar todas as demandas.")
-    return await ProjectTaskService.list_all(ctx.db, project_id=project_id)
+    return await ProjectTaskService.list_all(
+        ctx.db, project_id=project_id, only_task_ids=await _po_external_scope(ctx)
+    )
 
 
 _MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB
@@ -694,6 +850,7 @@ async def get_reports(
     diretoria: Optional[str] = Query(None, description="Filtra cards pela diretoria."),
     area: Optional[str] = Query(None, description="Filtra cards pela área."),
     ctx: ModuleContext = Depends(_ctx),
+    _po_ext=Depends(_deny_po_external),
 ):
     return await ProjectReportsService.build(ctx.db, po=po, diretoria=diretoria, area=area)
 
@@ -702,10 +859,11 @@ async def get_reports(
 async def get_us_delivery_report(
     period: str = Query(
         "today",
-        description="today|tomorrow|this_week|next_week|this_month|next_month",
+        description="today|tomorrow|this_week|next_week|last_month|this_month|next_month",
     ),
     assignee: Optional[uuid.UUID] = Query(None, description="Filtra pelo responsável (Person.id)."),
     ctx: ModuleContext = Depends(_ctx),
+    _po_ext=Depends(_deny_po_external),
 ):
     """Entregas de User Story por responsável no período + lista de atrasadas."""
     return await UsDeliveryReportService.build(ctx.db, period=period, assignee=assignee)
@@ -731,6 +889,7 @@ async def get_team_performance(
     ),
     ctx: ModuleContext = Depends(_ctx),
     _perf=Depends(_can_view_performance),
+    _po_ext=Depends(_deny_po_external),
 ):
     """Painel de desempenho do time: linhas por Dev e por PO, KPIs de fluxo, séries de
     tendência e raias de WIP/aging. Restrito à gestão (`projetos.performance.view`)."""
@@ -768,6 +927,7 @@ async def get_po_portfolio_overview(
     diretoria: Optional[str] = Query(None, description="Filtra projetos/programas pela diretoria."),
     area: Optional[str] = Query(None, description="Filtra projetos/programas pela área."),
     ctx: ModuleContext = Depends(_ctx),
+    _po_ext=Depends(_deny_po_external),
 ):
     """Modo gestão: agregados do portfólio de cada PO, lado a lado."""
     return await PoPortfolioService.build_overview(ctx.db, diretoria=diretoria, area=area)
@@ -779,6 +939,7 @@ async def get_po_portfolio(
     diretoria: Optional[str] = Query(None, description="Filtra projetos/programas pela diretoria."),
     area: Optional[str] = Query(None, description="Filtra projetos/programas pela área."),
     ctx: ModuleContext = Depends(_ctx),
+    _po_ext=Depends(_deny_po_external),
 ):
     """Portfólio do PO: projetos/programas que ele possui (assigned_to), com prioridade,
     progresso, riscos, gargalos, previsibilidade e saúde sintetizada. Gated só pelo módulo.
@@ -790,19 +951,23 @@ async def get_po_portfolio(
 async def get_po_sync(
     diretoria: Optional[str] = Query(None, description="Recorta a análise pela diretoria."),
     area: Optional[str] = Query(None, description="Recorta a análise pela área."),
+    mes: Optional[int] = Query(None, ge=1, le=12, description="Mês de referência (entregas concluídas). Próximo ciclo = mês seguinte."),
+    ano: Optional[int] = Query(None, ge=2000, le=2100, description="Ano de referência."),
     ctx: ModuleContext = Depends(_ctx),
+    _po_ext=Depends(_deny_po_external),
 ):
     """Análise de portfólio para a cerimônia **PO Sync**: lidera por PO e aplica as regras da
     metodologia (fase pela situação real, % execução descontando "Não realizado", saúde de
     prazo com média/mediana/outliers e lacunas de baseline). Read-only. Retorna dict rico
     (sem response_model, como o preview do Status Report) para não filtrar campos aninhados."""
-    return await PoSyncService.build(ctx.db, diretoria=diretoria, area=area)
+    return await PoSyncService.build(ctx.db, diretoria=diretoria, area=area, mes=mes, ano=ano)
 
 
 @router.post("/status-reports/preview")
 async def preview_status_report(
     data: StatusReportPreviewIn,
     ctx: ModuleContext = Depends(_ctx),
+    _po_ext=Depends(_deny_po_external),
 ):
     """Monta o Status Report do estado atual para o recorte (diretoria/área). NÃO persiste —
     serve de rascunho para o editor preencher a narrativa antes de salvar."""
@@ -813,6 +978,7 @@ async def preview_status_report(
 async def create_status_report(
     data: StatusReportCreateIn,
     ctx: ModuleContext = Depends(_ctx),
+    _po_ext=Depends(_deny_po_external),
 ):
     """Persiste um snapshot imutável (dados do estado atual + narrativa). Vira um ponto na
     série histórica do recorte."""
@@ -824,6 +990,7 @@ async def list_status_reports(
     diretoria: Optional[str] = Query(None, description="Filtra a série histórica pela diretoria."),
     area: Optional[str] = Query(None, description="Filtra a série histórica pela área."),
     ctx: ModuleContext = Depends(_ctx),
+    _po_ext=Depends(_deny_po_external),
 ):
     """Série histórica de Status Reports (mais recente primeiro), filtrável por recorte."""
     return await StatusReportService.list(ctx.db, diretoria=diretoria, area=area)
@@ -833,40 +1000,70 @@ async def list_status_reports(
 async def get_status_report(
     report_id: uuid.UUID,
     ctx: ModuleContext = Depends(_ctx),
+    _po_ext=Depends(_deny_po_external),
 ):
     """Snapshot completo de um Status Report para visualização/impressão."""
     return await StatusReportService.get(ctx.db, report_id)
 
 
-@router.get("/projects/{project_id}/tasks", response_model=list[ProjectTaskResponse])
+@router.get(
+    "/projects/{project_id}/tasks",
+    # response_model=None de propósito: o FastAPI revalidaria o card enxuto de volta
+    # em ProjectTaskResponse e leria os atributos excluídos direto do ORM, desfazendo
+    # a economia. Cada ramo constrói explicitamente o modelo que vai serializar.
+    response_model=None,
+    responses={200: {"model": list[ProjectTaskResponse]}},
+)
 async def list_tasks(
     project_id: uuid.UUID,
+    response: Response,
     status_id: Optional[uuid.UUID] = Query(None),
     assigned_to: Optional[uuid.UUID] = Query(None),
+    slim: bool = Query(
+        False,
+        description="Omite description/anexos/procurement_meta (~1/3 do payload). O kanban "
+                    "não desenha esses campos; o drawer e o Gantt precisam, então não usam slim.",
+    ),
+    done_limit: Optional[int] = Query(
+        None, ge=0,
+        description="Traz só os N card-raiz concluídos mais recentes (com suas árvores). "
+                    "O total vai no header X-Done-Total para a coluna mostrar quanto falta.",
+    ),
     ctx: ModuleContext = Depends(_ctx),
 ):
     if await _is_basic_user(ctx):
         assigned_to = await _person_id_for_user(ctx) or _NOBODY
-        return await ProjectTaskService.list(
+        tasks = await ProjectTaskService.list(
             ctx.db,
             project_id=project_id,
             status_id=status_id,
             assigned_to=assigned_to,
         )
+    else:
+        can_view_all = await _has_permission(ctx, "projetos.task.view") or await _has_permission(ctx, "projetos.task.manage")
+        if not can_view_all:
+            own_view = await _has_permission(ctx, "projetos.task.view_own")
+            if own_view:
+                assigned_to = await _person_id_for_user(ctx) or _NOBODY
+            else:
+                raise HTTPException(status_code=403, detail="Sem permissão para visualizar tarefas.")
+        tasks = await ProjectTaskService.list(
+            ctx.db,
+            project_id=project_id,
+            status_id=status_id,
+            assigned_to=assigned_to,
+            only_task_ids=await _po_external_scope(ctx),
+        )
 
-    can_view_all = await _has_permission(ctx, "projetos.task.view") or await _has_permission(ctx, "projetos.task.manage")
-    if not can_view_all:
-        own_view = await _has_permission(ctx, "projetos.task.view_own")
-        if own_view:
-            assigned_to = await _person_id_for_user(ctx) or _NOBODY
-        else:
-            raise HTTPException(status_code=403, detail="Sem permissão para visualizar tarefas.")
-    return await ProjectTaskService.list(
-        ctx.db,
-        project_id=project_id,
-        status_id=status_id,
-        assigned_to=assigned_to,
-    )
+    if done_limit is not None:
+        tasks, done_total = await ProjectTaskService.trim_done_column(
+            ctx.db, project_id, tasks, done_limit
+        )
+        response.headers["X-Done-Total"] = str(done_total)
+        response.headers["Access-Control-Expose-Headers"] = "X-Done-Total"
+
+    model = ProjectTaskCardResponse if slim else ProjectTaskResponse
+    return [model.model_validate(t) for t in tasks]
 
 
 @router.get("/projects/{project_id}/programs", response_model=list[ProjectRefMini])
@@ -994,6 +1191,7 @@ async def update_task(
     data: ProjectTaskUpdate,
     ctx: ModuleContext = Depends(_ctx),
 ):
+    await _assert_task_in_scope(ctx, task_id)
     task = await ProjectTaskService.get(ctx.db, project_id, task_id)
     can_manage = await _has_permission(ctx, "projetos.task.manage")
     is_company_user = ctx.user.role == UserRole.COMPANY_USER
@@ -1021,6 +1219,7 @@ async def set_planning_classification(
 ):
     """Edita Projeto/Programa a partir do card (ex.: "Concluído" da prospecção) e
     propaga ao card de planejamento convertido nos demais kanbans."""
+    await _assert_task_in_scope(ctx, task_id)
     if not await _has_permission(ctx, "projetos.task.manage"):
         raise HTTPException(status_code=403, detail="Sem permissão para classificar Projeto/Programa.")
     return await ProjectTaskService.set_planning_classification(
@@ -1041,6 +1240,7 @@ async def delete_task(
     task_id: uuid.UUID,
     ctx: ModuleContext = Depends(_ctx),
 ):
+    await _assert_task_in_scope(ctx, task_id)
     can_manage = await _has_permission(ctx, "projetos.task.manage")
     task = await ProjectTaskService.get(ctx.db, project_id, task_id)
     if not can_manage:
@@ -1055,6 +1255,7 @@ async def list_task_children(
     task_id: uuid.UUID,
     ctx: ModuleContext = Depends(_ctx),
 ):
+    await _assert_task_in_scope(ctx, task_id)
     return await ProjectTaskService.list_children(ctx.db, project_id, task_id)
 
 
@@ -1065,6 +1266,7 @@ async def create_schedule_stage(
     data: ScheduleStageCreate,
     ctx: ModuleContext = Depends(_ctx),
 ):
+    await _assert_task_in_scope(ctx, task_id)
     if not await _has_permission(ctx, "projetos.task.manage"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sem permissão para editar o cronograma.")
     return await ProjectTaskService.create_schedule_stage(ctx.db, project_id, task_id, data, current_user_id=ctx.user.id)
@@ -1111,13 +1313,16 @@ async def get_workload(
     unit: str = Query("day"),
     date_from: Optional[str] = Query(None, alias="from"),
     date_to: Optional[str] = Query(None, alias="to"),
+    root: Optional[uuid.UUID] = Query(None, description="Restringe ao card-raiz de planejamento"),
     ctx: ModuleContext = Depends(_ctx),
 ):
     from datetime import date as _date
 
     df = _date.fromisoformat(date_from) if date_from else None
     dt = _date.fromisoformat(date_to) if date_to else None
-    cells = await TaskDependencyService.compute_workload(ctx.db, project_id, df, dt, unit=unit)
+    cells = await TaskDependencyService.compute_workload(
+        ctx.db, project_id, df, dt, unit=unit, root_task_id=root,
+    )
     return WorkloadResponse(unit="day", cells=cells)
 
 
@@ -1139,6 +1344,17 @@ async def get_assignee_absences(
     })
 
 
+@router.get("/projects/{project_id}/schedule-overload", response_model=ScheduleOverloadResponse)
+async def get_schedule_overload(
+    project_id: uuid.UUID,
+    root: Optional[uuid.UUID] = Query(None, description="Restringe à subárvore deste card-raiz"),
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Tarefas do cronograma cujo responsável está superlotado no período — alimenta o
+    marcador de sobrecarga no avatar do Gantt. Mesmo gating de /assignee-absences."""
+    return await CapacityService.compute_schedule_overload(ctx.db, project_id, root)
+
+
 # ─────────────────────────────────────────────
 # Cockpit de planejamento de capacidade (cross-project)
 # ─────────────────────────────────────────────
@@ -1152,6 +1368,7 @@ async def get_capacity_heatmap(
     area: Optional[uuid.UUID] = Query(None, description="Filtra pelas pessoas desta área"),
     position: Optional[str] = Query(None, description="Filtra pelo slug do cargo (ex.: dev_backend)"),
     ctx: ModuleContext = Depends(_ctx),
+    _po_ext=Depends(_deny_po_external),
 ):
     """Lente por pessoa: heatmap de sobrecarga pessoa×dia cruzando TODO o portfólio.
     Gated pelo acesso ao módulo projetos (mesmo padrão de /po-sync)."""
@@ -1167,12 +1384,29 @@ async def get_capacity_heatmap(
     )
 
 
+@router.get("/capacity/day-detail", response_model=CapacityDayDetailResponse)
+async def get_capacity_day_detail(
+    person: uuid.UUID = Query(..., description="Pessoa (responsável efetivo) da célula"),
+    day: str = Query(..., alias="date", description="Dia clicado no heatmap (ISO)"),
+    ctx: ModuleContext = Depends(_ctx),
+    _po_ext=Depends(_deny_po_external),
+):
+    """Detalhe de uma célula do heatmap: US do dia (com etapa e horas) + atrasadas da
+    pessoa. Mesmo gating de /capacity/heatmap."""
+    from datetime import date as _date
+
+    return await CapacityService.compute_day_detail(
+        ctx.db, person, _date.fromisoformat(day),
+    )
+
+
 @router.get("/capacity/by-project", response_model=CapacityByProjectResponse)
 async def get_capacity_by_project(
     date_from: str = Query(..., alias="from"),
     date_to: str = Query(..., alias="to"),
     area: Optional[uuid.UUID] = Query(None, description="Filtra pelas pessoas desta área"),
     ctx: ModuleContext = Depends(_ctx),
+    _po_ext=Depends(_deny_po_external),
 ):
     """Lente por projeto (viabilidade): demanda × capacidade das pessoas alocadas."""
     from datetime import date as _date
@@ -1191,6 +1425,7 @@ async def get_capacity_gaps(
     date_to: str = Query(..., alias="to"),
     group_by: str = Query("position", pattern="^(position|area)$"),
     ctx: ModuleContext = Depends(_ctx),
+    _po_ext=Depends(_deny_po_external),
 ):
     """Gargalos por cargo/área e reforço (headcount) sugerido para cobrir o pico de déficit."""
     from datetime import date as _date
@@ -1213,6 +1448,7 @@ async def get_available_people(
     min_level: Optional[str] = Query(None, description="Nível mínimo na skill (basico..referencia)"),
     min_free_hours: float = Query(0.0, description="Folga total mínima no período (h)"),
     ctx: ModuleContext = Depends(_ctx),
+    _po_ext=Depends(_deny_po_external),
 ):
     """Pessoas com folga de capacidade no período (finder cross-team por skill/cargo)."""
     from datetime import date as _date
@@ -1231,11 +1467,36 @@ async def get_available_people(
     )
 
 
+@router.get("/capacity/person-window", response_model=PersonCapacityWindowResponse)
+async def get_person_capacity_window(
+    person: uuid.UUID = Query(..., description="Pessoa (assigned_to) a analisar"),
+    date_from: str = Query(..., alias="from"),
+    date_to: str = Query(..., alias="to"),
+    exclude_task: Optional[uuid.UUID] = Query(
+        None, description="Tarefa em edição — sai do 'já alocado' para não contar em dobro"
+    ),
+    ctx: ModuleContext = Depends(_ctx),
+    _po_ext=Depends(_deny_po_external),
+):
+    """Carga × capacidade de um responsável na janela de uma tarefa — alimenta o painel
+    de capacidade do cronograma. Mesmo gating das demais lentes (acesso ao módulo)."""
+    from datetime import date as _date
+
+    return await CapacityService.compute_person_window(
+        ctx.db,
+        person,
+        _date.fromisoformat(date_from),
+        _date.fromisoformat(date_to),
+        exclude_task_id=exclude_task,
+    )
+
+
 @router.get("/capacity/tasks", response_model=SimTasksResponse)
 async def get_capacity_tasks(
     date_from: str = Query(..., alias="from"),
     date_to: str = Query(..., alias="to"),
     ctx: ModuleContext = Depends(_ctx),
+    _po_ext=Depends(_deny_po_external),
 ):
     """Tarefas agendadas na janela — alimenta o construtor de mutações do simulador."""
     from datetime import date as _date
@@ -1249,6 +1510,7 @@ async def get_capacity_tasks(
 async def post_capacity_simulate(
     payload: ScenarioRequest,
     ctx: ModuleContext = Depends(_ctx),
+    _po_ext=Depends(_deny_po_external),
 ):
     """Simulador what-if efêmero: aplica mutações em memória e devolve o antes/depois. Nada é persistido."""
     return await CapacityService.simulate(
@@ -1261,6 +1523,7 @@ async def get_capacity_suggestions(
     date_from: str = Query(..., alias="from"),
     date_to: str = Query(..., alias="to"),
     ctx: ModuleContext = Depends(_ctx),
+    _po_ext=Depends(_deny_po_external),
 ):
     """Cenários prontos para resolver a sobrecarga (realocar/freela/adiar), com impacto já medido."""
     from datetime import date as _date
@@ -1275,6 +1538,7 @@ async def get_capacity_cross_team(
     date_from: str = Query(..., alias="from"),
     date_to: str = Query(..., alias="to"),
     ctx: ModuleContext = Depends(_ctx),
+    _po_ext=Depends(_deny_po_external),
 ):
     """Vazamento entre times: por pessoa, horas no próprio time vs em projetos de outros times
     (time dono = área do PO do card-raiz). Risco quando away > home."""
@@ -1285,12 +1549,63 @@ async def get_capacity_cross_team(
     )
 
 
+@router.post(
+    "/projects/{project_id}/schedule/scenario",
+    response_model=ScheduleScenarioResponse,
+)
+async def post_schedule_scenario(
+    project_id: uuid.UUID,
+    data: ScheduleScenarioRequest,
+    ctx: ModuleContext = Depends(_ctx),
+    _po_ext=Depends(_deny_po_external),
+):
+    """Cenário hipotético de fim do projeto: início + time → data projetada pela
+    capacidade livre agregada (desconta outros projetos, sáb/dom e ausências).
+    Não persiste nada."""
+    await _assert_task_in_scope(ctx, data.root_task_id)
+    return await CapacityService.simulate_project_end_scenario(
+        ctx.db,
+        project_id,
+        data.root_task_id,
+        data.start_date,
+        list(data.person_ids or []),
+    )
+
+
+@router.post(
+    "/projects/{project_id}/tasks/{task_id}/reschedule",
+    response_model=list[ProjectTaskResponse],
+)
+async def reschedule_schedule(
+    project_id: uuid.UUID,
+    task_id: uuid.UUID,
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Recálculo automático SOB DEMANDA da subárvore do card de planejamento.
+
+    O cronograma é manual: nenhuma edição reagenda tarefas. Este endpoint é a única
+    porta para o motor (sequência por responsável + dependências + calendário) e
+    SOBRESCREVE as datas manuais da subárvore. Exige o baseline aberto.
+    """
+    if not await _has_permission(ctx, "projetos.task.manage"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sem permissão para recalcular o cronograma.",
+        )
+    await _assert_task_in_scope(ctx, task_id)
+    await ProjectTaskService.reschedule_on_demand(ctx.db, project_id, task_id)
+    return await ProjectTaskService.list(
+        ctx.db, project_id=project_id, only_task_ids=await _po_external_scope(ctx)
+    )
+
+
 @router.get("/projects/{project_id}/critical-path", response_model=list[CriticalPathItem])
 async def get_critical_path(
     project_id: uuid.UUID,
     root: uuid.UUID = Query(..., description="Card de planejamento (raiz do cronograma)"),
     ctx: ModuleContext = Depends(_ctx),
 ):
+    await _assert_task_in_scope(ctx, root)
     return await ProjectTaskService.critical_path(ctx.db, project_id, root)
 
 
@@ -1326,6 +1641,19 @@ async def get_schedule_lock_for_task(
 ):
     """Estado da trava da raiz de planejamento à qual a tarefa pertence (resolve o root)."""
     return await ScheduleBaselineService.lock_state_for_task(ctx.db, project_id, task)
+
+
+@router.get("/projects/{project_id}/schedule-readiness")
+async def get_schedule_readiness(
+    project_id: uuid.UUID,
+    task: uuid.UUID = Query(..., description="Card cuja árvore de planejamento se quer avaliar"),
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Se o cronograma do projeto está pronto para Feature/US avançarem, e o que falta.
+
+    Read-only. O board consulta para explicar o bloqueio antes de tentar mover; quem
+    decide de fato é o guard em `ProjectTaskService.update` (423)."""
+    return await ProjectTaskService.schedule_readiness(ctx.db, project_id, task)
 
 
 @router.get("/projects/{project_id}/baselines", response_model=list[ScheduleBaselineResponse])
@@ -1428,6 +1756,7 @@ async def get_task_form_submission(
     task_id: uuid.UUID,
     ctx: ModuleContext = Depends(_ctx),
 ):
+    await _assert_task_in_scope(ctx, task_id)
     return await ProjectDemandFormSubmissionService.get_by_task(ctx.db, project_id, task_id)
 
 
@@ -1438,6 +1767,7 @@ async def upsert_task_form_submission(
     data: ProjectDemandFormSubmissionUpsert,
     ctx: ModuleContext = Depends(_ctx),
 ):
+    await _assert_task_in_scope(ctx, task_id)
     return await ProjectDemandFormSubmissionService.upsert(
         ctx.db,
         project_id=project_id,
@@ -1447,13 +1777,91 @@ async def upsert_task_form_submission(
     )
 
 
+# ── Evidência de commit da User Story ──
+@router.get("/projects/{project_id}/tasks/{task_id}/commits", response_model=list[UsCommitItem])
+async def list_us_commits(
+    project_id: uuid.UUID,
+    task_id: uuid.UUID,
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Commits já vinculados à User Story."""
+    await _assert_task_in_scope(ctx, task_id)
+    return await UsCommitEvidenceService.list_linked(ctx.db, project_id, task_id)
+
+
+@router.get("/projects/{project_id}/tasks/{task_id}/commits/available", response_model=list[UsCommitItem])
+async def list_us_commits_available(
+    project_id: uuid.UUID,
+    task_id: uuid.UUID,
+    search: Optional[str] = Query(None, description="Busca em mensagem, autor ou hash."),
+    limit: int = Query(50, ge=1, le=200),
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Commits elegíveis: os dos repositórios do produto vinculado ao projeto."""
+    await _assert_task_in_scope(ctx, task_id)
+    return await UsCommitEvidenceService.available_commits(
+        ctx.db, project_id, task_id, search=search, limit=limit
+    )
+
+
+@router.get("/projects/{project_id}/tasks/{task_id}/commits/state", response_model=UsCommitEvidenceState)
+async def us_commit_evidence_state(
+    project_id: uuid.UUID,
+    task_id: uuid.UUID,
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """O que a US tem de evidência e se já pode ser concluída."""
+    await _assert_task_in_scope(ctx, task_id)
+    return await UsCommitEvidenceService.evidence_state(ctx.db, project_id, task_id)
+
+
+@router.post("/projects/{project_id}/tasks/{task_id}/commits", response_model=list[UsCommitItem], status_code=201)
+async def link_us_commits(
+    project_id: uuid.UUID,
+    task_id: uuid.UUID,
+    data: UsCommitLinkIn,
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Vincula commits do produto do projeto como evidência da User Story."""
+    await _assert_task_in_scope(ctx, task_id)
+    return await UsCommitEvidenceService.link(
+        ctx.db, project_id, task_id, data.commit_ids, user_id=ctx.user.id
+    )
+
+
+@router.delete("/projects/{project_id}/tasks/{task_id}/commits/{commit_id}", status_code=204)
+async def unlink_us_commit(
+    project_id: uuid.UUID,
+    task_id: uuid.UUID,
+    commit_id: uuid.UUID,
+    ctx: ModuleContext = Depends(_ctx),
+):
+    await _assert_task_in_scope(ctx, task_id)
+    await UsCommitEvidenceService.unlink(ctx.db, project_id, task_id, commit_id)
+
+
 @router.get("/projects/{project_id}/tasks/{task_id}/comments", response_model=list[ProjectTaskCommentResponse])
 async def list_task_comments(
     project_id: uuid.UUID,
     task_id: uuid.UUID,
     ctx: ModuleContext = Depends(_ctx),
 ):
+    await _assert_task_in_scope(ctx, task_id)
     return await ProjectTaskCommentService.list(ctx.db, project_id, task_id)
+
+
+@router.get(
+    "/projects/{project_id}/tasks/{task_id}/status-history",
+    response_model=list[ProjectTaskStatusHistoryResponse],
+)
+async def list_task_status_history(
+    project_id: uuid.UUID,
+    task_id: uuid.UUID,
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Timeline de movimentação entre raias: entrada/saída, data/hora e quem arrastou."""
+    await _assert_task_in_scope(ctx, task_id)
+    return await ProjectTaskStatusHistoryService.list(ctx.db, project_id, task_id)
 
 
 @router.post("/projects/{project_id}/tasks/{task_id}/comments", response_model=ProjectTaskCommentResponse, status_code=201)
@@ -1464,6 +1872,7 @@ async def create_task_comment(
     ctx: ModuleContext = Depends(_ctx),
     _=Depends(_can_comment_manage),
 ):
+    await _assert_task_in_scope(ctx, task_id)
     return await ProjectTaskCommentService.create(
         ctx.db,
         project_id,
@@ -1563,6 +1972,7 @@ async def list_task_agent_executions(
     task_id: uuid.UUID,
     ctx: ModuleContext = Depends(_ctx),
 ):
+    await _assert_task_in_scope(ctx, task_id)
     return await ProjectStageAgentService.list_executions(ctx.db, task_id)
 
 
@@ -1708,6 +2118,7 @@ async def get_task_priority(
     task_id: uuid.UUID,
     ctx: ModuleContext = Depends(_ctx),
 ):
+    await _assert_task_in_scope(ctx, task_id)
     return await PriorityScoreService.get_for_task(ctx.db, task_id)
 
 
@@ -1716,6 +2127,7 @@ async def get_task_priority_history(
     task_id: uuid.UUID,
     ctx: ModuleContext = Depends(_ctx),
 ):
+    await _assert_task_in_scope(ctx, task_id)
     return await PriorityScoreService.history(ctx.db, task_id)
 
 
@@ -1726,6 +2138,7 @@ async def save_task_priority(
     ctx: ModuleContext = Depends(_ctx),
     _=Depends(_can_priority_score),
 ):
+    await _assert_task_in_scope(ctx, task_id)
     return await PriorityScoreService.score_task(ctx.db, task_id, data, ctx.user.id)
 
 
@@ -1735,5 +2148,6 @@ async def delete_task_priority(
     ctx: ModuleContext = Depends(_ctx),
     _=Depends(_can_priority_score),
 ):
+    await _assert_task_in_scope(ctx, task_id)
     await PriorityScoreService.delete(ctx.db, task_id)
 

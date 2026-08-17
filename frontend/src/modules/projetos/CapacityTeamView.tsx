@@ -13,6 +13,7 @@ import { EmptyState } from "@/components/EmptyState"
 import { SectionCard } from "@/components/SectionCard"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { CapacityDayDetailDialog } from "@/modules/projetos/CapacityDayDetailDialog"
 import { WorkloadView } from "@/modules/projetos/WorkloadView"
 
 // Ordena o elenco: PO e Referência Técnica primeiro, depois o resto.
@@ -61,6 +62,8 @@ export function CapacityTeamView({ from, to }: { from: string; to: string }) {
   const [projects, setProjects] = useState<CapacityByProjectResponse | null>(null)
   const [crossTeam, setCrossTeam] = useState<CrossTeamResponse | null>(null)
   const [loading, setLoading] = useState(false)
+  // Célula do heatmap aberta no modal de detalhamento do dia.
+  const [dayDetail, setDayDetail] = useState<{ personId: string; date: string } | null>(null)
 
   useEffect(() => {
     teamopsApi.listAreas(true).then(setAreas).catch(() => setAreas([]))
@@ -176,7 +179,11 @@ export function CapacityTeamView({ from, to }: { from: string; to: string }) {
           {/* Capacidade do time */}
           <SectionCard title="Capacidade do time (todos os projetos)">
             {heatmap && heatmap.cells.length > 0 ? (
-              <WorkloadView cells={heatmap.cells} nameForUser={nameFor} />
+              <WorkloadView
+                cells={heatmap.cells}
+                nameForUser={nameFor}
+                onCellClick={(personId, date) => setDayDetail({ personId, date })}
+              />
             ) : (
               <EmptyState icon={Users} title="Sem carga no período"
                 description="Ninguém do time tem tarefas com responsável, horas e datas no intervalo. Ajuste o período." />
@@ -257,6 +264,13 @@ export function CapacityTeamView({ from, to }: { from: string; to: string }) {
           </div>
         </>
       )}
+
+      <CapacityDayDetailDialog
+        personId={dayDetail?.personId ?? null}
+        date={dayDetail?.date ?? null}
+        personName={dayDetail ? nameFor(dayDetail.personId) : undefined}
+        onClose={() => setDayDetail(null)}
+      />
     </div>
   )
 }
