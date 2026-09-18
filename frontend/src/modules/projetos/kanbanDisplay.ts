@@ -33,6 +33,27 @@ export function isPlanningRootTask(planningKind: string | null | undefined): boo
   return planningKind === "projeto" || planningKind === "programa"
 }
 
+/** Raia Homologação (PO) / Homologar (PO): mesma regra do backend (`_is_homolog_po_status`). */
+export function isHomologPoStatusName(name: string | null | undefined): boolean {
+  if (!name?.trim()) return false
+  const n = name
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+  return n.includes("homolog") && n.includes("po")
+}
+
+/** Raia Concluído (US/Feature/projeto): mesma ideia do backend (`_is_concluded_planning_status`). */
+export function isConcludedStatusName(name: string | null | undefined): boolean {
+  if (!name?.trim()) return false
+  const n = name
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+  if (n.includes("impediment") || n.includes("impedid") || n.includes("bloquead")) return false
+  return n.includes("conclu")
+}
+
 export function isUserStoryDemandType(name: string | null | undefined, slug?: string | null): boolean {
   const n = (name ?? "").trim().toLowerCase()
   const s = (slug ?? "").trim().toLowerCase()

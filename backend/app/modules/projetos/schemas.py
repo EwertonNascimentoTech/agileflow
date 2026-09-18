@@ -535,17 +535,29 @@ class ProjectTaskResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+CARD_DESCRIPTION_PREVIEW_CHARS = 200
+
+
 class ProjectTaskCardResponse(ProjectTaskResponse):
     """Card do kanban: tudo do card completo, menos os campos pesados que ele não desenha.
 
     `description` sozinha responde por ~2/3 do peso da lista do board (773 kB de 1,2 MB
-    de linhas num portfólio de 1,5k cards) e nenhum card a exibe — só o drawer e o Gantt.
+    de linhas num portfólio de 1,5k cards), então sai da lista e volta só como prévia
+    cortada (`description_preview`), que é o que o card desenha em 2 linhas. O texto
+    completo vem do GET do card, usado pelo drawer, e da lista sem `slim`, usada no Gantt.
     Herda de `ProjectTaskResponse` de propósito: campo novo no card completo aparece aqui
     automaticamente, e só é omitido quem estiver explicitamente na lista abaixo.
     """
     description: Optional[str] = Field(default=None, exclude=True)
     anexos: Optional[list] = Field(default=None, exclude=True)
     procurement_meta: Optional[dict] = Field(default=None, exclude=True)
+    description_preview: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _fill_description_preview(self):
+        if self.description and not self.description_preview:
+            self.description_preview = self.description[:CARD_DESCRIPTION_PREVIEW_CHARS].strip()
+        return self
 
 
 class TaskDependencyCreate(BaseModel):
@@ -1353,6 +1365,9 @@ class ProjectDeliveryKpis(BaseModel):
     total: int = 0
     com_servicos: int = 0
     com_processos_e_documentos: int = 0
+    servicos_no_mes: int = 0
+    processos_no_mes: int = 0
+    documentos_no_mes: int = 0
 
 
 class UsDeliveryReportResponse(BaseModel):
@@ -1574,7 +1589,7 @@ class ProjectStageAgentBindingCreate(BaseModel):
     funnel_id: uuid.UUID
     status_id: uuid.UUID
     name: str = Field(..., min_length=1, max_length=140)
-    agent_kind: str = Field("ask", pattern=r"^(ask|classify_and_advance)$")
+    agent_kind: str = Field("ask", pattern=r"^(ask|classify_and_advance|review_and_route)$")
     # agent_id = ID do agente (assistant) do Azure AI Foundry.
     agent_id: str = Field(..., min_length=1, max_length=120)
     prompt_template: str = Field(..., min_length=1)
@@ -1585,14 +1600,15 @@ class ProjectStageAgentBindingCreate(BaseModel):
     gateway_client_secret: Optional[str] = Field(None, max_length=255)
     continue_thread: bool = False
     add_comment_on_success: bool = True
-    # Raia de destino ao concluir (classify_and_advance). None = próxima etapa do funil.
+    # Raia de destino ao concluir (classify_and_advance / review aprovado). None = próxima etapa.
     advance_to_status_id: Optional[uuid.UUID] = None
+    fail_to_status_id: Optional[uuid.UUID] = None
     is_active: bool = True
 
 
 class ProjectStageAgentBindingUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=140)
-    agent_kind: Optional[str] = Field(None, pattern=r"^(ask|classify_and_advance)$")
+    agent_kind: Optional[str] = Field(None, pattern=r"^(ask|classify_and_advance|review_and_route)$")
     agent_id: Optional[str] = Field(None, min_length=1, max_length=120)
     usuario: Optional[str] = Field(None, max_length=255)
     prompt_template: Optional[str] = Field(None, min_length=1)
@@ -1602,6 +1618,7 @@ class ProjectStageAgentBindingUpdate(BaseModel):
     continue_thread: Optional[bool] = None
     add_comment_on_success: Optional[bool] = None
     advance_to_status_id: Optional[uuid.UUID] = None
+    fail_to_status_id: Optional[uuid.UUID] = None
     is_active: Optional[bool] = None
 
 
@@ -1621,6 +1638,7 @@ class ProjectStageAgentBindingResponse(BaseModel):
     continue_thread: bool
     add_comment_on_success: bool
     advance_to_status_id: Optional[uuid.UUID] = None
+    fail_to_status_id: Optional[uuid.UUID] = None
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -2053,3 +2071,66 @@ class ProjectProgramResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ── Ociosidade diária (API pública com token fixo) ──
+class OciosidadeAbsence(BaseModel):
+    type: str
+    status: str
+    partial_hours: Optional[float] = None
+    start: date
+    end: date
+    affects_capacity: bool
+
+
+class OciosidadeTask(BaseModel):
+    task: str
+    project: Optional[str] = None
+    feature: Optional[str] = None
+    product_owner: Optional[str] = None
+    product_owner_email: Optional[str] = None
+    hours: float = 0.0
+    status: Optional[str] = None
+    due: Optional[date] = None
+    overdue: bool = False
+    days_late: Optional[int] = None
+
+
+class OciosidadePerson(BaseModel):
+    person_id: uuid.UUID
+    name: str
+    email: Optional[str] = None
+    status: str
+    position: Optional[str] = None
+    position_slug: Optional[str] = None
+    daily_hours: float
+    project_allocation_pct: float
+    project_hours_per_day: float
+    capacity_hours: float
+    allocated_hours: float
+    utilization_pct: Optional[float] = None
+    idle: bool
+    idle_reason: str
+    absences_today: list[OciosidadeAbsence] = Field(default_factory=list)
+    items: list[OciosidadeTask] = Field(default_factory=list)
+    overdue: list[OciosidadeTask] = Field(default_factory=list)
+
+
+class OciosidadeSummary(BaseModel):
+    total: int = 0
+    idle: int = 0
+    occupied: int = 0
+    residual: int = 0
+    away: int = 0
+    overdue_us: int = 0
+    by_position: dict[str, int] = Field(default_factory=dict)
+    idle_by_position: dict[str, int] = Field(default_factory=dict)
+
+
+class OciosidadeResponse(BaseModel):
+    tenant_slug: str
+    date: date
+    is_working_day: bool
+    generated_at: datetime
+    summary: OciosidadeSummary
+    people: list[OciosidadePerson] = Field(default_factory=list)

@@ -59,9 +59,53 @@ Responda APENAS com um JSON válido (sem markdown, sem texto extra), neste forma
   "justificativa": "Breve explicação da classificação"
 }`
 
+const DEFAULT_REVIEW_PROMPT = `Você é um analista de triagem do kanban Prospectar Soluções de TI.
+
+Avalie a solicitação abaixo ANTES de ela seguir para classificação. Faça três análises:
+
+1) Informações preenchidas: os dados do card e de CADA campo do formulário são consistentes e têm conteúdo real (não placeholder)?
+2) Lacunas: percorra TODOS os campos listados em {{task_context}} (não só um subconjunto). Em especial, não deixe de avaliar:
+   Dados do projeto: diretoria, área, descrição, anexos.
+   Identificação: requisitante, solicitante, cargo, e-mail, sponsor.
+   Problema e valor: descrição do problema ou oportunidade, hipótese de solução, quem é afetado, métrica de sucesso, valor esperado.
+   Escopo conhecido: áreas envolvidas, sistemas envolvidos, documentação existente, ferramenta atual.
+   Urgência e risco: prazo desejado, justificativa do prazo, risco regulatório, descrição dos riscos regulatórios, impacto da inação.
+3) Duplicidade: compare com os demais cards/projetos listados. Há redundância ou possível duplicata?
+
+{{task_context}}
+
+{{peer_cards}}
+
+Responda APENAS com um JSON válido (sem markdown, sem texto extra), neste formato exato:
+{
+  "aprovado": true,
+  "campos_faltantes": [],
+  "duplicidade": null,
+  "ajustes": "",
+  "justificativa": "Resumo objetivo da decisão"
+}
+
+Regras:
+- aprovado=true SOMENTE se as três análises passarem (dados suficientes em TODOS os campos relevantes, sem lacunas e sem duplicidade).
+- Trate como VAZIO / lacuna: campo em branco, só pontuação (".", "-", "—"), "n/a", "não informado" ou texto genérico sem conteúdo acionável.
+- Hipótese de solução, métrica de sucesso e valor esperado com "." ou equivalente = lacuna obrigatória.
+- Prazo desejado vazio = lacuna. Se houver prazo, justificativa do prazo também precisa estar preenchida.
+- Se risco regulatório = Sim, a descrição dos riscos é obrigatória. Se = Não, descrição vazia é aceitável.
+- Liste em campos_faltantes o rótulo de CADA campo insuficiente e descreva em ajustes o que o requisitante deve completar.
+- Se houver possível duplicata, aprovado=false, preencha duplicidade com o título/card semelhante e explique em ajustes.
+- ajustes deve ser um texto acionável para o requisitante (o que corrigir/completar).
+- justificativa sempre preenchida.`
+
 const AGENT_KIND_LABELS: Record<ProjectStageAgentKind, string> = {
   ask: "Pergunta livre",
   classify_and_advance: "Classificação (matriz + avançar)",
+  review_and_route: "Triagem (aprovar ou ajustar)",
+}
+
+function defaultPromptFor(kind: ProjectStageAgentKind): string {
+  if (kind === "classify_and_advance") return DEFAULT_CLASSIFY_PROMPT
+  if (kind === "review_and_route") return DEFAULT_REVIEW_PROMPT
+  return DEFAULT_PROMPT
 }
 
 type AgentForm = {
@@ -72,17 +116,19 @@ type AgentForm = {
   continue_thread: boolean
   add_comment_on_success: boolean
   advance_to_status_id: string
+  fail_to_status_id: string
   is_active: boolean
 }
 
-const emptyForm = (kind: ProjectStageAgentKind = "classify_and_advance"): AgentForm => ({
+const emptyForm = (kind: ProjectStageAgentKind = "review_and_route"): AgentForm => ({
   agent_kind: kind,
   name: "",
   agent_id: "",
-  prompt_template: kind === "classify_and_advance" ? DEFAULT_CLASSIFY_PROMPT : DEFAULT_PROMPT,
+  prompt_template: defaultPromptFor(kind),
   continue_thread: false,
   add_comment_on_success: true,
   advance_to_status_id: "",
+  fail_to_status_id: "",
   is_active: true,
 })
 
@@ -144,7 +190,8 @@ export default function ProjectAgentsConfigPage() {
   function openCreate(status: ProjectStatus) {
     setEditing(null)
     setTargetStatus(status)
-    setForm(emptyForm("classify_and_advance"))
+    const kind = /backlog/i.test(status.name) ? "review_and_route" : "classify_and_advance"
+    setForm(emptyForm(kind))
     setDialogOpen(true)
   }
 
@@ -159,6 +206,7 @@ export default function ProjectAgentsConfigPage() {
       continue_thread: agent.continue_thread,
       add_comment_on_success: agent.add_comment_on_success,
       advance_to_status_id: agent.advance_to_status_id ?? "",
+      fail_to_status_id: agent.fail_to_status_id ?? "",
       is_active: agent.is_active,
     })
     setDialogOpen(true)
@@ -180,7 +228,11 @@ export default function ProjectAgentsConfigPage() {
           prompt_template: form.prompt_template,
           continue_thread: form.continue_thread,
           add_comment_on_success: form.add_comment_on_success,
-          advance_to_status_id: form.agent_kind === "classify_and_advance" ? (form.advance_to_status_id || null) : null,
+          advance_to_status_id:
+            form.agent_kind === "classify_and_advance" || form.agent_kind === "review_and_route"
+              ? (form.advance_to_status_id || null)
+              : null,
+          fail_to_status_id: form.agent_kind === "review_and_route" ? (form.fail_to_status_id || null) : null,
           is_active: form.is_active,
         }
         await projetosApi.updateStageAgent(editing.id, payload)
@@ -196,7 +248,11 @@ export default function ProjectAgentsConfigPage() {
           prompt_template: form.prompt_template,
           continue_thread: form.continue_thread,
           add_comment_on_success: form.add_comment_on_success,
-          advance_to_status_id: form.agent_kind === "classify_and_advance" ? (form.advance_to_status_id || null) : null,
+          advance_to_status_id:
+            form.agent_kind === "classify_and_advance" || form.agent_kind === "review_and_route"
+              ? (form.advance_to_status_id || null)
+              : null,
+          fail_to_status_id: form.agent_kind === "review_and_route" ? (form.fail_to_status_id || null) : null,
           is_active: form.is_active,
         }
         await projetosApi.createStageAgent(payload)
@@ -357,14 +413,18 @@ export default function ProjectAgentsConfigPage() {
                     ...f,
                     agent_kind: kind,
                     prompt_template:
-                      kind === "classify_and_advance" && (!f.prompt_template || f.prompt_template === DEFAULT_PROMPT)
-                        ? DEFAULT_CLASSIFY_PROMPT
+                      !f.prompt_template ||
+                      f.prompt_template === DEFAULT_PROMPT ||
+                      f.prompt_template === DEFAULT_CLASSIFY_PROMPT ||
+                      f.prompt_template === DEFAULT_REVIEW_PROMPT
+                        ? defaultPromptFor(kind)
                         : f.prompt_template,
                   }))
                 }}
               >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="review_and_route">Triagem (aprovar ou ajustar)</SelectItem>
                   <SelectItem value="classify_and_advance">Classificação (matriz Impacto × Esforço + avançar)</SelectItem>
                   <SelectItem value="ask">Pergunta livre (Azure)</SelectItem>
                 </SelectContent>
@@ -374,11 +434,18 @@ export default function ProjectAgentsConfigPage() {
                   Lê todos os dados do card, classifica na matriz e move o card para a raia escolhida abaixo.
                 </p>
               )}
+              {form.agent_kind === "review_and_route" && (
+                <p className="text-[11px] text-muted-foreground">
+                  Avalia dados preenchidos, lacunas e duplicidade. Aprovado vai para Classificação; reprovado vai para Ajustes com comentário.
+                </p>
+              )}
             </div>
 
-            {form.agent_kind === "classify_and_advance" && (
+            {(form.agent_kind === "classify_and_advance" || form.agent_kind === "review_and_route") && (
               <div className="space-y-1">
-                <Label>Avançar para a raia</Label>
+                <Label>
+                  {form.agent_kind === "review_and_route" ? "Se aprovado, mover para" : "Avançar para a raia"}
+                </Label>
                 <Select
                   value={form.advance_to_status_id || "__next__"}
                   onValueChange={(v) => setForm((f) => ({ ...f, advance_to_status_id: v === "__next__" ? "" : v }))}
@@ -392,7 +459,29 @@ export default function ProjectAgentsConfigPage() {
                   </SelectContent>
                 </Select>
                 <p className="text-[11px] text-muted-foreground">
-                  Para onde o card vai depois que o agente classifica. Padrão: a próxima etapa do funil.
+                  {form.agent_kind === "review_and_route"
+                    ? "Destino quando a triagem aprovar. No Prospectar, escolha Classificação (não use automático: a próxima raia é Ajustes)."
+                    : "Para onde o card vai depois que o agente classifica. Padrão: a próxima etapa do funil."}
+                </p>
+              </div>
+            )}
+            {form.agent_kind === "review_and_route" && (
+              <div className="space-y-1">
+                <Label>Se reprovado, mover para</Label>
+                <Select
+                  value={form.fail_to_status_id || "__none__"}
+                  onValueChange={(v) => setForm((f) => ({ ...f, fail_to_status_id: v === "__none__" ? "" : v }))}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Não mover (só comentar)</SelectItem>
+                    {(statusesByFunnel.get(targetStatus?.funnel_id ?? "") ?? [])
+                      .filter((s) => s.id !== targetStatus?.id)
+                      .map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">
+                  Destino quando faltar informação ou houver duplicidade (ex.: Ajustes). Sempre adiciona um comentário com o que corrigir.
                 </p>
               </div>
             )}
@@ -421,7 +510,9 @@ export default function ProjectAgentsConfigPage() {
               <p className="text-[11px] text-muted-foreground">
                 {form.agent_kind === "classify_and_advance"
                   ? "Placeholders: {{task_context}}, {{priority_rubric}}, {{title}}, {{description}}, {{task_id}}"
-                  : "Placeholders: {{title}}, {{description}}, {{task_id}}, {{form_values}}"}
+                  : form.agent_kind === "review_and_route"
+                    ? "Placeholders: {{task_context}}, {{peer_cards}}, {{title}}, {{description}}, {{task_id}}"
+                    : "Placeholders: {{title}}, {{description}}, {{task_id}}, {{form_values}}"}
               </p>
             </div>
             <div className="flex flex-col gap-3 pt-1">

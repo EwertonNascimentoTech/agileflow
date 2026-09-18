@@ -1,8 +1,8 @@
 """Métricas de portfólio calculadas do módulo PROJETOS (indicadores táticos de TI).
 
 Complementa a fonte `portfolio` original (Produtos) com métricas derivadas de
-`ProjectTask`: cumprimento de cronograma, desvio de trabalho vs baseline, taxa de
-implantação, tempo de análise da oportunidade (Demanda → Projeto), lead time de US,
+`ProjectTask`: cumprimento de cronograma (User Stories), desvio de trabalho vs baseline,
+taxa de implantação, tempo de análise da oportunidade (Demanda → Projeto), lead time de US,
 SLA estourado, impedimento e adoção de IA.
 
 Desenho:
@@ -56,6 +56,8 @@ def dataset_key(metrica: Optional[M]) -> str:
         return "projetos"
     if m == M.DOCUMENTOS_NATOS_DIGITAIS:
         return "produtos_documentos"
+    if m == M.PROCESSOS_DIGITAIS:
+        return "produtos_processos"
     return "produtos_servicos"
 
 
@@ -67,6 +69,7 @@ class ProjetosDataset:
     us_ids: set = field(default_factory=set)
     cancelled_ids: set = field(default_factory=set)      # em etapa "Não realizado"
     impedimento_ids: set = field(default_factory=set)    # em etapa de impedimento (agora)
+    homologacao_ids: set = field(default_factory=set)    # status_id de etapas Homologação*
     final_status_ids: set = field(default_factory=set)   # etapas is_final
     roots: list = field(default_factory=list)            # planning_kind ∈ {projeto, programa}
     subtree_by_root: dict = field(default_factory=dict)  # root_id → [ids] (inclui a raiz)
@@ -99,6 +102,11 @@ async def load_dataset(db: AsyncSession) -> ProjetosDataset:
         sid for sid, name, _f in status_rows
         if PoSyncService._IMPEDIMENTO_PAT.search(name or "")
     }
+    homologacao_status = {
+        sid for sid, name, _f in status_rows
+        if PoSyncService._HOMOLOG_PAT.search(name or "")
+    }
+    ds.homologacao_ids = homologacao_status
     children: dict = {}
     for t in tasks:
         if t.status_id in cancelled_status:
@@ -154,12 +162,18 @@ def calc(
     today: date,
 ) -> Optional[tuple[float, float, Optional[float]]]:
     """Realizado do período. `None` = não computável (preservar valor gravado);
-    `(num, den, None)` = computável porém sem população (den=0)."""
+    `(num, den, None)` = computável porém sem população (den=0) — o chamador
+    grava realizado=0 (não deixa Pendente)."""
 
     def _no_periodo(d: Optional[date]) -> bool:
         return d is not None and periodo_inicio <= d <= periodo_fim
 
-    # ▲ % de entregas (itens da subárvore) com prazo no período concluídas dentro do prazo.
+    # ▲ % de User Stories com prazo no período concluídas dentro do prazo.
+    # Só projetos com cronograma já comprometido (schedule_committed_at) — ainda em
+    # prospecção/contratação/refinamento não entram. Conta APENAS US (Features e
+    # etapas de cronograma ficam de fora — estimated_hours delas é rollup).
+    # Homologação* conta como concluída (desenvolvimento e implantação — mesma regra,
+    # só muda card_classification do projeto-raiz).
     if metrica in _CRONOGRAMA_CLS:
         alvo = _CRONOGRAMA_CLS[metrica]
         num = den = 0
@@ -168,20 +182,29 @@ def calc(
                 continue
             if root.id in ds.cancelled_ids:
                 continue
+            sc = root.schedule_committed_at
+            if sc is None or _d(sc) > periodo_fim:
+                continue
             for tid in ds.subtree_by_root.get(root.id, []):
-                if tid == root.id or tid in ds.cancelled_ids:
+                if tid == root.id or tid in ds.cancelled_ids or tid not in ds.us_ids:
                     continue
                 t = ds.by_id[tid]
                 due = _d(t.due_date)
                 if not _no_periodo(due):
                     continue
                 den += 1
-                if t.completed_at is not None and _d(t.completed_at) <= due:
+                # Homologação* = trabalho entregue → conta no numerador.
+                if t.status_id in ds.homologacao_ids:
+                    num += 1
+                    continue
+                done = _d(t.completed_at)
+                if done is not None and done <= due:
                     num += 1
         return (num, den, _pct(num, den))
 
     # ▼ % do plano comprometido que entrou de trabalho NOVO neste período.
-    # Denominador FIXO = tarefas planejadas (baseline v1; fallback: criadas até o commit).
+    # Denominador FIXO = US planejadas (baseline v1; fallback: criadas até o commit).
+    # Conta APENAS User Stories — Features/etapas ficam de fora (mesmo critério do cumprimento).
     if metrica in _DESVIO_CLS:
         alvo = _DESVIO_CLS[metrica]
         num = den = 0
@@ -196,11 +219,13 @@ def calc(
             sub = [
                 ds.by_id[tid]
                 for tid in ds.subtree_by_root.get(root.id, [])
-                if tid != root.id and tid not in ds.cancelled_ids
+                if tid != root.id and tid not in ds.cancelled_ids and tid in ds.us_ids
             ]
             plan_ids = ds.baseline_v1_ids.get(root.id)
             if plan_ids is None:
                 plan_ids = {t.id for t in sub if t.created_at is not None and t.created_at <= sc}
+            else:
+                plan_ids = {pid for pid in plan_ids if pid in ds.us_ids}
             plan_ids = plan_ids - {root.id}
             den += len(plan_ids)
             num += sum(

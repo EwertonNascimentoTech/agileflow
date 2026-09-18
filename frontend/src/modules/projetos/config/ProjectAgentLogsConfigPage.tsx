@@ -22,6 +22,7 @@ const ALL_STATUS = "__all__"
 const AGENT_KIND_LABELS: Record<ProjectStageAgentKind, string> = {
   ask: "Pergunta livre",
   classify_and_advance: "Classificação + avançar",
+  review_and_route: "Triagem (aprovar ou ajustar)",
 }
 
 const EXEC_STATUS_LABELS: Record<string, string> = {

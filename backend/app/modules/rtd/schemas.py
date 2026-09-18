@@ -52,10 +52,17 @@ class ReuniaoOut(BaseModel):
     observacoes: Optional[str] = None
     epa_planos: Optional[list[int]] = None
     epa_planos_taticos: Optional[list[int]] = None
+    public_token: Optional[str] = None
     total_deliberacoes: int = 0
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class PublicTokenOut(BaseModel):
+    """Resposta do gerar/consultar link público da RTD."""
+    public_token: str
+    path: str  # ex.: /p/rtd/{token} — o front monta a URL absoluta
 
 
 # ── Deliberação ──

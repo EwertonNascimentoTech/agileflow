@@ -20,6 +20,7 @@ export interface Reuniao {
   observacoes: string | null
   epa_planos: number[] | null
   epa_planos_taticos: number[] | null
+  public_token: string | null
   total_deliberacoes: number
   created_at: string
 }
@@ -257,6 +258,11 @@ export const rtdApi = {
     }).then((r) => r.data),
   deleteReuniao: (id: string) => api.delete(`/rtd/reunioes/${id}`).then((r) => r.data),
   getReport: (id: string) => api.get<ReuniaoReport>(`/rtd/reunioes/${id}/report`).then((r) => r.data),
+
+  generatePublicToken: (id: string) =>
+    api.post<{ public_token: string; path: string }>(`/rtd/reunioes/${id}/public-token`).then((r) => r.data),
+  revokePublicToken: (id: string) =>
+    api.delete(`/rtd/reunioes/${id}/public-token`).then((r) => r.data),
 
   upsertIndicadorAnalise: (reuniaoId: string, indicadorId: string, data: AnaliseUpsert) =>
     api.put<IndicadorAnalise>(`/rtd/reunioes/${reuniaoId}/indicadores/${indicadorId}/analise`, data)

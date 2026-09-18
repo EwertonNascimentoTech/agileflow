@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { ArrowLeft, ChevronLeft, ChevronRight, Gavel } from "lucide-react"
+import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Gavel, Link2, Link2Off, Printer } from "lucide-react"
 
 import { rtdApi, type PersonMini, type ReuniaoReport } from "@/api/rtd"
 import { RtdIndicadoresSection } from "@/modules/rtd/RtdIndicadoresSection"
 import { RtdPlanosEpaSection } from "@/modules/rtd/RtdPlanosEpaSection"
+import { RtdCapaSlide } from "@/modules/rtd/RtdPresentationDocument"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -18,6 +19,34 @@ function fmt(iso: string | null | undefined): string {
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" })
 }
 
+function erroDaApi(err: unknown): string {
+  const e = err as { response?: { data?: { detail?: unknown } } }
+  const d = e.response?.data?.detail
+  return typeof d === "string" && d.trim() ? d : ""
+}
+
+async function copiarTexto(texto: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(texto)
+    return true
+  } catch {
+    try {
+      const el = document.createElement("textarea")
+      el.value = texto
+      el.setAttribute("readonly", "")
+      el.style.position = "fixed"
+      el.style.left = "-9999px"
+      document.body.appendChild(el)
+      el.select()
+      const ok = document.execCommand("copy")
+      document.body.removeChild(el)
+      return ok
+    } catch {
+      return false
+    }
+  }
+}
+
 
 // Slides da apresentação (navegação por steps; ← → no teclado).
 const SLIDES = [
@@ -27,54 +56,6 @@ const SLIDES = [
   "3. Indicadores Táticos",
   "4. Planos Táticos",
 ]
-
-/** Capa no padrão visual FIEA: formas azuis em diagonal + título em destaque. */
-function CapaSlide({ titulo, competencia, data }: { titulo: string; competencia: string; data: string | null }) {
-  const dataLabel = data
-    ? new Date(`${data}T12:00:00`).toLocaleDateString("pt-BR", { day: "numeric", month: "long", year: "numeric" })
-    : competencia
-  return (
-    <div className="relative min-h-[70vh] overflow-hidden rounded-xl border bg-gradient-to-br from-slate-100 via-white to-slate-50">
-      {/* Formas diagonais azuis (padrão da capa institucional) */}
-      <div className="pointer-events-none absolute inset-y-0 right-0 w-3/5">
-        <div className="absolute -right-20 top-[-15%] h-[140%] w-64 -skew-x-12 bg-gradient-to-b from-sky-300 via-sky-500 to-blue-800 opacity-90" />
-        <div className="absolute right-32 top-[-25%] h-[75%] w-36 -skew-x-12 bg-gradient-to-b from-blue-400 to-blue-800 opacity-70" />
-        <div className="absolute bottom-[-15%] right-48 h-[65%] w-52 -skew-x-12 bg-gradient-to-t from-sky-500 to-sky-200 opacity-60" />
-        <div className="absolute -right-2 bottom-[-10%] h-[45%] w-24 -skew-x-12 bg-gradient-to-t from-blue-900 to-blue-500 opacity-80" />
-      </div>
-
-      <div className="relative z-10 flex min-h-[70vh] flex-col justify-between p-8 md:p-12">
-        <div>
-          <p className="text-sm font-black italic leading-none text-blue-800">Sistema FIEA</p>
-          <p className="text-[10px] font-semibold tracking-widest text-blue-700">SESI · SENAI · IEL</p>
-        </div>
-        <div>
-          <h1 className="font-black italic leading-[0.95]">
-            <span className="block text-5xl text-sky-500 md:text-7xl">REUNIÃO</span>
-            <span className="block text-4xl text-blue-900 md:text-6xl">TOMADA DE</span>
-            <span className="block text-4xl text-blue-900 md:text-6xl">DECISÃO</span>
-          </h1>
-          <p className="mt-4 text-sm font-semibold uppercase tracking-[0.35em] text-sky-600">
-            {titulo || "Tecnologias Digitais"}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-end gap-x-10 gap-y-2">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-wide text-blue-900">Diretoria de Gestão Estratégica</p>
-          </div>
-          <div>
-            <p className="text-[11px] text-muted-foreground">Data</p>
-            <p className="text-sm font-bold text-blue-900">{dataLabel}</p>
-          </div>
-          <div>
-            <p className="text-[11px] text-muted-foreground">Competência</p>
-            <p className="text-sm font-bold text-blue-900">{competencia}</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 function Section({ n, title, children }: { n: string; title: string; children: React.ReactNode }) {
   return (
@@ -97,12 +78,19 @@ export default function RtdReuniaoPage() {
   const [persons, setPersons] = useState<PersonMini[]>([])
   const [closing, setClosing] = useState(false)
   const [slide, setSlide] = useState(0)
+  const [publicToken, setPublicToken] = useState<string | null>(null)
+  const [sharing, setSharing] = useState(false)
 
 
   async function load() {
     setLoading(true)
     try {
-      setRep(await rtdApi.getReport(id))
+      const [report, reuniao] = await Promise.all([
+        rtdApi.getReport(id),
+        rtdApi.getReuniao(id),
+      ])
+      setRep(report)
+      setPublicToken(reuniao.public_token)
     } catch {
       toast.error("Falha ao carregar o relatório da reunião")
     } finally {
@@ -141,6 +129,39 @@ export default function RtdReuniaoPage() {
     }
   }
 
+  async function copiarLinkPublico() {
+    setSharing(true)
+    try {
+      const out = await rtdApi.generatePublicToken(id)
+      setPublicToken(out.public_token)
+      const url = `${window.location.origin}${out.path}`
+      const copiou = await copiarTexto(url)
+      if (copiou) {
+        toast.success("Link público copiado — qualquer pessoa com o link pode ver (sem login).")
+      } else {
+        toast.info(`Link gerado: ${url}`)
+      }
+    } catch (err) {
+      toast.error(erroDaApi(err) || "Falha ao gerar o link público")
+    } finally {
+      setSharing(false)
+    }
+  }
+
+  async function revogarLinkPublico() {
+    if (!confirm("Revogar o link público? Quem já tiver o endereço não conseguirá mais abrir.")) return
+    setSharing(true)
+    try {
+      await rtdApi.revokePublicToken(id)
+      setPublicToken(null)
+      toast.success("Link público revogado.")
+    } catch (err) {
+      toast.error(erroDaApi(err) || "Falha ao revogar o link")
+    } finally {
+      setSharing(false)
+    }
+  }
+
   if (loading) {
     return <div className="mx-auto max-w-6xl space-y-4 p-4 md:p-6">
       <Skeleton className="h-16 w-full" /><Skeleton className="h-48 w-full" /><Skeleton className="h-48 w-full" />
@@ -166,8 +187,39 @@ export default function RtdReuniaoPage() {
             Competência <b>{String(meta.competencia)}</b> · período {fmt(panorama.periodo.inicio)}–{fmt(panorama.periodo.fim)}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <Badge variant={meta.status === "fechada" ? "success" : "secondary"}>{String(meta.status)}</Badge>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate(`/app/modules/rtd/reunioes/${id}/pdf`)}
+            title="Abrir versão imprimível da apresentação"
+          >
+            <Printer className="mr-1.5 h-3.5 w-3.5" />
+            Gerar PDF
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => void copiarLinkPublico()} disabled={sharing}
+            title="Copiar link para compartilhar sem login">
+            <Link2 className="mr-1.5 h-3.5 w-3.5" />
+            {sharing ? "…" : publicToken ? "Copiar link" : "Compartilhar"}
+          </Button>
+          {publicToken && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.open(`/p/rtd/${publicToken}`, "_blank")}
+              title="Abrir a apresentação pública"
+            >
+              <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+              Abrir
+            </Button>
+          )}
+          {publicToken && (
+            <Button variant="ghost" size="sm" onClick={() => void revogarLinkPublico()} disabled={sharing}
+              title="Revogar link público">
+              <Link2Off className="h-3.5 w-3.5 text-muted-foreground" />
+            </Button>
+          )}
           {meta.status === "fechada" ? (
             <Button variant="outline" size="sm" onClick={() => alterarStatus(false)} disabled={closing}>
               {closing ? "…" : "Reabrir reunião"}
@@ -179,6 +231,11 @@ export default function RtdReuniaoPage() {
           )}
         </div>
       </div>
+      {publicToken && (
+        <p className="break-all rounded-md border bg-muted/40 px-3 py-2 font-mono text-xs text-muted-foreground">
+          {`${typeof window !== "undefined" ? window.location.origin : ""}/p/rtd/${publicToken}`}
+        </p>
+      )}
 
       {/* Stepper da apresentação */}
       <div className="flex flex-wrap items-center gap-1.5">
@@ -200,7 +257,7 @@ export default function RtdReuniaoPage() {
 
       {/* Slide 0 — Capa */}
       <div className={slide === 0 ? "" : "hidden"}>
-        <CapaSlide
+        <RtdCapaSlide
           titulo={String(meta.titulo)}
           competencia={String(meta.competencia)}
           data={(meta.data_realizacao as string | null) ?? null}

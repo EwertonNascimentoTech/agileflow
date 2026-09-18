@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useState } from "react"
-import { Check, X, Plus, ChevronLeft, ChevronRight } from "lucide-react"
+import {
+  AlertTriangle,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  FolderKanban,
+  Plus,
+  Users,
+  X,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -19,14 +28,24 @@ import {
   ABSENCE_STATUS_LABELS,
   type Absence,
   type AbsenceCalendar,
+  type AbsenceImpact,
   type AbsenceType,
   type Person,
 } from "@/api/teamops"
+import { useAuth } from "@/contexts/AuthContext"
+import { hasPermission } from "@/lib/permissions"
 
 const NONE = "__none__"
 
 function ymd(d: Date): string {
-  return d.toISOString().slice(0, 10)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+
+// "2026-08" -> Date local no dia 1 (evita o parse UTC de new Date("2026-08-01"),
+// que em fusos negativos cai no mes anterior).
+function monthStart(month: string): Date {
+  const [y, m] = month.split("-").map(Number)
+  return new Date(y, m - 1, 1)
 }
 
 function currentMonth(): string {
@@ -40,7 +59,14 @@ function addMonth(month: string, delta: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
 }
 
+function formatDate(value: string): string {
+  const [year, month, day] = value.split("-")
+  return `${day}/${month}/${year}`
+}
+
 export default function AbsencesPage() {
+  const { user } = useAuth()
+  const canApprove = hasPermission(user?.permissions, "teamops.absence.approve")
   const [creating, setCreating] = useState(false)
   const [refreshTick, setRefreshTick] = useState(0)
   const triggerRefresh = () => setRefreshTick((t) => t + 1)
@@ -63,7 +89,8 @@ export default function AbsencesPage() {
         <TabsList>
           <TabsTrigger value="calendar">Calendário</TabsTrigger>
           <TabsTrigger value="list">Lista</TabsTrigger>
-          <TabsTrigger value="approvals">Aprovações pendentes</TabsTrigger>
+          {canApprove && <TabsTrigger value="approvals">Aprovações pendentes</TabsTrigger>}
+          {canApprove && <TabsTrigger value="impact">Análise de impacto</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="calendar" className="mt-4">
@@ -74,9 +101,17 @@ export default function AbsencesPage() {
           <ListView key={`list-${refreshTick}`} onChange={triggerRefresh} />
         </TabsContent>
 
-        <TabsContent value="approvals" className="mt-4">
-          <ApprovalsView key={`appr-${refreshTick}`} onChange={triggerRefresh} />
-        </TabsContent>
+        {canApprove && (
+          <TabsContent value="approvals" className="mt-4">
+            <ApprovalsView key={`appr-${refreshTick}`} onChange={triggerRefresh} />
+          </TabsContent>
+        )}
+
+        {canApprove && (
+          <TabsContent value="impact" className="mt-4">
+            <ImpactAnalysisView key={`impact-${refreshTick}`} />
+          </TabsContent>
+        )}
       </Tabs>
 
       {creating && (
@@ -103,16 +138,13 @@ function CalendarView() {
   const weekdays = ["D", "S", "T", "Q", "Q", "S", "S"]
 
   // Calcula offset do primeiro dia
-  const firstWeekday = useMemo(() => {
-    const [y, m] = month.split("-").map(Number)
-    return new Date(y, m - 1, 1).getDay()
-  }, [month])
+  const firstWeekday = useMemo(() => monthStart(month).getDay(), [month])
 
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-2">
         <CardTitle className="text-base">
-          {new Date(month + "-01").toLocaleString("pt-BR", { month: "long", year: "numeric" })}
+          {monthStart(month).toLocaleString("pt-BR", { month: "long", year: "numeric" })}
         </CardTitle>
         <div className="flex gap-1">
           <Button variant="outline" size="sm" onClick={() => setMonth(addMonth(month, -1))}>
@@ -293,6 +325,131 @@ function ApprovalsView({ onChange }: { onChange: () => void }) {
           </CardContent>
         </Card>
       ))}
+    </div>
+  )
+}
+
+function ImpactAnalysisView() {
+  const [data, setData] = useState<AbsenceImpact | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    teamopsApi.getAbsenceImpact()
+      .then(setData)
+      .catch((err) => setError(err?.response?.data?.detail ?? "Não foi possível analisar os impactos."))
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) return <Skeleton className="h-96" />
+  if (error) {
+    return <Card><CardContent className="p-8 text-center text-sm text-destructive">{error}</CardContent></Card>
+  }
+  if (!data) return null
+
+  const summaryCards = [
+    { label: "Ausências analisadas", value: data.summary.analyzed_absences, icon: Users },
+    { label: "Pessoas em risco", value: data.summary.people_at_risk, icon: AlertTriangle },
+    { label: "Conflitos no time", value: data.summary.team_conflicts, icon: Users },
+    { label: "Projetos impactados", value: data.summary.impacted_projects, icon: FolderKanban },
+  ]
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {summaryCards.map(({ label, value, icon: Icon }) => (
+          <Card key={label}>
+            <CardContent className="flex items-center justify-between p-4">
+              <div>
+                <p className="text-xs text-muted-foreground">{label}</p>
+                <p className="text-2xl font-semibold">{value}</p>
+              </div>
+              <Icon className="h-5 w-5 text-muted-foreground" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {data.items.length === 0 ? (
+        <Card>
+          <CardContent className="p-8 text-center text-sm text-muted-foreground">
+            Nenhuma ausência pendente ou aprovada com impacto futuro.
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {data.items.map((item) => (
+            <Card key={item.absence_id} className={
+              item.risk_level === "high"
+                ? "border-destructive/50"
+                : item.risk_level === "medium" ? "border-amber-400/60" : ""
+            }>
+              <CardHeader className="pb-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <CardTitle className="text-base">{item.person.full_name}</CardTitle>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {item.absence_type.name} · {formatDate(item.start_date)} a {formatDate(item.end_date)}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Badge variant={item.status === "aprovada" ? "success" : "secondary"}>
+                      {ABSENCE_STATUS_LABELS[item.status]}
+                    </Badge>
+                    <Badge variant={item.risk_level === "high" ? "destructive" : "outline"}>
+                      Risco {item.risk_level === "high" ? "alto" : item.risk_level === "medium" ? "médio" : "baixo"}
+                    </Badge>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <div>
+                    <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Impacto no time</p>
+                    {item.overlapping_people.length > 0 ? (
+                      <div className="space-y-2">
+                        <p className="text-sm">
+                          Também estarão ausentes:{" "}
+                          <span className="font-medium">
+                            {item.overlapping_people.map((person) => person.full_name).join(", ")}
+                          </span>
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Time(s): {item.areas.map((area) => area.name).join(", ") || "Sem área vinculada"}
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">Sem sobreposição com pessoas do mesmo time.</p>
+                    )}
+                  </div>
+                  <div>
+                    <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Impacto nos projetos</p>
+                    {item.impacted_projects.length > 0 ? (
+                      <div className="space-y-2">
+                        {item.impacted_projects.map((project) => (
+                          <div key={project.id} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
+                            <span className="font-medium">{project.name}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {project.overlapping_tasks} sobreposta(s) / {project.open_tasks} aberta(s)
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">Sem tarefas abertas em projetos.</p>
+                    )}
+                  </div>
+                </div>
+                <div className="rounded-md bg-muted/50 p-3">
+                  {item.reasons.map((reason) => (
+                    <p key={reason} className="text-sm">• {reason}</p>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

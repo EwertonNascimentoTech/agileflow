@@ -27,6 +27,7 @@ import { formatMissingFieldsMessage, validateRequiredFields } from "@/modules/pr
 import { BacklogClassificationDialog } from "@/modules/projetos/BacklogClassificationDialog"
 import { ProjectPriorityWidget } from "@/modules/projetos/priority/ProjectPriorityWidget"
 import { CommentBody, CommentComposer, commentHasContent } from "@/modules/projetos/CommentComposer"
+import { canImportScheduleInStatus, ScheduleImportPanel } from "@/modules/projetos/ScheduleImportPanel"
 import { useAuth } from "@/contexts/AuthContext"
 import { toast } from "@/lib/toast"
 import { UsChecklistSection } from "@/modules/projetos/UsChecklistSection"
@@ -179,6 +180,10 @@ export function ProjectTaskDrawer({
   const [removing, setRemoving] = useState(false)
   const [sendingComment, setSendingComment] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  /** O quadro entrega o card sem description/anexos/procurement_meta (lista enxuta).
+   *  Até o GET do card completo responder, esses campos ficam fora do que o drawer salva,
+   *  senão gravar qualquer outro campo apagaria a descrição e os anexos. */
+  const [detailsHydrated, setDetailsHydrated] = useState(false)
   const { fields: defaultFormFields } = useDefaultFormConfig()
   const defaultFieldsByKey = defaultFieldMap(defaultFormFields)
 
@@ -193,6 +198,8 @@ export function ProjectTaskDrawer({
     setAssigneeMenuOpen(false)
     setAssigneeSearch("")
     setStatusMenuOpen(false)
+    setDetailsHydrated(false)
+    let cancelled = false
     const cfg = defaultFieldMap(defaultFormFields)
     const timer = setTimeout(() => {
       setTitle(task.title)
@@ -238,6 +245,18 @@ export function ProjectTaskDrawer({
     projetosApi.getTaskFormSubmission(projectId, task.id).then((submission) => {
       setFormValues({ ...(task.procurement_meta ?? {}), ...(submission?.values ?? {}) })
     }).catch(() => setFormValues({ ...(task.procurement_meta ?? {}) }))
+    // Campos pesados que a lista do quadro não traz.
+    projetosApi.getTask(projectId, task.id).then((full) => {
+      if (cancelled) return
+      setDescription(full.description ?? "")
+      setAnexos(full.anexos ?? [])
+      setFormValues((prev) => ({ ...(full.procurement_meta ?? {}), ...prev }))
+      setDetailsHydrated(true)
+    }).catch(() => {
+      // Sem o card completo o drawer não sabe o texto atual: segue sem hidratar para que
+      // um salvamento de outro campo não apague descrição e anexos.
+      if (!cancelled) toast.error("Não foi possível carregar a descrição e os anexos deste card.")
+    })
     projetosApi.listDemandTypes().then(setDemandTypes).catch(() => setDemandTypes([]))
     projetosApi.listFunnels(projectId, true).then(setFunnels).catch(() => setFunnels([]))
     if (!boardTasks) {
@@ -251,7 +270,10 @@ export function ProjectTaskDrawer({
     }).catch(() => { setAllStatuses([]); setStatusMap({}) })
     // Estado da trava de cronograma da raiz a que esta tarefa pertence.
     projetosApi.getScheduleLockForTask(projectId, task.id).then(setScheduleLock).catch(() => setScheduleLock(null))
-    return () => clearTimeout(timer)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
   }, [open, task, projectId, defaultFormFields])
 
   async function reloadScheduleLock() {
@@ -769,8 +791,8 @@ export function ProjectTaskDrawer({
         demand_type_id: selectedDemandTypeId || null,
         parent_task_id: parentTaskId === NO_ASSIGNEE ? null : parentTaskId,
         title: title.trim(),
-        description: description.trim() || null,
-        anexos,
+        description: detailsHydrated ? (description.trim() || null) : undefined,
+        anexos: detailsHydrated ? anexos : undefined,
         assigned_to: isBasicUser ? undefined : (assignedTo === NO_ASSIGNEE ? null : assignedTo),
         diretoria,
         area,
@@ -1509,6 +1531,23 @@ export function ProjectTaskDrawer({
                 )}
               </div>
             </div>
+
+            {!readOnly && task && isPlanningRootTask(task.planning_kind) && canImportScheduleInStatus(statusLabel) && (
+              <div className="rounded-md border border-primary/20 bg-primary/5 p-3">
+                <ScheduleImportPanel
+                  projectId={projectId}
+                  statuses={allStatuses}
+                  funnels={funnels}
+                  fixedParentTaskId={task.id}
+                  hideParentSelect
+                  compact
+                  onImported={() => {
+                    void projetosApi.listTaskChildren(projectId, task.id).then(setChildren).catch(() => {})
+                    onSaved(task)
+                  }}
+                />
+              </div>
+            )}
 
             {!readOnly && task && (
               <ProjectPriorityWidget taskId={task.id} mode={currentStatus?.priority_mode ?? "edit"} />

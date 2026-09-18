@@ -1797,6 +1797,16 @@ class ProjectTaskService:
             )
         if task and await ProjectTaskService._is_task_assignee(db, current_user, task):
             return
+        # PO do projeto pode trabalhar o card na Homologação (PO) — inclusive concluir.
+        if task and current_user:
+            homolog_sid = status_id or task.status_id
+            if homolog_sid:
+                homolog_status = await db.get(ProjectStatusConfig, homolog_sid)
+                if (
+                    ProjectTaskService._is_homolog_po_status(homolog_status)
+                    and await ProjectTaskService._is_planning_root_po(db, current_user, task)
+                ):
+                    return
         sid = status_id or (task.status_id if task else None)
         if sid:
             status_obj = await db.get(ProjectStatusConfig, sid)
@@ -1826,6 +1836,12 @@ class ProjectTaskService:
                     detail="Você não tem acesso a este kanban.",
                 )
         if task and await ProjectTaskService._is_task_assignee(db, current_user, task):
+            return
+        if (
+            task
+            and ProjectTaskService._is_homolog_po_status(source_status)
+            and await ProjectTaskService._is_planning_root_po(db, current_user, task)
+        ):
             return
         src_level = await ProjectTaskService._funnel_access(db, source_status.funnel_id, current_user)
         tgt_level = await ProjectTaskService._funnel_access(db, target_status.funnel_id, current_user)
@@ -2104,6 +2120,38 @@ class ProjectTaskService:
             return False
         n = ProjectTaskService._norm_col(getattr(status, "name", None))
         return "homolog" in n and "po" in n
+
+    @staticmethod
+    def _is_concluded_planning_status(status) -> bool:
+        """Etapa Concluído do kanban Projetos e Programas.
+
+        US/Features a 100% NÃO concluem o projeto: só a raia Concluído do card-raiz.
+        Impedimento (e similares) nunca conta, mesmo com `completed_at` de rollup.
+        """
+        if status is None:
+            return False
+        n = ProjectTaskService._norm_col(getattr(status, "name", None))
+        if not n:
+            return False
+        if "impediment" in n or "impedid" in n or "bloquead" in n:
+            return False
+        return "conclu" in n
+
+    @staticmethod
+    async def _is_planning_root_po(
+        db: AsyncSession,
+        current_user: Optional[User],
+        task: Optional[ProjectTask],
+    ) -> bool:
+        """True se o usuário logado é o responsável (PO) do card-raiz projeto/programa."""
+        if not current_user or not task:
+            return False
+        person_id = await ProjectTaskService._person_id_for_user(db, current_user.id)
+        if person_id is None:
+            return False
+        root_id = await ProjectTaskService._planning_root_id(db, task.project_id, task.id)
+        root = await db.get(ProjectTask, root_id)
+        return root is not None and root.assigned_to == person_id
 
     @staticmethod
     def _planning_root_assignee(
@@ -2421,7 +2469,7 @@ class ProjectTaskService:
         task: ProjectTask,
         current_user: Optional[User],
     ) -> None:
-        """No kanban User Story, só o responsável do card ou a coordenação movem.
+        """Quem pode mover: Homologação (PO) é do PO do projeto; no kanban US, o resto é do dev.
 
         Guard separado dos de etapa (`_check_move_permission`) de propósito: aqueles rodam
         antes do bypass de responsável e barrariam o próprio dono do card. Aqui a ordem é a
@@ -2434,6 +2482,18 @@ class ProjectTaskService:
             return
         if current_user.role in (UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN):
             return
+
+        # Sair da Homologação (PO) = concluir a homologação: só o PO do projeto.
+        if ProjectTaskService._is_homolog_po_status(source_status):
+            if await ProjectTaskService._is_planning_root_po(db, current_user, task):
+                return
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Só o PO responsável pelo projeto pode concluir a Homologação (PO). "
+                    "O desenvolvedor move o card até essa etapa; dali em diante é o PO."
+                ),
+            )
 
         # Vale só quando o card sai OU entra no kanban de User Story (Feature fica de fora).
         funnel_ids = {
@@ -2778,6 +2838,8 @@ class ProjectTaskService:
                 next_frontier.append(child.id)
                 if child.status_id != init_status.id:
                     from_st = await db.get(ProjectStatusConfig, child.status_id)
+                    if ProjectTaskService._skip_funnel_cascade(from_st, init_status):
+                        continue
                     child.status_id = init_status.id
                     child.completed_at = None
                     child.status_entered_at = now
@@ -2817,12 +2879,39 @@ class ProjectTaskService:
                 visited.add(child.id)
                 next_frontier.append(child.id)
                 if child.status_id != target.id:
+                    from_st = await db.get(ProjectStatusConfig, child.status_id)
+                    if ProjectTaskService._skip_funnel_cascade(from_st, target):
+                        continue
                     child.status_id = target.id
                     child.completed_at = None
                     child.status_entered_at = now
                     child.sla_state = sla
                     child.updated_at = now
+                    await ProjectTaskService._record_status_move(
+                        db, child, from_status=from_st, to_status=target,
+                        moved_by=None, source="cascade",
+                    )
             frontier = next_frontier
+
+    @staticmethod
+    def _skip_funnel_cascade(
+        from_status: Optional[ProjectStatusConfig],
+        target: ProjectStatusConfig,
+    ) -> bool:
+        """Não reenvia card que já está no kanban destino, nem card já concluído.
+
+        `children_to_funnel_id` existe para tirar Feature/US do kanban de Projetos na
+        primeira entrada em desenvolvimento — não para zerar o Backlog cada vez que o
+        card-raiz muda de raia (ex.: concluir o projeto devolvia todas as US).
+        """
+        if from_status is None:
+            return False
+        if from_status.funnel_id and from_status.funnel_id == target.funnel_id:
+            return True
+        if bool(getattr(from_status, "is_final", False)):
+            return True
+        n = ProjectTaskService._norm_col(getattr(from_status, "name", None))
+        return "conclu" in n
 
     @staticmethod
     async def _initial_status_of_funnel(
@@ -4136,8 +4225,17 @@ class ProjectTaskService:
                     )
                 )
                 source_status = source_status_row.scalar_one_or_none()
-                ProjectTaskService._check_move_out_permission(source_status, current_user)
-                ProjectTaskService._check_move_permission(target_status, current_user)
+                # Sair da Homologação (PO) é do PO do projeto (via `_check_us_move_authorship`):
+                # a lista de funções da origem não se aplica. Destino Concluído também não —
+                # senão o PO fica barrado por `move_in_role_ids` da raia final.
+                leaving_homolog_po = ProjectTaskService._is_homolog_po_status(source_status)
+                to_concluido = bool(target_status.is_final) or (
+                    ProjectTaskService._is_concluded_planning_status(target_status)
+                )
+                if not leaving_homolog_po:
+                    ProjectTaskService._check_move_out_permission(source_status, current_user)
+                if not (leaving_homolog_po and to_concluido):
+                    ProjectTaskService._check_move_permission(target_status, current_user)
                 await ProjectTaskService._check_funnel_access_for_move(
                     db, source_status, target_status, current_user, task,
                 )
@@ -4173,10 +4271,24 @@ class ProjectTaskService:
                                 ),
                             )
 
-                # Evidência de código: a US só conclui com commit vinculado ou justificativa.
-                # Vale apenas para o movimento manual/API — mesmo alcance do guard acima.
-                if target_status.is_final and await ProjectTaskService._is_user_story_task(db, task):
-                    await UsCommitEvidenceService.assert_evidence_for_completion(db, task)
+                # Evidência de código: o dev informa commit ou justificativa ao enviar a US
+                # para Homologação (PO). O PO só conclui se essa evidência existir
+                # (também vale se a US pular a raia do PO e for direto a Concluído).
+                to_concluido = bool(target_status.is_final) or (
+                    ProjectTaskService._is_concluded_planning_status(target_status)
+                )
+                needs_commit_evidence = ProjectTaskService._is_homolog_po_status(target_status) or (
+                    to_concluido
+                )
+                if needs_commit_evidence and await ProjectTaskService._is_user_story_task(db, task):
+                    momento = (
+                        "homologacao_po"
+                        if ProjectTaskService._is_homolog_po_status(target_status)
+                        else "concluir"
+                    )
+                    await UsCommitEvidenceService.assert_evidence_for_completion(
+                        db, task, momento=momento,
+                    )
 
         # O card mudou de etapa? (calculado antes do setattr)
         status_changed = bool(payload.get("status_id")) and payload["status_id"] != task.status_id
@@ -4508,6 +4620,21 @@ class ProjectTaskService:
         return bool(dt and dt.allowed_child_type_ids)
 
     @staticmethod
+    async def _schedule_child_type_id(
+        db: AsyncSession, parent: ProjectTask
+    ) -> Optional[uuid.UUID]:
+        """Tipo do NÍVEL-FILHO de `parent` na amarração (ex.: Feature → User Story).
+        None quando indefinido ou ambíguo (vários filhos permitidos)."""
+        eff = await ProjectTaskService._effective_type_id(db, parent)
+        if eff is None:
+            return None
+        dt = await db.get(ProjectDemandType, eff)
+        allowed = (dt.allowed_child_type_ids or []) if dt else []
+        if len(allowed) != 1:
+            return None
+        return uuid.UUID(str(allowed[0]))
+
+    @staticmethod
     async def create_schedule_stage(
         db: AsyncSession,
         project_id: uuid.UUID,
@@ -4516,9 +4643,9 @@ class ProjectTaskService:
         current_user_id: Optional[uuid.UUID] = None,
     ) -> ProjectTask:
         """Cria uma ETAPA do cronograma do projeto: atividade-filha simples (sem tipo de
-        demanda), no mesmo status do pai. Respeita a amarração de tipos: só permite criar
-        etapa onde o tipo EFETIVO do pai (corrente de allowed_child_type_ids) ainda tem um
-        nível-filho definido — evita criar níveis que não existem na hierarquia."""
+        demanda), na etapa inicial do kanban do nível-filho. Respeita a amarração de tipos:
+        só permite criar etapa onde o tipo EFETIVO do pai (corrente de allowed_child_type_ids)
+        ainda tem um nível-filho definido — evita criar níveis que não existem na hierarquia."""
         parent = await ProjectTaskService.get(db, project_id, parent_task_id)
         # Criar etapa altera o cronograma → bloqueado se o projeto estiver travado.
         await ScheduleBaselineService.assert_editable(db, project_id, parent.id)
@@ -4527,11 +4654,20 @@ class ProjectTaskService:
                 status_code=400,
                 detail="Este item não tem um nível-filho definido na amarração de tipos; não é possível adicionar etapa.",
             )
-        status_obj = await db.get(ProjectStatusConfig, parent.status_id)
+        # A etapa nasce no kanban do NÍVEL-FILHO (Feature → kanban User Story, projeto →
+        # kanban Features). Herdar a etapa do pai deixaria o card fora do board do próprio
+        # nível — uma US criada pelo cronograma sumiria do kanban User Story.
+        status_id = parent.status_id
+        child_type_id = await ProjectTaskService._schedule_child_type_id(db, parent)
+        if child_type_id is not None:
+            status_id = await ProjectTaskService._coerce_status_for_demand_type(
+                db, project_id, child_type_id, status_id,
+            )
+        status_obj = await db.get(ProjectStatusConfig, status_id)
         # Etapas do cronograma só recebem horas depois; datas vêm do motor (âncora do projeto).
         stage = ProjectTask(
             project_id=project_id,
-            status_id=parent.status_id,
+            status_id=status_id,
             parent_task_id=parent.id,
             demand_type_id=None,
             title=data.title.strip()[:200],
@@ -4626,10 +4762,12 @@ class ProjectTaskService:
     )
 
     @staticmethod
-    def _schedule_gaps_of(task: ProjectTask) -> list[str]:
+    def _schedule_gaps_of(task: ProjectTask, *, require_assignee: bool = True) -> list[str]:
         """Rótulos do que falta definir nesta etapa de cronograma (vazio = completa)."""
         gaps: list[str] = []
         for attr, label in ProjectTaskService._SCHEDULE_REQUIRED_FIELDS:
+            if attr == "assigned_to" and not require_assignee:
+                continue
             value = getattr(task, attr, None)
             if value is None:
                 gaps.append(label)
@@ -4689,22 +4827,32 @@ class ProjectTaskService:
             return {**base, "ready": False, "reason": "project_not_in_development",
                     "pending": [], "step_count": 0}
 
-        # Etapas de cronograma = descendentes SEM tipo de demanda (Feature/US têm tipo).
+        # Preferência: etapas de cronograma = descendentes SEM tipo de demanda
+        # (Feature/US têm tipo). Se o projeto planejou direto em Feature/US — sem
+        # cards intermediários de etapa — usa Feature/US como o próprio cronograma.
+        schedule_items = [item for item in descendants if item.demand_type_id is None]
+        if not schedule_items:
+            schedule_items = [item for item in descendants if item.demand_type_id is not None]
+
+        # Quem executa é a folha: um agrupador (etapa/Feature com filhos) não tem responsável
+        # próprio. Horas e datas continuam exigidas — nesses nós vêm do rollup dos filhos.
+        parent_ids = {d.parent_task_id for d in descendants if d.parent_task_id is not None}
+
         pending: list[dict] = []
         step_count = 0
-        for item in descendants:
-            if item.demand_type_id is not None:
-                continue
+        for item in schedule_items:
             step_count += 1
             if ProjectTaskService._schedule_dates_frozen(item):
                 continue  # etapa já concluída não trava mais nada
-            gaps = ProjectTaskService._schedule_gaps_of(item)
+            gaps = ProjectTaskService._schedule_gaps_of(
+                item, require_assignee=item.id not in parent_ids,
+            )
             if gaps:
                 pending.append({"id": str(item.id), "title": item.title, "missing": gaps})
 
         base = {**base, "step_count": step_count}
         # Projeto em desenvolvimento tem que ter cronograma. Sem esta checagem um projeto
-        # sem nenhuma etapa passaria como "pronto" — cronograma vazio não tem pendência.
+        # sem nenhuma etapa/Feature/US passaria como "pronto" — cronograma vazio não tem pendência.
         if step_count == 0:
             return {**base, "ready": False, "reason": "schedule_missing", "pending": []}
         if pending:
@@ -5063,12 +5211,14 @@ class ProjectTaskService:
             if t.percent_complete != pct:
                 t.percent_complete = pct
                 t.updated_at = now
-            if pct >= 100 and t.completed_at is None:
-                t.completed_at = now
-                t.updated_at = now
-            elif pct < 100 and t.completed_at is not None:
-                t.completed_at = None
-                t.updated_at = now
+            # Card-raiz de planejamento: conclusão é a etapa Concluído do kanban, não o 100% das US.
+            if t.planning_kind not in ("projeto", "programa"):
+                if pct >= 100 and t.completed_at is None:
+                    t.completed_at = now
+                    t.updated_at = now
+                elif pct < 100 and t.completed_at is not None:
+                    t.completed_at = None
+                    t.updated_at = now
             return (acc, wsum)
 
         rollup_progress(root_id)
@@ -7357,11 +7507,11 @@ class CapacityService:
 
 
 class UsCommitEvidenceService:
-    """Evidência de código na conclusão da User Story.
+    """Evidência de código ao enviar a User Story para Homologação (PO).
 
-    Regra: para concluir uma US o dev vincula ao menos um commit do produto que está
-    vinculado ao projeto. Se o produto não tiver commit, ele justifica. Projeto sem
-    produto vinculado nem chega a essa escolha — é bloqueado até o cadastro ser corrigido.
+    Regra: o dev responsável vincula ao menos um commit do produto do projeto. Se o
+    produto não tiver commit, ele justifica. Projeto sem produto é bloqueado até o
+    cadastro ser corrigido. Sair da Homologação (PO) é do PO do projeto.
 
     Imports do módulo Produtos são lazy dentro das funções (padrão de
     `_validate_procurement_question`): projetos não depende de produtos no topo do módulo.
@@ -7536,7 +7686,7 @@ class UsCommitEvidenceService:
     async def evidence_state(
         db: AsyncSession, project_id: uuid.UUID, task_id: uuid.UUID
     ) -> dict:
-        """Diagnóstico consumido pelo drawer: o que a US tem e o que falta para concluir."""
+        """Diagnóstico do drawer: o que a US tem e o que falta para Homologação (PO)."""
         from app.modules.produtos.models import RepoCommit
 
         task = await ProjectTaskService.get(db, project_id, task_id)
@@ -7566,8 +7716,18 @@ class UsCommitEvidenceService:
         }
 
     @staticmethod
-    async def assert_evidence_for_completion(db: AsyncSession, task: ProjectTask) -> None:
-        """Guard da conclusão. Checagens da mais barata para a mais cara."""
+    async def assert_evidence_for_completion(
+        db: AsyncSession, task: ProjectTask, *, momento: str = "concluir",
+    ) -> None:
+        """Guard de evidência. Checagens da mais barata para a mais cara.
+
+        `momento`: 'homologacao_po' (envio à raia do PO) ou 'concluir'.
+        """
+        acao = (
+            "mover a User Story para Homologação (PO)"
+            if momento == "homologacao_po"
+            else "concluir a User Story"
+        )
         if (task.commit_justificativa or "").strip():
             return
 
@@ -7583,7 +7743,7 @@ class UsCommitEvidenceService:
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "Vincule um produto ao projeto antes de concluir a User Story — sem "
+                    f"Vincule um produto ao projeto antes de {acao} — sem "
                     "produto não há repositório de onde tirar a evidência de código."
                 ),
             )
@@ -7602,16 +7762,16 @@ class UsCommitEvidenceService:
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"Vincule ao menos um commit para concluir a User Story — há "
-                    f"{disponiveis} commit(s) do produto disponíveis. Se nenhum se aplica, "
-                    "registre a justificativa."
+                    f"O desenvolvedor responsável deve informar um commit ou justificativa "
+                    f"para {acao} — há {disponiveis} commit(s) do produto disponíveis. "
+                    "Abra o card, vincule o commit ou registre a justificativa."
                 ),
             )
         raise HTTPException(
             status_code=400,
             detail=(
-                "O produto deste projeto não tem nenhum commit importado. Registre a "
-                "justificativa para concluir a User Story sem evidência de código."
+                f"O produto deste projeto não tem nenhum commit importado. O desenvolvedor "
+                f"responsável deve registrar a justificativa para {acao} sem evidência de código."
             ),
         )
 
@@ -8145,6 +8305,31 @@ class UsDeliveryReportService:
         return datetime.now(UsDeliveryReportService.TZ)
 
     @staticmethod
+    def _as_local_date(val) -> Optional[date]:
+        """Data em Brasília: datetime naive do banco é UTC; `date` puro fica como está."""
+        if val is None:
+            return None
+        if isinstance(val, datetime):
+            utc = val.replace(tzinfo=timezone.utc) if val.tzinfo is None else val.astimezone(timezone.utc)
+            return utc.astimezone(UsDeliveryReportService.TZ).date()
+        if isinstance(val, date):
+            return val
+        return None
+
+    @classmethod
+    def _same_month(cls, item_date, completed_at) -> bool:
+        """Vínculo 'entregue no mês' da conclusão do projeto (calendário Brasília)."""
+        d = item_date if isinstance(item_date, date) and not isinstance(item_date, datetime) else cls._as_local_date(item_date)
+        c = cls._as_local_date(completed_at)
+        if d is None or c is None:
+            return False
+        return d.year == c.year and d.month == c.month
+
+    @classmethod
+    def _filter_links_same_month(cls, items: list[dict], completed_at) -> list[dict]:
+        return [it for it in items if cls._same_month(it.get("item_date"), completed_at)]
+
+    @staticmethod
     def _monday(d: date) -> date:
         return d - timedelta(days=d.weekday())  # Monday=0
 
@@ -8364,16 +8549,23 @@ class UsDeliveryReportService:
 
         delivered: list[ProjectTask] = []
         for t in roots:
-            is_done = bool(t.status and t.status.is_final) or t.completed_at is not None
-            if not is_done or t.completed_at is None:
+            # Só o card de Projetos e Programas na etapa Concluído. US/Features prontas
+            # (ou completed_at de rollup) com o raiz em Impedimento NÃO contam.
+            if not ProjectTaskService._is_concluded_planning_status(t.status):
                 continue
-            if range_start <= t.completed_at < range_end:
+            done_at = t.completed_at or t.status_entered_at
+            if done_at is None:
+                continue
+            if range_start <= done_at < range_end:
                 delivered.append(t)
 
         empty_kpis = {
             "total": 0,
             "com_servicos": 0,
             "com_processos_e_documentos": 0,
+            "servicos_no_mes": 0,
+            "processos_no_mes": 0,
+            "documentos_no_mes": 0,
         }
         if not delivered:
             return [], empty_kpis
@@ -8494,16 +8686,19 @@ class UsDeliveryReportService:
         items: list[dict] = []
         com_servicos = 0
         com_proc_doc = 0
+        servicos_no_mes = 0
+        processos_no_mes = 0
+        documentos_no_mes = 0
         for t in delivered:
             product = product_by_origin.get(t.id)
             if product is None and t.linked_product_id:
                 product = product_by_id.get(t.linked_product_id)
 
             servicos = servicos_by_product.get(product.id, []) if product else []
-            servico_items = [
-                {"name": s.name, "item_date": s.data_publicacao}
-                for s in servicos
-            ]
+            servico_items = cls._filter_links_same_month(
+                [{"name": s.name, "item_date": s.data_publicacao} for s in servicos],
+                t.completed_at,
+            )
             processo_items: list[dict] = []
             for s in servicos:
                 processo_items.extend(processes_by_servico.get(s.id, []))
@@ -8515,15 +8710,19 @@ class UsDeliveryReportService:
                             "name": f"Dispensa — {s.name}",
                             "item_date": s.data_publicacao,
                         })
+            processo_items = cls._filter_links_same_month(processo_items, t.completed_at)
             docs = docs_by_product.get(product.id, []) if product else []
-            documento_items = [
-                {"name": d.name, "item_date": d.data_documento}
-                for d in docs
-            ]
+            documento_items = cls._filter_links_same_month(
+                [{"name": d.name, "item_date": d.data_documento} for d in docs],
+                t.completed_at,
+            )
 
             servicos_count = len(servico_items)
             processos_count = len(processo_items)
             documentos_count = len(documento_items)
+            servicos_no_mes += servicos_count
+            processos_no_mes += processos_count
+            documentos_no_mes += documentos_count
 
             has_servicos = servicos_count > 0
             has_processos = processos_count > 0
@@ -8562,6 +8761,9 @@ class UsDeliveryReportService:
             "total": len(items),
             "com_servicos": com_servicos,
             "com_processos_e_documentos": com_proc_doc,
+            "servicos_no_mes": servicos_no_mes,
+            "processos_no_mes": processos_no_mes,
+            "documentos_no_mes": documentos_no_mes,
         }
         return items, kpis
 
@@ -9264,6 +9466,44 @@ Regras:
 - Use os códigos exatos listados na rubrica.
 """
 
+DEFAULT_REVIEW_PROMPT = """Você é um analista de triagem do kanban Prospectar Soluções de TI.
+
+Avalie a solicitação abaixo ANTES de ela seguir para classificação. Faça três análises:
+
+1) Informações preenchidas: os dados do card e de CADA campo do formulário são consistentes e têm conteúdo real (não placeholder)?
+2) Lacunas: percorra TODOS os campos listados em {{task_context}} (não só um subconjunto). Em especial, não deixe de avaliar:
+   Dados do projeto: diretoria, área, descrição, anexos.
+   Identificação: requisitante, solicitante, cargo, e-mail, sponsor.
+   Problema e valor: descrição do problema ou oportunidade, hipótese de solução, quem é afetado, métrica de sucesso, valor esperado.
+   Escopo conhecido: áreas envolvidas, sistemas envolvidos, documentação existente, ferramenta atual.
+   Urgência e risco: prazo desejado, justificativa do prazo, risco regulatório, descrição dos riscos regulatórios, impacto da inação.
+3) Duplicidade: compare com os demais cards/projetos listados. Há redundância ou possível duplicata?
+
+{{task_context}}
+
+{{peer_cards}}
+
+Responda APENAS com um JSON válido (sem markdown, sem texto extra), neste formato exato:
+{
+  "aprovado": true,
+  "campos_faltantes": [],
+  "duplicidade": null,
+  "ajustes": "",
+  "justificativa": "Resumo objetivo da decisão"
+}
+
+Regras:
+- aprovado=true SOMENTE se as três análises passarem (dados suficientes em TODOS os campos relevantes, sem lacunas e sem duplicidade).
+- Trate como VAZIO / lacuna: campo em branco, só pontuação (".", "-", "—"), "n/a", "não informado" ou texto genérico sem conteúdo acionável.
+- Hipótese de solução, métrica de sucesso e valor esperado com "." ou equivalente = lacuna obrigatória.
+- Prazo desejado vazio = lacuna. Se houver prazo, justificativa do prazo também precisa estar preenchida.
+- Se risco regulatório = Sim, a descrição dos riscos é obrigatória. Se = Não, descrição vazia é aceitável.
+- Liste em campos_faltantes o rótulo de CADA campo insuficiente e descreva em ajustes o que o requisitante deve completar.
+- Se houver possível duplicata, aprovado=false, preencha duplicidade com o título/card semelhante e explique em ajustes.
+- ajustes deve ser um texto acionável para o requisitante (o que corrigir/completar).
+- justificativa sempre preenchida.
+"""
+
 
 class ProjectStageAgentService:
     """CRUD dos vínculos de agentes IDCortex por etapa do kanban."""
@@ -9286,6 +9526,7 @@ class ProjectStageAgentService:
             continue_thread=item.continue_thread,
             add_comment_on_success=item.add_comment_on_success,
             advance_to_status_id=item.advance_to_status_id,
+            fail_to_status_id=item.fail_to_status_id,
             is_active=item.is_active,
             created_at=item.created_at,
             updated_at=item.updated_at,
@@ -9481,6 +9722,10 @@ class ProjectAgentRunner:
         try:
             if binding.agent_kind == "classify_and_advance":
                 await ProjectAgentRunner._execute_classify_and_advance(
+                    db, project_id, task, binding, status_obj=status_obj,
+                )
+            elif binding.agent_kind == "review_and_route":
+                await ProjectAgentRunner._execute_review_and_route(
                     db, project_id, task, binding, status_obj=status_obj,
                 )
             else:
@@ -9728,6 +9973,72 @@ class ProjectAgentRunner:
                 pass
         return None
 
+    _EMPTY_PLACEHOLDERS = {
+        "", ".", "-", "—", "n/a", "na", "s/n", "sn", "xxx",
+        "nao informado", "não informado", "nao se aplica", "não se aplica",
+    }
+
+    @staticmethod
+    def _display_form_value(val) -> tuple[str, bool]:
+        """Retorna (texto para o prompt, é_lacuna). Placeholder tipo '.' conta como vazio."""
+        if val is None:
+            return "(vazio)", True
+        if isinstance(val, bool):
+            return ("Sim" if val else "Não"), False
+        if isinstance(val, (list, tuple)):
+            if not val:
+                return "(vazio)", True
+            text = ", ".join(str(v).strip() for v in val if str(v).strip())
+            if not text:
+                return "(vazio)", True
+            return text, False
+        text = str(val).strip()
+        if text.lower() in ProjectAgentRunner._EMPTY_PLACEHOLDERS:
+            return "(vazio)" if not text else f"(insuficiente: {text!r})", True
+        return text, False
+
+    @staticmethod
+    async def _collect_form_gaps(db: AsyncSession, task: ProjectTask) -> list[str]:
+        """Campos do card/formulário vazios ou só placeholder ('.' etc.)."""
+        gaps: list[str] = []
+        if not (task.diretoria or "").strip():
+            gaps.append("Diretoria")
+        if not (task.area or "").strip():
+            gaps.append("Área")
+        desc = (task.description or "").strip()
+        if not desc or desc.lower() in ProjectAgentRunner._EMPTY_PLACEHOLDERS:
+            gaps.append("Descrição")
+
+        sub_res = await db.execute(
+            select(ProjectDemandFormSubmission).where(ProjectDemandFormSubmission.task_id == task.id)
+        )
+        submission = sub_res.scalar_one_or_none()
+        form_values = submission.values if submission else {}
+        if not task.demand_type_id:
+            return gaps
+
+        risco = str(form_values.get("risco_regulatorio") or "").strip().lower()
+        skip_empty = {"requisitante", "desenvolvida_com_ia"}
+        if risco not in {"sim", "true", "1", "yes"}:
+            skip_empty.add("descricao_dos_riscos_regulatorios")
+
+        fields_res = await db.execute(
+            select(ProjectDemandFormField)
+            .join(ProjectDemandFormSection, ProjectDemandFormSection.id == ProjectDemandFormField.section_id)
+            .where(
+                ProjectDemandFormSection.demand_type_id == task.demand_type_id,
+                ProjectDemandFormField.is_active == True,  # noqa: E712
+            )
+            .order_by(ProjectDemandFormSection.order.asc(), ProjectDemandFormField.order.asc())
+        )
+        for field in fields_res.scalars().all():
+            if field.field_key in skip_empty:
+                continue
+            _, insufficient = ProjectAgentRunner._display_form_value(form_values.get(field.field_key))
+            if insufficient:
+                gaps.append(field.label)
+        return gaps
+
     @staticmethod
     async def _build_rich_task_context(
         db: AsyncSession,
@@ -9750,14 +10061,20 @@ class ProjectAgentRunner:
             if dt:
                 lines.append(f"Tipo de demanda: {dt.name}")
 
+        anexos = task.anexos or []
+        anexo_txt = (
+            ", ".join(str(a.get("filename") or a.get("object_name") or "arquivo") for a in anexos if isinstance(a, dict))
+            if anexos else "(nenhum)"
+        )
         lines.extend([
             f"Título: {task.title or ''}",
-            f"Descrição: {task.description or ''}",
-            f"Diretoria: {task.diretoria or '—'}",
-            f"Área: {task.area or '—'}",
-            f"Início: {task.start_date.isoformat() if task.start_date else '—'}",
-            f"Prazo: {task.due_date.isoformat() if task.due_date else '—'}",
-            f"Horas estimadas: {task.estimated_hours if task.estimated_hours is not None else '—'}",
+            f"Descrição: {task.description or '(vazia)'}",
+            f"Diretoria: {task.diretoria or '(vazia)'}",
+            f"Área: {task.area or '(vazia)'}",
+            f"Anexos: {anexo_txt}",
+            f"Início: {task.start_date.isoformat() if task.start_date else '(vazio)'}",
+            f"Prazo: {task.due_date.isoformat() if task.due_date else '(vazio)'}",
+            f"Horas estimadas: {task.estimated_hours if task.estimated_hours is not None else '(vazio)'}",
         ])
 
         sub_res = await db.execute(
@@ -9766,20 +10083,41 @@ class ProjectAgentRunner:
         submission = sub_res.scalar_one_or_none()
         form_values = submission.values if submission else {}
 
-        if task.demand_type_id and form_values:
+        if task.demand_type_id:
             fields_res = await db.execute(
                 select(ProjectDemandFormField, ProjectDemandFormSection)
                 .join(ProjectDemandFormSection, ProjectDemandFormSection.id == ProjectDemandFormField.section_id)
-                .where(ProjectDemandFormSection.demand_type_id == task.demand_type_id)
+                .where(
+                    ProjectDemandFormSection.demand_type_id == task.demand_type_id,
+                    ProjectDemandFormField.is_active == True,  # noqa: E712
+                )
                 .order_by(ProjectDemandFormSection.order.asc(), ProjectDemandFormField.order.asc())
             )
-            label_by_key = {f.field_key: f.label for f, _ in fields_res.all()}
-            lines.append("\nFormulário da demanda:")
-            for key, val in form_values.items():
-                label = label_by_key.get(key, key)
-                if isinstance(val, list):
-                    val = ", ".join(str(v) for v in val)
-                lines.append(f"  - {label}: {val}")
+            rows = fields_res.all()
+            if rows:
+                lines.append("\nFormulário da demanda (avalie TODOS os campos abaixo):")
+                current_section = None
+                seen_keys: set[str] = set()
+                for field, section in rows:
+                    if section.title != current_section:
+                        current_section = section.title
+                        lines.append(f"  [{section.title}]")
+                    seen_keys.add(field.field_key)
+                    display, insufficient = ProjectAgentRunner._display_form_value(
+                        form_values.get(field.field_key),
+                    )
+                    mark = "  ← LACUNA (vazio ou placeholder)" if insufficient else ""
+                    lines.append(f"    - {field.label}: {display}{mark}")
+                extras = [k for k in form_values if k not in seen_keys]
+                if extras:
+                    lines.append("  [Outros]")
+                    for key in extras:
+                        display, insufficient = ProjectAgentRunner._display_form_value(form_values.get(key))
+                        mark = "  ← LACUNA (vazio ou placeholder)" if insufficient else ""
+                        lines.append(f"    - {key}: {display}{mark}")
+            elif form_values:
+                lines.append("\nFormulário da demanda:")
+                lines.append(json.dumps(form_values, ensure_ascii=False, indent=2))
         elif form_values:
             lines.append("\nFormulário da demanda:")
             lines.append(json.dumps(form_values, ensure_ascii=False, indent=2))
@@ -9836,6 +10174,114 @@ class ProjectAgentRunner:
             .replace("{{description}}", task.description or "")
             .replace("{{task_id}}", str(task.id))
         )
+
+    @staticmethod
+    async def _build_peer_cards_context(
+        db: AsyncSession,
+        task: ProjectTask,
+        funnel_id: uuid.UUID,
+    ) -> str:
+        """Lista cards do mesmo funil e projetos da carteira para checagem de duplicidade."""
+        lines = ["Demais solicitações do mesmo funil (para checar duplicidade):"]
+        peers = (await db.execute(
+            select(ProjectTask.title, ProjectTask.description, ProjectStatusConfig.name)
+            .join(ProjectStatusConfig, ProjectStatusConfig.id == ProjectTask.status_id)
+            .where(
+                ProjectStatusConfig.funnel_id == funnel_id,
+                ProjectTask.id != task.id,
+                ProjectStatusConfig.name.notin_(("Cancelado", "Rejeitado", "Concluído")),
+            )
+            .order_by(ProjectTask.updated_at.desc())
+            .limit(40)
+        )).all()
+        if not peers:
+            lines.append("  (nenhuma outra solicitação ativa neste funil)")
+        else:
+            for title, desc, st_name in peers:
+                snippet = (desc or "").replace("\n", " ").strip()
+                if len(snippet) > 180:
+                    snippet = snippet[:177] + "..."
+                extra = f" — {snippet}" if snippet else ""
+                lines.append(f"  - [{st_name}] {title or '(sem título)'}{extra}")
+
+        projetos = (await db.execute(
+            select(ProjectTask.title, ProjectTask.description)
+            .where(
+                ProjectTask.id != task.id,
+                ProjectTask.planning_kind == "projeto",
+                ProjectTask.title.isnot(None),
+            )
+            .order_by(ProjectTask.updated_at.desc())
+            .limit(30)
+        )).all()
+        lines.append("\nProjetos já existentes na carteira:")
+        if not projetos:
+            lines.append("  (nenhum projeto cadastrado)")
+        else:
+            for title, desc in projetos:
+                snippet = (desc or "").replace("\n", " ").strip()
+                if len(snippet) > 120:
+                    snippet = snippet[:117] + "..."
+                extra = f" — {snippet}" if snippet else ""
+                lines.append(f"  - {title}{extra}")
+        return "\n".join(lines)
+
+    @staticmethod
+    async def _build_review_prompt(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        task: ProjectTask,
+        template: str,
+        funnel_id: uuid.UUID,
+    ) -> str:
+        task_context = await ProjectAgentRunner._build_rich_task_context(db, project_id, task)
+        peer_cards = await ProjectAgentRunner._build_peer_cards_context(db, task, funnel_id)
+        tpl = template.strip() or DEFAULT_REVIEW_PROMPT
+        return (
+            tpl.replace("{{task_context}}", task_context)
+            .replace("{{peer_cards}}", peer_cards)
+            .replace("{{title}}", task.title or "")
+            .replace("{{description}}", task.description or "")
+            .replace("{{task_id}}", str(task.id))
+        )
+
+    @staticmethod
+    async def _resolve_route_status(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        configured_id: Optional[uuid.UUID],
+        fallback: Optional[ProjectStatusConfig],
+    ) -> Optional[ProjectStatusConfig]:
+        if configured_id:
+            cfg = await db.get(ProjectStatusConfig, configured_id)
+            if cfg is not None and cfg.project_id == project_id:
+                return cfg
+        return fallback
+
+    @staticmethod
+    def _parse_review_decision(answer_message: str) -> tuple[bool, str]:
+        """Retorna (aprovado, texto de ajustes/comentário). Sem JSON válido → não aprova."""
+        parsed = ProjectAgentRunner._extract_json_from_text(answer_message) or {}
+        raw_ok = parsed.get("aprovado")
+        if isinstance(raw_ok, str):
+            aprovado = raw_ok.strip().lower() in {"true", "sim", "yes", "1"}
+        else:
+            aprovado = raw_ok is True
+        parts: list[str] = []
+        faltantes = parsed.get("campos_faltantes") or []
+        if isinstance(faltantes, list) and faltantes:
+            parts.append("Campos faltantes: " + ", ".join(str(x) for x in faltantes if x))
+        dup = parsed.get("duplicidade")
+        if dup:
+            parts.append(f"Possível duplicidade: {dup}")
+        ajustes = (parsed.get("ajustes") or "").strip()
+        if ajustes:
+            parts.append(ajustes)
+        just = (parsed.get("justificativa") or "").strip()
+        if just and just not in parts:
+            parts.append(just)
+        comment = "\n".join(parts).strip() or (answer_message or "").strip()
+        return aprovado, comment
 
     @staticmethod
     async def _resolve_pillar_ids(db: AsyncSession, raw_codes) -> list[uuid.UUID]:
@@ -10071,6 +10517,105 @@ class ProjectAgentRunner:
                         f"Quadrante: {quadrant} | Impacto efetivo: {preview.get('impacto_efetivo')} | "
                         f"Esforço: {preview.get('esforco')}\n\n{justificativa}{move_note}"
                     ),
+                ))
+            await db.commit()
+        except Exception as exc:  # noqa: BLE001
+            exec_row.status = "failed"
+            exec_row.error_message = ProjectAgentRunner._format_gateway_error(exc)
+            db.add(ProjectAgentRunner._notify_agent_failure(binding, task.id, exec_row.error_message))
+            await db.commit()
+
+    @staticmethod
+    async def _execute_review_and_route(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        task: ProjectTask,
+        binding: ProjectStageAgentBinding,
+        status_obj: Optional[ProjectStatusConfig] = None,
+    ) -> None:
+        current_status = status_obj or await db.get(ProjectStatusConfig, task.status_id)
+        if not current_status:
+            return
+
+        prompt = await ProjectAgentRunner._build_review_prompt(
+            db, project_id, task, binding.prompt_template, current_status.funnel_id,
+        )
+        thread_id = None
+        if binding.continue_thread:
+            thread_id = await ProjectAgentRunner._resolve_thread_id(db, task.id, binding.id)
+
+        send_msg, anon_report = await ProjectAgentRunner._anonymize_prompt(db, prompt)
+        exec_row = ProjectAgentExecution(
+            task_id=task.id,
+            binding_id=binding.id,
+            status="pending",
+            thread_id=thread_id,
+            request_payload={"agent_id": binding.agent_id, "mensagem": send_msg,
+                             "thread_id": thread_id, "_anonimizacao": anon_report},
+        )
+        db.add(exec_row)
+        await db.flush()
+
+        try:
+            status_code, body, answer_message = await ProjectAgentRunner._call_azure_agent(
+                binding, send_msg, thread_id,
+            )
+            exec_row.response_payload = body
+            exec_row.thread_id = body.get("thread_id")
+            exec_row.answer_message = answer_message
+
+            if status_code >= 400:
+                exec_row.status = "failed"
+                exec_row.error_message = ProjectAgentRunner._gateway_http_message(status_code)
+                db.add(ProjectAgentRunner._notify_agent_failure(binding, task.id, exec_row.error_message))
+                await db.commit()
+                return
+            if not answer_message:
+                exec_row.status = "failed"
+                exec_row.error_message = "Agente não retornou mensagem de resposta."
+                db.add(ProjectAgentRunner._notify_agent_failure(binding, task.id, exec_row.error_message))
+                await db.commit()
+                return
+
+            aprovado, comment = ProjectAgentRunner._parse_review_decision(answer_message)
+            gaps = await ProjectAgentRunner._collect_form_gaps(db, task)
+            if gaps:
+                aprovado = False
+                gap_line = "Campos faltantes: " + ", ".join(gaps)
+                if gap_line not in comment:
+                    comment = gap_line + (("\n" + comment) if comment else "")
+            exec_id = exec_row.id
+            next_in_funnel = await ProjectAgentRunner._next_status_in_funnel(
+                db, current_status.funnel_id, current_status.order,
+            )
+            dest = await ProjectAgentRunner._resolve_route_status(
+                db, project_id,
+                binding.advance_to_status_id if aprovado else binding.fail_to_status_id,
+                next_in_funnel if aprovado else None,
+            )
+            advanced_to: Optional[str] = None
+            if dest and dest.id != task.status_id:
+                await ProjectTaskService.update(
+                    db,
+                    project_id,
+                    task.id,
+                    ProjectTaskUpdate(status_id=dest.id),
+                    current_user=None,
+                )
+                advanced_to = dest.name
+                exec_row = await db.get(ProjectAgentExecution, exec_id)
+
+            if exec_row is None:
+                raise ValueError("Registro de execução do agente não encontrado.")
+
+            exec_row.status = "success"
+            if not aprovado or binding.add_comment_on_success:
+                decision = "Aprovado — seguir para classificação" if aprovado else "Devolvido para ajuste"
+                move_note = f"\n\nCard movido para: {advanced_to}" if advanced_to else ""
+                db.add(ProjectTaskComment(
+                    task_id=task.id,
+                    author_id=None,
+                    content=f"[agente: {binding.name}] {decision}\n{comment}{move_note}",
                 ))
             await db.commit()
         except Exception as exc:  # noqa: BLE001
@@ -11236,16 +11781,43 @@ class ProjectCardFieldService:
 
     @staticmethod
     async def ensure_seeded(db: AsyncSession, funnel_id: uuid.UUID) -> None:
+        funnel_name = (
+            await db.execute(
+                select(ProjectFunnel.name).where(ProjectFunnel.id == funnel_id)
+            )
+        ).scalar_one_or_none()
+        force_us_description = ProjectTaskService._is_user_story_funnel_name(funnel_name)
+
         res = await db.execute(
             select(ProjectCardField.field_key).where(ProjectCardField.funnel_id == funnel_id)
         )
         existing = {row[0] for row in res.all()}
-        added = False
+        changed = False
         for row in _CARD_FIELDS_SEED:
             if row["field_key"] not in existing:
-                db.add(ProjectCardField(funnel_id=funnel_id, **row))
-                added = True
-        if added:
+                values = dict(row)
+                if force_us_description and values["field_key"] == "description":
+                    values["is_visible"] = True
+                db.add(ProjectCardField(funnel_id=funnel_id, **values))
+                changed = True
+
+        # Descrição é parte obrigatória do card de User Story. Mesmo que um layout
+        # antigo tenha salvo o campo como oculto, reativa ao carregar/salvar o layout.
+        if force_us_description and "description" in existing:
+            description_row = (
+                await db.execute(
+                    select(ProjectCardField).where(
+                        ProjectCardField.funnel_id == funnel_id,
+                        ProjectCardField.field_key == "description",
+                    )
+                )
+            ).scalar_one_or_none()
+            if description_row is not None and not description_row.is_visible:
+                description_row.is_visible = True
+                description_row.updated_at = datetime.utcnow()
+                changed = True
+
+        if changed:
             await db.commit()
 
     @staticmethod
@@ -12123,14 +12695,14 @@ class PoSyncService:
     @classmethod
     def _project_phase(cls, root) -> str:
         """Fase do projeto a partir da ETAPA do Kanban do card-raiz (não da subárvore).
-        Concluído (is_final/completed) → concluido; senão classifica o nome da etapa em
-        impedimento / producao / homologacao / desenvolvimento; o resto é planejamento.
-        'Pronto para Desenvolvimento' fica em planejamento (dev ainda não iniciado)."""
-        if root.completed_at is not None or (root.status is not None and bool(root.status.is_final)):
-            return "concluido"
+        Impedimento tem prioridade. Concluído só se a raia do card-raiz é Concluído
+        (US/Features a 100% não bastam). Senão classifica o nome em producao / homologacao /
+        desenvolvimento; o resto é planejamento. 'Pronto para Desenvolvimento' fica em planejamento."""
         name = (root.status.name if root.status is not None else "") or ""
         if cls._IMPEDIMENTO_PAT.search(name):
             return "impedimento"
+        if ProjectTaskService._is_concluded_planning_status(root.status):
+            return "concluido"
         if cls._PROD_PAT.search(name):
             return "producao"
         if cls._HOMOLOG_PAT.search(name):
@@ -12572,11 +13144,13 @@ class PoSyncService:
                 "po": po_name.get(root.assigned_to),
                 "diretoria_label": dlabel(dir_code), "fase": fase,
             }
-            if root.completed_at is not None and mes_ini <= root.completed_at <= mes_fim:
-                proj_concluidas.append({
-                    **_base, "completed_at": iso(root.completed_at),
-                    "prazo_status": prazo_status, "atraso_dias": atraso_dias,
-                })
+            if ProjectTaskService._is_concluded_planning_status(root.status):
+                done_at = root.completed_at or root.status_entered_at
+                if done_at is not None and mes_ini <= done_at <= mes_fim:
+                    proj_concluidas.append({
+                        **_base, "completed_at": iso(done_at),
+                        "prazo_status": prazo_status, "atraso_dias": atraso_dias,
+                    })
             if root.completed_at is None and root.due_date is not None and prox_ini <= root.due_date <= prox_fim:
                 proj_previstas.append({**_base, "due_date": iso(root.due_date)})
             # Só projetos em IMPEDIMENTO (atraso/SLA entram como badge extra, não como critério).

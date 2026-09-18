@@ -147,5 +147,17 @@ class Settings(BaseSettings):
     # (/docs no Docker, ou <repo>/docs em desenvolvimento).
     DOCS_ROOT: str = ""
 
+    # ── Portfólio de produtos — endpoint público (token fixo) ──
+    # GET /api/v1/public/produtos/portfolio/{token}
+    # Vazio = endpoint responde 503. Tenant padrão: ss.
+    PUBLIC_PRODUTOS_PORTFOLIO_TOKEN: str = ""
+    PUBLIC_PRODUTOS_TENANT_SLUG: str = "ss"
+
+    # ── Ociosidade diária — endpoint público (token fixo) ──
+    # GET /api/v1/public/projetos/ociosidade/{token}
+    # Vazio = endpoint responde 503. Tenant padrão: ss.
+    PUBLIC_OCIOSIDADE_TOKEN: str = ""
+    PUBLIC_OCIOSIDADE_TENANT_SLUG: str = "ss"
+
 
 settings = Settings()

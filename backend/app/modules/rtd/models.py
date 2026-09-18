@@ -98,6 +98,9 @@ class RtdReuniao(TenantBase):
     # calcula ao vivo; fechada → lê daqui. Reabrir preserva (sobrescrito no próximo fechamento).
     snapshot_indicadores: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
+    # Link público de compartilhamento (sem login). Opaco, único por tenant, revogável.
+    public_token: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, unique=True, index=True)
+
     created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)

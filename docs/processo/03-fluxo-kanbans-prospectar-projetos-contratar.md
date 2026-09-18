@@ -1,24 +1,38 @@
-# Fluxo BPMN � Prospectar � Projetos � Contratar
+# Fluxo BPMN — Prospectar → Projetos → Features → US → Contratar
 
-Vis?o das **etapas reais** dos tr?s kanbans do processo TD, com bifurca??es de classifica??o e contrata??o.
+Visão das **etapas reais** dos cinco kanbans do processo TD, com bifurcações de classificação, contratação e rollup Feature/US.
 
-| Artefacto | Descri??o |
+| Artefacto | Descrição |
 | :--- | :--- |
-| [03-fluxo-kanbans-prospectar-projetos-contratar-bpmn.xml](03-fluxo-kanbans-prospectar-projetos-contratar-bpmn.xml) | BPMN 2.0 (pools dos 3 kanbans) � abrir em Documenta??o ou [demo.bpmn.io](https://demo.bpmn.io) |
+| [03-fluxo-kanbans-prospectar-projetos-contratar-bpmn.xml](03-fluxo-kanbans-prospectar-projetos-contratar-bpmn.xml) | BPMN 2.0 (5 pools) — abrir em Documentação ou [demo.bpmn.io](https://demo.bpmn.io) |
 
-## Bifurca??es principais
+## Ordem do fluxo
 
-1. **Classificar** (sa?da do Backlog em Prospectar): Desenvolvimento | Implanta??o | Melhoria  
-2. **Produto sistema externo?** ? se sim, **Ser? contratado?**  
-3. **Sim** ? origem vai para raia **Contrata??o** (travada) + nasce card no kanban **Contratar**  
-4. **Avaliar Classifica??o**: Ajustes | Impedimento | Rejeitado | Aprovado ? Conclu?do (converte p/ Projetos)  
-5. **Contratar / Negocia??o**: Ganhou (contrato no Produto + libera origem) | Perdeu (origem ? Cancelado)  
-6. **Projetos e Programas**: Impedimento, escopo, homologa??o (loops de retorno)
+1. **Prospectar Soluções** — entrada da demanda; classifica (Desenvolvimento / Implantação / Melhoria).
+2. **Contratar** (lateral) — se produto sistema externo e “Será contratado? = Sim”: origem fica na raia Contratação (travada) e nasce card neste kanban.
+3. **Projetos e Programas** — conversão no Concluído da prospecção (Projeto ou Programa).
+4. **Features** — a partir de Pronto para Desenvolvimento / Em Desenvolvimento (criar ou importar planilha).
+5. **User Story** — filhas da Feature; rollup de conclusão devolve a Feature para Homologação (PO).
 
-## Etapas por kanban (ordem atual)
+## Bifurcações principais
 
-**Prospectar Solu??es:** Backlog ? Ajustes ? Classifica??o ? Avaliar Classifica??o ? Contrata??o ? Impedimento ? Rejeitado ? Conclu?do ? Cancelado  
+1. **Classificar** (saída do Backlog em Prospectar): Desenvolvimento | Implantação | Melhoria
+2. **Produto sistema externo?** — se sim, **Será contratado?**
+3. **Sim** — origem vai para raia **Contratação** (travada) + nasce card no kanban **Contratar**
+4. **Avaliar Classificação**: Ajustes | Impedimento | Rejeitado | Aprovado → Concluído (converte p/ Projetos)
+5. **Contratar / Negociação**: Ganhou (contrato no Produto + libera origem) | Perdeu (origem → Cancelado)
+6. **Projetos**: Impedimento, escopo, homologação (loops de retorno); **Pausado** existe como raia operacional
+7. **Feature**: Homologação (PO) → Ajustar (volta a Em Dev) ou Concluído
+8. **US**: Impedimento; Homologação (PO) pode devolver a Em Desenvolvimento
 
-**Projetos e Programas:** Backlog ? Agendar Reuni?o ? Conduzir Reuni?o ? Impedimento ? Requisitos/Prot?tipo ? Refinamento ? Validar Escopo ? Pronto p/ Dev ? Em Desenvolvimento ? DevOps HML ? Homologando ? DEVSECOPS ? Conclu?do (+ Contrata??o / Cancelado)  
+## Etapas por kanban (ordem atual no tenant)
 
-**Contratar:** Backlog ? Prospectar ? An?lise de ader?ncia ? Proposta ? Negocia??o ? Conclu?do | Cancelado  
+**Prospectar Soluções:** Backlog → Ajustes → Classificação → Avaliar Classificação → Contratação → Impedimento → Rejeitado → Concluído → Cancelado
+
+**Projetos e Programas:** Backlog → Contratação → Agendar Reunião → Conduzir Reunião de Levantamento → Impedimento → Pausado → Requisitos / Protótipo → Refinamento PO & Tech → Validar Escopo (Cliente) → Pronto para Desenvolvimento → Em Desenvolvimento → DevOps (HML) → Homologando (Cliente) → DEVSECOPS (PROD) → Concluído → Cancelado
+
+**Features:** Backlog → Em Desenvolvimento → Homologação (PO) → Ajustar → Concluído
+
+**User Story:** Backlog → Impedimento → Em Desenvolvimento → Code Review → Homologação (PO) → Concluído
+
+**Contratar:** Backlog → Prospectar → Análise de aderência → Proposta → Negociação → Concluído | Cancelado

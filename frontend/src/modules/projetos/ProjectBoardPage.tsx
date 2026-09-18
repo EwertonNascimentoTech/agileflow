@@ -61,6 +61,8 @@ import {
   isFeatureKanbanFunnel,
   isFeatureOrUsKanbanFunnel,
   isPlanningRootTask,
+  isHomologPoStatusName,
+  isConcludedStatusName,
   isUserStoryKanbanFunnel,
   shouldShowUsChecklistProgress,
   usChecklistProgressPct,
@@ -261,12 +263,16 @@ const BoardCard = memo(function BoardCard({
         return <span className="task-id">{task.id.slice(0, 8).toUpperCase()}</span>
       case "title":
         return <h4 className="title" style={{ width: "100%" }}>{task.title}</h4>
-      case "description":
-        return task.description ? (
+      case "description": {
+        // A lista do quadro traz só a prévia; o texto completo aparece quando o card já
+        // foi carregado inteiro (ex.: depois de salvar no drawer).
+        const desc = task.description ?? task.description_preview ?? null
+        return desc ? (
           <p style={{ width: "100%", fontSize: 12, color: "var(--af-muted-foreground, #6b7280)", margin: 0, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-            {task.description}
+            {desc}
           </p>
         ) : null
+      }
       case "parent": {
         const parent = task.parent_task_id ? ctx.parentName(task.parent_task_id) : null
         return parent ? (
@@ -1554,21 +1560,33 @@ export default function ProjectBoardPage() {
       }
     }
     const isAssignee = isUserAssignee(task)
-    if (!canMoveTaskOnBoard(
+    const authPersonId = persons.find((p) => p.user_id === user?.id)?.id
+    const root = planningRootOf(task)
+    const isProjectPo = Boolean(root?.assigned_to && root.assigned_to === authPersonId)
+    const leavingHomologPo = isHomologPoStatusName(fromStatus?.name)
+    const toConcluido = !!(toStatus?.is_final) || isConcludedStatusName(toStatus?.name)
+    const ehAdmin = user?.role === "super_admin" || user?.role === "company_admin"
+    // Homologação (PO) → Concluído: o PO do projeto passa mesmo sem ser o responsável da US
+    // e mesmo que a raia Concluído tenha lista de funções.
+    const poConcluiHomolog = leavingHomologPo && isProjectPo && toConcluido
+    if (!poConcluiHomolog && !canMoveTaskOnBoard(
       user,
       fromStatus,
       toStatus,
       funnelAccessForTask(task),
-      isAssignee,
+      isAssignee || (leavingHomologPo && isProjectPo),
     )) {
       toast.error("Você não tem permissão para mover este card para essa etapa.")
       return
     }
     const moveFunnelName = funnels.find((f) => f.id === (fromStatus?.funnel_id ?? selectedFunnelId))?.name ?? selectedFunnelName
-    // No kanban User Story só o responsável ou a coordenação (admin) movem. Espelha
-    // `_check_us_move_authorship` no backend, que é quem de fato decide (403).
-    const ehAdmin = user?.role === "super_admin" || user?.role === "company_admin"
-    if (isUserStoryKanbanFunnel(moveFunnelName) && !ehAdmin && !isAssignee) {
+    if (leavingHomologPo && !ehAdmin && !isProjectPo) {
+      toast.error("Só o PO responsável pelo projeto pode concluir a Homologação (PO).")
+      return
+    }
+    // No kanban User Story só o responsável ou a coordenação (admin) movem — exceto
+    // sair da Homologação (PO), que é do PO do projeto.
+    if (!leavingHomologPo && isUserStoryKanbanFunnel(moveFunnelName) && !ehAdmin && !isAssignee) {
       toast.error("Só o responsável pela User Story ou a coordenação podem movê-la.")
       return
     }
@@ -1617,9 +1635,11 @@ export default function ProjectBoardPage() {
       if (projectId) {
         projetosApi.listPrograms(projectId).then(setPrograms).catch(() => setPrograms([]))
       }
+      // A descrição sugerida na conversão é o texto completo, que a lista do quadro não traz.
+      const full = projectId ? await projetosApi.getTask(projectId, task.id).catch(() => null) : null
       setConversionPrompt({
         task, toStatusId, typeName, name: stripProjectPrefix(task.title),
-        kind: "projeto", description: task.description ?? "",
+        kind: "projeto", description: full?.description ?? task.description ?? "",
         assignedTo: poUsers.some((u) => u.id === task.assigned_to) ? (task.assigned_to ?? "") : "",
         items: [{ title: "", description: "", start_date: "", due_date: "" }],
         programMode: "select", programId: "", newProgramName: "", newProgramDesc: "",
@@ -1697,7 +1717,9 @@ export default function ProjectBoardPage() {
     } catch (err) {
       // Inclui o 423 da trava de cronograma, cuja mensagem lista as etapas pendentes —
       // longa demais para um alert() do browser.
-      toast.error(getApiError(err) || "Não foi possível mover o card.")
+      const msg = getApiError(err) || "Não foi possível mover o card."
+      toast.error(msg)
+      if (/commit|justificativa/i.test(msg)) setSelectedTask(task)
     }
   }
 
@@ -1894,8 +1916,12 @@ export default function ProjectBoardPage() {
   const selectedTaskStatus = selectedTask
     ? statuses.find((s) => s.id === selectedTask.status_id)
     : undefined
+  const selectedRoot = selectedTask ? planningRootOf(selectedTask) : undefined
+  const authPersonId = persons.find((p) => p.user_id === user?.id)?.id
+  const isSelectedProjectPo = Boolean(selectedRoot?.assigned_to && selectedRoot.assigned_to === authPersonId)
   const canEditSelectedTask = selectedTask
     ? canEditTaskOnBoard(user, selectedTaskStatus, funnelAccessForTask(selectedTask), isUserAssignee(selectedTask))
+      || (isHomologPoStatusName(selectedTaskStatus?.name) && isSelectedProjectPo)
     : false
   const filterState: BoardFilterState = {
     q: searchQuery,

@@ -800,6 +800,8 @@ export interface ProcessItem {
   frequencia: string | null
   entradas: string | null
   saidas: string | null
+  servicos_count?: number
+  servicos?: { name: string; product_name: string }[]
   children: ProcessItem[]
 }
 

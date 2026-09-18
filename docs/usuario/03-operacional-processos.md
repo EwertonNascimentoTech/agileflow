@@ -61,3 +61,5 @@ Em configurações de cargos é possível ligar permissões da função ao cargo
 ## Produtos
 
 Portfólio de produtos, inteligência, portfólio de processos e fornecedores — útil após projetos finalizados ou para inventário de serviços da área.
+
+Regras de governança, alertas e recortes (unidade / área / categoria): [05 — governança do portfólio de produtos](../processo/05-regras-governanca-portfolio-produtos.md).

@@ -4056,6 +4056,7 @@ async def _step_122_produtos_repos_view_cargos(conn: AsyncConnection, schema: st
           FROM {schema}.team_positions po
          WHERE po.role_id IS NOT NULL
            AND po.slug IN ('gerente_executivo', 'coord_de_arq_dev_e_sustenta_o',
+                           'coordenador', 'administrativo',
                            'refer_ncia_t_cnica', 'product_owner')
         ON CONFLICT (role_id, permission_code) DO NOTHING
     """))
@@ -4142,6 +4143,127 @@ _INDEX_SPECS: list[tuple[str, str, str, tuple[str, ...], str | None]] = [
     ("tasks_attendance", "tasks", "attendance_id", ("attendance_id",), None),
     ("tasks_assigned", "tasks", "assigned_to", ("assigned_to",), None),
 ]
+
+
+async def _step_127_administrativo_como_coordenador(conn: AsyncConnection, schema: str) -> None:
+    """Alinha o cargo Administrativo ao mesmo acesso operacional do Coordenador.
+
+    Copia permissões de `coordenador` / `coord_de_arq_dev_e_sustenta_o`, remove o
+    bloqueio `none` nos kanbans e inclui o role nas etapas onde o coordenador já
+    pode mover cards. Permissões extras de TeamOps do Administrativo são mantidas.
+    """
+    if not await _table_exists(conn, schema, "team_positions"):
+        return
+
+    await conn.execute(text(f"""
+        INSERT INTO public.role_permissions (id, role_id, permission_code)
+        SELECT gen_random_uuid(), admin.role_id, src_perm.permission_code
+          FROM {schema}.team_positions admin
+          JOIN {schema}.team_positions src
+            ON src.slug IN ('coordenador', 'coord_de_arq_dev_e_sustenta_o')
+           AND src.role_id IS NOT NULL
+          JOIN public.role_permissions src_perm ON src_perm.role_id = src.role_id
+         WHERE admin.slug = 'administrativo'
+           AND admin.role_id IS NOT NULL
+        ON CONFLICT (role_id, permission_code) DO NOTHING
+    """))
+
+    if await _table_exists(conn, schema, "project_funnels") and await _column_exists(
+        conn, schema, "project_funnels", "access_control"
+    ):
+        await conn.execute(text(f"""
+            UPDATE {schema}.project_funnels f
+               SET access_control = f.access_control - admin.role_id::text
+              FROM {schema}.team_positions admin
+             WHERE admin.slug = 'administrativo'
+               AND admin.role_id IS NOT NULL
+               AND f.access_control ? admin.role_id::text
+               AND f.access_control ->> (admin.role_id::text) = 'none'
+        """))
+
+    if await _table_exists(conn, schema, "project_status_configs"):
+        for col in ("move_in_role_ids", "move_out_role_ids"):
+            if not await _column_exists(conn, schema, "project_status_configs", col):
+                continue
+            await conn.execute(text(f"""
+                UPDATE {schema}.project_status_configs s
+                   SET {col} = (
+                       SELECT jsonb_agg(to_jsonb(x.val))
+                         FROM (
+                             SELECT DISTINCT jsonb_array_elements_text(
+                                 COALESCE(s.{col}, '[]'::jsonb) || jsonb_build_array(admin.role_id::text)
+                             ) AS val
+                         ) x
+                   )
+                  FROM {schema}.team_positions admin
+                  JOIN {schema}.team_positions coord
+                    ON coord.slug IN ('coordenador', 'coord_de_arq_dev_e_sustenta_o')
+                   AND coord.role_id IS NOT NULL
+                 WHERE admin.slug = 'administrativo'
+                   AND admin.role_id IS NOT NULL
+                   AND s.{col} IS NOT NULL
+                   AND s.{col} @> jsonb_build_array(coord.role_id::text)
+                   AND NOT (s.{col} @> jsonb_build_array(admin.role_id::text))
+            """))
+
+
+async def _step_128_gestores_teamops(conn: AsyncConnection, schema: str) -> None:
+    """Restringe a gestão de pessoas e ausências aos cargos gestores do TeamOps."""
+    if not await _table_exists(conn, schema, "team_positions"):
+        return
+
+    manager_slugs = (
+        "'coordenador', 'coord_de_arq_dev_e_sustenta_o', 'administrativo'"
+    )
+    manager_permissions = (
+        "'teamops.person.manage', "
+        "'teamops.absence.view_team', "
+        "'teamops.absence.manage', "
+        "'teamops.absence.approve'"
+    )
+
+    await conn.execute(text(f"""
+        INSERT INTO public.role_permissions (id, role_id, permission_code)
+        SELECT gen_random_uuid(), position.role_id, permission.code
+          FROM {schema}.team_positions position
+          CROSS JOIN (
+              SELECT unnest(ARRAY[{manager_permissions}]) AS code
+          ) permission
+         WHERE position.slug IN ({manager_slugs})
+           AND position.role_id IS NOT NULL
+        ON CONFLICT (role_id, permission_code) DO NOTHING
+    """))
+
+    # Mesmo que uma matriz antiga tenha concedido a permissão cadastral a outro
+    # cargo, a regra atual permite gerenciar pessoas apenas aos gestores acima.
+    await conn.execute(text(f"""
+        DELETE FROM public.role_permissions permission
+         USING {schema}.team_positions position
+         WHERE permission.role_id = position.role_id
+           AND permission.permission_code = 'teamops.person.manage'
+           AND position.slug NOT IN ({manager_slugs})
+    """))
+
+
+async def _step_129_projetos_agent_fail_to(conn: AsyncConnection, schema: str) -> None:
+    """Raia de destino quando a triagem do backlog (review_and_route) não aprova."""
+    await _add_columns(conn, schema, "project_stage_agent_bindings", {
+        "fail_to_status_id": "UUID",
+    })
+
+
+async def _step_126_rtd_public_token(conn: AsyncConnection, schema: str) -> None:
+    """Token opaco para compartilhar a RTD sem login (`/p/rtd/{token}`)."""
+    if not await _table_exists(conn, schema, "rtd_reunioes"):
+        return
+    if not await _column_exists(conn, schema, "rtd_reunioes", "public_token"):
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.rtd_reunioes ADD COLUMN public_token VARCHAR(64)"
+        ))
+        await conn.execute(text(
+            f"CREATE UNIQUE INDEX IF NOT EXISTS ix_{schema}_rtd_reunioes_public_token "
+            f"ON {schema}.rtd_reunioes(public_token) WHERE public_token IS NOT NULL"
+        ))
 
 
 async def _step_125_us_commit_evidence(conn: AsyncConnection, schema: str) -> None:
@@ -4346,6 +4468,10 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     # existente — se rodasse antes, o índice de `environment` ficaria para o próximo boot.
     ("124_repo_commits_branch", _step_124_repo_commits_branch),
     ("125_us_commit_evidence", _step_125_us_commit_evidence),
+    ("126_rtd_public_token", _step_126_rtd_public_token),
+    ("127_administrativo_como_coordenador", _step_127_administrativo_como_coordenador),
+    ("128_gestores_teamops", _step_128_gestores_teamops),
+    ("129_projetos_agent_fail_to", _step_129_projetos_agent_fail_to),
     ("123_reconcile_indexes", _step_123_reconcile_indexes),
 ]
 

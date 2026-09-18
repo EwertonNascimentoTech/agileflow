@@ -46,13 +46,14 @@ export const FONTE_OPTS: FonteDados[] = ["manual", "portfolio"]
 
 export const METRICA_LABEL: Record<FonteMetrica, string> = {
   // Produtos
-  servicos_publicados: "Serviços digitais — % publicados (prod. produção) sobre publicados (prod. produção + desenvolvimento)",
-  documentos_natos_digitais: "Documentos nato-digital — % cadastrados (prod. produção) sobre cadastrados (prod. produção + desenvolvimento); data = publicação do serviço",
+  servicos_publicados: "Serviços digitais — % acumulada: em produção com publicação até o mês, sobre o portfólio (produção + desenvolvimento)",
+  documentos_natos_digitais: "Documentos nato-digital — % acumulada: em produção com data até o mês, sobre o portfólio (produção + desenvolvimento)",
+  processos_digitais: "Processos digitais — % de sub-processos do portfólio vinculados a serviços (sem duplicidade) sobre o total de sub-processos do portfólio",
   // Projetos (indicadores táticos)
-  cronograma_desenvolvimento: "Projetos de desenvolvimento — % de entregas do período concluídas dentro do prazo (▲ %)",
-  cronograma_implantacao: "Projetos de implantação — % de entregas do período concluídas dentro do prazo (▲ %)",
-  desvio_trabalho_desenvolvimento: "Projetos de desenvolvimento — % de tarefas criadas após o comprometimento do cronograma sobre as planejadas (▼ %)",
-  desvio_trabalho_implantacao: "Projetos de implantação — % de tarefas criadas após o comprometimento do cronograma sobre as planejadas (▼ %)",
+  cronograma_desenvolvimento: "Projetos de desenvolvimento com cronograma comprometido — % de User Stories do período concluídas (ou em Homologação) dentro do prazo (▲ %)",
+  cronograma_implantacao: "Projetos de implantação com cronograma comprometido — % de User Stories do período concluídas (ou em Homologação) dentro do prazo (▲ %)",
+  desvio_trabalho_desenvolvimento: "Projetos de desenvolvimento — % de User Stories criadas após o comprometimento do cronograma sobre as planejadas (▼ %)",
+  desvio_trabalho_implantacao: "Projetos de implantação — % de User Stories criadas após o comprometimento do cronograma sobre as planejadas (▼ %)",
   pct_desenvolvimento: "Percentual de desenvolvimento — desenvolvimentos ÷ (desenvolvimentos + implantações) do portfólio até o fim do período (▲ %)",
   tempo_analise_oportunidade: "Tempo de análise da oportunidade — dias médios da demanda até virar projeto (▼ dias)",
   lead_time_us: "Lead time de US — dias médios do backlog à entrega das US concluídas no período (▼ dias)",
@@ -63,6 +64,7 @@ export const METRICA_LABEL: Record<FonteMetrica, string> = {
 export const METRICA_OPTS: FonteMetrica[] = [
   "servicos_publicados",
   "documentos_natos_digitais",
+  "processos_digitais",
   "cronograma_desenvolvimento",
   "cronograma_implantacao",
   "desvio_trabalho_desenvolvimento",

@@ -1184,6 +1184,25 @@ async def reorder_tasks(
     return await ProjectTaskService.reorder(ctx.db, project_id, data.items)
 
 
+@router.get("/projects/{project_id}/tasks/{task_id}", response_model=ProjectTaskResponse)
+async def get_task(
+    project_id: uuid.UUID,
+    task_id: uuid.UUID,
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Card completo — inclui os campos que a lista do quadro (`slim`) omite:
+    description, anexos e procurement_meta. É o que o drawer usa ao abrir um card."""
+    await _assert_task_in_scope(ctx, task_id)
+    task = await ProjectTaskService.get(ctx.db, project_id, task_id)
+    can_view_all = await _has_permission(ctx, "projetos.task.view") or await _has_permission(ctx, "projetos.task.manage")
+    if await _is_basic_user(ctx) or not can_view_all:
+        if not (can_view_all or await _has_permission(ctx, "projetos.task.view_own")):
+            raise HTTPException(status_code=403, detail="Sem permissão para visualizar tarefas.")
+        if task.assigned_to != (await _person_id_for_user(ctx) or _NOBODY):
+            raise HTTPException(status_code=403, detail="Você só pode visualizar suas próprias tarefas.")
+    return task
+
+
 @router.patch("/projects/{project_id}/tasks/{task_id}", response_model=ProjectTaskResponse)
 async def update_task(
     project_id: uuid.UUID,

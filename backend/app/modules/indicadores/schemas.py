@@ -15,7 +15,7 @@ _STATUS = Literal["ativo", "inativo"]
 _FONTE = Literal["manual", "portfolio"]
 _FONTE_METRICA = Literal[
     # Produtos
-    "servicos_publicados", "documentos_natos_digitais",
+    "servicos_publicados", "documentos_natos_digitais", "processos_digitais",
     # Projetos (indicadores táticos — ver portfolio_projetos.py)
     "cronograma_desenvolvimento", "cronograma_implantacao",
     "desvio_trabalho_desenvolvimento", "desvio_trabalho_implantacao",
@@ -64,6 +64,17 @@ class PortfolioDocumentoRef(BaseModel):
     lifecycle: str
     data_documento: Optional[date] = None
     em_producao: bool = False
+    novo_no_mes: bool = False
+
+
+class PortfolioProcessoRef(BaseModel):
+    portfolio_id: uuid.UUID
+    portfolio_name: str
+    item_lineage_id: uuid.UUID
+    processo_name: str
+    codigo: Optional[str] = None
+    data_digitalizacao: Optional[date] = None
+    servicos: list[str] = Field(default_factory=list)
     novo_no_mes: bool = False
 
 
@@ -160,6 +171,8 @@ class AcompanhamentoResponse(BaseModel):
     portfolio_servicos_novos: Optional[list[PortfolioServicoRef]] = None
     portfolio_documentos: Optional[list[PortfolioDocumentoRef]] = None
     portfolio_documentos_novos: Optional[list[PortfolioDocumentoRef]] = None
+    portfolio_processos: Optional[list[PortfolioProcessoRef]] = None
+    portfolio_processos_novos: Optional[list[PortfolioProcessoRef]] = None
     portfolio_links: Optional[list[PortfolioLinkRef]] = None
     portfolio_links_novos: Optional[list[PortfolioLinkRef]] = None
     created_at: datetime
@@ -189,6 +202,8 @@ class AcompanhamentoEvidenciasResponse(BaseModel):
     portfolio_servicos_novos: list[PortfolioServicoRef] = Field(default_factory=list)
     portfolio_documentos: list[PortfolioDocumentoRef] = Field(default_factory=list)
     portfolio_documentos_novos: list[PortfolioDocumentoRef] = Field(default_factory=list)
+    portfolio_processos: list[PortfolioProcessoRef] = Field(default_factory=list)
+    portfolio_processos_novos: list[PortfolioProcessoRef] = Field(default_factory=list)
     portfolio_links: list[PortfolioLinkRef] = Field(default_factory=list)
     portfolio_links_novos: list[PortfolioLinkRef] = Field(default_factory=list)
 

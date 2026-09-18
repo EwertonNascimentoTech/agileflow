@@ -7,6 +7,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary"
 import ProtectedRoute from "@/components/ProtectedRoute"
 import ModuleConfigGuard from "@/components/ModuleConfigGuard"
 import ExternalPOGuard from "@/components/ExternalPOGuard"
+import RtdLoadingScreen from "@/modules/rtd/RtdLoadingScreen"
 
 // Todas as páginas/layouts abaixo são carregadas sob demanda (code splitting por
 // rota). Sem isto, o bundle inicial embute o JS de TODOS os módulos (~100 páginas,
@@ -34,6 +35,7 @@ const SettingsPage = lazy(() => import("@/modules/crm/admin/SettingsPage"))
 
 // ── Pública (proposta com token sem auth) ─────────────────────────────
 const PublicProposalPage = lazy(() => import("@/modules/crm/proposals/PublicProposalPage"))
+const PublicRtdPage = lazy(() => import("@/modules/rtd/PublicRtdPage"))
 
 // ── CRM (módulo unificado) ────────────────────────────────────────────
 const CrmLayout = lazy(() => import("@/modules/crm/CrmLayout"))
@@ -138,11 +140,16 @@ const IndicadoresConfigPage = lazy(() => import("@/modules/indicadores/config/In
 const RtdLayout = lazy(() => import("@/modules/rtd/RtdLayout"))
 const RtdReunioesPage = lazy(() => import("@/modules/rtd/RtdReunioesPage"))
 const RtdReuniaoPage = lazy(() => import("@/modules/rtd/RtdReuniaoPage"))
+const RtdPresentationPrintPage = lazy(() => import("@/modules/rtd/RtdPresentationPrintPage"))
 
 const DocumentationPage = lazy(() => import("@/pages/DocumentationPage"))
 const DocumentacaoLayout = lazy(() => import("@/modules/documentacao/DocumentacaoLayout"))
 
 function RouteFallback() {
+  const isPublicRtd = typeof window !== "undefined" && window.location.pathname.startsWith("/p/rtd/")
+  if (isPublicRtd) {
+    return <RtdLoadingScreen />
+  }
   return (
     <div className="flex h-full min-h-[40vh] w-full items-center justify-center">
       <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted border-t-primary" />
@@ -164,6 +171,7 @@ export default function App() {
               <Route path="/forgot-password" element={<Navigate to="/login" replace />} />
               <Route path="/primeiro-acesso" element={<FirstAccessPage />} />
               <Route path="/p/propostas/:token" element={<PublicProposalPage />} />
+              <Route path="/p/rtd/:token" element={<PublicRtdPage />} />
 
               {/* Super Admin */}
               <Route element={<ProtectedRoute allowedRoles={["super_admin"]} />}>
@@ -356,6 +364,7 @@ export default function App() {
 
                   {/* RTD — Reunião de Tomada de Decisão. Módulo vedado ao PO Externo. */}
                   <Route element={<ExternalPOGuard />}>
+                    <Route path="modules/rtd/reunioes/:id/pdf" element={<RtdPresentationPrintPage />} />
                     <Route path="modules/rtd" element={<RtdLayout />}>
                       <Route index element={<Navigate to="reunioes" replace />} />
                       <Route path="reunioes" element={<RtdReunioesPage />} />

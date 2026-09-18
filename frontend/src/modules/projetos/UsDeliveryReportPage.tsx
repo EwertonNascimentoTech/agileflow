@@ -76,7 +76,7 @@ function LinkBadge({
         variant={ok ? "success" : "outline"}
         className={`font-normal gap-1 ${hasItems ? "cursor-default" : ""}`}
       >
-        {label}{count > 0 ? ` ${count}` : ""}
+        {label} {count}
       </Badge>
       {hasItems && (
         <span
@@ -294,7 +294,14 @@ export default function UsDeliveryReportPage() {
   }, [data])
 
   const periodLabel = PERIOD_OPTS.find((p) => p.value === period)?.label ?? period
-  const kpis = data?.project_kpis ?? { total: 0, com_servicos: 0, com_processos_e_documentos: 0 }
+  const kpis = data?.project_kpis ?? {
+    total: 0,
+    com_servicos: 0,
+    com_processos_e_documentos: 0,
+    servicos_no_mes: 0,
+    processos_no_mes: 0,
+    documentos_no_mes: 0,
+  }
   const projects = data?.project_deliveries ?? []
 
   return (
@@ -355,7 +362,7 @@ export default function UsDeliveryReportPage() {
             <div>
               <h4 className="text-sm font-semibold">Entregas (projetos)</h4>
               <p className="text-xs text-muted-foreground">
-                Projetos e programas concluídos em {periodLabel.toLowerCase()} · vínculos com o portfólio de produtos.
+                Só entra o card de Projetos e Programas na etapa Concluído. US/Features prontas com o projeto em Impedimento não contam.
               </p>
             </div>
             <div className="grid gap-3 sm:grid-cols-3">
@@ -382,8 +389,22 @@ export default function UsDeliveryReportPage() {
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">Lista de entregas</CardTitle>
                 <CardDescription>
-                  Indicadores: serviços do produto · processos (sub-processos do portfólio) · documentos cadastrados.
+                  Tags = serviços, processos e documentos com data no mesmo mês da conclusão do projeto.
                 </CardDescription>
+                <div className="flex flex-wrap gap-1.5 pt-2">
+                  <Badge variant="success" className="font-normal">
+                    Serviços {kpis.servicos_no_mes}
+                  </Badge>
+                  <Badge variant="success" className="font-normal">
+                    Processos {kpis.processos_no_mes}
+                  </Badge>
+                  <Badge variant="success" className="font-normal">
+                    Docs {kpis.documentos_no_mes}
+                  </Badge>
+                  <span className="self-center text-[11px] text-muted-foreground">
+                    entregues no mês da conclusão (soma das linhas)
+                  </span>
+                </div>
               </CardHeader>
               <CardContent>
                 <ProjectDeliveriesTable items={projects} />

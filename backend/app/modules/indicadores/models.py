@@ -84,11 +84,17 @@ class FontePortfolioMetrica(str, enum.Enum):
     # % de documentos nato-digital cadastrados (prod. produção) sobre cadastrados (prod. + desenv.).
     # data_documento é sincronizada com data_publicacao dos serviços do produto.
     DOCUMENTOS_NATOS_DIGITAIS = "documentos_natos_digitais"
+    # % de sub-processos do portfólio vinculados a ≥1 serviço (COUNT DISTINCT) sobre o total
+    # de sub-processos nas versões correntes dos portfólios ativos.
+    PROCESSOS_DIGITAIS = "processos_digitais"
     # ── Projetos (táticos) ──
-    # ▲ % de entregas do período concluídas dentro do prazo, por classificação do projeto-raiz.
+    # ▲ % de User Stories do período concluídas (ou em Homologação) dentro do prazo,
+    # por classificação do projeto-raiz (só com cronograma comprometido). Mesma regra
+    # para desenvolvimento e implantação — só muda card_classification.
     CRONOGRAMA_DESENVOLVIMENTO = "cronograma_desenvolvimento"
     CRONOGRAMA_IMPLANTACAO = "cronograma_implantacao"
-    # ▼ % de tarefas criadas após o comprometimento do cronograma sobre as planejadas (baseline v1).
+    # ▼ % de User Stories criadas após o comprometimento do cronograma sobre as
+    # planejadas (baseline v1; só US).
     DESVIO_TRABALHO_DESENVOLVIMENTO = "desvio_trabalho_desenvolvimento"
     DESVIO_TRABALHO_IMPLANTACAO = "desvio_trabalho_implantacao"
     # ▲ % de desenvolvimentos sobre desenvolvimentos + implantações do portfólio

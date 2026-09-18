@@ -58,6 +58,23 @@ export function isExternalProductOwner(
   return EXTERNAL_PO_POSITION_SLUGS.includes((user.position_slug ?? "").trim())
 }
 
+export const TEAMOPS_PEOPLE_MANAGER_SLUGS: readonly string[] = [
+  "coordenador",
+  "coord_de_arq_dev_e_sustenta_o",
+  "administrativo",
+]
+
+export function canManageTeamopsPeople(
+  user: { role?: string; position_slug?: string | null; permissions?: string[] } | null | undefined,
+): boolean {
+  if (!user) return false
+  if (user.role === "super_admin" || user.role === "company_admin") return true
+  return (
+    TEAMOPS_PEOPLE_MANAGER_SLUGS.includes((user.position_slug ?? "").trim()) &&
+    hasPermission(user.permissions, "teamops.person.manage")
+  )
+}
+
 /** Nível de acesso de um usuário a um kanban (funil) conforme o access_control por função. */
 export type FunnelAccessLevel = "manage" | "view" | "none"
 

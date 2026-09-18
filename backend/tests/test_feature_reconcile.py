@@ -32,6 +32,22 @@ def test_any_us_in_ajustar_moves_feature_to_ajustar():
     assert target.name == "Ajustar (Dev)"
 
 
+def test_planning_card_concluded_only_on_concluido_column():
+    assert ProjectTaskService._is_concluded_planning_status(_col("Concluído"))
+    assert ProjectTaskService._is_concluded_planning_status(_col("Concluida"))
+    assert not ProjectTaskService._is_concluded_planning_status(_col("Impedimento"))
+    assert not ProjectTaskService._is_concluded_planning_status(_col("Em Desenvolvimento", is_final=True))
+    assert not ProjectTaskService._is_concluded_planning_status(None)
+
+
+def test_homolog_po_column_detection():
+    assert ProjectTaskService._is_homolog_po_status(_col("Homologação (PO)"))
+    assert ProjectTaskService._is_homolog_po_status(_col("Homologar (PO)"))
+    assert not ProjectTaskService._is_homolog_po_status(_col("Homologação técnica"))
+    assert not ProjectTaskService._is_homolog_po_status(_col("Em Desenvolvimento"))
+    assert not ProjectTaskService._is_homolog_po_status(None)
+
+
 def test_all_us_in_homolog_moves_feature_to_homologar():
     us = [_col("Homologação (PO)"), _col("Homologação (PO)")]
     target = ProjectTaskService._feature_target_status(FEATURE_COLS, us)

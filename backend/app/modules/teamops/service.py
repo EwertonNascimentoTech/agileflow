@@ -119,6 +119,10 @@ from app.modules.teamops.schemas import (
     AbsenceCalendarResponse,
     AbsenceCreate,
     AbsenceDecision,
+    AbsenceImpactPerson,
+    AbsenceImpactProject,
+    AbsenceImpactResponse,
+    AbsenceImpactSummary,
     AbsenceTypeCreate,
     AbsenceTypeUpdate,
     AbsenceUpdate,
@@ -147,6 +151,7 @@ from app.modules.teamops.schemas import (
     StackUpdate,
     WorkCalendarUpdate,
 )
+from app.modules.projetos.models import Project, ProjectTask
 
 
 def _slugify(value: str) -> str:
@@ -1407,6 +1412,144 @@ class AbsenceService:
         await PersonStatusSync.sync_one(db, item.person_id, commit=False)
         await db.commit()
         return await AbsenceService.get(db, item.id)
+
+    @staticmethod
+    async def impact_analysis(
+        db: AsyncSession,
+        start_from: Optional[date] = None,
+        end_to: Optional[date] = None,
+    ) -> AbsenceImpactResponse:
+        """Cruza ausências pendentes/aprovadas com áreas e tarefas abertas.
+
+        Uma sobreposição só é considerada conflito de time quando as pessoas
+        compartilham pelo menos uma área. Tarefas sem cronograma ainda aparecem
+        como impacto potencial, mas não contam como sobreposição confirmada.
+        """
+        start_from = start_from or date.today()
+        q = (
+            select(Absence)
+            .join(AbsenceType, Absence.absence_type_id == AbsenceType.id)
+            .options(
+                selectinload(Absence.person).selectinload(Person.position),
+                selectinload(Absence.person).selectinload(Person.areas),
+                selectinload(Absence.absence_type),
+            )
+            .where(
+                Absence.status.in_([AbsenceStatus.PENDENTE, AbsenceStatus.APROVADA]),
+                AbsenceType.affects_capacity.is_(True),
+                Absence.end_date >= start_from,
+            )
+            .order_by(Absence.start_date.asc(), Absence.end_date.asc())
+        )
+        if end_to:
+            q = q.where(Absence.start_date <= end_to)
+        absences = list((await db.execute(q)).scalars().unique().all())
+
+        person_ids = {absence.person_id for absence in absences}
+        tasks_by_person: dict[uuid.UUID, list[tuple[ProjectTask, Project]]] = {}
+        if person_ids:
+            task_rows = await db.execute(
+                select(ProjectTask, Project)
+                .join(Project, Project.id == ProjectTask.project_id)
+                .where(
+                    ProjectTask.assigned_to.in_(person_ids),
+                    ProjectTask.completed_at.is_(None),
+                    Project.is_active.is_(True),
+                )
+            )
+            for task, project in task_rows.all():
+                tasks_by_person.setdefault(task.assigned_to, []).append((task, project))
+
+        items: list[AbsenceImpactPerson] = []
+        impacted_project_ids: set[uuid.UUID] = set()
+        team_conflicts = 0
+        people_at_risk: set[uuid.UUID] = set()
+
+        for absence in absences:
+            person = absence.person
+            area_ids = {area.id for area in person.areas}
+            overlapping_people: dict[uuid.UUID, Person] = {}
+            for other in absences:
+                if other.person_id == absence.person_id:
+                    continue
+                if other.end_date < absence.start_date or other.start_date > absence.end_date:
+                    continue
+                if area_ids.intersection(area.id for area in other.person.areas):
+                    overlapping_people[other.person_id] = other.person
+
+            projects: dict[uuid.UUID, AbsenceImpactProject] = {}
+            for task, project in tasks_by_person.get(absence.person_id, []):
+                item = projects.setdefault(
+                    project.id,
+                    AbsenceImpactProject(id=project.id, name=project.name),
+                )
+                item.open_tasks += 1
+                if (
+                    task.start_date is not None
+                    and task.due_date is not None
+                    and task.due_date.date() >= absence.start_date
+                    and task.start_date.date() <= absence.end_date
+                ):
+                    item.overlapping_tasks += 1
+
+            overlap_task_count = sum(project.overlapping_tasks for project in projects.values())
+            reasons: list[str] = []
+            if overlapping_people:
+                reasons.append(
+                    f"{len(overlapping_people)} outro(s) colaborador(es) do mesmo time "
+                    "estarão ausentes no período."
+                )
+            if overlap_task_count:
+                reasons.append(
+                    f"{overlap_task_count} tarefa(s) aberta(s) têm cronograma sobreposto à ausência."
+                )
+            unscheduled_count = sum(
+                project.open_tasks - project.overlapping_tasks for project in projects.values()
+            )
+            if unscheduled_count:
+                reasons.append(
+                    f"{unscheduled_count} tarefa(s) aberta(s) sem impacto de período confirmado."
+                )
+            if not reasons:
+                reasons.append("Nenhum conflito de time ou projeto foi identificado.")
+
+            if overlapping_people and overlap_task_count:
+                risk_level = "high"
+            elif overlapping_people or overlap_task_count or projects:
+                risk_level = "medium"
+            else:
+                risk_level = "low"
+
+            if overlapping_people:
+                team_conflicts += 1
+            if risk_level != "low":
+                people_at_risk.add(absence.person_id)
+            impacted_project_ids.update(projects)
+            items.append(AbsenceImpactPerson(
+                absence_id=absence.id,
+                person=person,
+                absence_type=absence.absence_type,
+                status=absence.status,
+                start_date=absence.start_date,
+                end_date=absence.end_date,
+                areas=list(person.areas),
+                overlapping_people=sorted(
+                    overlapping_people.values(), key=lambda value: value.full_name,
+                ),
+                impacted_projects=sorted(projects.values(), key=lambda value: value.name),
+                risk_level=risk_level,
+                reasons=reasons,
+            ))
+
+        return AbsenceImpactResponse(
+            summary=AbsenceImpactSummary(
+                analyzed_absences=len(absences),
+                people_at_risk=len(people_at_risk),
+                team_conflicts=team_conflicts,
+                impacted_projects=len(impacted_project_ids),
+            ),
+            items=items,
+        )
 
     @staticmethod
     async def calendar(db: AsyncSession, month: str) -> AbsenceCalendarResponse:

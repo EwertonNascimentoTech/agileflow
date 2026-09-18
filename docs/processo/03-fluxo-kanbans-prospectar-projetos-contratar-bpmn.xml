@@ -3,311 +3,370 @@
              xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
              xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
              xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
-             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-             id="Definitions_KanbansProspectarProjetoContratar"
+             id="Definitions_KanbansTD"
              targetNamespace="https://agileflow.local/processo/kanbans"
-             exporter="agileflow"
-             exporterVersion="1.0">
+             exporter="agileflow" exporterVersion="2.1">
 
-  <!--
-    BPMN � Fluxo das etapas com bifurca??es
-    Kanbans: Prospectar Solu??es | Projetos e Programas | Contratar
-    Fonte: etapas reais do tenant (processo TD) + regra de contrata??o.
-  -->
+  <!-- Fluxo dos kanbans TD: Prospectar Soluções > Projetos e Programas > Features > User Story, com Contratar lateral. Etapas do tenant. -->
 
   <collaboration id="Collab_Kanbans">
-    <participant id="Part_Prospectar" name="Kanban: Prospectar Solu??es" processRef="Proc_Prospectar"/>
+    <participant id="Part_Prospectar" name="Kanban: Prospectar Soluções" processRef="Proc_Prospectar"/>
     <participant id="Part_Projetos" name="Kanban: Projetos e Programas" processRef="Proc_Projetos"/>
+    <participant id="Part_Features" name="Kanban: Features" processRef="Proc_Features"/>
+    <participant id="Part_US" name="Kanban: User Story" processRef="Proc_US"/>
     <participant id="Part_Contratar" name="Kanban: Contratar" processRef="Proc_Contratar"/>
-
-    <!-- Handoff Prospectar conclu?do ? cria card em Projetos/Programas -->
-    <messageFlow id="MF_Prospectar_to_Projetos"
-                 name="Convers?o: cria Projeto/Programa"
-                 sourceRef="Task_P_Concluido"
-                 targetRef="Task_J_Backlog"/>
-
-    <!-- Bifurca??o contrata??o: origem fica em Contrata??o; nasce card Contratar -->
-    <messageFlow id="MF_Origem_to_Contratar"
-                 name="Ser? contratado? = Sim ? cria card Contratar"
-                 sourceRef="Task_Hold_Contrata??o"
-                 targetRef="Task_C_Backlog"/>
-
-    <!-- Desfecho Contratar ? libera ou cancela origem -->
-    <messageFlow id="MF_Contratar_Win"
-                 name="Ganhou: contrato no Produto + libera origem"
-                 sourceRef="Task_C_Concluido"
-                 targetRef="Gateway_PosHold"/>
-    <messageFlow id="MF_Contratar_Lose"
-                 name="Perdeu: origem ? Cancelado"
-                 sourceRef="Task_C_Cancelado"
-                 targetRef="Task_Origem_Cancelado"/>
+    <messageFlow id="MF_P_to_J" name="Conversão: cria Projeto ou Programa" sourceRef="Task_P_Concluido" targetRef="Task_J_Backlog"/>
+    <messageFlow id="MF_Hold_to_C" name="Será contratado? = Sim - cria card Contratar" sourceRef="Task_P_Hold" targetRef="Task_C_Backlog"/>
+    <messageFlow id="MF_JHold_to_C" name="Contratação no projeto — cria card Contratar" sourceRef="Task_J_Hold" targetRef="Task_C_Backlog"/>
+    <messageFlow id="MF_C_Win" name="Ganhou: contrato no Produto + libera origem" sourceRef="Task_C_Concluido" targetRef="Task_P_Classificacao"/>
+    <messageFlow id="MF_C_Lose" name="Perdeu: origem vai para Cancelado" sourceRef="Task_C_Cancelado" targetRef="Task_P_Cancelado"/>
+    <messageFlow id="MF_J_to_F" name="Pronto para Dev: cria ou importa Features" sourceRef="Task_J_Pronto" targetRef="Task_F_Backlog"/>
+    <messageFlow id="MF_F_to_U" name="Em Dev da Feature: cria User Stories" sourceRef="Task_F_Dev" targetRef="Task_U_Backlog"/>
+    <messageFlow id="MF_U_to_F" name="Rollup: US concluídas avançam a Feature" sourceRef="Task_U_Concluido" targetRef="Task_F_Hml"/>
+    <messageFlow id="MF_F_to_J" name="Rollup: Features concluídas liberam o projeto" sourceRef="Task_F_Concluido" targetRef="Task_J_DevOps"/>
   </collaboration>
 
-  <!-- ???????????????????????????????????????????
-       PROSPECTAR SOLU??ES
-       ??????????????????????????????????????????? -->
-  <process id="Proc_Prospectar" name="Prospectar Solu??es" isExecutable="false">
-    <startEvent id="Start_Prospectar" name="Nova demanda"/>
-    <sequenceFlow id="SF_P01" sourceRef="Start_Prospectar" targetRef="Task_P_Backlog"/>
-
+  <process id="Proc_Prospectar" name="Prospectar Soluções" isExecutable="false">
+    <startEvent id="Start_P" name="Nova demanda"/>
     <userTask id="Task_P_Backlog" name="Backlog"/>
-    <sequenceFlow id="SF_P02" sourceRef="Task_P_Backlog" targetRef="Gateway_Classificar"/>
-
-    <exclusiveGateway id="Gateway_Classificar" name="Classificar card"/>
-    <sequenceFlow id="SF_P03" name="Desenvolvimento" sourceRef="Gateway_Classificar" targetRef="Task_P_Classificacao"/>
-    <sequenceFlow id="SF_P04" name="Implanta??o / Melhoria" sourceRef="Gateway_Classificar" targetRef="Gateway_Externo"/>
-
-    <exclusiveGateway id="Gateway_Externo" name="Produto sistema externo?"/>
-    <sequenceFlow id="SF_P05" name="N?o" sourceRef="Gateway_Externo" targetRef="Task_P_Classificacao"/>
-    <sequenceFlow id="SF_P06" name="Sim" sourceRef="Gateway_Externo" targetRef="Gateway_SeraContratado"/>
-
-    <exclusiveGateway id="Gateway_SeraContratado" name="Ser? contratado?"/>
-    <sequenceFlow id="SF_P07" name="N?o" sourceRef="Gateway_SeraContratado" targetRef="Task_P_Classificacao"/>
-    <sequenceFlow id="SF_P08" name="Sim" sourceRef="Gateway_SeraContratado" targetRef="Task_Hold_Contrata??o"/>
-
-    <!-- Origem travada na raia Contrata??o (pode estar em Prospectar ou Projetos) -->
-    <userTask id="Task_Hold_Contrata??o" name="Contrata??o (origem travada)"/>
-    <sequenceFlow id="SF_P09" sourceRef="Task_Hold_Contrata??o" targetRef="Gateway_PosHold"/>
-
-    <exclusiveGateway id="Gateway_PosHold" name="Desfecho da contrata??o"/>
-    <sequenceFlow id="SF_P10" name="Ganhou ? segue fluxo" sourceRef="Gateway_PosHold" targetRef="Task_P_Classificacao"/>
-    <sequenceFlow id="SF_P11" name="Perdeu" sourceRef="Gateway_PosHold" targetRef="Task_Origem_Cancelado"/>
-
-    <userTask id="Task_Origem_Cancelado" name="Cancelado (origem)"/>
-    <sequenceFlow id="SF_P12" sourceRef="Task_Origem_Cancelado" targetRef="End_P_Cancelado"/>
-    <endEvent id="End_P_Cancelado" name="Demanda cancelada"/>
-
-    <userTask id="Task_P_Classificacao" name="Classifica??o"/>
-    <sequenceFlow id="SF_P13" sourceRef="Task_P_Classificacao" targetRef="Task_P_Avaliar"/>
-
-    <userTask id="Task_P_Avaliar" name="Avaliar Classifica??o"/>
-    <sequenceFlow id="SF_P14" sourceRef="Task_P_Avaliar" targetRef="Gateway_Avaliacao"/>
-
-    <exclusiveGateway id="Gateway_Avaliacao" name="Resultado da avalia??o"/>
-    <sequenceFlow id="SF_P15" name="Ajustes" sourceRef="Gateway_Avaliacao" targetRef="Task_P_Ajustes"/>
-    <sequenceFlow id="SF_P16" name="Impedimento" sourceRef="Gateway_Avaliacao" targetRef="Task_P_Impedimento"/>
-    <sequenceFlow id="SF_P17" name="Rejeitado" sourceRef="Gateway_Avaliacao" targetRef="Task_P_Rejeitado"/>
-    <sequenceFlow id="SF_P18" name="Aprovado" sourceRef="Gateway_Avaliacao" targetRef="Task_P_Concluido"/>
-
+    <exclusiveGateway id="Gw_P_Classificar" name="Classificar"/>
+    <exclusiveGateway id="Gw_P_Externo" name="Produto sistema externo?"/>
+    <exclusiveGateway id="Gw_P_Sera" name="Será contratado?"/>
+    <userTask id="Task_P_Hold" name="Contratação (origem travada)"/>
+    <exclusiveGateway id="Gw_P_PosHold" name="Desfecho contratação"/>
+    <userTask id="Task_P_Cancelado" name="Cancelado"/>
+    <endEvent id="End_P_Cancel" name="Demanda cancelada"/>
+    <userTask id="Task_P_Classificacao" name="Classificação"/>
+    <userTask id="Task_P_Avaliar" name="Avaliar Classificação"/>
+    <exclusiveGateway id="Gw_P_Avaliar" name="Resultado"/>
+    <userTask id="Task_P_Concluido" name="Concluído (converte)"/>
+    <endEvent id="End_P_Ok" name="Handoff para Projetos"/>
     <userTask id="Task_P_Ajustes" name="Ajustes"/>
-    <sequenceFlow id="SF_P19" sourceRef="Task_P_Ajustes" targetRef="Task_P_Avaliar"/>
-
     <userTask id="Task_P_Impedimento" name="Impedimento"/>
-    <sequenceFlow id="SF_P20" sourceRef="Task_P_Impedimento" targetRef="Task_P_Avaliar"/>
-
     <userTask id="Task_P_Rejeitado" name="Rejeitado"/>
-    <sequenceFlow id="SF_P21" sourceRef="Task_P_Rejeitado" targetRef="End_P_Rejeitado"/>
-    <endEvent id="End_P_Rejeitado" name="Prospec??o rejeitada"/>
-
-    <userTask id="Task_P_Concluido" name="Conclu?do (converte p/ Projeto)"/>
-    <sequenceFlow id="SF_P22" sourceRef="Task_P_Concluido" targetRef="End_P_Ok"/>
-    <endEvent id="End_P_Ok" name="Handoff para Projetos e Programas"/>
+    <endEvent id="End_P_Rej" name="Prospecção rejeitada"/>
+    <sequenceFlow id="SF_P01" sourceRef="Start_P" targetRef="Task_P_Backlog"/>
+    <sequenceFlow id="SF_P02" sourceRef="Task_P_Backlog" targetRef="Gw_P_Classificar"/>
+    <sequenceFlow id="SF_P03" name="Desenvolvimento" sourceRef="Gw_P_Classificar" targetRef="Task_P_Classificacao"/>
+    <sequenceFlow id="SF_P04" name="Implantação / Melhoria" sourceRef="Gw_P_Classificar" targetRef="Gw_P_Externo"/>
+    <sequenceFlow id="SF_P05" name="Não" sourceRef="Gw_P_Externo" targetRef="Task_P_Classificacao"/>
+    <sequenceFlow id="SF_P06" name="Sim" sourceRef="Gw_P_Externo" targetRef="Gw_P_Sera"/>
+    <sequenceFlow id="SF_P07" name="Não" sourceRef="Gw_P_Sera" targetRef="Task_P_Classificacao"/>
+    <sequenceFlow id="SF_P08" name="Sim" sourceRef="Gw_P_Sera" targetRef="Task_P_Hold"/>
+    <sequenceFlow id="SF_P09" sourceRef="Task_P_Hold" targetRef="Gw_P_PosHold"/>
+    <sequenceFlow id="SF_P10" name="Ganhou" sourceRef="Gw_P_PosHold" targetRef="Task_P_Classificacao"/>
+    <sequenceFlow id="SF_P11" name="Perdeu" sourceRef="Gw_P_PosHold" targetRef="Task_P_Cancelado"/>
+    <sequenceFlow id="SF_P12" sourceRef="Task_P_Classificacao" targetRef="Task_P_Avaliar"/>
+    <sequenceFlow id="SF_P13" sourceRef="Task_P_Avaliar" targetRef="Gw_P_Avaliar"/>
+    <sequenceFlow id="SF_P14" name="Ajustes" sourceRef="Gw_P_Avaliar" targetRef="Task_P_Ajustes"/>
+    <sequenceFlow id="SF_P15" name="Impedimento" sourceRef="Gw_P_Avaliar" targetRef="Task_P_Impedimento"/>
+    <sequenceFlow id="SF_P16" name="Rejeitado" sourceRef="Gw_P_Avaliar" targetRef="Task_P_Rejeitado"/>
+    <sequenceFlow id="SF_P17" name="Aprovado" sourceRef="Gw_P_Avaliar" targetRef="Task_P_Concluido"/>
+    <sequenceFlow id="SF_P18" sourceRef="Task_P_Ajustes" targetRef="Task_P_Avaliar"/>
+    <sequenceFlow id="SF_P19" sourceRef="Task_P_Impedimento" targetRef="Task_P_Avaliar"/>
+    <sequenceFlow id="SF_P20" sourceRef="Task_P_Rejeitado" targetRef="End_P_Rej"/>
+    <sequenceFlow id="SF_P21" sourceRef="Task_P_Concluido" targetRef="End_P_Ok"/>
+    <sequenceFlow id="SF_P22" sourceRef="Task_P_Cancelado" targetRef="End_P_Cancel"/>
   </process>
 
-  <!-- ???????????????????????????????????????????
-       PROJETOS E PROGRAMAS
-       ??????????????????????????????????????????? -->
   <process id="Proc_Projetos" name="Projetos e Programas" isExecutable="false">
-    <startEvent id="Start_Projetos" name="Card convertido / aberto"/>
-    <sequenceFlow id="SF_J01" sourceRef="Start_Projetos" targetRef="Task_J_Backlog"/>
-
+    <startEvent id="Start_J" name="Card convertido"/>
     <userTask id="Task_J_Backlog" name="Backlog"/>
-    <sequenceFlow id="SF_J02" sourceRef="Task_J_Backlog" targetRef="Gateway_J_Externo"/>
-
-    <!-- Mesma regra se classifica??o/contrata??o ocorrer neste kanban -->
-    <exclusiveGateway id="Gateway_J_Externo" name="Precisa contratar (externo)?"/>
-    <sequenceFlow id="SF_J03" name="Sim" sourceRef="Gateway_J_Externo" targetRef="Task_J_Hold"/>
-    <sequenceFlow id="SF_J04" name="N?o" sourceRef="Gateway_J_Externo" targetRef="Task_J_Agendar"/>
-
-    <userTask id="Task_J_Hold" name="Contrata??o (origem travada)"/>
-    <sequenceFlow id="SF_J05" sourceRef="Task_J_Hold" targetRef="Gateway_J_PosHold"/>
-
-    <exclusiveGateway id="Gateway_J_PosHold" name="Desfecho contrata??o"/>
-    <sequenceFlow id="SF_J06" name="Ganhou" sourceRef="Gateway_J_PosHold" targetRef="Task_J_Agendar"/>
-    <sequenceFlow id="SF_J07" name="Perdeu" sourceRef="Gateway_J_PosHold" targetRef="Task_J_Cancelado"/>
-
-    <userTask id="Task_J_Agendar" name="Agendar Reuni?o"/>
-    <sequenceFlow id="SF_J08" sourceRef="Task_J_Agendar" targetRef="Task_J_Conduzir"/>
-
-    <userTask id="Task_J_Conduzir" name="Conduzir Reuni?o de Levantamento"/>
-    <sequenceFlow id="SF_J09" sourceRef="Task_J_Conduzir" targetRef="Gateway_J_Imped"/>
-
-    <exclusiveGateway id="Gateway_J_Imped" name="H? impedimento?"/>
-    <sequenceFlow id="SF_J10" name="Sim" sourceRef="Gateway_J_Imped" targetRef="Task_J_Impedimento"/>
-    <sequenceFlow id="SF_J11" name="N?o" sourceRef="Gateway_J_Imped" targetRef="Task_J_Requisitos"/>
-
-    <userTask id="Task_J_Impedimento" name="Impedimento"/>
-    <sequenceFlow id="SF_J12" sourceRef="Task_J_Impedimento" targetRef="Task_J_Conduzir"/>
-
-    <userTask id="Task_J_Requisitos" name="Requisitos / Prot?tipo"/>
-    <sequenceFlow id="SF_J13" sourceRef="Task_J_Requisitos" targetRef="Task_J_Refinamento"/>
-
-    <userTask id="Task_J_Refinamento" name="Refinamento PO e Tech"/>
-    <sequenceFlow id="SF_J14" sourceRef="Task_J_Refinamento" targetRef="Task_J_Validar"/>
-
-    <userTask id="Task_J_Validar" name="Validar Escopo (Cliente)"/>
-    <sequenceFlow id="SF_J15" sourceRef="Task_J_Validar" targetRef="Gateway_J_Escopo"/>
-
-    <exclusiveGateway id="Gateway_J_Escopo" name="Escopo ok?"/>
-    <sequenceFlow id="SF_J16" name="N?o" sourceRef="Gateway_J_Escopo" targetRef="Task_J_Requisitos"/>
-    <sequenceFlow id="SF_J17" name="Sim" sourceRef="Gateway_J_Escopo" targetRef="Task_J_Pronto"/>
-
-    <userTask id="Task_J_Pronto" name="Pronto para Desenvolvimento"/>
-    <sequenceFlow id="SF_J18" sourceRef="Task_J_Pronto" targetRef="Task_J_Dev"/>
-
-    <userTask id="Task_J_Dev" name="Em Desenvolvimento"/>
-    <sequenceFlow id="SF_J19" sourceRef="Task_J_Dev" targetRef="Task_J_DevOps"/>
-
-    <userTask id="Task_J_DevOps" name="DevOps (HML)"/>
-    <sequenceFlow id="SF_J20" sourceRef="Task_J_DevOps" targetRef="Task_J_HML"/>
-
-    <userTask id="Task_J_HML" name="Homologando (Cliente)"/>
-    <sequenceFlow id="SF_J21" sourceRef="Task_J_HML" targetRef="Gateway_J_HML"/>
-
-    <exclusiveGateway id="Gateway_J_HML" name="Homologa??o ok?"/>
-    <sequenceFlow id="SF_J22" name="N?o" sourceRef="Gateway_J_HML" targetRef="Task_J_Dev"/>
-    <sequenceFlow id="SF_J23" name="Sim" sourceRef="Gateway_J_HML" targetRef="Task_J_Prod"/>
-
-    <userTask id="Task_J_Prod" name="DEVSECOPS (PROD)"/>
-    <sequenceFlow id="SF_J24" sourceRef="Task_J_Prod" targetRef="Task_J_Concluido"/>
-
-    <userTask id="Task_J_Concluido" name="Conclu?do"/>
-    <sequenceFlow id="SF_J25" sourceRef="Task_J_Concluido" targetRef="End_J_Ok"/>
-    <endEvent id="End_J_Ok" name="Projeto entregue"/>
-
+    <exclusiveGateway id="Gw_J_Contratar" name="Precisa contratar?"/>
+    <userTask id="Task_J_Hold" name="Contratação (origem travada)"/>
+    <exclusiveGateway id="Gw_J_PosHold" name="Desfecho"/>
     <userTask id="Task_J_Cancelado" name="Cancelado"/>
-    <sequenceFlow id="SF_J26" sourceRef="Task_J_Cancelado" targetRef="End_J_Cancel"/>
     <endEvent id="End_J_Cancel" name="Projeto cancelado"/>
+    <userTask id="Task_J_Agendar" name="Agendar Reunião"/>
+    <userTask id="Task_J_Conduzir" name="Conduzir Reunião de Levantamento"/>
+    <exclusiveGateway id="Gw_J_Imped" name="Impedimento?"/>
+    <userTask id="Task_J_Impedimento" name="Impedimento"/>
+    <userTask id="Task_J_Req" name="Requisitos / Protótipo"/>
+    <userTask id="Task_J_Ref" name="Refinamento PO e Tech"/>
+    <userTask id="Task_J_Validar" name="Validar Escopo (Cliente)"/>
+    <exclusiveGateway id="Gw_J_Escopo" name="Escopo ok?"/>
+    <userTask id="Task_J_Pronto" name="Pronto para Desenvolvimento"/>
+    <userTask id="Task_J_Dev" name="Em Desenvolvimento"/>
+    <userTask id="Task_J_DevOps" name="DevOps (HML)"/>
+    <userTask id="Task_J_Hml" name="Homologando (Cliente)"/>
+    <exclusiveGateway id="Gw_J_Hml" name="Homologação ok?"/>
+    <userTask id="Task_J_Prod" name="DEVSECOPS (PROD)"/>
+    <userTask id="Task_J_Concluido" name="Concluído"/>
+    <endEvent id="End_J_Ok" name="Projeto entregue"/>
+    <sequenceFlow id="SF_J01" sourceRef="Start_J" targetRef="Task_J_Backlog"/>
+    <sequenceFlow id="SF_J02" sourceRef="Task_J_Backlog" targetRef="Gw_J_Contratar"/>
+    <sequenceFlow id="SF_J03" name="Sim" sourceRef="Gw_J_Contratar" targetRef="Task_J_Hold"/>
+    <sequenceFlow id="SF_J04" name="Não" sourceRef="Gw_J_Contratar" targetRef="Task_J_Agendar"/>
+    <sequenceFlow id="SF_J05" sourceRef="Task_J_Hold" targetRef="Gw_J_PosHold"/>
+    <sequenceFlow id="SF_J06" name="Ganhou" sourceRef="Gw_J_PosHold" targetRef="Task_J_Agendar"/>
+    <sequenceFlow id="SF_J07" name="Perdeu" sourceRef="Gw_J_PosHold" targetRef="Task_J_Cancelado"/>
+    <sequenceFlow id="SF_J08" sourceRef="Task_J_Agendar" targetRef="Task_J_Conduzir"/>
+    <sequenceFlow id="SF_J09" sourceRef="Task_J_Conduzir" targetRef="Gw_J_Imped"/>
+    <sequenceFlow id="SF_J10" name="Sim" sourceRef="Gw_J_Imped" targetRef="Task_J_Impedimento"/>
+    <sequenceFlow id="SF_J11" name="Não" sourceRef="Gw_J_Imped" targetRef="Task_J_Req"/>
+    <sequenceFlow id="SF_J12" sourceRef="Task_J_Impedimento" targetRef="Task_J_Conduzir"/>
+    <sequenceFlow id="SF_J13" sourceRef="Task_J_Req" targetRef="Task_J_Ref"/>
+    <sequenceFlow id="SF_J14" sourceRef="Task_J_Ref" targetRef="Task_J_Validar"/>
+    <sequenceFlow id="SF_J15" sourceRef="Task_J_Validar" targetRef="Gw_J_Escopo"/>
+    <sequenceFlow id="SF_J16" name="Não" sourceRef="Gw_J_Escopo" targetRef="Task_J_Req"/>
+    <sequenceFlow id="SF_J17" name="Sim" sourceRef="Gw_J_Escopo" targetRef="Task_J_Pronto"/>
+    <sequenceFlow id="SF_J18" sourceRef="Task_J_Pronto" targetRef="Task_J_Dev"/>
+    <sequenceFlow id="SF_J19" sourceRef="Task_J_Dev" targetRef="Task_J_DevOps"/>
+    <sequenceFlow id="SF_J20" sourceRef="Task_J_DevOps" targetRef="Task_J_Hml"/>
+    <sequenceFlow id="SF_J21" sourceRef="Task_J_Hml" targetRef="Gw_J_Hml"/>
+    <sequenceFlow id="SF_J22" name="Não" sourceRef="Gw_J_Hml" targetRef="Task_J_Dev"/>
+    <sequenceFlow id="SF_J23" name="Sim" sourceRef="Gw_J_Hml" targetRef="Task_J_Prod"/>
+    <sequenceFlow id="SF_J24" sourceRef="Task_J_Prod" targetRef="Task_J_Concluido"/>
+    <sequenceFlow id="SF_J25" sourceRef="Task_J_Concluido" targetRef="End_J_Ok"/>
+    <sequenceFlow id="SF_J26" sourceRef="Task_J_Cancelado" targetRef="End_J_Cancel"/>
   </process>
 
-  <!-- ???????????????????????????????????????????
-       CONTRATAR
-       ??????????????????????????????????????????? -->
+  <process id="Proc_Features" name="Features" isExecutable="false">
+    <startEvent id="Start_F" name="Feature criada no projeto"/>
+    <userTask id="Task_F_Backlog" name="Backlog"/>
+    <userTask id="Task_F_Dev" name="Em Desenvolvimento"/>
+    <userTask id="Task_F_Hml" name="Homologação (PO)"/>
+    <exclusiveGateway id="Gw_F_Hml" name="PO aprova?"/>
+    <userTask id="Task_F_Ajustar" name="Ajustar"/>
+    <userTask id="Task_F_Concluido" name="Concluído"/>
+    <endEvent id="End_F_Ok" name="Feature entregue"/>
+    <sequenceFlow id="SF_F01" sourceRef="Start_F" targetRef="Task_F_Backlog"/>
+    <sequenceFlow id="SF_F02" sourceRef="Task_F_Backlog" targetRef="Task_F_Dev"/>
+    <sequenceFlow id="SF_F03" sourceRef="Task_F_Dev" targetRef="Task_F_Hml"/>
+    <sequenceFlow id="SF_F04" sourceRef="Task_F_Hml" targetRef="Gw_F_Hml"/>
+    <sequenceFlow id="SF_F05" name="Não" sourceRef="Gw_F_Hml" targetRef="Task_F_Ajustar"/>
+    <sequenceFlow id="SF_F06" name="Sim" sourceRef="Gw_F_Hml" targetRef="Task_F_Concluido"/>
+    <sequenceFlow id="SF_F07" sourceRef="Task_F_Ajustar" targetRef="Task_F_Dev"/>
+    <sequenceFlow id="SF_F08" sourceRef="Task_F_Concluido" targetRef="End_F_Ok"/>
+  </process>
+
+  <process id="Proc_US" name="User Story" isExecutable="false">
+    <startEvent id="Start_U" name="US criada na Feature"/>
+    <userTask id="Task_U_Backlog" name="Backlog"/>
+    <exclusiveGateway id="Gw_U_Imped" name="Impedimento?"/>
+    <userTask id="Task_U_Impedimento" name="Impedimento"/>
+    <userTask id="Task_U_Dev" name="Em Desenvolvimento"/>
+    <userTask id="Task_U_CR" name="Code Review"/>
+    <userTask id="Task_U_Hml" name="Homologação (PO)"/>
+    <exclusiveGateway id="Gw_U_Hml" name="PO aprova?"/>
+    <userTask id="Task_U_Concluido" name="Concluído"/>
+    <endEvent id="End_U_Ok" name="US entregue"/>
+    <sequenceFlow id="SF_U01" sourceRef="Start_U" targetRef="Task_U_Backlog"/>
+    <sequenceFlow id="SF_U02" sourceRef="Task_U_Backlog" targetRef="Gw_U_Imped"/>
+    <sequenceFlow id="SF_U03" name="Sim" sourceRef="Gw_U_Imped" targetRef="Task_U_Impedimento"/>
+    <sequenceFlow id="SF_U04" name="Não" sourceRef="Gw_U_Imped" targetRef="Task_U_Dev"/>
+    <sequenceFlow id="SF_U05" sourceRef="Task_U_Impedimento" targetRef="Task_U_Dev"/>
+    <sequenceFlow id="SF_U06" sourceRef="Task_U_Dev" targetRef="Task_U_CR"/>
+    <sequenceFlow id="SF_U07" sourceRef="Task_U_CR" targetRef="Task_U_Hml"/>
+    <sequenceFlow id="SF_U08" sourceRef="Task_U_Hml" targetRef="Gw_U_Hml"/>
+    <sequenceFlow id="SF_U09" name="Não" sourceRef="Gw_U_Hml" targetRef="Task_U_Dev"/>
+    <sequenceFlow id="SF_U10" name="Sim" sourceRef="Gw_U_Hml" targetRef="Task_U_Concluido"/>
+    <sequenceFlow id="SF_U11" sourceRef="Task_U_Concluido" targetRef="End_U_Ok"/>
+  </process>
+
   <process id="Proc_Contratar" name="Contratar" isExecutable="false">
-    <startEvent id="Start_Contratar" name="Card criado (origem travada)"/>
-    <sequenceFlow id="SF_C01" sourceRef="Start_Contratar" targetRef="Task_C_Backlog"/>
-
+    <startEvent id="Start_C" name="Card criado (origem travada)"/>
     <userTask id="Task_C_Backlog" name="Backlog"/>
-    <sequenceFlow id="SF_C02" sourceRef="Task_C_Backlog" targetRef="Task_C_Prospectar"/>
-
     <userTask id="Task_C_Prospectar" name="Prospectar"/>
-    <sequenceFlow id="SF_C03" sourceRef="Task_C_Prospectar" targetRef="Task_C_Aderencia"/>
-
-    <userTask id="Task_C_Aderencia" name="An?lise de ader?ncia"/>
-    <sequenceFlow id="SF_C04" sourceRef="Task_C_Aderencia" targetRef="Task_C_Proposta"/>
-
+    <userTask id="Task_C_Aderencia" name="Análise de aderência"/>
     <userTask id="Task_C_Proposta" name="Proposta (anexo + valor)"/>
-    <sequenceFlow id="SF_C05" sourceRef="Task_C_Proposta" targetRef="Gateway_C_Proposta"/>
-
-    <exclusiveGateway id="Gateway_C_Proposta" name="Proposta e valor ok?"/>
-    <sequenceFlow id="SF_C06" name="N?o" sourceRef="Gateway_C_Proposta" targetRef="Task_C_Proposta"/>
-    <sequenceFlow id="SF_C07" name="Sim ? Negocia??o" sourceRef="Gateway_C_Proposta" targetRef="Task_C_Negociacao"/>
-
-    <userTask id="Task_C_Negociacao" name="Negocia??o"/>
-    <sequenceFlow id="SF_C08" sourceRef="Task_C_Negociacao" targetRef="Gateway_C_WinLose"/>
-
-    <exclusiveGateway id="Gateway_C_WinLose" name="Ganhou a contrata??o?"/>
-    <sequenceFlow id="SF_C09" name="Sim (fornecedor + contrato)" sourceRef="Gateway_C_WinLose" targetRef="Task_C_Concluido"/>
-    <sequenceFlow id="SF_C10" name="N?o (motivo)" sourceRef="Gateway_C_WinLose" targetRef="Task_C_Cancelado"/>
-
-    <userTask id="Task_C_Concluido" name="Conclu?do (anexa contrato no Produto)"/>
-    <sequenceFlow id="SF_C11" sourceRef="Task_C_Concluido" targetRef="End_C_Win"/>
-    <endEvent id="End_C_Win" name="Contrata??o conclu?da"/>
-
+    <exclusiveGateway id="Gw_C_Prop" name="Proposta e valor ok?"/>
+    <userTask id="Task_C_Neg" name="Negociação"/>
+    <exclusiveGateway id="Gw_C_Win" name="Ganhou a contratação?"/>
+    <userTask id="Task_C_Concluido" name="Concluído (contrato no Produto)"/>
+    <endEvent id="End_C_Win" name="Contratação concluída"/>
     <userTask id="Task_C_Cancelado" name="Cancelado (justificativa)"/>
+    <endEvent id="End_C_Lose" name="Contratação perdida"/>
+    <sequenceFlow id="SF_C01" sourceRef="Start_C" targetRef="Task_C_Backlog"/>
+    <sequenceFlow id="SF_C02" sourceRef="Task_C_Backlog" targetRef="Task_C_Prospectar"/>
+    <sequenceFlow id="SF_C03" sourceRef="Task_C_Prospectar" targetRef="Task_C_Aderencia"/>
+    <sequenceFlow id="SF_C04" sourceRef="Task_C_Aderencia" targetRef="Task_C_Proposta"/>
+    <sequenceFlow id="SF_C05" sourceRef="Task_C_Proposta" targetRef="Gw_C_Prop"/>
+    <sequenceFlow id="SF_C06" name="Não" sourceRef="Gw_C_Prop" targetRef="Task_C_Proposta"/>
+    <sequenceFlow id="SF_C07" name="Sim" sourceRef="Gw_C_Prop" targetRef="Task_C_Neg"/>
+    <sequenceFlow id="SF_C08" sourceRef="Task_C_Neg" targetRef="Gw_C_Win"/>
+    <sequenceFlow id="SF_C09" name="Sim (fornecedor + contrato)" sourceRef="Gw_C_Win" targetRef="Task_C_Concluido"/>
+    <sequenceFlow id="SF_C10" name="Não (motivo)" sourceRef="Gw_C_Win" targetRef="Task_C_Cancelado"/>
+    <sequenceFlow id="SF_C11" sourceRef="Task_C_Concluido" targetRef="End_C_Win"/>
     <sequenceFlow id="SF_C12" sourceRef="Task_C_Cancelado" targetRef="End_C_Lose"/>
-    <endEvent id="End_C_Lose" name="Contrata??o perdida"/>
   </process>
 
-  <!-- ???????????????????????????????????????????
-       DIAGRAMA (layout simplificado p/ bpmn-js)
-       ??????????????????????????????????????????? -->
   <bpmndi:BPMNDiagram id="BPMNDiagram_1">
     <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Collab_Kanbans">
-
-      <bpmndi:BPMNShape id="Shape_Part_Prospectar" bpmnElement="Part_Prospectar" isHorizontal="true">
-        <dc:Bounds x="160" y="80" width="1400" height="320"/>
+      <bpmndi:BPMNShape id="Sh_Part_Prospectar" bpmnElement="Part_Prospectar" isHorizontal="true">
+        <dc:Bounds x="140" y="30" width="3000" height="310"/>
       </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Part_Projetos" bpmnElement="Part_Projetos" isHorizontal="true">
-        <dc:Bounds x="160" y="440" width="1400" height="300"/>
+      <bpmndi:BPMNShape id="Sh_Part_Projetos" bpmnElement="Part_Projetos" isHorizontal="true">
+        <dc:Bounds x="140" y="350" width="3000" height="310"/>
       </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Part_Contratar" bpmnElement="Part_Contratar" isHorizontal="true">
-        <dc:Bounds x="160" y="780" width="1400" height="260"/>
+      <bpmndi:BPMNShape id="Sh_Part_Features" bpmnElement="Part_Features" isHorizontal="true">
+        <dc:Bounds x="140" y="680" width="3000" height="190"/>
       </bpmndi:BPMNShape>
-
-      <!-- Prospectar nodes (y ~120-360) -->
-      <bpmndi:BPMNShape id="S_Start_P" bpmnElement="Start_Prospectar"><dc:Bounds x="200" y="200" width="36" height="36"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_P_Backlog" bpmnElement="Task_P_Backlog"><dc:Bounds x="270" y="178" width="110" height="80"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_Gw_Class" bpmnElement="Gateway_Classificar" isMarkerVisible="true"><dc:Bounds x="420" y="193" width="50" height="50"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_Gw_Ext" bpmnElement="Gateway_Externo" isMarkerVisible="true"><dc:Bounds x="520" y="193" width="50" height="50"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_Gw_Contr" bpmnElement="Gateway_SeraContratado" isMarkerVisible="true"><dc:Bounds x="620" y="193" width="50" height="50"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_Hold" bpmnElement="Task_Hold_Contrata??o"><dc:Bounds x="710" y="100" width="140" height="80"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_Gw_PosHold" bpmnElement="Gateway_PosHold" isMarkerVisible="true"><dc:Bounds x="890" y="115" width="50" height="50"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_OrigCancel" bpmnElement="Task_Origem_Cancelado"><dc:Bounds x="980" y="100" width="120" height="80"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_End_PCancel" bpmnElement="End_P_Cancelado"><dc:Bounds x="1140" y="122" width="36" height="36"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_P_Class" bpmnElement="Task_P_Classificacao"><dc:Bounds x="710" y="250" width="120" height="80"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_P_Avaliar" bpmnElement="Task_P_Avaliar"><dc:Bounds x="870" y="250" width="130" height="80"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_Gw_Aval" bpmnElement="Gateway_Avaliacao" isMarkerVisible="true"><dc:Bounds x="1040" y="265" width="50" height="50"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_P_Ajustes" bpmnElement="Task_P_Ajustes"><dc:Bounds x="980" y="340" width="100" height="50"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_P_Imped" bpmnElement="Task_P_Impedimento"><dc:Bounds x="1100" y="340" width="110" height="50"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_P_Rejeit" bpmnElement="Task_P_Rejeitado"><dc:Bounds x="1240" y="250" width="100" height="80"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_End_PRej" bpmnElement="End_P_Rejeitado"><dc:Bounds x="1380" y="272" width="36" height="36"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_P_Conc" bpmnElement="Task_P_Concluido"><dc:Bounds x="1240" y="160" width="140" height="70"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_End_POk" bpmnElement="End_P_Ok"><dc:Bounds x="1420" y="177" width="36" height="36"/></bpmndi:BPMNShape>
-
-      <!-- Projetos nodes (y ~480-700) -->
-      <bpmndi:BPMNShape id="S_Start_J" bpmnElement="Start_Projetos"><dc:Bounds x="200" y="540" width="36" height="36"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_J_Backlog" bpmnElement="Task_J_Backlog"><dc:Bounds x="270" y="518" width="100" height="80"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_Gw_JExt" bpmnElement="Gateway_J_Externo" isMarkerVisible="true"><dc:Bounds x="410" y="533" width="50" height="50"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_J_Hold" bpmnElement="Task_J_Hold"><dc:Bounds x="500" y="460" width="130" height="60"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_Gw_JPos" bpmnElement="Gateway_J_PosHold" isMarkerVisible="true"><dc:Bounds x="670" y="465" width="50" height="50"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_J_Agendar" bpmnElement="Task_J_Agendar"><dc:Bounds x="500" y="560" width="120" height="60"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_J_Conduzir" bpmnElement="Task_J_Conduzir"><dc:Bounds x="650" y="560" width="140" height="60"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_Gw_JImp" bpmnElement="Gateway_J_Imped" isMarkerVisible="true"><dc:Bounds x="820" y="565" width="50" height="50"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_J_Imped" bpmnElement="Task_J_Impedimento"><dc:Bounds x="800" y="650" width="100" height="50"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_J_Req" bpmnElement="Task_J_Requisitos"><dc:Bounds x="910" y="560" width="120" height="60"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_J_Ref" bpmnElement="Task_J_Refinamento"><dc:Bounds x="1050" y="560" width="120" height="60"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_J_Val" bpmnElement="Task_J_Validar"><dc:Bounds x="1190" y="560" width="130" height="60"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_Gw_JEsc" bpmnElement="Gateway_J_Escopo" isMarkerVisible="true"><dc:Bounds x="1350" y="565" width="50" height="50"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_J_Pronto" bpmnElement="Task_J_Pronto"><dc:Bounds x="910" y="650" width="130" height="50"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_J_Dev" bpmnElement="Task_J_Dev"><dc:Bounds x="1060" y="650" width="120" height="50"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_J_DevOps" bpmnElement="Task_J_DevOps"><dc:Bounds x="1200" y="650" width="100" height="50"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_J_HML" bpmnElement="Task_J_HML"><dc:Bounds x="1320" y="650" width="120" height="50"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_Gw_JHML" bpmnElement="Gateway_J_HML" isMarkerVisible="true"><dc:Bounds x="1460" y="652" width="50" height="50"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_J_Prod" bpmnElement="Task_J_Prod"><dc:Bounds x="1320" y="480" width="120" height="50"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_J_Conc" bpmnElement="Task_J_Concluido"><dc:Bounds x="1460" y="480" width="80" height="50"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_End_JOk" bpmnElement="End_J_Ok"><dc:Bounds x="1480" y="560" width="36" height="36"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_J_Cancel" bpmnElement="Task_J_Cancelado"><dc:Bounds x="760" y="460" width="100" height="50"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_End_JCancel" bpmnElement="End_J_Cancel"><dc:Bounds x="900" y="467" width="36" height="36"/></bpmndi:BPMNShape>
-
-      <!-- Contratar nodes (y ~820-1000) -->
-      <bpmndi:BPMNShape id="S_Start_C" bpmnElement="Start_Contratar"><dc:Bounds x="200" y="880" width="36" height="36"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_C_Backlog" bpmnElement="Task_C_Backlog"><dc:Bounds x="270" y="858" width="90" height="80"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_C_Pros" bpmnElement="Task_C_Prospectar"><dc:Bounds x="390" y="858" width="100" height="80"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_C_Ader" bpmnElement="Task_C_Aderencia"><dc:Bounds x="520" y="858" width="130" height="80"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_C_Prop" bpmnElement="Task_C_Proposta"><dc:Bounds x="680" y="858" width="130" height="80"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_Gw_CProp" bpmnElement="Gateway_C_Proposta" isMarkerVisible="true"><dc:Bounds x="850" y="873" width="50" height="50"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_C_Neg" bpmnElement="Task_C_Negociacao"><dc:Bounds x="940" y="858" width="110" height="80"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_Gw_CWin" bpmnElement="Gateway_C_WinLose" isMarkerVisible="true"><dc:Bounds x="1090" y="873" width="50" height="50"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_C_Conc" bpmnElement="Task_C_Concluido"><dc:Bounds x="1180" y="820" width="160" height="70"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_End_CWin" bpmnElement="End_C_Win"><dc:Bounds x="1380" y="837" width="36" height="36"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_C_Cancel" bpmnElement="Task_C_Cancelado"><dc:Bounds x="1180" y="920" width="150" height="70"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="S_End_CLose" bpmnElement="End_C_Lose"><dc:Bounds x="1380" y="937" width="36" height="36"/></bpmndi:BPMNShape>
-
-      <!-- Message flows -->
-      <bpmndi:BPMNEdge id="E_MF1" bpmnElement="MF_Prospectar_to_Projetos">
-        <di:waypoint x="1310" y="230"/><di:waypoint x="1310" y="400"/><di:waypoint x="320" y="400"/><di:waypoint x="320" y="518"/>
-      </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="E_MF2" bpmnElement="MF_Origem_to_Contratar">
-        <di:waypoint x="780" y="180"/><di:waypoint x="780" y="420"/><di:waypoint x="250" y="420"/><di:waypoint x="250" y="880"/>
-      </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="E_MF3" bpmnElement="MF_Contratar_Win">
-        <di:waypoint x="1260" y="820"/><di:waypoint x="1260" y="140"/><di:waypoint x="915" y="140"/>
-      </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="E_MF4" bpmnElement="MF_Contratar_Lose">
-        <di:waypoint x="1255" y="990"/><di:waypoint x="1040" y="990"/><di:waypoint x="1040" y="180"/>
-      </bpmndi:BPMNEdge>
-
+      <bpmndi:BPMNShape id="Sh_Part_US" bpmnElement="Part_US" isHorizontal="true">
+        <dc:Bounds x="140" y="890" width="3000" height="210"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Part_Contratar" bpmnElement="Part_Contratar" isHorizontal="true">
+        <dc:Bounds x="140" y="1120" width="3000" height="210"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Start_P" bpmnElement="Start_P"><dc:Bounds x="180" y="172" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_P_Backlog" bpmnElement="Task_P_Backlog"><dc:Bounds x="240" y="155" width="110" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Gw_P_Classificar" bpmnElement="Gw_P_Classificar" isMarkerVisible="true"><dc:Bounds x="390" y="165" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Gw_P_Externo" bpmnElement="Gw_P_Externo" isMarkerVisible="true"><dc:Bounds x="470" y="55" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Gw_P_Sera" bpmnElement="Gw_P_Sera" isMarkerVisible="true"><dc:Bounds x="550" y="55" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_P_Hold" bpmnElement="Task_P_Hold"><dc:Bounds x="630" y="50" width="140" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Gw_P_PosHold" bpmnElement="Gw_P_PosHold" isMarkerVisible="true"><dc:Bounds x="800" y="55" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_P_Cancelado" bpmnElement="Task_P_Cancelado"><dc:Bounds x="880" y="50" width="110" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_End_P_Cancel" bpmnElement="End_P_Cancel"><dc:Bounds x="1020" y="62" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_P_Classificacao" bpmnElement="Task_P_Classificacao"><dc:Bounds x="490" y="155" width="120" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_P_Avaliar" bpmnElement="Task_P_Avaliar"><dc:Bounds x="650" y="155" width="130" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Gw_P_Avaliar" bpmnElement="Gw_P_Avaliar" isMarkerVisible="true"><dc:Bounds x="820" y="165" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_P_Concluido" bpmnElement="Task_P_Concluido"><dc:Bounds x="940" y="155" width="140" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_End_P_Ok" bpmnElement="End_P_Ok"><dc:Bounds x="1090" y="172" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_P_Ajustes" bpmnElement="Task_P_Ajustes"><dc:Bounds x="490" y="260" width="110" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_P_Impedimento" bpmnElement="Task_P_Impedimento"><dc:Bounds x="630" y="260" width="120" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_P_Rejeitado" bpmnElement="Task_P_Rejeitado"><dc:Bounds x="930" y="260" width="110" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_End_P_Rej" bpmnElement="End_P_Rej"><dc:Bounds x="1080" y="272" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Start_J" bpmnElement="Start_J"><dc:Bounds x="180" y="482" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_J_Backlog" bpmnElement="Task_J_Backlog"><dc:Bounds x="240" y="465" width="100" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Gw_J_Contratar" bpmnElement="Gw_J_Contratar" isMarkerVisible="true"><dc:Bounds x="380" y="475" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_J_Hold" bpmnElement="Task_J_Hold"><dc:Bounds x="470" y="380" width="140" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Gw_J_PosHold" bpmnElement="Gw_J_PosHold" isMarkerVisible="true"><dc:Bounds x="650" y="380" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_J_Cancelado" bpmnElement="Task_J_Cancelado"><dc:Bounds x="740" y="380" width="110" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_End_J_Cancel" bpmnElement="End_J_Cancel"><dc:Bounds x="890" y="387" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_J_Agendar" bpmnElement="Task_J_Agendar"><dc:Bounds x="470" y="465" width="120" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_J_Conduzir" bpmnElement="Task_J_Conduzir"><dc:Bounds x="630" y="465" width="150" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Gw_J_Imped" bpmnElement="Gw_J_Imped" isMarkerVisible="true"><dc:Bounds x="820" y="475" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_J_Impedimento" bpmnElement="Task_J_Impedimento"><dc:Bounds x="760" y="575" width="120" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_J_Req" bpmnElement="Task_J_Req"><dc:Bounds x="910" y="465" width="130" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_J_Ref" bpmnElement="Task_J_Ref"><dc:Bounds x="1080" y="465" width="140" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_J_Validar" bpmnElement="Task_J_Validar"><dc:Bounds x="1260" y="465" width="140" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Gw_J_Escopo" bpmnElement="Gw_J_Escopo" isMarkerVisible="true"><dc:Bounds x="1440" y="475" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_J_Pronto" bpmnElement="Task_J_Pronto"><dc:Bounds x="1530" y="465" width="150" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_J_Dev" bpmnElement="Task_J_Dev"><dc:Bounds x="1720" y="465" width="130" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_J_DevOps" bpmnElement="Task_J_DevOps"><dc:Bounds x="1890" y="465" width="120" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_J_Hml" bpmnElement="Task_J_Hml"><dc:Bounds x="2050" y="465" width="140" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Gw_J_Hml" bpmnElement="Gw_J_Hml" isMarkerVisible="true"><dc:Bounds x="2230" y="475" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_J_Prod" bpmnElement="Task_J_Prod"><dc:Bounds x="2320" y="465" width="140" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_J_Concluido" bpmnElement="Task_J_Concluido"><dc:Bounds x="2500" y="465" width="110" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_End_J_Ok" bpmnElement="End_J_Ok"><dc:Bounds x="2650" y="482" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Start_F" bpmnElement="Start_F"><dc:Bounds x="180" y="742" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_F_Backlog" bpmnElement="Task_F_Backlog"><dc:Bounds x="240" y="725" width="110" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_F_Dev" bpmnElement="Task_F_Dev"><dc:Bounds x="390" y="725" width="140" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_F_Hml" bpmnElement="Task_F_Hml"><dc:Bounds x="570" y="725" width="140" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Gw_F_Hml" bpmnElement="Gw_F_Hml" isMarkerVisible="true"><dc:Bounds x="750" y="735" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_F_Ajustar" bpmnElement="Task_F_Ajustar"><dc:Bounds x="840" y="805" width="110" height="40"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_F_Concluido" bpmnElement="Task_F_Concluido"><dc:Bounds x="840" y="725" width="120" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_End_F_Ok" bpmnElement="End_F_Ok"><dc:Bounds x="1000" y="742" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Start_U" bpmnElement="Start_U"><dc:Bounds x="180" y="942" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_U_Backlog" bpmnElement="Task_U_Backlog"><dc:Bounds x="240" y="925" width="100" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Gw_U_Imped" bpmnElement="Gw_U_Imped" isMarkerVisible="true"><dc:Bounds x="380" y="935" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_U_Impedimento" bpmnElement="Task_U_Impedimento"><dc:Bounds x="360" y="1010" width="120" height="40"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_U_Dev" bpmnElement="Task_U_Dev"><dc:Bounds x="520" y="925" width="140" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_U_CR" bpmnElement="Task_U_CR"><dc:Bounds x="700" y="925" width="120" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_U_Hml" bpmnElement="Task_U_Hml"><dc:Bounds x="860" y="925" width="140" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Gw_U_Hml" bpmnElement="Gw_U_Hml" isMarkerVisible="true"><dc:Bounds x="1040" y="935" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_U_Concluido" bpmnElement="Task_U_Concluido"><dc:Bounds x="1120" y="925" width="120" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_End_U_Ok" bpmnElement="End_U_Ok"><dc:Bounds x="1280" y="942" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Start_C" bpmnElement="Start_C"><dc:Bounds x="180" y="1182" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_C_Backlog" bpmnElement="Task_C_Backlog"><dc:Bounds x="240" y="1165" width="100" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_C_Prospectar" bpmnElement="Task_C_Prospectar"><dc:Bounds x="380" y="1165" width="120" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_C_Aderencia" bpmnElement="Task_C_Aderencia"><dc:Bounds x="540" y="1165" width="150" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_C_Proposta" bpmnElement="Task_C_Proposta"><dc:Bounds x="730" y="1165" width="150" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Gw_C_Prop" bpmnElement="Gw_C_Prop" isMarkerVisible="true"><dc:Bounds x="900" y="1175" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_C_Neg" bpmnElement="Task_C_Neg"><dc:Bounds x="990" y="1165" width="120" height="70"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Gw_C_Win" bpmnElement="Gw_C_Win" isMarkerVisible="true"><dc:Bounds x="1150" y="1175" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_C_Concluido" bpmnElement="Task_C_Concluido"><dc:Bounds x="1240" y="1130" width="180" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_End_C_Win" bpmnElement="End_C_Win"><dc:Bounds x="1460" y="1137" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_Task_C_Cancelado" bpmnElement="Task_C_Cancelado"><dc:Bounds x="1240" y="1240" width="170" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sh_End_C_Lose" bpmnElement="End_C_Lose"><dc:Bounds x="1450" y="1247" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Ed_SF_P01" bpmnElement="SF_P01"><di:waypoint x="216" y="190"/><di:waypoint x="240" y="190"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_P02" bpmnElement="SF_P02"><di:waypoint x="350" y="190"/><di:waypoint x="390" y="190"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_P03" bpmnElement="SF_P03"><di:waypoint x="440" y="190"/><di:waypoint x="490" y="190"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_P04" bpmnElement="SF_P04"><di:waypoint x="415" y="165"/><di:waypoint x="415" y="80"/><di:waypoint x="470" y="80"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_P05" bpmnElement="SF_P05"><di:waypoint x="495" y="105"/><di:waypoint x="495" y="155"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_P06" bpmnElement="SF_P06"><di:waypoint x="520" y="80"/><di:waypoint x="550" y="80"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_P07" bpmnElement="SF_P07"><di:waypoint x="575" y="105"/><di:waypoint x="575" y="155"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_P08" bpmnElement="SF_P08"><di:waypoint x="600" y="80"/><di:waypoint x="630" y="80"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_P09" bpmnElement="SF_P09"><di:waypoint x="770" y="80"/><di:waypoint x="800" y="80"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_P10" bpmnElement="SF_P10"><di:waypoint x="825" y="105"/><di:waypoint x="825" y="145"/><di:waypoint x="530" y="145"/><di:waypoint x="530" y="155"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_P11" bpmnElement="SF_P11"><di:waypoint x="850" y="80"/><di:waypoint x="880" y="80"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_P12" bpmnElement="SF_P12"><di:waypoint x="610" y="190"/><di:waypoint x="650" y="190"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_P13" bpmnElement="SF_P13"><di:waypoint x="780" y="190"/><di:waypoint x="820" y="190"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_P14" bpmnElement="SF_P14"><di:waypoint x="845" y="215"/><di:waypoint x="845" y="245"/><di:waypoint x="545" y="245"/><di:waypoint x="545" y="260"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_P15" bpmnElement="SF_P15"><di:waypoint x="845" y="215"/><di:waypoint x="845" y="238"/><di:waypoint x="690" y="238"/><di:waypoint x="690" y="260"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_P16" bpmnElement="SF_P16"><di:waypoint x="845" y="215"/><di:waypoint x="845" y="232"/><di:waypoint x="985" y="232"/><di:waypoint x="985" y="260"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_P17" bpmnElement="SF_P17"><di:waypoint x="870" y="190"/><di:waypoint x="940" y="190"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_P18" bpmnElement="SF_P18"><di:waypoint x="545" y="260"/><di:waypoint x="545" y="252"/><di:waypoint x="700" y="252"/><di:waypoint x="700" y="225"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_P19" bpmnElement="SF_P19"><di:waypoint x="690" y="260"/><di:waypoint x="690" y="243"/><di:waypoint x="740" y="243"/><di:waypoint x="740" y="225"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_P20" bpmnElement="SF_P20"><di:waypoint x="1040" y="285"/><di:waypoint x="1080" y="285"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_P21" bpmnElement="SF_P21"><di:waypoint x="1080" y="190"/><di:waypoint x="1090" y="190"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_P22" bpmnElement="SF_P22"><di:waypoint x="990" y="80"/><di:waypoint x="1020" y="80"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_J01" bpmnElement="SF_J01"><di:waypoint x="216" y="500"/><di:waypoint x="240" y="500"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_J02" bpmnElement="SF_J02"><di:waypoint x="340" y="500"/><di:waypoint x="380" y="500"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_J03" bpmnElement="SF_J03"><di:waypoint x="405" y="475"/><di:waypoint x="405" y="405"/><di:waypoint x="470" y="405"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_J04" bpmnElement="SF_J04"><di:waypoint x="430" y="500"/><di:waypoint x="470" y="500"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_J05" bpmnElement="SF_J05"><di:waypoint x="610" y="405"/><di:waypoint x="650" y="405"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_J06" bpmnElement="SF_J06"><di:waypoint x="675" y="430"/><di:waypoint x="675" y="450"/><di:waypoint x="530" y="450"/><di:waypoint x="530" y="465"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_J07" bpmnElement="SF_J07"><di:waypoint x="700" y="405"/><di:waypoint x="740" y="405"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_J08" bpmnElement="SF_J08"><di:waypoint x="590" y="500"/><di:waypoint x="630" y="500"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_J09" bpmnElement="SF_J09"><di:waypoint x="780" y="500"/><di:waypoint x="820" y="500"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_J10" bpmnElement="SF_J10"><di:waypoint x="845" y="525"/><di:waypoint x="845" y="575"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_J11" bpmnElement="SF_J11"><di:waypoint x="870" y="500"/><di:waypoint x="910" y="500"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_J12" bpmnElement="SF_J12"><di:waypoint x="820" y="575"/><di:waypoint x="820" y="555"/><di:waypoint x="705" y="555"/><di:waypoint x="705" y="535"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_J13" bpmnElement="SF_J13"><di:waypoint x="1040" y="500"/><di:waypoint x="1080" y="500"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_J14" bpmnElement="SF_J14"><di:waypoint x="1220" y="500"/><di:waypoint x="1260" y="500"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_J15" bpmnElement="SF_J15"><di:waypoint x="1400" y="500"/><di:waypoint x="1440" y="500"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_J16" bpmnElement="SF_J16"><di:waypoint x="1465" y="525"/><di:waypoint x="1465" y="645"/><di:waypoint x="975" y="645"/><di:waypoint x="975" y="535"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_J17" bpmnElement="SF_J17"><di:waypoint x="1490" y="500"/><di:waypoint x="1530" y="500"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_J18" bpmnElement="SF_J18"><di:waypoint x="1680" y="500"/><di:waypoint x="1720" y="500"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_J19" bpmnElement="SF_J19"><di:waypoint x="1850" y="500"/><di:waypoint x="1890" y="500"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_J20" bpmnElement="SF_J20"><di:waypoint x="2010" y="500"/><di:waypoint x="2050" y="500"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_J21" bpmnElement="SF_J21"><di:waypoint x="2190" y="500"/><di:waypoint x="2230" y="500"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_J22" bpmnElement="SF_J22"><di:waypoint x="2255" y="525"/><di:waypoint x="2255" y="635"/><di:waypoint x="1785" y="635"/><di:waypoint x="1785" y="535"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_J23" bpmnElement="SF_J23"><di:waypoint x="2280" y="500"/><di:waypoint x="2320" y="500"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_J24" bpmnElement="SF_J24"><di:waypoint x="2460" y="500"/><di:waypoint x="2500" y="500"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_J25" bpmnElement="SF_J25"><di:waypoint x="2610" y="500"/><di:waypoint x="2650" y="500"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_J26" bpmnElement="SF_J26"><di:waypoint x="850" y="405"/><di:waypoint x="890" y="405"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_F01" bpmnElement="SF_F01"><di:waypoint x="216" y="760"/><di:waypoint x="240" y="760"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_F02" bpmnElement="SF_F02"><di:waypoint x="350" y="760"/><di:waypoint x="390" y="760"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_F03" bpmnElement="SF_F03"><di:waypoint x="530" y="760"/><di:waypoint x="570" y="760"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_F04" bpmnElement="SF_F04"><di:waypoint x="710" y="760"/><di:waypoint x="750" y="760"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_F05" bpmnElement="SF_F05"><di:waypoint x="775" y="785"/><di:waypoint x="775" y="825"/><di:waypoint x="840" y="825"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_F06" bpmnElement="SF_F06"><di:waypoint x="800" y="760"/><di:waypoint x="840" y="760"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_F07" bpmnElement="SF_F07"><di:waypoint x="895" y="845"/><di:waypoint x="895" y="858"/><di:waypoint x="440" y="858"/><di:waypoint x="440" y="795"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_F08" bpmnElement="SF_F08"><di:waypoint x="960" y="760"/><di:waypoint x="1000" y="760"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_U01" bpmnElement="SF_U01"><di:waypoint x="216" y="960"/><di:waypoint x="240" y="960"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_U02" bpmnElement="SF_U02"><di:waypoint x="340" y="960"/><di:waypoint x="380" y="960"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_U03" bpmnElement="SF_U03"><di:waypoint x="405" y="985"/><di:waypoint x="405" y="1010"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_U04" bpmnElement="SF_U04"><di:waypoint x="430" y="960"/><di:waypoint x="520" y="960"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_U05" bpmnElement="SF_U05"><di:waypoint x="420" y="1050"/><di:waypoint x="420" y="1065"/><di:waypoint x="600" y="1065"/><di:waypoint x="600" y="995"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_U06" bpmnElement="SF_U06"><di:waypoint x="660" y="960"/><di:waypoint x="700" y="960"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_U07" bpmnElement="SF_U07"><di:waypoint x="820" y="960"/><di:waypoint x="860" y="960"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_U08" bpmnElement="SF_U08"><di:waypoint x="1000" y="960"/><di:waypoint x="1040" y="960"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_U09" bpmnElement="SF_U09"><di:waypoint x="1065" y="985"/><di:waypoint x="1065" y="1080"/><di:waypoint x="560" y="1080"/><di:waypoint x="560" y="995"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_U10" bpmnElement="SF_U10"><di:waypoint x="1090" y="960"/><di:waypoint x="1120" y="960"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_U11" bpmnElement="SF_U11"><di:waypoint x="1240" y="960"/><di:waypoint x="1280" y="960"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_C01" bpmnElement="SF_C01"><di:waypoint x="216" y="1200"/><di:waypoint x="240" y="1200"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_C02" bpmnElement="SF_C02"><di:waypoint x="340" y="1200"/><di:waypoint x="380" y="1200"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_C03" bpmnElement="SF_C03"><di:waypoint x="500" y="1200"/><di:waypoint x="540" y="1200"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_C04" bpmnElement="SF_C04"><di:waypoint x="690" y="1200"/><di:waypoint x="730" y="1200"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_C05" bpmnElement="SF_C05"><di:waypoint x="880" y="1200"/><di:waypoint x="900" y="1200"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_C06" bpmnElement="SF_C06"><di:waypoint x="925" y="1225"/><di:waypoint x="925" y="1305"/><di:waypoint x="805" y="1305"/><di:waypoint x="805" y="1235"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_C07" bpmnElement="SF_C07"><di:waypoint x="950" y="1200"/><di:waypoint x="990" y="1200"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_C08" bpmnElement="SF_C08"><di:waypoint x="1110" y="1200"/><di:waypoint x="1150" y="1200"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_C09" bpmnElement="SF_C09"><di:waypoint x="1175" y="1175"/><di:waypoint x="1175" y="1155"/><di:waypoint x="1240" y="1155"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_C10" bpmnElement="SF_C10"><di:waypoint x="1175" y="1225"/><di:waypoint x="1175" y="1265"/><di:waypoint x="1240" y="1265"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_C11" bpmnElement="SF_C11"><di:waypoint x="1420" y="1155"/><di:waypoint x="1460" y="1155"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_SF_C12" bpmnElement="SF_C12"><di:waypoint x="1410" y="1265"/><di:waypoint x="1450" y="1265"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_MF_P_to_J" bpmnElement="MF_P_to_J"><di:waypoint x="1010" y="225"/><di:waypoint x="1010" y="345"/><di:waypoint x="290" y="345"/><di:waypoint x="290" y="465"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_MF_Hold_to_C" bpmnElement="MF_Hold_to_C"><di:waypoint x="700" y="110"/><di:waypoint x="700" y="135"/><di:waypoint x="175" y="135"/><di:waypoint x="175" y="1200"/><di:waypoint x="240" y="1200"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_MF_JHold_to_C" bpmnElement="MF_JHold_to_C"><di:waypoint x="540" y="430"/><di:waypoint x="540" y="440"/><di:waypoint x="355" y="440"/><di:waypoint x="355" y="1290"/><di:waypoint x="290" y="1290"/><di:waypoint x="290" y="1235"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_MF_C_Win" bpmnElement="MF_C_Win"><di:waypoint x="1330" y="1130"/><di:waypoint x="1330" y="1110"/><di:waypoint x="1250" y="1110"/><di:waypoint x="1250" y="130"/><di:waypoint x="550" y="130"/><di:waypoint x="550" y="155"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_MF_C_Lose" bpmnElement="MF_C_Lose"><di:waypoint x="1410" y="1265"/><di:waypoint x="1510" y="1265"/><di:waypoint x="1510" y="20"/><di:waypoint x="935" y="20"/><di:waypoint x="935" y="50"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_MF_J_to_F" bpmnElement="MF_J_to_F"><di:waypoint x="1605" y="535"/><di:waypoint x="1605" y="665"/><di:waypoint x="295" y="665"/><di:waypoint x="295" y="725"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_MF_F_to_U" bpmnElement="MF_F_to_U"><di:waypoint x="480" y="795"/><di:waypoint x="480" y="880"/><di:waypoint x="290" y="880"/><di:waypoint x="290" y="925"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_MF_U_to_F" bpmnElement="MF_U_to_F"><di:waypoint x="1180" y="925"/><di:waypoint x="1180" y="878"/><di:waypoint x="640" y="878"/><di:waypoint x="640" y="795"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Ed_MF_F_to_J" bpmnElement="MF_F_to_J"><di:waypoint x="900" y="725"/><di:waypoint x="900" y="675"/><di:waypoint x="1950" y="675"/><di:waypoint x="1950" y="535"/></bpmndi:BPMNEdge>
     </bpmndi:BPMNPlane>
   </bpmndi:BPMNDiagram>
 </definitions>

@@ -63,6 +63,31 @@ async def delete_reuniao(
         raise HTTPException(status_code=404, detail="Reunião não encontrada")
 
 
+@router.post("/reunioes/{reuniao_id}/public-token", response_model=schemas.PublicTokenOut)
+async def generate_public_token(
+    reuniao_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx),
+):
+    """Gera (ou reusa) o link público da apresentação — acessível sem login.
+
+    Qualquer usuário que já vê a reunião pode copiar o link (a apresentação pública
+    é somente leitura). Revogar o token continua exigindo `rtd.manage`.
+    """
+    out = await RtdService.generate_public_token(ctx.db, reuniao_id, ctx.user.id)
+    if out is None:
+        raise HTTPException(status_code=404, detail="Reunião não encontrada")
+    return out
+
+
+@router.delete("/reunioes/{reuniao_id}/public-token", status_code=204)
+async def revoke_public_token(
+    reuniao_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage),
+):
+    """Revoga o link público (o token deixa de funcionar)."""
+    ok = await RtdService.revoke_public_token(ctx.db, reuniao_id, ctx.user.id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Reunião não encontrada")
+
+
 @router.get("/reunioes/{reuniao_id}/report")
 async def get_report(reuniao_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
     r = await RtdService.get_reuniao(ctx.db, reuniao_id)

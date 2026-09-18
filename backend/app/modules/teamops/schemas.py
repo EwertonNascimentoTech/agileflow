@@ -602,6 +602,39 @@ class AbsenceCalendarResponse(BaseModel):
     days: list[AbsenceCalendarDay] = []
 
 
+class AbsenceImpactProject(BaseModel):
+    id: uuid.UUID
+    name: str
+    open_tasks: int = 0
+    overlapping_tasks: int = 0
+
+
+class AbsenceImpactPerson(BaseModel):
+    absence_id: uuid.UUID
+    person: PersonMini
+    absence_type: AbsenceTypeMini
+    status: AbsenceStatus
+    start_date: date
+    end_date: date
+    areas: list[AreaMini] = []
+    overlapping_people: list[PersonMini] = []
+    impacted_projects: list[AbsenceImpactProject] = []
+    risk_level: str  # low | medium | high
+    reasons: list[str] = []
+
+
+class AbsenceImpactSummary(BaseModel):
+    analyzed_absences: int = 0
+    people_at_risk: int = 0
+    team_conflicts: int = 0
+    impacted_projects: int = 0
+
+
+class AbsenceImpactResponse(BaseModel):
+    summary: AbsenceImpactSummary
+    items: list[AbsenceImpactPerson] = []
+
+
 # ─────────────────────────────────────────────
 # Calendário de trabalho + feriados
 # ─────────────────────────────────────────────

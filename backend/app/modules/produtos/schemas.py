@@ -513,6 +513,127 @@ class ProductListItem(BaseModel):
     stacks: list[StackMini] = Field(default_factory=list)
 
 
+class PublicProductPortfolioResponse(BaseModel):
+    """Payload público da aba Produtos (token fixo) — legado flat; preferir PublicProductPortfolioPage."""
+    tenant_slug: str
+    tenant_name: str
+    generated_at: datetime
+    count: int
+    items: list[ProductListItem]
+
+
+# ── Portfólio público enriquecido (paginado) ──
+
+class PublicProductPessoas(BaseModel):
+    area_id: Optional[uuid.UUID] = None
+    area_name: Optional[str] = None
+    setor_name: Optional[str] = None
+    po_id: Optional[uuid.UUID] = None
+    po_nome: Optional[str] = None
+    rt_id: Optional[uuid.UUID] = None
+    rt_nome: Optional[str] = None
+    dono_negocio_id: Optional[uuid.UUID] = None
+    dono_negocio_nome: Optional[str] = None
+
+
+class PublicServicoSubprocesso(BaseModel):
+    item_lineage_id: uuid.UUID
+    portfolio_id: uuid.UUID
+    name: Optional[str] = None
+    codigo: Optional[str] = None
+
+
+class PublicProductServico(BaseModel):
+    id: uuid.UUID
+    name: str
+    status_servico: Optional[str] = None
+    ano_referencia: int
+    data_publicacao: Optional[date] = None
+    responsavel_person_id: Optional[uuid.UUID] = None
+    responsavel_nome: Optional[str] = None
+    subprocessos_count: int = 0
+    subprocessos: list[PublicServicoSubprocesso] = Field(default_factory=list)
+    sem_subprocesso_disponivel: bool = False
+    justificativa_sem_subprocesso: Optional[str] = None
+    is_active: bool = True
+
+
+class PublicProductContrato(BaseModel):
+    id: uuid.UUID
+    numero: Optional[str] = None
+    identificador: Optional[str] = None
+    fornecedor_id: Optional[uuid.UUID] = None
+    fornecedor_nome: Optional[str] = None
+    status: Optional[str] = None
+    vigencia_inicio: date
+    vigencia_fim: date
+    alerta_dias: list[int] = Field(default_factory=lambda: [90, 60, 30])
+    gestor_id: Optional[uuid.UUID] = None
+    gestor_nome: Optional[str] = None
+    fiscal_id: Optional[uuid.UUID] = None
+    fiscal_nome: Optional[str] = None
+    is_active: bool = True
+
+
+class PublicProductIndicadores(BaseModel):
+    evidencias_portfolio_ano: int = 0
+    ultima_meta_status: Optional[str] = None
+    meta_nao_batida_periodos_consecutivos: int = 0
+    area_id: Optional[uuid.UUID] = None
+
+
+class PublicProductProjetos(BaseModel):
+    linked_task_ids: list[uuid.UUID] = Field(default_factory=list)
+    origin_task_id: Optional[uuid.UUID] = None
+    origin_task_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class PublicProductLgpd(BaseModel):
+    tem_dados_pessoais: bool = False
+    documentacao_status: Optional[str] = None
+    classificacao_informacao: Optional[str] = None
+    nivel_dados: Optional[str] = None
+
+
+class PublicProductItem(BaseModel):
+    id: uuid.UUID
+    name: str
+    sigla: Optional[str] = None
+    simbolo: Optional[str] = None
+    unidade: Optional[str] = None
+    categoria: Optional[str] = None
+    lifecycle: str
+    status_produto: Optional[str] = None
+    criticidade: str
+    corporativo: bool = False
+    origem: Optional[str] = None
+    is_active: bool = True
+    pessoas: PublicProductPessoas = Field(default_factory=PublicProductPessoas)
+    servicos: list[PublicProductServico] = Field(default_factory=list)
+    contratos: list[PublicProductContrato] = Field(default_factory=list)
+    indicadores: PublicProductIndicadores = Field(default_factory=PublicProductIndicadores)
+    projetos: PublicProductProjetos = Field(default_factory=PublicProductProjetos)
+    lgpd: PublicProductLgpd = Field(default_factory=PublicProductLgpd)
+    score: int = 100
+    classe: str = "saudavel"
+    saude_gaps: list[str] = Field(default_factory=list)
+    alertas: list[ProductAlerta] = Field(default_factory=list)
+    stacks: list[StackMini] = Field(default_factory=list)
+    created_at: Optional[datetime] = None
+
+
+class PublicProductPortfolioPage(BaseModel):
+    tenant_slug: str
+    tenant_name: str
+    generated_at: datetime
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+    finalizados_nao_promovidos: int = 0
+    items: list[PublicProductItem]
+
+
 class ProductResponse(BaseModel):
     id: uuid.UUID
     name: str
@@ -790,7 +911,15 @@ class ProcessItemResponse(BaseModel):
     frequencia: Optional[str]
     entradas: Optional[str]
     saidas: Optional[str]
+    servicos_count: int = 0
+    servicos: list["ProcessItemServicoRef"] = Field(default_factory=list)
     children: list["ProcessItemResponse"] = Field(default_factory=list)
+
+
+class ProcessItemServicoRef(BaseModel):
+    """Serviço vinculado ao sub-processo (tooltip da árvore do portfólio)."""
+    name: str
+    product_name: str
 
 
 class ProcessVersionTree(BaseModel):
@@ -1107,6 +1236,7 @@ ProductResponse.model_rebuild()
 ContratoCreate.model_rebuild()
 ContratoUpdate.model_rebuild()
 ContratoResponse.model_rebuild()
+ProcessItemResponse.model_rebuild()
 
 
 # ─────────────────────────────────────────────

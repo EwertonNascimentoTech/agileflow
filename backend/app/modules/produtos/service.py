@@ -792,6 +792,305 @@ class ProductService:
         return out
 
     @classmethod
+    async def _area_indicadores_index(cls, db: AsyncSession, year: int) -> dict[uuid.UUID, schemas.PublicProductIndicadores]:
+        """Resumo de indicadores/RTD por area_id (KPIs institucionais ligados a area)."""
+        try:
+            from app.modules.indicadores.models import FonteDados, Indicador, IndicadorAcompanhamento
+        except Exception:
+            return {}
+
+        inds = list((await db.execute(
+            select(Indicador).where(Indicador.is_active.is_(True), Indicador.area_id.isnot(None))
+        )).scalars().all())
+        if not inds:
+            return {}
+
+        by_area_acomp: dict[uuid.UUID, list] = defaultdict(list)
+        by_area_evid: dict[uuid.UUID, int] = defaultdict(int)
+        for ind in inds:
+            area_id = ind.area_id
+            if area_id is None:
+                continue
+            for a in (ind.acompanhamentos or []):
+                if a.ano_referencia != year:
+                    continue
+                by_area_acomp[area_id].append(a)
+                if a.fonte == FonteDados.PORTFOLIO and a.evidencias:
+                    by_area_evid[area_id] += len(a.evidencias)
+
+        out: dict[uuid.UUID, schemas.PublicProductIndicadores] = {}
+        for area_id, acomp in by_area_acomp.items():
+            acomp_sorted = sorted(acomp, key=lambda a: (a.periodo_fim, a.ordem))
+            last = acomp_sorted[-1] if acomp_sorted else None
+            streak = 0
+            for a in reversed(acomp_sorted):
+                if _ev(a.status) == "nao_atingido":
+                    streak += 1
+                else:
+                    break
+            out[area_id] = schemas.PublicProductIndicadores(
+                evidencias_portfolio_ano=by_area_evid.get(area_id, 0),
+                ultima_meta_status=_ev(last.status) if last else None,
+                meta_nao_batida_periodos_consecutivos=streak,
+                area_id=area_id,
+            )
+        # Areas so com evidencia (sem acomp do ano) — raro, mas cobre.
+        for area_id, evid in by_area_evid.items():
+            if area_id not in out:
+                out[area_id] = schemas.PublicProductIndicadores(
+                    evidencias_portfolio_ano=evid, area_id=area_id,
+                )
+        return out
+
+    @classmethod
+    async def _linked_tasks_by_product(cls, db: AsyncSession, product_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[uuid.UUID]]:
+        if not product_ids:
+            return {}
+        try:
+            from app.modules.projetos.models import ProjectTask
+        except Exception:
+            return {}
+        rows = (await db.execute(
+            select(ProjectTask.id, ProjectTask.linked_product_id).where(
+                ProjectTask.linked_product_id.in_(product_ids)
+            )
+        )).all()
+        out: dict[uuid.UUID, list[uuid.UUID]] = defaultdict(list)
+        for tid, pid in rows:
+            if pid is not None:
+                out[pid].append(tid)
+        return out
+
+    @classmethod
+    async def list_public_portfolio(
+        cls,
+        db: AsyncSession,
+        *,
+        page: int = 1,
+        page_size: int = 50,
+        unidade: Optional[str] = None,
+        area_id: Optional[uuid.UUID] = None,
+        categoria: Optional[str] = None,
+        criticidade: Optional[str] = None,
+        classe: Optional[str] = None,
+        q: Optional[str] = None,
+    ) -> tuple[list[schemas.PublicProductItem], int, int]:
+        """Portfólio público enriquecido: filtra + pagina após montar score/alertas."""
+        page = max(1, page)
+        page_size = min(max(1, page_size), 100)
+        today = date.today()
+        year = today.year
+
+        index = await _areas_index(db)
+        tech_ref_ids = await cls._tech_reference_ids(db)
+        hw, hsaud, haten = await cls._load_health_params(db)
+        repo_stats = await cls._repo_stats(db)
+        area_ind = await cls._area_indicadores_index(db, year)
+
+        res = await db.execute(
+            select(Product).where(Product.is_active.is_(True)).order_by(Product.name.asc())
+        )
+        products = list(res.scalars().all())
+        product_ids = [p.id for p in products]
+        linked_by_product = await cls._linked_tasks_by_product(db, product_ids)
+
+        all_svc_ids = [s.id for p in products for s in p.servicos if s.is_active]
+        link_counts = await cls._servico_link_counts(db, all_svc_ids)
+
+        # Resolve subprocessos (nome/código) em lote.
+        all_links = []
+        if all_svc_ids:
+            all_links = list((await db.execute(select(ProcessServiceLink).where(
+                ProcessServiceLink.servico_id.in_(all_svc_ids),
+                ProcessServiceLink.is_active.is_(True),
+            ))).scalars().all())
+        resolved_links = await ProcessPortfolioService._resolve_link_items(db, all_links)
+        links_by_servico: dict[uuid.UUID, list[schemas.ServiceLinkItem]] = defaultdict(list)
+        for lk, item in zip(all_links, resolved_links):
+            links_by_servico[lk.servico_id].append(item)
+
+        all_uuids: list[uuid.UUID] = []
+        per_product_uuids: list[list[uuid.UUID]] = []
+        for p in products:
+            uuids: list[uuid.UUID] = []
+            for i in p.stacks or []:
+                try:
+                    uuids.append(uuid.UUID(str(i)))
+                except (ValueError, TypeError):
+                    pass
+            per_product_uuids.append(uuids)
+            all_uuids.extend(uuids)
+        stack_map = await cls._stacks_map(db, list(dict.fromkeys(all_uuids)))
+
+        finalized = await cls.list_finalized_projects(db)
+        finalizados_nao_promovidos = sum(1 for f in finalized if not f.already_promoted)
+
+        items: list[schemas.PublicProductItem] = []
+        q_norm = (q or "").strip().lower() or None
+        unidade_f = (unidade or "").strip().lower() or None
+        categoria_f = (categoria or "").strip().lower() or None
+        criticidade_f = (criticidade or "").strip().lower() or None
+        classe_f = (classe or "").strip().lower() or None
+
+        for p, stack_uuids in zip(products, per_product_uuids):
+            if q_norm and q_norm not in (p.name or "").lower() and q_norm not in (p.sigla or "").lower():
+                continue
+            if unidade_f and (_ev(p.unidade) if p.unidade else None) != unidade_f:
+                continue
+            if area_id and p.area_id != area_id:
+                continue
+            if categoria_f and (_ev(p.categoria) if p.categoria else None) != categoria_f:
+                continue
+            if criticidade_f and _ev(p.criticidade) != criticidade_f:
+                continue
+
+            has_active_contract = cls._has_active_contract(p, today)
+            docs_ativas = [d for d in p.documentations if d.is_active]
+            ult_doc = max(docs_ativas, key=lambda d: d.created_at, default=None)
+            docs_file = [d for d in p.documentos if d.is_active]
+            tem_dp = any(d.dados_pessoais or d.dados_sensiveis for d in docs_file)
+            classificacoes = [_ev(d.classificacao) for d in docs_file if d.classificacao]
+            niveis = [_ev(d.nivel_dados_pessoais) for d in docs_file if d.nivel_dados_pessoais]
+            # Prioridade: sensivel > pessoais > sem
+            nivel_dados = None
+            if any(n == "dados_pessoais_sensiveis" for n in niveis):
+                nivel_dados = "sensivel"
+            elif any(n == "dados_pessoais" for n in niveis) or tem_dp:
+                nivel_dados = "dados_pessoais"
+            elif niveis:
+                nivel_dados = "sem_dados_pessoais"
+
+            alertas = cls._compute_alertas(
+                p, has_doc=len(docs_ativas) > 0, has_active_contract=has_active_contract,
+                tech_ref_ids=tech_ref_ids, today=today, repo_stats=repo_stats,
+            )
+            health = cls._health(
+                p, today=today, has_active_contract=has_active_contract,
+                tech_ref_ids=tech_ref_ids, weights=hw, lim_saud=hsaud, lim_aten=haten,
+                servico_link_counts=link_counts, repo_stats=repo_stats,
+            )
+            if classe_f and health.classe != classe_f:
+                continue
+
+            servicos_out: list[schemas.PublicProductServico] = []
+            for s in sorted([x for x in p.servicos if x.is_active], key=lambda x: x.order):
+                plinks = links_by_servico.get(s.id, [])
+                servicos_out.append(schemas.PublicProductServico(
+                    id=s.id,
+                    name=s.name,
+                    status_servico=_ev(s.status_servico) if s.status_servico else None,
+                    ano_referencia=s.ano_referencia,
+                    data_publicacao=s.data_publicacao,
+                    responsavel_person_id=s.responsavel_person_id,
+                    responsavel_nome=s.responsavel.full_name if s.responsavel else None,
+                    subprocessos_count=len(plinks),
+                    subprocessos=[
+                        schemas.PublicServicoSubprocesso(
+                            item_lineage_id=lk.item_lineage_id,
+                            portfolio_id=lk.portfolio_id,
+                            name=lk.name,
+                            codigo=lk.codigo,
+                        )
+                        for lk in plinks
+                    ],
+                    sem_subprocesso_disponivel=bool(s.sem_subprocesso_disponivel),
+                    justificativa_sem_subprocesso=s.justificativa_sem_subprocesso,
+                    is_active=s.is_active,
+                ))
+
+            contratos_out: list[schemas.PublicProductContrato] = []
+            for c in sorted([x for x in p.contratos if x.is_active], key=lambda x: x.vigencia_fim, reverse=True):
+                contratos_out.append(schemas.PublicProductContrato(
+                    id=c.id,
+                    numero=c.numero,
+                    identificador=c.identificador,
+                    fornecedor_id=c.fornecedor_id,
+                    fornecedor_nome=c.fornecedor.nome if c.fornecedor else None,
+                    status=_contrato_effective_status(c, today),
+                    vigencia_inicio=c.vigencia_inicio,
+                    vigencia_fim=c.vigencia_fim,
+                    alerta_dias=list(c.alerta_dias or [90, 60, 30]),
+                    gestor_id=c.gestor_person_id,
+                    gestor_nome=c.gestor.full_name if c.gestor else None,
+                    fiscal_id=c.fiscal_person_id,
+                    fiscal_nome=c.fiscal.full_name if c.fiscal else None,
+                    is_active=c.is_active,
+                ))
+
+            # Evidências do produto no ano (releases) + resumo da área (indicadores).
+            evid_prod = 0
+            for r in p.releases:
+                if not r.is_active:
+                    continue
+                if r.data_release and r.data_release.year != year:
+                    continue
+                if r.evidencia_anexos:
+                    evid_prod += len(r.evidencia_anexos)
+                elif r.evidencia_link:
+                    evid_prod += 1
+            ind = area_ind.get(p.area_id) if p.area_id else None
+            indicadores = schemas.PublicProductIndicadores(
+                evidencias_portfolio_ano=evid_prod + (ind.evidencias_portfolio_ano if ind else 0),
+                ultima_meta_status=ind.ultima_meta_status if ind else None,
+                meta_nao_batida_periodos_consecutivos=ind.meta_nao_batida_periodos_consecutivos if ind else 0,
+                area_id=p.area_id,
+            )
+
+            origin_ids = [p.origin_task_id] if p.origin_task_id else []
+            linked_ids = linked_by_product.get(p.id, [])
+
+            items.append(schemas.PublicProductItem(
+                id=p.id,
+                name=p.name,
+                sigla=p.sigla,
+                simbolo=p.simbolo,
+                unidade=_ev(p.unidade) if p.unidade else None,
+                categoria=_ev(p.categoria) if p.categoria else None,
+                lifecycle=_ev(p.lifecycle),
+                status_produto=_ev(p.status_produto) if p.status_produto else None,
+                criticidade=_ev(p.criticidade),
+                corporativo=bool(p.corporativo),
+                origem=_ev(p.origem),
+                is_active=p.is_active,
+                pessoas=schemas.PublicProductPessoas(
+                    area_id=p.area_id,
+                    area_name=p.area.name if p.area else None,
+                    setor_name=_setor_name(p.area, index) if p.area else None,
+                    po_id=p.responsavel_person_id,
+                    po_nome=p.responsavel.full_name if p.responsavel else None,
+                    rt_id=p.responsavel_tecnico_person_id,
+                    rt_nome=p.responsavel_tecnico.full_name if p.responsavel_tecnico else None,
+                    dono_negocio_id=p.dono_negocio_person_id,
+                    dono_negocio_nome=p.dono_negocio.full_name if p.dono_negocio else None,
+                ),
+                servicos=servicos_out,
+                contratos=contratos_out,
+                indicadores=indicadores,
+                projetos=schemas.PublicProductProjetos(
+                    linked_task_ids=linked_ids,
+                    origin_task_id=p.origin_task_id,
+                    origin_task_ids=origin_ids,
+                ),
+                lgpd=schemas.PublicProductLgpd(
+                    tem_dados_pessoais=tem_dp,
+                    documentacao_status=_ev(ult_doc.status) if ult_doc else None,
+                    classificacao_informacao=classificacoes[0] if classificacoes else None,
+                    nivel_dados=nivel_dados,
+                ),
+                score=health.score,
+                classe=health.classe,
+                saude_gaps=[c.label for c in health.checks if c.status == "fail"],
+                alertas=alertas,
+                stacks=[stack_map[i] for i in stack_uuids if i in stack_map],
+                created_at=p.created_at,
+            ))
+
+        total = len(items)
+        start = (page - 1) * page_size
+        page_items = items[start:start + page_size]
+        return page_items, total, finalizados_nao_promovidos
+
+    @classmethod
     async def get(cls, db: AsyncSession, product_id: uuid.UUID) -> schemas.ProductResponse:
         return await cls._to_response(db, await cls._get(db, product_id))
 
@@ -2534,7 +2833,7 @@ class ProcessPortfolioService:
             objetivo=item.objetivo, nivel_maturidade=_ev(item.nivel_maturidade) if item.nivel_maturidade else None,
             tipo_documento=item.tipo_documento, versao_documento=item.versao_documento,
             proxima_revisao=item.proxima_revisao, link_externo=item.link_externo, frequencia=item.frequencia,
-            entradas=item.entradas, saidas=item.saidas, children=[],
+            entradas=item.entradas, saidas=item.saidas, servicos_count=0, servicos=[], children=[],
         )
 
     @classmethod
@@ -2555,6 +2854,43 @@ class ProcessPortfolioService:
                 if agg is not None:
                     by_id[it.id].status_item = _ev(agg)
         return roots
+
+    @classmethod
+    async def _attach_servico_counts(
+        cls, db, portfolio_id, nodes: list[schemas.ProcessItemResponse],
+    ) -> None:
+        """Preenche `servicos` / `servicos_count` nos sub-processos (serviços ativos vinculados)."""
+        rows = (await db.execute(
+            select(
+                ProcessServiceLink.item_lineage_id,
+                ProductServico.name,
+                Product.name,
+            )
+            .join(ProductServico, ProductServico.id == ProcessServiceLink.servico_id)
+            .join(Product, Product.id == ProductServico.product_id)
+            .where(
+                ProcessServiceLink.portfolio_id == portfolio_id,
+                ProcessServiceLink.is_active.is_(True),
+                ProductServico.is_active.is_(True),
+                Product.is_active.is_(True),
+            )
+            .order_by(ProductServico.name)
+        )).all()
+        by_lineage: dict = {}
+        for lineage_id, svc_name, prod_name in rows:
+            by_lineage.setdefault(lineage_id, []).append(
+                schemas.ProcessItemServicoRef(name=svc_name, product_name=prod_name)
+            )
+
+        def walk(items: list[schemas.ProcessItemResponse]) -> None:
+            for n in items:
+                if n.nivel == "subprocesso":
+                    n.servicos = by_lineage.get(n.lineage_id, [])
+                    n.servicos_count = len(n.servicos)
+                if n.children:
+                    walk(n.children)
+
+        walk(nodes)
 
     # ── portfolios ────────────────────────────
     @classmethod
@@ -2654,10 +2990,12 @@ class ProcessPortfolioService:
         items = await cls._items_of(db, version_id)
         for it in items:
             it.codigo = None
+        tree = cls._tree(items)
+        await cls._attach_servico_counts(db, v.portfolio_id, tree)
         return schemas.ProcessVersionTree(
             id=v.id, portfolio_id=v.portfolio_id, version=v.version, status=_ev(v.status),
             justification=v.justification, consolidated_at=v.consolidated_at, created_at=v.created_at,
-            editable=v.status == ProcessPortfolioVersionStatus.RASCUNHO, items=cls._tree(items),
+            editable=v.status == ProcessPortfolioVersionStatus.RASCUNHO, items=tree,
         )
 
     @classmethod

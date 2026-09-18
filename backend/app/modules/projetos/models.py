@@ -35,6 +35,7 @@ class ProjectAutomationAction(str, enum.Enum):
 class ProjectStageAgentKind(str, enum.Enum):
     ASK = "ask"                                    # pergunta livre ao gateway IDCortex
     CLASSIFY_AND_ADVANCE = "classify_and_advance"  # classifica matriz Impacto×Esforço e avança o card
+    REVIEW_AND_ROUTE = "review_and_route"          # triagem de backlog: aprova ou devolve para ajustar
 
 
 class Project(TenantBase):
@@ -710,9 +711,11 @@ class ProjectStageAgentBinding(TenantBase):
     gateway_client_secret: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     continue_thread: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     add_comment_on_success: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    # Raia de destino ao concluir (classify_and_advance). NULL = avança para a próxima etapa
-    # do funil (comportamento padrão). UUID sem FK rígida para tolerar etapa removida.
+    # Raia de destino ao concluir (classify_and_advance / review_and_route aprovado).
+    # NULL = avança para a próxima etapa do funil. UUID sem FK rígida para tolerar etapa removida.
     advance_to_status_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # Raia de destino quando a triagem NÃO aprova (review_and_route). NULL = não move.
+    fail_to_status_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

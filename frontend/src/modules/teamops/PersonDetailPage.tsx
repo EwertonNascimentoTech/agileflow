@@ -34,8 +34,12 @@ import {
   type StackLevel,
 } from "@/api/teamops"
 import { PersonFormDialog } from "./PersonFormDialog"
+import { useAuth } from "@/contexts/AuthContext"
+import { canManageTeamopsPeople } from "@/lib/permissions"
 
 export default function PersonDetailPage() {
+  const { user } = useAuth()
+  const canManage = canManageTeamopsPeople(user)
   const { personId } = useParams<{ personId: string }>()
   const navigate = useNavigate()
   const [person, setPerson] = useState<Person | null>(null)
@@ -90,27 +94,29 @@ export default function PersonDetailPage() {
         <Button variant="ghost" size="sm" onClick={() => navigate("/app/modules/teamops/people")}>
           <ArrowLeft className="mr-2 h-4 w-4" /> Voltar
         </Button>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
-            <Pencil className="mr-2 h-4 w-4" /> Editar
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-            onClick={async () => {
-              if (!confirm(`Excluir permanentemente "${person.full_name}"?\n\nEsta ação remove a pessoa do sistema e desfaz seus vínculos no organograma. Ausências e stacks vinculadas também serão removidas.`)) return
-              try {
-                await teamopsApi.deletePerson(person.id)
-                navigate("/app/modules/teamops/people")
-              } catch (err: any) {
-                alert(err?.response?.data?.detail ?? "Erro ao excluir.")
-              }
-            }}
-          >
-            <UserMinus className="mr-2 h-4 w-4" /> Excluir
-          </Button>
-        </div>
+        {canManage && (
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+              <Pencil className="mr-2 h-4 w-4" /> Editar
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={async () => {
+                if (!confirm(`Excluir permanentemente "${person.full_name}"?\n\nEsta ação remove a pessoa do sistema e desfaz seus vínculos no organograma. Ausências e stacks vinculadas também serão removidas.`)) return
+                try {
+                  await teamopsApi.deletePerson(person.id)
+                  navigate("/app/modules/teamops/people")
+                } catch (err: any) {
+                  alert(err?.response?.data?.detail ?? "Erro ao excluir.")
+                }
+              }}
+            >
+              <UserMinus className="mr-2 h-4 w-4" /> Excluir
+            </Button>
+          </div>
+        )}
       </div>
 
       <Card>
@@ -264,7 +270,7 @@ export default function PersonDetailPage() {
         </TabsContent>
       </Tabs>
 
-      {editing && (
+      {canManage && editing && (
         <PersonFormDialog
           person={person}
           areas={areas}

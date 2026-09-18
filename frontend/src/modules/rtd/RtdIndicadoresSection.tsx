@@ -82,7 +82,12 @@ function ChartTip({ active, payload, unit }: {
   const row = payload?.[0]?.payload
   if (!active || !row) return null
   return (
-    <div className="z-50 max-w-[320px] rounded-lg border bg-background px-3 py-2.5 text-xs shadow-md">
+    // O mousemove precisa parar aqui: se chegar no wrapper do Recharts ele recalcula a barra
+    // ativa e reposiciona o tooltip, tornando impossível rolar a lista de entregas.
+    <div
+      className="z-50 max-w-[320px] rounded-lg border bg-background px-3 py-2.5 text-xs shadow-md"
+      onMouseMove={(e) => e.stopPropagation()}
+    >
       <p className="mb-1.5 font-semibold">
         Período: {row.competencia}{row.isRef ? " (referência da reunião)" : ""}
       </p>
@@ -99,7 +104,7 @@ function ChartTip({ active, payload, unit }: {
       {row.entregas && row.entregas.length > 0 && (
         <div className="mt-2 border-t pt-1.5">
           <p className="mb-1 font-semibold text-foreground">Entregas do período</p>
-          <ul className="max-h-40 space-y-0.5 overflow-y-auto">
+          <ul className="max-h-40 space-y-0.5 overflow-y-auto overscroll-contain pr-1">
             {row.entregas.map((e, i) => (
               <li key={i} className={e.startsWith("… e mais") ? "italic text-muted-foreground" : "text-muted-foreground"}>
                 {e.startsWith("… e mais") ? e : `• ${e}`}
@@ -159,7 +164,8 @@ function IndicadorChart({ det, unit }: { det: IndicadorDetalhe; unit: string }) 
           <XAxis dataKey="label" tickLine={false} axisLine={false} interval={0}
             tick={<RefTick rows={rows} />} height={22} />
           <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} width={40} />
-          <Tooltip cursor={{ fill: "hsl(var(--muted) / 0.4)" }} content={<ChartTip unit={unit} />} />
+          <Tooltip cursor={{ fill: "hsl(var(--muted) / 0.4)" }} content={<ChartTip unit={unit} />}
+            wrapperStyle={{ pointerEvents: "auto" }} />
           <Legend formatter={(v) => (v === "meta" ? "Meta" : "Realizado")} wrapperStyle={{ fontSize: 11 }} />
           <Bar dataKey="meta" name="meta" radius={[3, 3, 0, 0]} maxBarSize={20}>
             {rows.map((r) => (
@@ -212,14 +218,22 @@ interface CardState {
   acoes: AcaoRow[]
 }
 
+function hasText(v: string | null | undefined): boolean {
+  return Boolean(v?.trim())
+}
+
 function IndicadorCard({
-  det, reuniaoId, readOnly, persons, onSaved,
+  det, reuniaoId, readOnly, persons, onSaved, defaultExpanded = false, hideEmpty = false,
 }: {
   det: IndicadorDetalhe
   reuniaoId: string
   readOnly: boolean
   persons: PersonMini[]
   onSaved: () => void
+  /** PDF / impressão: abre o card com gráfico e análises visíveis. */
+  defaultExpanded?: boolean
+  /** PDF: omite campos de análise/ação sem conteúdo. */
+  hideEmpty?: boolean
 }) {
   const a = det.analise
   // Seed do plano de ação: lista salva; senão migra os campos legados p/ 1ª ação.
@@ -248,13 +262,16 @@ function IndicadorCard({
   const temReversao = Boolean(a?.acoes?.length || a?.causa_analise || a?.plano_reversao || a?.responsavel_person_id || a?.prazo || a?.resultado_esperado)
   const status = det.periodo?.status ?? "pendente"
   // Abaixo da meta: reversão obrigatória (aberta); em atenção: opcional (colapsada, salvo se já preenchida).
-  const [reversaoAberta, setReversaoAberta] = useState(status === "nao_atingido" || temReversao)
+  // PDF (hideEmpty): força aberto para imprimir o que existir.
+  const [reversaoAberta, setReversaoAberta] = useState(
+    hideEmpty || status === "nao_atingido" || temReversao,
+  )
   const [saving, setSaving] = useState(false)
   const [gerando, setGerando] = useState(false)
   // Sugestão da IA carregada no formulário mas ainda NÃO salva (revisão humana pendente).
   const [sugestaoPendente, setSugestaoPendente] = useState(false)
   // Card minimizado por padrão — só o cabeçalho; clique expande/minimiza.
-  const [expandido, setExpandido] = useState(false)
+  const [expandido, setExpandido] = useState(defaultExpanded)
 
   const farol = STATUS_FAROL[status]
   const unit = det.unidade_medida?.trim() ?? ""
@@ -467,22 +484,50 @@ function IndicadorCard({
         </div>
       )}
 
-      {/* Análise da reunião */}
-      <div className="mt-3 grid gap-3 md:grid-cols-2">
-        <div className="space-y-1">
-          <Label className="text-xs">Principais fatores que impactaram o resultado</Label>
-          <Textarea rows={2} value={st.fatores} disabled={readOnly}
-            onChange={(e) => set("fatores")(e.target.value)} placeholder="O que explicou o número deste período" />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">Riscos associados</Label>
-          <Textarea rows={2} value={st.riscos} disabled={readOnly}
-            onChange={(e) => set("riscos")(e.target.value)} placeholder="Riscos para os próximos períodos" />
-        </div>
-      </div>
+      {/* Análise da reunião — no PDF omite campos em branco */}
+      {(() => {
+        const showFatores = !hideEmpty || hasText(st.fatores)
+        const showRiscos = !hideEmpty || hasText(st.riscos)
+        if (!showFatores && !showRiscos) return null
+        return (
+          <div className={`mt-3 grid gap-3 ${showFatores && showRiscos ? "md:grid-cols-2" : ""}`}>
+            {showFatores && (
+              <div className="space-y-1">
+                <Label className="text-xs">Principais fatores que impactaram o resultado</Label>
+                {hideEmpty ? (
+                  <p className="whitespace-pre-wrap text-sm text-foreground">{st.fatores.trim()}</p>
+                ) : (
+                  <Textarea rows={2} value={st.fatores} disabled={readOnly}
+                    onChange={(e) => set("fatores")(e.target.value)} placeholder="O que explicou o número deste período" />
+                )}
+              </div>
+            )}
+            {showRiscos && (
+              <div className="space-y-1">
+                <Label className="text-xs">Riscos associados</Label>
+                {hideEmpty ? (
+                  <p className="whitespace-pre-wrap text-sm text-foreground">{st.riscos.trim()}</p>
+                ) : (
+                  <Textarea rows={2} value={st.riscos} disabled={readOnly}
+                    onChange={(e) => set("riscos")(e.target.value)} placeholder="Riscos para os próximos períodos" />
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {/* Bloco de reversão — indicadores abaixo da meta */}
-      {(status === "nao_atingido" || status === "em_atencao") && (
+      {(() => {
+        const acoesComConteudo = st.acoes.filter((x) =>
+          hasText(x.causa) || hasText(x.acao) || hasText(x.resultado)
+          || (x.responsavel && x.responsavel !== NONE) || hasText(x.prazo),
+        )
+        const showReversao = status === "nao_atingido" || status === "em_atencao"
+        if (!showReversao) return null
+        if (hideEmpty && acoesComConteudo.length === 0) return null
+        const lista = hideEmpty ? acoesComConteudo : st.acoes
+        return (
         <div className="mt-3 rounded-md border border-dashed border-destructive/40 p-2.5">
           <button
             type="button"
@@ -491,22 +536,32 @@ function IndicadorCard({
           >
             {reversaoAberta ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
             Plano de ação para reverter
-            {st.acoes.length > 0 && (
+            {lista.length > 0 && (
               <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                {st.acoes.length} ação(ões)
+                {lista.length} ação(ões)
               </span>
             )}
-            {status === "em_atencao" && <span className="font-normal text-muted-foreground">(opcional — em atenção)</span>}
+            {!hideEmpty && status === "em_atencao" && (
+              <span className="font-normal text-muted-foreground">(opcional — em atenção)</span>
+            )}
           </button>
           {reversaoAberta && (
             <div className="mt-2 space-y-2">
-              {st.acoes.length === 0 && (
+              {!hideEmpty && st.acoes.length === 0 && (
                 <p className="text-xs text-muted-foreground">
                   Nenhuma ação registrada — adicione a primeira (pode haver várias causas/ações,
                   inclusive realocação de pessoas entre times).
                 </p>
               )}
-              {st.acoes.map((acao, i) => (
+              {lista.map((acao, i) => {
+                const idx = hideEmpty ? st.acoes.indexOf(acao) : i
+                const respNome = persons.find((p) => p.id === acao.responsavel)?.full_name
+                const showCausa = !hideEmpty || hasText(acao.causa)
+                const showAcao = !hideEmpty || hasText(acao.acao)
+                const showResultado = !hideEmpty || hasText(acao.resultado)
+                const showResp = !hideEmpty || Boolean(respNome)
+                const showPrazo = !hideEmpty || hasText(acao.prazo)
+                return (
                 <div key={i} className="space-y-2 rounded-md border bg-background p-2.5">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
@@ -514,51 +569,90 @@ function IndicadorCard({
                     </span>
                     {!readOnly && (
                       <Button variant="ghost" size="icon" className="h-6 w-6" title="Remover ação"
-                        onClick={() => rmAcao(i)}>
+                        onClick={() => rmAcao(idx)}>
                         <Trash2 className="h-3.5 w-3.5 text-destructive" />
                       </Button>
                     )}
                   </div>
-                  <div className="grid gap-2 md:grid-cols-2">
+                  {(showCausa || showAcao) && (
+                  <div className={`grid gap-2 ${showCausa && showAcao ? "md:grid-cols-2" : ""}`}>
+                    {showCausa && (
                     <div className="space-y-1">
                       <Label className="text-xs">Causa</Label>
-                      <Textarea rows={2} value={acao.causa} disabled={readOnly}
-                        onChange={(e) => setAcao(i, "causa", e.target.value)}
-                        placeholder="Por que a meta não foi atingida (esta causa)" />
+                      {hideEmpty ? (
+                        <p className="whitespace-pre-wrap text-sm">{acao.causa.trim()}</p>
+                      ) : (
+                        <Textarea rows={2} value={acao.causa} disabled={readOnly}
+                          onChange={(e) => setAcao(idx, "causa", e.target.value)}
+                          placeholder="Por que a meta não foi atingida (esta causa)" />
+                      )}
                     </div>
+                    )}
+                    {showAcao && (
                     <div className="space-y-1">
                       <Label className="text-xs">Ação</Label>
-                      <Textarea rows={2} value={acao.acao} disabled={readOnly}
-                        onChange={(e) => setAcao(i, "acao", e.target.value)}
-                        placeholder="Ex.: realocar 1 dev com folga do time A para o projeto B" />
+                      {hideEmpty ? (
+                        <p className="whitespace-pre-wrap text-sm">{acao.acao.trim()}</p>
+                      ) : (
+                        <Textarea rows={2} value={acao.acao} disabled={readOnly}
+                          onChange={(e) => setAcao(idx, "acao", e.target.value)}
+                          placeholder="Ex.: realocar 1 dev com folga do time A para o projeto B" />
+                      )}
                     </div>
+                    )}
                   </div>
+                  )}
+                  {showResultado && (
                   <div className="space-y-1">
                     <Label className="text-xs">Resultado esperado</Label>
-                    <Input className="h-9" value={acao.resultado} disabled={readOnly}
-                      onChange={(e) => setAcao(i, "resultado", e.target.value)}
-                      placeholder="Ex.: voltar a ≥ 90% até set/26" />
+                    {hideEmpty ? (
+                      <p className="text-sm">{acao.resultado.trim()}</p>
+                    ) : (
+                      <Input className="h-9" value={acao.resultado} disabled={readOnly}
+                        onChange={(e) => setAcao(idx, "resultado", e.target.value)}
+                        placeholder="Ex.: voltar a ≥ 90% até set/26" />
+                    )}
                   </div>
-                  <div className="grid gap-2 md:grid-cols-2">
+                  )}
+                  {(showResp || showPrazo) && (
+                  <div className={`grid gap-2 ${showResp && showPrazo ? "md:grid-cols-2" : ""}`}>
+                    {showResp && (
                     <div className="space-y-1">
                       <Label className="text-xs">Responsável</Label>
-                      <Select value={acao.responsavel} disabled={readOnly}
-                        onValueChange={(v) => setAcao(i, "responsavel", v)}>
-                        <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={NONE}>—</SelectItem>
-                          {persons.map((p) => <SelectItem key={p.id} value={p.id}>{p.full_name}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
+                      {hideEmpty ? (
+                        <p className="text-sm">{respNome}</p>
+                      ) : (
+                        <Select value={acao.responsavel} disabled={readOnly}
+                          onValueChange={(v) => setAcao(idx, "responsavel", v)}>
+                          <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={NONE}>—</SelectItem>
+                            {persons.map((p) => <SelectItem key={p.id} value={p.id}>{p.full_name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      )}
                     </div>
+                    )}
+                    {showPrazo && (
                     <div className="space-y-1">
                       <Label className="text-xs">Prazo</Label>
-                      <Input type="date" className="h-9" value={acao.prazo} disabled={readOnly}
-                        onChange={(e) => setAcao(i, "prazo", e.target.value)} />
+                      {hideEmpty ? (
+                        <p className="text-sm tabular-nums">
+                          {acao.prazo
+                            ? new Date(`${acao.prazo}T12:00:00`).toLocaleDateString("pt-BR")
+                            : ""}
+                        </p>
+                      ) : (
+                        <Input type="date" className="h-9" value={acao.prazo} disabled={readOnly}
+                          onChange={(e) => setAcao(idx, "prazo", e.target.value)} />
+                      )}
                     </div>
+                    )}
                   </div>
+                  )}
                 </div>
-              ))}
+                )
+              })}
               {!readOnly && (
                 <Button variant="outline" size="sm" onClick={addAcao}>
                   <Plus className="mr-1.5 h-3.5 w-3.5" /> Adicionar ação
@@ -567,7 +661,8 @@ function IndicadorCard({
             </div>
           )}
         </div>
-      )}
+        )
+      })()}
 
       {!readOnly && (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
@@ -599,6 +694,7 @@ function IndicadorCard({
 
 export function RtdIndicadoresSection({
   detalhes, reuniaoId, readOnly, snapshotAt, persons, onSaved, categoria,
+  defaultExpanded = false, hideEmpty = false,
 }: {
   detalhes: IndicadorDetalhe[] | null
   reuniaoId: string
@@ -608,6 +704,10 @@ export function RtdIndicadoresSection({
   onSaved: () => void
   /** Filtra a seção: slide de Estratégicos ou de Táticos (sem filtro = ambos). */
   categoria?: "estrategico" | "tatico"
+  /** PDF / impressão: expande todos os cards. */
+  defaultExpanded?: boolean
+  /** PDF: omite campos de análise/ação sem conteúdo. */
+  hideEmpty?: boolean
 }) {
   const grupos = useMemo(() => {
     const det = detalhes ?? []
@@ -637,6 +737,7 @@ export function RtdIndicadoresSection({
   }, [detalhes])
 
   if (!detalhes || detalhes.length === 0) {
+    if (hideEmpty) return null
     return (
       <p className="text-sm text-muted-foreground">
         Módulo de Indicadores sem dados para o ano da reunião — cadastre indicadores e gere os acompanhamentos.
@@ -656,7 +757,8 @@ export function RtdIndicadoresSection({
         <div className="space-y-3">
           {grupos.estrategicos.map((d) => (
             <IndicadorCard key={d.indicador_id} det={d} reuniaoId={reuniaoId}
-              readOnly={readOnly} persons={persons} onSaved={onSaved} />
+              readOnly={readOnly} persons={persons} onSaved={onSaved}
+              defaultExpanded={defaultExpanded} hideEmpty={hideEmpty} />
           ))}
         </div>
       )}
@@ -671,7 +773,8 @@ export function RtdIndicadoresSection({
               <div className="space-y-3">
                 {list.map((d) => (
                   <IndicadorCard key={d.indicador_id} det={d} reuniaoId={reuniaoId}
-                    readOnly={readOnly} persons={persons} onSaved={onSaved} />
+                    readOnly={readOnly} persons={persons} onSaved={onSaved}
+                    defaultExpanded={defaultExpanded} hideEmpty={hideEmpty} />
                 ))}
               </div>
             </div>

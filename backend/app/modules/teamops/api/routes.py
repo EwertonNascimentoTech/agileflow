@@ -12,6 +12,7 @@ from app.modules.teamops.schemas import (
     AbsenceCalendarResponse,
     AbsenceCreate,
     AbsenceDecision,
+    AbsenceImpactResponse,
     AbsenceResponse,
     AbsenceTypeCreate,
     AbsenceTypeResponse,
@@ -63,7 +64,7 @@ from app.modules.teamops.service import (
     StackService,
     WorkCalendarService,
 )
-from app.modules.teamops.models import Person
+from app.modules.teamops.models import Person, Position
 from app.modules.super_admin.models import UserRole
 
 router = APIRouter(prefix="/teamops", tags=["TeamOps"])
@@ -76,6 +77,11 @@ _can_person_stack_manage = require_permission("teamops.person_stack.manage")
 _can_absence_approve = require_permission("teamops.absence.approve")
 _can_absence_manage = require_permission("teamops.absence.manage")
 _can_config_manage = require_permission("teamops.config.manage")
+_PEOPLE_MANAGER_POSITION_SLUGS = {
+    "coordenador",
+    "coord_de_arq_dev_e_sustenta_o",
+    "administrativo",
+}
 
 
 async def _current_person_id(ctx: ModuleContext) -> Optional[uuid.UUID]:
@@ -84,6 +90,24 @@ async def _current_person_id(ctx: ModuleContext) -> Optional[uuid.UUID]:
         return None
     result = await ctx.db.execute(select(Person.id).where(Person.user_id == ctx.user.id))
     return result.scalar_one_or_none()
+
+
+async def _ensure_people_manager(ctx: ModuleContext) -> None:
+    """Gestão cadastral de pessoas é exclusiva de Coordenador/Administrativo."""
+    if ctx.user.role in (UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN):
+        return
+    slug = (
+        await ctx.db.execute(
+            select(Position.slug)
+            .join(Person, Person.position_id == Position.id)
+            .where(Person.user_id == ctx.user.id)
+        )
+    ).scalar_one_or_none()
+    if slug not in _PEOPLE_MANAGER_POSITION_SLUGS:
+        raise HTTPException(
+            status_code=403,
+            detail="Somente Coordenador ou Administrativo pode gerenciar pessoas.",
+        )
 
 
 # ─────────────────────────────────────────────
@@ -384,6 +408,7 @@ async def create_person(
     ctx: ModuleContext = Depends(_ctx),
     _=Depends(_can_person_manage),
 ):
+    await _ensure_people_manager(ctx)
     return await PersonService.create(ctx.db, data, tenant_id=ctx.user.tenant_id)
 
 
@@ -399,6 +424,7 @@ async def offboarding_preview(
     _=Depends(_can_person_manage),
 ):
     """Prévia ao desligar: tarefas em aberto vs concluídas + colegas do mesmo cargo."""
+    await _ensure_people_manager(ctx)
     return await PersonService.offboarding_preview(ctx.db, person_id)
 
 
@@ -409,6 +435,7 @@ async def update_person(
     ctx: ModuleContext = Depends(_ctx),
     _=Depends(_can_person_manage),
 ):
+    await _ensure_people_manager(ctx)
     return await PersonService.update(ctx.db, person_id, data, tenant_id=ctx.user.tenant_id)
 
 
@@ -418,6 +445,7 @@ async def delete_person(
     ctx: ModuleContext = Depends(_ctx),
     _=Depends(_can_person_manage),
 ):
+    await _ensure_people_manager(ctx)
     await PersonService.delete(ctx.db, person_id)
 
 
@@ -494,6 +522,16 @@ async def list_absences(
 @router.get("/absences/calendar", response_model=AbsenceCalendarResponse)
 async def absences_calendar(month: str = Query(..., pattern=r"^\d{4}-\d{2}$"), ctx: ModuleContext = Depends(_ctx)):
     return await AbsenceService.calendar(ctx.db, month)
+
+
+@router.get("/absences/impact-analysis", response_model=AbsenceImpactResponse)
+async def absence_impact_analysis(
+    start_from: Optional[date] = Query(None),
+    end_to: Optional[date] = Query(None),
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_absence_approve),
+):
+    return await AbsenceService.impact_analysis(ctx.db, start_from=start_from, end_to=end_to)
 
 
 @router.post("/absences", response_model=AbsenceResponse, status_code=201)

@@ -331,6 +331,37 @@ export interface AbsenceCalendar {
   days: AbsenceCalendarDay[]
 }
 
+export interface AbsenceImpactProject {
+  id: string
+  name: string
+  open_tasks: number
+  overlapping_tasks: number
+}
+
+export interface AbsenceImpactPerson {
+  absence_id: string
+  person: PersonMini
+  absence_type: AbsenceTypeMini
+  status: AbsenceStatus
+  start_date: string
+  end_date: string
+  areas: AreaMini[]
+  overlapping_people: PersonMini[]
+  impacted_projects: AbsenceImpactProject[]
+  risk_level: "low" | "medium" | "high"
+  reasons: string[]
+}
+
+export interface AbsenceImpact {
+  summary: {
+    analyzed_absences: number
+    people_at_risk: number
+    team_conflicts: number
+    impacted_projects: number
+  }
+  items: AbsenceImpactPerson[]
+}
+
 // ── Calendário de trabalho + feriados (base do cronograma) ──────────────────
 export interface WorkCalendar {
   id: string
@@ -499,6 +530,8 @@ export const teamopsApi = {
   }) => api.get<Absence[]>("/teamops/absences", { params }).then((r) => r.data),
   getAbsenceCalendar: (month: string) =>
     api.get<AbsenceCalendar>("/teamops/absences/calendar", { params: { month } }).then((r) => r.data),
+  getAbsenceImpact: (params?: { start_from?: string; end_to?: string }) =>
+    api.get<AbsenceImpact>("/teamops/absences/impact-analysis", { params }).then((r) => r.data),
   createAbsence: (data: {
     person_id: string
     absence_type_id: string

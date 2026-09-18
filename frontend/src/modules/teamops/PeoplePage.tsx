@@ -23,10 +23,14 @@ import {
   type Position,
 } from "@/api/teamops"
 import { PersonFormDialog } from "./PersonFormDialog"
+import { useAuth } from "@/contexts/AuthContext"
+import { canManageTeamopsPeople } from "@/lib/permissions"
 
 const NONE = "__none__"
 
 export default function PeoplePage() {
+  const { user } = useAuth()
+  const canManage = canManageTeamopsPeople(user)
   const [people, setPeople] = useState<Person[]>([])
   const [areas, setAreas] = useState<Area[]>([])
   const [positions, setPositions] = useState<Position[]>([])
@@ -75,10 +79,12 @@ export default function PeoplePage() {
             {total} pessoa{total === 1 ? "" : "s"} cadastrada{total === 1 ? "" : "s"}.
           </p>
         </div>
-        <Button onClick={() => setCreating(true)}>
-          <UserPlus className="mr-2 h-4 w-4" />
-          Nova pessoa
-        </Button>
+        {canManage && (
+          <Button onClick={() => setCreating(true)}>
+            <UserPlus className="mr-2 h-4 w-4" />
+            Nova pessoa
+          </Button>
+        )}
       </header>
 
       <Card>
@@ -176,25 +182,27 @@ export default function PeoplePage() {
                         </Badge>
                       </td>
                       <td className="px-4 py-2 text-right">
-                        <div className="flex justify-end gap-1">
-                          <Button variant="ghost" size="sm" onClick={() => setEditing(p)}>Editar</Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                            onClick={async () => {
-                              if (!confirm(`Excluir permanentemente "${p.full_name}"?\n\nAusências e stacks vinculadas também serão removidas; vínculos no organograma viram nulos.`)) return
-                              try {
-                                await teamopsApi.deletePerson(p.id)
-                                refresh()
-                              } catch (err: any) {
-                                alert(err?.response?.data?.detail ?? "Erro ao excluir.")
-                              }
-                            }}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
+                        {canManage && (
+                          <div className="flex justify-end gap-1">
+                            <Button variant="ghost" size="sm" onClick={() => setEditing(p)}>Editar</Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              onClick={async () => {
+                                if (!confirm(`Excluir permanentemente "${p.full_name}"?\n\nAusências e stacks vinculadas também serão removidas; vínculos no organograma viram nulos.`)) return
+                                try {
+                                  await teamopsApi.deletePerson(p.id)
+                                  refresh()
+                                } catch (err: any) {
+                                  alert(err?.response?.data?.detail ?? "Erro ao excluir.")
+                                }
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -205,7 +213,7 @@ export default function PeoplePage() {
         </CardContent>
       </Card>
 
-      {(creating || editing) && (
+      {canManage && (creating || editing) && (
         <PersonFormDialog
           person={editing}
           areas={areas}

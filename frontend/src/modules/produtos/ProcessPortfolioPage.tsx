@@ -378,7 +378,7 @@ function Node({ node, depth = 0, editable, siblings, index, collapsedIds, onTogg
   const statusItem = effectiveStatusItem(node)
   return (
     <div>
-      <div className="flex items-center gap-2 rounded-md border p-2" style={{ marginLeft: depth * 20 }}>
+      <div className="relative z-0 flex items-center gap-2 overflow-visible rounded-md border p-2 hover:z-20" style={{ marginLeft: depth * 20 }}>
         {hasChildren ? (
           <Button
             variant="ghost"
@@ -408,6 +408,31 @@ function Node({ node, depth = 0, editable, siblings, index, collapsedIds, onTogg
         </div>
         {node.nivel === "subprocesso" ? (
           <>
+            <div className="group/sv relative shrink-0">
+              <Badge
+                variant={(node.servicos_count ?? 0) > 0 ? "success" : "outline"}
+                className="cursor-default text-[9px]"
+              >
+                Serviços {node.servicos_count ?? 0}
+              </Badge>
+              {(node.servicos?.length ?? 0) > 0 && (
+                <div className="pointer-events-none absolute right-0 top-full z-50 mt-1 hidden w-80 rounded-md border bg-popover p-2 text-left text-[11px] leading-snug text-popover-foreground shadow-lg group-hover/sv:block">
+                  <p className="mb-1.5 font-semibold text-foreground">
+                    {node.servicos!.length} serviço(s)
+                  </p>
+                  <ul className="space-y-1.5">
+                    {node.servicos!.map((s, i) => (
+                      <li key={`${s.name}-${i}`}>
+                        <span className="block font-medium text-foreground">{s.name}</span>
+                        {s.product_name && (
+                          <span className="block text-muted-foreground">{s.product_name}</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
             <Badge variant={node.passagem_para_ti ? "default" : "outline"} className="shrink-0 text-[9px]">
               {node.passagem_para_ti ? "Passagem TI" : "Sem passagem TI"}
             </Badge>

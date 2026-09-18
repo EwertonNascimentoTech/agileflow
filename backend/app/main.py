@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.gzip import GZipMiddleware
+from app.core.selective_gzip import SelectiveGZipMiddleware
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 
@@ -14,11 +14,14 @@ from app.modules.super_admin.api.routes import router as super_admin_router
 from app.modules.super_admin.api.routes import auth_router
 from app.modules.company.api.routes import router as company_admin_router
 from app.modules.projetos.api.routes import router as projetos_router
+from app.modules.projetos.api.public_routes import router as projetos_public_router
 from app.modules.teamops.api.routes import router as teamops_router
 from app.modules.produtos.api.routes import router as produtos_router
 from app.modules.produtos.api.webhooks import router as produtos_webhooks_router
+from app.modules.produtos.api.public_routes import router as produtos_public_router
 from app.modules.indicadores.api.routes import router as indicadores_router
 from app.modules.rtd.api.routes import router as rtd_router
+from app.modules.rtd.api.public_routes import router as rtd_public_router
 from app.modules.docs.api.routes import router as docs_router
 
 
@@ -173,8 +176,9 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# Comprime respostas JSON grandes (listagens de kanban, portfólio, indicadores).
-app.add_middleware(GZipMiddleware, minimum_size=1000)
+# Comprime JSON grandes (kanban, portfolio autenticado, indicadores).
+# Rotas /api/v1/public/* ficam fora — clientes simples sem gzip quebram o parse.
+app.add_middleware(SelectiveGZipMiddleware, minimum_size=1000)
 
 app.add_middleware(
     CORSMiddleware,
@@ -192,8 +196,13 @@ app.include_router(teamops_router, prefix="/api/v1")
 app.include_router(produtos_router, prefix="/api/v1")
 # Fora de require_module: o Azure DevOps não manda JWT (autenticação por Basic no hook).
 app.include_router(produtos_webhooks_router, prefix="/api/v1")
+# Portfólio público com token fixo (PUBLIC_PRODUTOS_PORTFOLIO_TOKEN).
+app.include_router(produtos_public_router, prefix="/api/v1")
+# Ociosidade diária pública com token fixo (PUBLIC_OCIOSIDADE_TOKEN).
+app.include_router(projetos_public_router, prefix="/api/v1")
 app.include_router(indicadores_router, prefix="/api/v1")
 app.include_router(rtd_router, prefix="/api/v1")
+app.include_router(rtd_public_router, prefix="/api/v1")
 app.include_router(docs_router, prefix="/api/v1")
 
 

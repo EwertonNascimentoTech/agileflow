@@ -273,12 +273,13 @@ async def buscar_planos(codigos: list[int], periodo_fim: date) -> list[dict]:
             except Exception:  # noqa: BLE001 — acompanhamentos são complemento
                 pass
 
-            # Regra da RTD: ação NÃO concluída com prazo até o fim do mês de referência
-            # está ATRASADA — independente do status nominal no EPA (Planejado/Em andamento).
-            fim_iso = periodo_fim.isoformat()
+            # Regra da RTD: ação NÃO concluída com prazo < data atual → ATRASADA
+            # (independente do status nominal no EPA: Planejado / Em andamento / etc.).
+            # Suspensas permanecem "suspenso" (fora do cálculo de execução).
+            hoje_iso = date.today().isoformat()
             for a in acoes:
-                if a["status"] in ("planejado", "em_andamento", "outro") \
-                        and a["prazo"] and a["prazo"] <= fim_iso:
+                if a["status"] not in ("concluido", "suspenso") \
+                        and a["prazo"] and a["prazo"] < hoje_iso:
                     a["status"] = "atrasado"
 
             exec_base = [a for a in acoes if a["status"] != "suspenso"]

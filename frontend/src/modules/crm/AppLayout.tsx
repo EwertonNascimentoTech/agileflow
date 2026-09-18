@@ -75,8 +75,9 @@ export default function AppLayout() {
   // Abrir/acompanhar solicitações é funcionalidade básica de TODO usuário. Quem já enxerga o
   // módulo Processos acessa pelos itens do próprio módulo; quem NÃO enxerga ganha um atalho
   // dedicado "Solicitações" no rail (com uma sidebar mínima: Nova + Minhas).
-  // Coordenadores (cargo TeamOps) sempre ganham o atalho, mantendo seus demais módulos.
-  const isCoordenador = (user?.position_slug ?? "") === "coordenador"
+  // Coordenadores (e Administrativo, mesmo nível) sempre ganham o atalho, mantendo seus demais módulos.
+  const slug = (user?.position_slug ?? "").trim()
+  const isCoordenador = slug === "coordenador" || slug === "administrativo" || slug === "coord_de_arq_dev_e_sustenta_o"
   // Product Owner (Externo): opera os kanbans dos seus projetos, sem as visões consolidadas.
   const isExternalPO = isExternalProductOwner(user)
   const canSeeProjetos = isAdmin || canSeeModule(user?.permissions, "projetos")

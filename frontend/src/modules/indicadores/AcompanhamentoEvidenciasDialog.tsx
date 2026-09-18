@@ -8,6 +8,7 @@ import {
   type AnexoItem,
   type FonteMetrica,
   type PortfolioDocumentoRef,
+  type PortfolioProcessoRef,
   type PortfolioServicoRef,
 } from "@/api/indicadores"
 import { AttachmentField, type Attachment } from "@/components/AttachmentField"
@@ -30,6 +31,12 @@ function evidenciasCount(data: {
   )
 }
 
+function cicloLabel(lc: string) {
+  if (lc === "producao") return "Produção"
+  if (lc === "desenvolvimento") return "Desenvolvimento"
+  return lc
+}
+
 function ServicosTable({ rows, highlight }: { rows: PortfolioServicoRef[]; highlight?: boolean }) {
   if (!rows.length) return null
   return (
@@ -39,6 +46,7 @@ function ServicosTable({ rows, highlight }: { rows: PortfolioServicoRef[]; highl
           <tr>
             <th className="px-3 py-2 font-semibold">Produto</th>
             <th className="px-3 py-2 font-semibold">Serviço</th>
+            <th className="px-3 py-2 font-semibold">Ciclo</th>
             <th className="px-3 py-2 font-semibold">Publicação</th>
           </tr>
         </thead>
@@ -57,6 +65,7 @@ function ServicosTable({ rows, highlight }: { rows: PortfolioServicoRef[]; highl
                 </span>
               </td>
               <td className="px-3 py-2">{s.servico_name}</td>
+              <td className="px-3 py-2 text-muted-foreground">{cicloLabel(s.lifecycle)}</td>
               <td className="px-3 py-2 text-muted-foreground">{s.data_publicacao ?? "—"}</td>
             </tr>
           ))}
@@ -75,6 +84,7 @@ function DocumentosTable({ rows, highlight }: { rows: PortfolioDocumentoRef[]; h
           <tr>
             <th className="px-3 py-2 font-semibold">Produto</th>
             <th className="px-3 py-2 font-semibold">Documento</th>
+            <th className="px-3 py-2 font-semibold">Ciclo</th>
             <th className="px-3 py-2 font-semibold">Data</th>
           </tr>
         </thead>
@@ -93,7 +103,45 @@ function DocumentosTable({ rows, highlight }: { rows: PortfolioDocumentoRef[]; h
                 </span>
               </td>
               <td className="px-3 py-2">{d.documento_name}</td>
+              <td className="px-3 py-2 text-muted-foreground">{cicloLabel(d.lifecycle)}</td>
               <td className="px-3 py-2 text-muted-foreground">{d.data_documento ?? "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function ProcessosTable({ rows, highlight }: { rows: PortfolioProcessoRef[]; highlight?: boolean }) {
+  if (!rows.length) return null
+  return (
+    <div className="overflow-hidden rounded-md border">
+      <table className="w-full text-sm">
+        <thead className="bg-muted/50 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+          <tr>
+            <th className="px-3 py-2 font-semibold">Sub-processo</th>
+            <th className="px-3 py-2 font-semibold">Serviços vinculados</th>
+            <th className="px-3 py-2 font-semibold">Digitalizado em</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((p) => (
+            <tr
+              key={`${p.portfolio_id}:${p.item_lineage_id}`}
+              className={`border-t ${highlight || p.novo_no_mes ? "bg-primary/5" : ""}`}
+            >
+              <td className="px-3 py-2">
+                <span className="flex items-center gap-1.5">
+                  {p.codigo ? `${p.codigo} — ${p.processo_name}` : p.processo_name}
+                  {(highlight || p.novo_no_mes) && (
+                    <Badge variant="secondary" className="h-4 px-1 text-[9px] font-normal">Novo</Badge>
+                  )}
+                </span>
+                <span className="block text-[11px] text-muted-foreground">{p.portfolio_name}</span>
+              </td>
+              <td className="px-3 py-2 text-muted-foreground">{p.servicos.join(", ") || "—"}</td>
+              <td className="px-3 py-2 text-muted-foreground">{p.data_digitalizacao ?? "—"}</td>
             </tr>
           ))}
         </tbody>
@@ -115,6 +163,7 @@ export function AcompanhamentoEvidenciasDialog({
 }) {
   const isPortfolio = acomp.fonte === "portfolio"
   const isDocumentos = fonteMetrica === "documentos_natos_digitais"
+  const isProcessosDigitais = fonteMetrica === "processos_digitais"
   const [loading, setLoading] = useState(isPortfolio)
   const [payload, setPayload] = useState<AcompanhamentoEvidenciasPayload | null>(
     isPortfolio
@@ -127,6 +176,8 @@ export function AcompanhamentoEvidenciasDialog({
           portfolio_servicos_novos: [],
           portfolio_documentos: [],
           portfolio_documentos_novos: [],
+          portfolio_processos: [],
+          portfolio_processos_novos: [],
           portfolio_links: [],
           portfolio_links_novos: [],
         },
@@ -167,6 +218,8 @@ export function AcompanhamentoEvidenciasDialog({
       portfolio_servicos_novos: data.portfolio_servicos_novos,
       portfolio_documentos: data.portfolio_documentos,
       portfolio_documentos_novos: data.portfolio_documentos_novos,
+      portfolio_processos: data.portfolio_processos,
+      portfolio_processos_novos: data.portfolio_processos_novos,
       portfolio_links: data.portfolio_links,
     }
   }
@@ -175,17 +228,28 @@ export function AcompanhamentoEvidenciasDialog({
   const servicosAcum = payload?.portfolio_servicos ?? []
   const documentosNovos = payload?.portfolio_documentos_novos ?? []
   const documentosAcum = payload?.portfolio_documentos ?? []
+  const processosNovos = payload?.portfolio_processos_novos ?? []
+  const processosAcum = payload?.portfolio_processos ?? []
   const servicosAcumSemNovos = servicosAcum.filter((s) => !s.novo_no_mes)
   const documentosAcumSemNovos = documentosAcum.filter((d) => !d.novo_no_mes)
-  const itemLabel = isDocumentos ? "documento" : "serviço"
-  const novoLabel = isDocumentos ? "Cadastrados" : "Publicados"
-  const vazioNovos = isDocumentos
+  const processosAcumSemNovos = processosAcum.filter((p) => !p.novo_no_mes)
+  const itemLabel = isProcessosDigitais ? "sub-processo" : isDocumentos ? "documento" : "serviço"
+  const novoLabel = isProcessosDigitais ? "Digitalizados" : isDocumentos ? "Cadastrados" : "Publicados"
+  const vazioNovos = isProcessosDigitais
+    ? "Nenhum sub-processo digitalizado neste mês."
+    : isDocumentos
     ? "Nenhum documento nato-digital novo cadastrado neste mês."
     : "Nenhum serviço novo publicado neste mês."
-  const vazioAcum = isDocumentos
+  const vazioAcum = isProcessosDigitais
+    ? "Nenhum sub-processo vinculado a serviço no numerador."
+    : isDocumentos
     ? "Nenhum documento nato-digital de produto em produção no numerador."
     : "Nenhum serviço de produto em produção no numerador."
-  const acumuladoCount = isDocumentos ? documentosAcum.length : servicosAcum.length
+  const acumuladoCount = isProcessosDigitais
+    ? processosAcum.length
+    : isDocumentos
+    ? documentosAcum.length
+    : servicosAcum.length
 
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose() }}>
@@ -211,7 +275,28 @@ export function AcompanhamentoEvidenciasDialog({
                   ({acomp.periodo_inicio} a {acomp.periodo_fim})
                 </span>
               </p>
-              {isDocumentos ? (
+              {!isProcessosDigitais && !isDocumentos && (
+                <p className="text-[11px] text-muted-foreground">
+                  Somente serviços com data de publicação neste mês. O realizado do mês é acumulado: numerador = produção já publicada até o fim do período; denominador = portfólio inteiro (produção + desenvolvimento), sem cair quando entra pipeline com publicação futura.
+                </p>
+              )}
+              {isDocumentos && (
+                <p className="text-[11px] text-muted-foreground">
+                  Somente documentos com data neste mês. O realizado é acumulado: numerador = produção com data até o fim do período; denominador = portfólio inteiro (produção + desenvolvimento).
+                </p>
+              )}
+              {isProcessosDigitais && (
+                <p className="text-[11px] text-muted-foreground">
+                  Somente sub-processos cuja data de documentação (ou do vínculo, se não houver) cai neste mês.
+                </p>
+              )}
+              {isProcessosDigitais ? (
+                processosNovos.length > 0 ? (
+                  <ProcessosTable rows={processosNovos} highlight />
+                ) : (
+                  <p className="text-sm text-muted-foreground">{vazioNovos}</p>
+                )
+              ) : isDocumentos ? (
                 documentosNovos.length > 0 ? (
                   <DocumentosTable rows={documentosNovos} highlight />
                 ) : (
@@ -228,7 +313,13 @@ export function AcompanhamentoEvidenciasDialog({
               <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
                 Acumulado no numerador até {acomp.periodo_fim} ({acumuladoCount} {itemLabel}(s))
               </p>
-              {isDocumentos ? (
+              {isProcessosDigitais ? (
+                processosAcumSemNovos.length > 0 ? (
+                  <ProcessosTable rows={processosAcumSemNovos} />
+                ) : processosNovos.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">{vazioAcum}</p>
+                ) : null
+              ) : isDocumentos ? (
                 documentosAcumSemNovos.length > 0 ? (
                   <DocumentosTable rows={documentosAcumSemNovos} />
                 ) : documentosNovos.length === 0 ? (

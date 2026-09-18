@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import calendar
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.indicadores import portfolio_projetos, schemas
@@ -38,6 +38,7 @@ _PERIODS = {
     IndicadorGranularidade.ANUAL: 1,
 }
 _ORDINAL = ("", "1º", "2º", "3º", "4º", "5º", "6º")
+_TZ_BR = timezone(timedelta(hours=-3))
 
 
 def _ev(val) -> str:
@@ -65,6 +66,30 @@ def _as_date(val) -> Optional[date]:
     return None
 
 
+def _created_on(val) -> Optional[date]:
+    """Dia do cadastro no fuso America/Sao_Paulo (created_at é gravado em UTC naive)."""
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        utc = val.replace(tzinfo=timezone.utc) if val.tzinfo is None else val.astimezone(timezone.utc)
+        return utc.astimezone(_TZ_BR).date()
+    return _as_date(val)
+
+
+def _entrada_portfolio(pub, created) -> Optional[date]:
+    """Data canônica do item no indicador.
+
+    Serviços e documentos: data de publicação / data do documento.
+    Processos: data de documentação; se vazia, a data do vínculo.
+    Cadastro (created_at) NÃO antecipa o item para o mês do lançamento quando a
+    publicação é anterior — a evidência do mês segue a data exibida na coluna.
+    """
+    d = _as_date(pub)
+    if d is not None:
+        return d
+    return _created_on(created)
+
+
 async def _areas_index(db: AsyncSession) -> dict[uuid.UUID, Area]:
     rows = (await db.execute(select(Area))).scalars().all()
     return {a.id: a for a in rows}
@@ -79,11 +104,11 @@ def _setor_name(area: Area, index: dict[uuid.UUID, Area]) -> Optional[str]:
 async def _portfolio_servicos_rows(
     db: AsyncSession, metrica: Optional[FontePortfolioMetrica] = None,
 ) -> list[tuple]:
-    """Carrega (data_publicacao, lifecycle) dos serviços ATIVOS de produtos em produção/desenvolvimento."""
+    """Carrega (data_publicacao, lifecycle, created_at) dos serviços ATIVOS de produtos em produção/desenvolvimento."""
     from app.modules.produtos.models import Product, ProductLifecycle, ProductServico
 
     rows = (await db.execute(
-        select(ProductServico.data_publicacao, Product.lifecycle)
+        select(ProductServico.data_publicacao, Product.lifecycle, ProductServico.created_at)
         .join(Product, Product.id == ProductServico.product_id)
         .where(
             ProductServico.is_active.is_(True),
@@ -91,17 +116,17 @@ async def _portfolio_servicos_rows(
             Product.lifecycle.in_([ProductLifecycle.PRODUCAO, ProductLifecycle.DESENVOLVIMENTO]),
         )
     )).all()
-    return [(dp, lc) for dp, lc in rows]
+    return [(dp, lc, created) for dp, lc, created in rows]
 
 
 async def _portfolio_documentos_rows(
     db: AsyncSession, metrica: Optional[FontePortfolioMetrica] = None,
 ) -> list[tuple]:
-    """Carrega (data_documento, lifecycle) dos documentos nato-digital ATIVOS de produtos em produção/desenvolvimento."""
+    """Carrega (data_documento, lifecycle, created_at) dos documentos nato-digital ATIVOS."""
     from app.modules.produtos.models import Product, ProductDocumento, ProductLifecycle
 
     rows = (await db.execute(
-        select(ProductDocumento.data_documento, Product.lifecycle)
+        select(ProductDocumento.data_documento, Product.lifecycle, ProductDocumento.created_at)
         .join(Product, Product.id == ProductDocumento.product_id)
         .where(
             ProductDocumento.is_active.is_(True),
@@ -110,7 +135,149 @@ async def _portfolio_documentos_rows(
             Product.lifecycle.in_([ProductLifecycle.PRODUCAO, ProductLifecycle.DESENVOLVIMENTO]),
         )
     )).all()
-    return [(dd, lc) for dd, lc in rows]
+    return [(dd, lc, created) for dd, lc, created in rows]
+
+
+async def _processos_versoes_vigentes(db: AsyncSession) -> tuple[dict, dict]:
+    """Versão vigente de cada portfólio ativo.
+
+    Retorna `(versao_por_portfolio, nomes)` onde a versão vigente é a consolidada
+    apontada por `current_version_id` ou, enquanto o portfólio só tem rascunho, a de
+    maior número (mesmo fallback de ProcessPortfolioService)."""
+    from app.modules.produtos.models import ProcessPortfolio, ProcessPortfolioVersion
+
+    rows = (await db.execute(
+        select(
+            ProcessPortfolio.id,
+            ProcessPortfolio.name,
+            ProcessPortfolio.current_version_id,
+            ProcessPortfolioVersion.id,
+            ProcessPortfolioVersion.version,
+        )
+        .join(ProcessPortfolioVersion, ProcessPortfolioVersion.portfolio_id == ProcessPortfolio.id)
+        .where(ProcessPortfolio.is_active.is_(True))
+    )).all()
+
+    versao_por_portfolio: dict = {}
+    nomes: dict = {}
+    melhor_versao: dict = {}
+    for pf_id, pf_name, current_id, ver_id, ver_num in rows:
+        nomes[pf_id] = pf_name
+        if current_id is not None:
+            versao_por_portfolio[pf_id] = current_id
+            continue
+        if pf_id not in versao_por_portfolio and ver_num > melhor_versao.get(pf_id, (-1,))[0]:
+            melhor_versao[pf_id] = (ver_num, ver_id)
+    for pf_id, (_num, ver_id) in melhor_versao.items():
+        versao_por_portfolio.setdefault(pf_id, ver_id)
+    return versao_por_portfolio, nomes
+
+
+async def _portfolio_processos_dataset(db: AsyncSession) -> dict:
+    """Snapshot para cálculo E evidências de processos_digitais.
+
+    - `subs`: {(portfolio_id, lineage_id): (nome, codigo)} — sub-processos da versão vigente
+    - `links`: [(portfolio_id, lineage_id, data_vinculo, servico_name, product_name), ...]
+    - `nomes`: {portfolio_id: nome do portfólio}
+    """
+    from app.modules.produtos.models import (
+        ProcessItemNivel,
+        ProcessPortfolioItem,
+        ProcessPortfolioVersion,
+        ProcessServiceLink,
+        Product,
+        ProductServico,
+    )
+
+    versao_por_portfolio, nomes = await _processos_versoes_vigentes(db)
+    if not versao_por_portfolio:
+        return {"subs": {}, "links": [], "nomes": nomes}
+
+    version_ids = list(versao_por_portfolio.values())
+    sub_rows = (await db.execute(
+        select(
+            ProcessPortfolioVersion.portfolio_id,
+            ProcessPortfolioItem.lineage_id,
+            ProcessPortfolioItem.name,
+            ProcessPortfolioItem.codigo,
+        )
+        .join(ProcessPortfolioVersion, ProcessPortfolioVersion.id == ProcessPortfolioItem.version_id)
+        .where(
+            ProcessPortfolioItem.version_id.in_(version_ids),
+            ProcessPortfolioItem.nivel == ProcessItemNivel.SUBPROCESSO,
+        )
+    )).all()
+    subs: dict = {}
+    for pf_id, lineage_id, name, codigo in sub_rows:
+        subs[(pf_id, lineage_id)] = (name, codigo)
+
+    link_rows = (await db.execute(
+        select(
+            ProcessServiceLink.portfolio_id,
+            ProcessServiceLink.item_lineage_id,
+            ProcessServiceLink.created_at,
+            ProcessPortfolioItem.data_documentacao,
+            ProductServico.name,
+            Product.name,
+        )
+        .join(ProductServico, ProductServico.id == ProcessServiceLink.servico_id)
+        .join(Product, Product.id == ProductServico.product_id)
+        .outerjoin(
+            ProcessPortfolioItem,
+            and_(
+                ProcessPortfolioItem.lineage_id == ProcessServiceLink.item_lineage_id,
+                ProcessPortfolioItem.version_id.in_(version_ids),
+            ),
+        )
+        .where(
+            ProcessServiceLink.is_active.is_(True),
+            ProcessServiceLink.portfolio_id.in_(list(versao_por_portfolio.keys())),
+            ProductServico.is_active.is_(True),
+            Product.is_active.is_(True),
+        )
+    )).all()
+    links: list[tuple] = []
+    for pf_id, lineage_id, created_at, data_doc, servico_name, product_name in link_rows:
+        if (pf_id, lineage_id) not in subs:
+            continue
+        d = _entrada_portfolio(data_doc, created_at)
+        if d is None:
+            continue
+        links.append((pf_id, lineage_id, d, servico_name, product_name))
+    return {"subs": subs, "links": links, "nomes": nomes}
+
+
+def _processos_first_link(ds: dict) -> dict:
+    """{(portfolio_id, lineage_id): (primeira_data, {servicos})} a partir do dataset."""
+    agg: dict = {}
+    for pf_id, lineage_id, d, servico_name, product_name in ds["links"]:
+        key = (pf_id, lineage_id)
+        info = agg.get(key)
+        if info is None:
+            info = {"first": d, "servicos": set()}
+            agg[key] = info
+        elif d < info["first"]:
+            info["first"] = d
+        label = f"{product_name} — {servico_name}" if product_name else servico_name
+        info["servicos"].add(label)
+    return agg
+
+
+async def _portfolio_processos_digitais_rows(
+    db: AsyncSession,
+) -> tuple[int, list[tuple]]:
+    """Dataset da métrica processos_digitais para cálculo do percentual.
+
+    Retorna `(den, [(lineage_id, first_link_date), ...])`:
+    - den = total de sub-processos da versão vigente de cada portfólio ativo
+    - lista = sub-processos distintos vinculados a ≥1 serviço ativo (sem duplicidade),
+      com a data do primeiro vínculo.
+    """
+    ds = await _portfolio_processos_dataset(db)
+    den = len(ds["subs"])
+    agg = _processos_first_link(ds)
+    linked = [(key, info["first"]) for key, info in agg.items()]
+    return den, linked
 
 
 async def _portfolio_rows(
@@ -126,6 +293,8 @@ async def _portfolio_rows(
         return await portfolio_projetos.load_dataset(db)
     if m == FontePortfolioMetrica.DOCUMENTOS_NATOS_DIGITAIS:
         return await _portfolio_documentos_rows(db, metrica)
+    if m == FontePortfolioMetrica.PROCESSOS_DIGITAIS:
+        return await _portfolio_processos_digitais_rows(db)
     return await _portfolio_servicos_rows(db, metrica)
 
 
@@ -142,18 +311,46 @@ def _calc_realizado(
     m = metrica or FontePortfolioMetrica.SERVICOS_PUBLICADOS
     if m in portfolio_projetos.PROJETOS_METRICAS:
         return portfolio_projetos.calc(m, cache, periodo_inicio, periodo_fim, date.today())
+    if m == FontePortfolioMetrica.PROCESSOS_DIGITAIS:
+        return _pct_processos_digitais(cache, periodo_fim)
     return _pct_ate(cache, periodo_fim)
 
 
 def _pct_ate(rows: list[tuple], ate: date) -> tuple[int, int, Optional[float]]:
-    """% em produção cadastrados/publicados até `ate` sobre o total cadastrado/publicado (prod. + desenv.).
+    """% acumulada: produção já publicada até `ate` sobre o portfólio (prod. + desenv.).
 
-    Numerador: acumula por data (itens em produção até `ate`).
-    Denominador: total com data preenchida, FIXO — não filtra por data.
+    Denominador: todos os itens ativos com data canônica (publicação / documento),
+    inclusive os ainda não publicados naquele mês. Assim o tamanho da carteira é o
+    mesmo em todos os meses e a série não cai quando entra pipeline futuro.
+
+    Numerador: subset em produção cuja data canônica já chegou (≤ `ate`).
+    Data canônica = publicação (serviço) ou data do documento — não o created_at.
     """
-    com_data = [(d, lc) for d, lc in rows if d is not None]
-    den = len(com_data)
-    num = sum(1 for d, lc in com_data if d <= ate and _ev(lc) == "producao")
+    eligible: list[tuple] = []
+    for row in rows:
+        pub = row[0] if row else None
+        created = row[2] if len(row) > 2 else None
+        entrada = _entrada_portfolio(pub, created)
+        if entrada is None:
+            continue
+        eligible.append((row, entrada))
+    den = len(eligible)
+    num = sum(
+        1 for row, entrada in eligible
+        if entrada <= ate and _ev(row[1]) == "producao"
+    )
+    pct = round(num / den * 100, 2) if den else None
+    return num, den, pct
+
+
+def _pct_processos_digitais(cache: tuple, ate: date) -> tuple[int, int, Optional[float]]:
+    """% de sub-processos distintos vinculados a serviços até `ate` / total do portfólio.
+
+    Denominador: total de sub-processos nas versões correntes (fixo).
+    Numerador: COUNT DISTINCT lineage_id com primeiro vínculo em data ≤ `ate`.
+    """
+    den, linked = cache
+    num = sum(1 for _, d in linked if d is not None and d != date.min and d <= ate)
     pct = round(num / den * 100, 2) if den else None
     return num, den, pct
 
@@ -262,6 +459,7 @@ async def _portfolio_servicos_detalhe(
         select(
             Product.id, Product.name, Product.lifecycle,
             ProductServico.id, ProductServico.name, ProductServico.data_publicacao,
+            ProductServico.created_at,
         )
         .join(Product, Product.id == ProductServico.product_id)
         .where(
@@ -269,13 +467,18 @@ async def _portfolio_servicos_detalhe(
             Product.is_active.is_(True),
             Product.lifecycle.in_(lifecycles),
             ProductServico.data_publicacao.isnot(None),
-            ProductServico.data_publicacao <= ate,
         )
     )
-    if de is not None:
-        q = q.where(ProductServico.data_publicacao >= de)
     q = q.order_by(Product.name.asc(), ProductServico.name.asc())
-    return (await db.execute(q)).all()
+    out = []
+    for r in (await db.execute(q)).all():
+        entrada = _entrada_portfolio(r[5], r[6])
+        if entrada is None or entrada > ate:
+            continue
+        if de is not None and entrada < de:
+            continue
+        out.append(r)
+    return out
 
 
 async def _portfolio_documentos_detalhe(
@@ -298,6 +501,7 @@ async def _portfolio_documentos_detalhe(
             ProductDocumento.id, ProductDocumento.name, ProductDocumento.data_documento,
             ProductDocumento.object_name, ProductDocumento.filename,
             ProductDocumento.content_type, ProductDocumento.size,
+            ProductDocumento.created_at,
         )
         .join(Product, Product.id == ProductDocumento.product_id)
         .where(
@@ -306,13 +510,18 @@ async def _portfolio_documentos_detalhe(
             Product.is_active.is_(True),
             Product.lifecycle.in_(lifecycles),
             ProductDocumento.data_documento.isnot(None),
-            ProductDocumento.data_documento <= ate,
         )
     )
-    if de is not None:
-        q = q.where(ProductDocumento.data_documento >= de)
     q = q.order_by(Product.name.asc(), ProductDocumento.name.asc())
-    return (await db.execute(q)).all()
+    out = []
+    for r in (await db.execute(q)).all():
+        entrada = _entrada_portfolio(r[5], r[10] if len(r) > 10 else None)
+        if entrada is None or entrada > ate:
+            continue
+        if de is not None and entrada < de:
+            continue
+        out.append(r)
+    return out
 
 
 async def _portfolio_anexos_e_links(
@@ -422,6 +631,43 @@ def _dedupe_documentos(items: list[schemas.PortfolioDocumentoRef]) -> list[schem
     return out
 
 
+def _processo_ref(
+    ds: dict, pf_id, lineage_id, first_date: date, servicos: set, *, novo_no_mes: bool,
+) -> schemas.PortfolioProcessoRef:
+    name, codigo = ds["subs"].get((pf_id, lineage_id), (None, None))
+    return schemas.PortfolioProcessoRef(
+        portfolio_id=pf_id,
+        portfolio_name=ds["nomes"].get(pf_id, ""),
+        item_lineage_id=lineage_id,
+        processo_name=name or "—",
+        codigo=codigo,
+        data_digitalizacao=None if first_date == date.min else first_date,
+        servicos=sorted(servicos),
+        novo_no_mes=novo_no_mes,
+    )
+
+
+def _processos_evidencias_from_ds(
+    ds: dict, periodo_inicio: date, periodo_fim: date,
+) -> tuple[list[schemas.PortfolioProcessoRef], list[schemas.PortfolioProcessoRef]]:
+    """Sub-processos digitalizados (vinculados a serviço): novos no mês + acumulado até fim."""
+    agg = _processos_first_link(ds)
+    novos: list[schemas.PortfolioProcessoRef] = []
+    acum: list[schemas.PortfolioProcessoRef] = []
+    for (pf_id, lineage_id), info in agg.items():
+        first = info["first"]
+        if first is None or first == date.min or first > periodo_fim:
+            continue
+        novo = periodo_inicio <= first <= periodo_fim
+        ref = _processo_ref(ds, pf_id, lineage_id, first, info["servicos"], novo_no_mes=novo)
+        acum.append(ref)
+        if novo:
+            novos.append(ref)
+    novos.sort(key=lambda r: (r.portfolio_name, r.processo_name))
+    acum.sort(key=lambda r: (r.portfolio_name, r.processo_name))
+    return novos, acum
+
+
 def _anexos_from_documento_rows(rows: list[tuple]) -> list[schemas.AnexoItem]:
     """Extrai anexos dos documentos nato-digital (object_name/filename)."""
     anexos: list[schemas.AnexoItem] = []
@@ -454,9 +700,9 @@ async def _portfolio_evidencias_servicos(
     list[schemas.PortfolioLinkRef],
     list[schemas.PortfolioLinkRef],
 ]:
-    """Evidências do numerador: novos no mês + acumulado até periodo_fim."""
+    """Evidências: novos no mês (produção + desenvolvimento) + acumulado do numerador (só produção)."""
     novos_rows = await _portfolio_servicos_detalhe(
-        db, metrica, periodo_fim, de=periodo_inicio, numerador_only=True,
+        db, metrica, periodo_fim, de=periodo_inicio, numerador_only=False,
     )
     acum_rows = await _portfolio_servicos_detalhe(db, metrica, periodo_fim, numerador_only=True)
     novos_ids = {r[3] for r in novos_rows}
@@ -486,9 +732,9 @@ async def _portfolio_evidencias_documentos(
     list[schemas.PortfolioLinkRef],
     list[schemas.PortfolioLinkRef],
 ]:
-    """Evidências do numerador: documentos nato-digital novos no mês + acumulado."""
+    """Evidências: novos no mês (produção + desenvolvimento) + acumulado do numerador (só produção)."""
     novos_rows = await _portfolio_documentos_detalhe(
-        db, metrica, periodo_fim, de=periodo_inicio, numerador_only=True,
+        db, metrica, periodo_fim, de=periodo_inicio, numerador_only=False,
     )
     acum_rows = await _portfolio_documentos_detalhe(db, metrica, periodo_fim, numerador_only=True)
     novos_ids = {r[3] for r in novos_rows}
@@ -513,6 +759,8 @@ async def _portfolio_evidencias(
     list[schemas.PortfolioServicoRef],
     list[schemas.PortfolioDocumentoRef],
     list[schemas.PortfolioDocumentoRef],
+    list[schemas.PortfolioProcessoRef],
+    list[schemas.PortfolioProcessoRef],
     list[schemas.AnexoItem],
     list[schemas.AnexoItem],
     list[schemas.PortfolioLinkRef],
@@ -521,16 +769,20 @@ async def _portfolio_evidencias(
     m = metrica or FontePortfolioMetrica.SERVICOS_PUBLICADOS
     if m in portfolio_projetos.PROJETOS_METRICAS:
         # Métricas de Projetos: sem evidências automáticas por enquanto (fase 2).
-        return [], [], [], [], [], [], [], []
+        return [], [], [], [], [], [], [], [], [], []
+    if m == FontePortfolioMetrica.PROCESSOS_DIGITAIS:
+        ds = await _portfolio_processos_dataset(db)
+        proc_novos, proc_acum = _processos_evidencias_from_ds(ds, periodo_inicio, periodo_fim)
+        return [], [], [], [], proc_novos, proc_acum, [], [], [], []
     if m == FontePortfolioMetrica.DOCUMENTOS_NATOS_DIGITAIS:
         doc_novos, doc_acum, anexos_novos, anexos_acum, links_novos, links_acum = (
             await _portfolio_evidencias_documentos(db, periodo_inicio, periodo_fim, metrica)
         )
-        return [], [], doc_novos, doc_acum, anexos_novos, anexos_acum, links_novos, links_acum
+        return [], [], doc_novos, doc_acum, [], [], anexos_novos, anexos_acum, links_novos, links_acum
     serv_novos, serv_acum, anexos_novos, anexos_acum, links_novos, links_acum = (
         await _portfolio_evidencias_servicos(db, periodo_inicio, periodo_fim, metrica)
     )
-    return serv_novos, serv_acum, [], [], anexos_novos, anexos_acum, links_novos, links_acum
+    return serv_novos, serv_acum, [], [], [], [], anexos_novos, anexos_acum, links_novos, links_acum
 
 
 # ── Preload de portfólio (evita N+1 em to_response) ──────────────────────
@@ -549,6 +801,9 @@ async def _portfolio_preload(
     if m in portfolio_projetos.PROJETOS_METRICAS:
         # Métricas de Projetos: evidências vazias (fase 2) — kind próprio p/ _mem.
         return ("projetos",)
+    if m == FontePortfolioMetrica.PROCESSOS_DIGITAIS:
+        ds = await _portfolio_processos_dataset(db)
+        return ("processos_digitais", ds)
     if m == FontePortfolioMetrica.DOCUMENTOS_NATOS_DIGITAIS:
         drows = (await db.execute(
             select(
@@ -556,13 +811,14 @@ async def _portfolio_preload(
                 ProductDocumento.id, ProductDocumento.name, ProductDocumento.data_documento,
                 ProductDocumento.object_name, ProductDocumento.filename,
                 ProductDocumento.content_type, ProductDocumento.size,
+                ProductDocumento.created_at,
             )
             .join(Product, Product.id == ProductDocumento.product_id)
             .where(
                 ProductDocumento.is_active.is_(True),
                 ProductDocumento.is_nato_digital.is_(True),
                 Product.is_active.is_(True),
-                Product.lifecycle == ProductLifecycle.PRODUCAO,
+                Product.lifecycle.in_([ProductLifecycle.PRODUCAO, ProductLifecycle.DESENVOLVIMENTO]),
                 ProductDocumento.data_documento.isnot(None),
             )
             .order_by(Product.name.asc(), ProductDocumento.name.asc())
@@ -573,12 +829,13 @@ async def _portfolio_preload(
         select(
             Product.id, Product.name, Product.lifecycle,
             ProductServico.id, ProductServico.name, ProductServico.data_publicacao,
+            ProductServico.created_at,
         )
         .join(Product, Product.id == ProductServico.product_id)
         .where(
             ProductServico.is_active.is_(True),
             Product.is_active.is_(True),
-            Product.lifecycle == ProductLifecycle.PRODUCAO,
+            Product.lifecycle.in_([ProductLifecycle.PRODUCAO, ProductLifecycle.DESENVOLVIMENTO]),
             ProductServico.data_publicacao.isnot(None),
         )
         .order_by(Product.name.asc(), ProductServico.name.asc())
@@ -656,12 +913,26 @@ def _portfolio_evidencias_mem(cache: tuple, periodo_inicio: date, periodo_fim: d
     """Versão em memória de _portfolio_evidencias a partir do dataset pré-carregado."""
     kind = cache[0]
     if kind == "projetos":
-        # Métricas de Projetos: sem evidências automáticas (fase 2).
-        return [], [], [], [], [], [], [], []
+        # Sem evidências automáticas detalhadas por enquanto.
+        return [], [], [], [], [], [], [], [], [], []
+    if kind == "processos_digitais":
+        ds = cache[1]
+        proc_novos, proc_acum = _processos_evidencias_from_ds(ds, periodo_inicio, periodo_fim)
+        return [], [], [], [], proc_novos, proc_acum, [], [], [], []
     if kind == "documentos":
         doc_rows = cache[1]
-        novos_rows = [r for r in doc_rows if r[5] is not None and periodo_inicio <= r[5] <= periodo_fim]
-        acum_rows = [r for r in doc_rows if r[5] is not None and r[5] <= periodo_fim]
+
+        def _entrada_doc(r) -> Optional[date]:
+            return _entrada_portfolio(r[5], r[10] if len(r) > 10 else None)
+
+        novos_rows = [
+            r for r in doc_rows
+            if (e := _entrada_doc(r)) is not None and periodo_inicio <= e <= periodo_fim
+        ]
+        acum_rows = [
+            r for r in doc_rows
+            if (e := _entrada_doc(r)) is not None and e <= periodo_fim and _ev(r[2]) == "producao"
+        ]
         novos_ids = {r[3] for r in novos_rows}
         documentos_novos = _dedupe_documentos([_documento_ref(r, novo_no_mes=True) for r in novos_rows])
         documentos_acum = _dedupe_documentos([
@@ -669,11 +940,21 @@ def _portfolio_evidencias_mem(cache: tuple, periodo_inicio: date, periodo_fim: d
         ])
         anexos_novos = _anexos_from_documento_rows(novos_rows)
         anexos_acum = _anexos_from_documento_rows(acum_rows)
-        return [], [], documentos_novos, documentos_acum, anexos_novos, anexos_acum, [], []
+        return [], [], documentos_novos, documentos_acum, [], [], anexos_novos, anexos_acum, [], []
 
     _, servico_rows, docs_by_pid, releases_by_pid = cache
-    novos_rows = [r for r in servico_rows if r[5] is not None and periodo_inicio <= r[5] <= periodo_fim]
-    acum_rows = [r for r in servico_rows if r[5] is not None and r[5] <= periodo_fim]
+
+    def _entrada(r) -> Optional[date]:
+        return _entrada_portfolio(r[5], r[6] if len(r) > 6 else None)
+
+    novos_rows = [
+        r for r in servico_rows
+        if (e := _entrada(r)) is not None and periodo_inicio <= e <= periodo_fim
+    ]
+    acum_rows = [
+        r for r in servico_rows
+        if (e := _entrada(r)) is not None and e <= periodo_fim and _ev(r[2]) == "producao"
+    ]
     novos_ids = {r[3] for r in novos_rows}
 
     servicos_novos = _dedupe_servicos([_servico_ref(r, novo_no_mes=True) for r in novos_rows])
@@ -687,7 +968,7 @@ def _portfolio_evidencias_mem(cache: tuple, periodo_inicio: date, periodo_fim: d
     anexos_acum, links_acum = _portfolio_anexos_e_links_mem(
         docs_by_pid, releases_by_pid, pids_acum, periodo_fim,
     )
-    return servicos_novos, servicos_acum, [], [], anexos_novos, anexos_acum, links_novos, links_acum
+    return servicos_novos, servicos_acum, [], [], [], [], anexos_novos, anexos_acum, links_novos, links_acum
 
 
 async def _get(db: AsyncSession, indicador_id: uuid.UUID) -> Indicador:
@@ -724,6 +1005,7 @@ class IndicadorService:
             (
                 servicos_novos, servicos_acum,
                 documentos_novos, documentos_acum,
+                processos_novos, processos_acum,
                 anexos_novos, anexos_acum,
                 links_novos, links_acum,
             ) = _portfolio_evidencias_mem(portfolio_cache, ac.periodo_inicio, ac.periodo_fim)
@@ -731,6 +1013,7 @@ class IndicadorService:
             (
                 servicos_novos, servicos_acum,
                 documentos_novos, documentos_acum,
+                processos_novos, processos_acum,
                 anexos_novos, anexos_acum,
                 links_novos, links_acum,
             ) = await _portfolio_evidencias(db, ac.periodo_inicio, ac.periodo_fim, ind.fonte_metrica)
@@ -740,6 +1023,8 @@ class IndicadorService:
             "portfolio_servicos_novos": servicos_novos or None,
             "portfolio_documentos": documentos_acum or None,
             "portfolio_documentos_novos": documentos_novos or None,
+            "portfolio_processos": processos_acum or None,
+            "portfolio_processos_novos": processos_novos or None,
             "portfolio_links": links_acum or None,
             "portfolio_links_novos": links_novos or None,
         })
@@ -756,6 +1041,7 @@ class IndicadorService:
             (
                 servicos_novos, servicos_acum,
                 documentos_novos, documentos_acum,
+                processos_novos, processos_acum,
                 anexos_novos, anexos_acum,
                 links_novos, links_acum,
             ) = await _portfolio_evidencias(db, ac.periodo_inicio, ac.periodo_fim, ind.fonte_metrica)
@@ -767,6 +1053,8 @@ class IndicadorService:
                 portfolio_servicos_novos=servicos_novos,
                 portfolio_documentos=documentos_acum,
                 portfolio_documentos_novos=documentos_novos,
+                portfolio_processos=processos_acum,
+                portfolio_processos_novos=processos_novos,
                 portfolio_links=links_acum,
                 portfolio_links_novos=links_novos,
             )
@@ -826,7 +1114,8 @@ class IndicadorService:
                 # Não computável (estado corrente fora do mês vigente) — preserva o gravado.
                 continue
             _num, _den, pct = res
-            novo = float(pct) if pct is not None else None
+            # Sem população (den=0 → pct None): grava 0 e avalia status (não deixa Pendente).
+            novo = float(pct) if pct is not None else 0.0
             atual = _f(ac.realizado)
             p, st = calc_status(
                 ind.sentido, novo, _f(ac.meta),
@@ -854,7 +1143,8 @@ class IndicadorService:
             res = _calc_realizado(ind.fonte_metrica, portfolio_rows, ac.periodo_inicio, ac.periodo_fim)
             if res is not None:
                 _n, _d, pct_mes = res
-                realizado = float(pct_mes) if pct_mes is not None else None
+                # Sem população → 0 (mesmo critério de recompute_portfolio).
+                realizado = float(pct_mes) if pct_mes is not None else 0.0
             # res None: mantém o valor gravado (fechado ao vivo mês a mês).
         pct, st = calc_status(
             ind.sentido, realizado, _f(ac.meta),
@@ -1060,7 +1350,7 @@ class IndicadorService:
             res = _calc_realizado(ind.fonte_metrica, rows, ac.periodo_inicio, ac.periodo_fim)
             if res is not None:
                 _num, _den, pct = res
-                ac.realizado = float(pct) if pct is not None else None
+                ac.realizado = float(pct) if pct is not None else 0.0
             # res None (estado corrente fora do mês vigente): preserva o valor gravado.
         elif data.limpar_realizado:
             ac.realizado = None
@@ -1109,6 +1399,8 @@ class IndicadorService:
                 res = _calc_realizado(m, rows, hoje.replace(day=1), fim_mes)
                 if res is not None:
                     p_num, p_den, p_pct = res
+            elif m == FontePortfolioMetrica.PROCESSOS_DIGITAIS:
+                p_num, p_den, p_pct = _pct_processos_digitais(rows, date.today())
             else:
                 p_num, p_den, p_pct = _pct_ate(rows, date.today())
 

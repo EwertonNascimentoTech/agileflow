@@ -47,12 +47,19 @@ function BarraExecucao({ label, cor, done, total, pct }: {
   )
 }
 
-function PlanoCard({ plano }: { plano: PlanoEpa }) {
+function PlanoCard({
+  plano, defaultExpanded = false, hideEmpty = false,
+}: {
+  plano: PlanoEpa
+  defaultExpanded?: boolean
+  hideEmpty?: boolean
+}) {
   // Minimizado por padrão: só identificação + barras; expandir mostra a tabela de ações.
-  const [expandido, setExpandido] = useState(false)
+  const [expandido, setExpandido] = useState(defaultExpanded)
   // Tooltip GRANDE e centralizado com os acompanhamentos da ação sob o mouse.
   const [acompAtivo, setAcompAtivo] = useState<{ titulo: string; itens: PlanoEpaAcomp[] } | null>(null)
   if (plano.erro) {
+    if (hideEmpty) return null
     return (
       <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
         <b>Plano {plano.codigo}:</b> {plano.erro}
@@ -79,7 +86,9 @@ function PlanoCard({ plano }: { plano: PlanoEpa }) {
             <p className="mt-0.5 text-xs font-semibold uppercase leading-snug text-sky-600">
               {plano.titulo}
             </p>
-            <p className="mt-1 text-[10px] text-muted-foreground">{plano.acoes.length} ação(ões)</p>
+            {(!hideEmpty || plano.acoes.length > 0) && (
+              <p className="mt-1 text-[10px] text-muted-foreground">{plano.acoes.length} ação(ões)</p>
+            )}
           </div>
         </div>
         {/* Barras de execução */}
@@ -130,14 +139,19 @@ function PlanoCard({ plano }: { plano: PlanoEpa }) {
                       a.status === "suspenso"
                         ? "Suspensa — fora do cálculo de execução"
                         : a.status === "atrasado" && a.status_raw
-                          ? `${a.status_raw} no EPA — prazo vencido dentro do período de referência`
+                          ? `${a.status_raw} no EPA — prazo anterior à data atual`
                           : a.status_raw ?? undefined
                     }>
                     {STATUS_LABEL[a.status].label}
                   </td>
-                  <td className="px-3 py-2 text-center">{a.responsavel ?? "—"}</td>
-                  <td className="px-3 py-2 text-center tabular-nums">{fmtData(a.prazo)}</td>
                   <td className="px-3 py-2 text-center">
+                    {a.responsavel || (hideEmpty ? "" : "—")}
+                  </td>
+                  <td className="px-3 py-2 text-center tabular-nums">
+                    {a.prazo ? fmtData(a.prazo) : (hideEmpty ? "" : "—")}
+                  </td>
+                  <td className="px-3 py-2 text-center">
+                    {(!hideEmpty || a.acompanhamentos.length > 0) && (
                     <span
                       className="inline-flex cursor-help items-center gap-1"
                       onMouseEnter={() => setAcompAtivo({ titulo: a.titulo, itens: a.acompanhamentos })}
@@ -149,6 +163,7 @@ function PlanoCard({ plano }: { plano: PlanoEpa }) {
                         <span className="text-[10px] font-bold text-sky-700">{a.acompanhamentos.length}</span>
                       )}
                     </span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -189,22 +204,34 @@ function PlanoCard({ plano }: { plano: PlanoEpa }) {
 }
 
 export function RtdPlanosEpaSection({
-  reuniaoId, codigosIniciais, readOnly, categoria = "estrategico",
+  reuniaoId, codigosIniciais, readOnly, categoria = "estrategico", initialData = null,
+  defaultExpanded = false, hideEmpty = false,
 }: {
   reuniaoId: string
   codigosIniciais: number[]
   readOnly: boolean
   /** Slide de Planos Estratégicos ou Planos Táticos (mesma mecânica, listas próprias). */
   categoria?: "estrategico" | "tatico"
+  /** Quando informado (ex.: página pública), não chama a API autenticada. */
+  initialData?: PlanosEpaResponse | null
+  /** PDF / impressão: expande a tabela de ações de cada plano. */
+  defaultExpanded?: boolean
+  /** PDF: omite placeholders e mensagens de ausência. */
+  hideEmpty?: boolean
 }) {
-  const [data, setData] = useState<PlanosEpaResponse | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [data, setData] = useState<PlanosEpaResponse | null>(initialData)
+  const [loading, setLoading] = useState(!initialData)
   const [codigosInput, setCodigosInput] = useState(codigosIniciais.join(", "))
   const [salvando, setSalvando] = useState(false)
   // Configuração de códigos escondida por padrão (os planos vêm do .env).
   const [configAberta, setConfigAberta] = useState(false)
 
   async function carregar() {
+    if (initialData) {
+      setData(initialData)
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
       const resp = await rtdApi.getPlanosEpa(reuniaoId, categoria)
@@ -217,7 +244,7 @@ export function RtdPlanosEpaSection({
       setLoading(false)
     }
   }
-  useEffect(() => { carregar() }, [reuniaoId])
+  useEffect(() => { carregar() }, [reuniaoId, categoria, initialData])
 
   async function salvarCodigos() {
     const codigos = codigosInput
@@ -279,16 +306,24 @@ export function RtdPlanosEpaSection({
       {loading ? (
         <div className="space-y-3"><Skeleton className="h-40 w-full" /><Skeleton className="h-40 w-full" /></div>
       ) : data?.erro ? (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{data.erro}</div>
+        hideEmpty ? null : (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{data.erro}</div>
+        )
       ) : !data?.codigos?.length ? (
-        <p className="text-sm text-muted-foreground">
-          Nenhum plano configurado — informe os códigos dos Planos Estratégicos do EPA acima.
-        </p>
+        hideEmpty ? null : (
+          <p className="text-sm text-muted-foreground">
+            Nenhum plano configurado — informe os códigos dos Planos Estratégicos do EPA acima.
+          </p>
+        )
       ) : !data?.planos?.length ? (
-        <p className="text-sm text-muted-foreground">Sem dados retornados pelo EPA para os códigos informados.</p>
+        hideEmpty ? null : (
+          <p className="text-sm text-muted-foreground">Sem dados retornados pelo EPA para os códigos informados.</p>
+        )
       ) : (
         <div className="space-y-4">
-          {data.planos.map((p) => <PlanoCard key={p.codigo} plano={p} />)}
+          {data.planos.map((p) => (
+            <PlanoCard key={p.codigo} plano={p} defaultExpanded={defaultExpanded} hideEmpty={hideEmpty} />
+          ))}
         </div>
       )}
     </div>

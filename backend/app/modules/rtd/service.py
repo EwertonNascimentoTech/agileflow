@@ -76,6 +76,7 @@ class RtdService:
             status=r.status.value, data_realizacao=r.data_realizacao,
             observacoes=r.observacoes, epa_planos=r.epa_planos,
             epa_planos_taticos=r.epa_planos_taticos,
+            public_token=r.public_token,
             total_deliberacoes=total_delib,
             created_at=r.created_at,
         )
@@ -182,6 +183,72 @@ class RtdService:
         await db.delete(r)
         await db.commit()
         return True
+
+    # ── Link público (sem login) ──
+    @classmethod
+    async def generate_public_token(
+        cls, db: AsyncSession, reuniao_id: uuid.UUID, user_id: uuid.UUID,
+    ) -> Optional[schemas.PublicTokenOut]:
+        """Gera (ou reusa) token opaco para compartilhar a apresentação sem login."""
+        import secrets
+        r = await cls.get_reuniao(db, reuniao_id)
+        if r is None:
+            return None
+        if not r.public_token:
+            r.public_token = secrets.token_urlsafe(24)
+            r.updated_by = user_id
+            r.updated_at = datetime.utcnow()
+            await db.commit()
+            await db.refresh(r)
+        return schemas.PublicTokenOut(
+            public_token=r.public_token,
+            path=f"/p/rtd/{r.public_token}",
+        )
+
+    @classmethod
+    async def revoke_public_token(
+        cls, db: AsyncSession, reuniao_id: uuid.UUID, user_id: uuid.UUID,
+    ) -> bool:
+        r = await cls.get_reuniao(db, reuniao_id)
+        if r is None:
+            return False
+        if r.public_token:
+            r.public_token = None
+            r.updated_by = user_id
+            r.updated_at = datetime.utcnow()
+            await db.commit()
+        return True
+
+    @classmethod
+    async def build_public_view(cls, db: AsyncSession, reuniao: models.RtdReuniao) -> dict:
+        """Payload enxuto dos 5 slides para a página pública (somente leitura)."""
+        snapshot_at = None
+        if reuniao.status == models.ReuniaoStatus.FECHADA and reuniao.snapshot_indicadores:
+            indicadores_detalhe = reuniao.snapshot_indicadores.get("indicadores_detalhe")
+            snapshot_at = reuniao.snapshot_indicadores.get("generated_at")
+        else:
+            indicadores_detalhe = await cls._indicadores_detalhe(db, reuniao)
+
+        planos_estrategicos = await cls.planos_epa(reuniao, "estrategico")
+        planos_taticos = await cls.planos_epa(reuniao, "tatico")
+
+        return {
+            "meta": {
+                "titulo": reuniao.titulo,
+                "competencia": reuniao.competencia,
+                "status": reuniao.status.value,
+                "data_realizacao": (
+                    reuniao.data_realizacao.isoformat() if reuniao.data_realizacao else None
+                ),
+                "periodo_inicio": reuniao.periodo_inicio.isoformat(),
+                "periodo_fim": reuniao.periodo_fim.isoformat(),
+                "snapshot_at": snapshot_at,
+                "generated_at": datetime.utcnow().isoformat(),
+            },
+            "indicadores_detalhe": indicadores_detalhe,
+            "planos_estrategicos": planos_estrategicos,
+            "planos_taticos": planos_taticos,
+        }
 
     # ── CRUD Deliberação ──
     @classmethod
@@ -359,9 +426,19 @@ class RtdService:
 
         itens: list[str] = []
         if metrica_valor == "servicos_publicados" and evid_serv is not None:
-            itens = [f"{s} — {p}" for s, d, p in evid_serv if dentro(d)]
+            from app.modules.indicadores.service import _entrada_portfolio
+            itens = []
+            for row in evid_serv:
+                created = row[3] if len(row) > 3 else None
+                if dentro(_entrada_portfolio(row[1], created)):
+                    itens.append(f"{row[0]} — {row[2]}")
         elif metrica_valor == "documentos_natos_digitais" and evid_doc is not None:
-            itens = [f"{s} — {p}" for s, d, p in evid_doc if dentro(d)]
+            from app.modules.indicadores.service import _entrada_portfolio
+            itens = []
+            for row in evid_doc:
+                created = row[3] if len(row) > 3 else None
+                if dentro(_entrada_portfolio(row[1], created)):
+                    itens.append(f"{row[0]} — {row[2]}")
         elif metrica_valor and metrica_valor.startswith("cronograma_") and ds is not None:
             for root in ds.roots:
                 if root.planning_kind != "projeto" or root.card_classification != alvo_cls \
@@ -608,23 +685,29 @@ class RtdService:
             vals = set(metrica_by_id.values())
             if "servicos_publicados" in vals:
                 evid_serv = (await db.execute(
-                    select(ProductServico.name, ProductServico.data_publicacao, Product.name)
+                    select(
+                        ProductServico.name, ProductServico.data_publicacao, Product.name,
+                        ProductServico.created_at,
+                    )
                     .join(Product, Product.id == ProductServico.product_id)
                     .where(
                         ProductServico.is_active.is_(True), Product.is_active.is_(True),
-                        Product.lifecycle == ProductLifecycle.PRODUCAO,
+                        Product.lifecycle.in_([ProductLifecycle.PRODUCAO, ProductLifecycle.DESENVOLVIMENTO]),
                         ProductServico.data_publicacao.isnot(None),
                     )
                 )).all()
             if "documentos_natos_digitais" in vals:
                 evid_doc = (await db.execute(
-                    select(ProductDocumento.name, ProductDocumento.data_documento, Product.name)
+                    select(
+                        ProductDocumento.name, ProductDocumento.data_documento, Product.name,
+                        ProductDocumento.created_at,
+                    )
                     .join(Product, Product.id == ProductDocumento.product_id)
                     .where(
                         ProductDocumento.is_active.is_(True),
                         ProductDocumento.is_nato_digital.is_(True),
                         Product.is_active.is_(True),
-                        Product.lifecycle == ProductLifecycle.PRODUCAO,
+                        Product.lifecycle.in_([ProductLifecycle.PRODUCAO, ProductLifecycle.DESENVOLVIMENTO]),
                         ProductDocumento.data_documento.isnot(None),
                     )
                 )).all()

@@ -11,6 +11,7 @@ export type FonteMetrica =
   // Produtos
   | "servicos_publicados"
   | "documentos_natos_digitais"
+  | "processos_digitais"
   // Projetos (indicadores táticos)
   | "cronograma_desenvolvimento"
   | "cronograma_implantacao"
@@ -64,6 +65,17 @@ export interface PortfolioDocumentoRef {
   novo_no_mes?: boolean
 }
 
+export interface PortfolioProcessoRef {
+  portfolio_id: string
+  portfolio_name: string
+  item_lineage_id: string
+  processo_name: string
+  codigo: string | null
+  data_digitalizacao: string | null
+  servicos: string[]
+  novo_no_mes?: boolean
+}
+
 export interface PortfolioLinkRef {
   label: string
   url: string
@@ -77,6 +89,8 @@ export interface AcompanhamentoEvidenciasPayload {
   portfolio_servicos_novos: PortfolioServicoRef[]
   portfolio_documentos: PortfolioDocumentoRef[]
   portfolio_documentos_novos: PortfolioDocumentoRef[]
+  portfolio_processos: PortfolioProcessoRef[]
+  portfolio_processos_novos: PortfolioProcessoRef[]
   portfolio_links: PortfolioLinkRef[]
   portfolio_links_novos: PortfolioLinkRef[]
 }
@@ -101,6 +115,8 @@ export interface Acompanhamento {
   portfolio_servicos_novos?: PortfolioServicoRef[] | null
   portfolio_documentos?: PortfolioDocumentoRef[] | null
   portfolio_documentos_novos?: PortfolioDocumentoRef[] | null
+  portfolio_processos?: PortfolioProcessoRef[] | null
+  portfolio_processos_novos?: PortfolioProcessoRef[] | null
   portfolio_links?: PortfolioLinkRef[] | null
   portfolio_links_novos?: PortfolioLinkRef[] | null
   created_at: string

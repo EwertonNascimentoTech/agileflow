@@ -93,6 +93,9 @@ export interface ProjectTask {
   origin_task_id: string | null
   title: string
   description: string | null
+  /** Prévia cortada da descrição: é o que a lista do quadro traz no lugar do texto
+   *  completo (omitido por peso). Vem só de `listBoardTasks`. */
+  description_preview?: string | null
   assigned_to: string | null
   planning_kind: string | null
   linked_program_id: string | null
@@ -122,7 +125,7 @@ export interface ProjectTask {
   completed_at: string | null
   left_backlog_at?: string | null
   status_entered_at: string | null
-  /** Justificativa de ausência de commit na conclusão da US (evidência de código). */
+  /** Justificativa de ausência de commit (exigida ao enviar a US para Homologação do PO). */
   commit_justificativa?: string | null
   commit_justificativa_em?: string | null
   /** Gravado quando o card-raiz de planejamento entra numa etapa `locks_schedule`.
@@ -150,7 +153,7 @@ export interface UsCommitItem {
   linked: boolean
 }
 
-/** O que falta para a US poder ser concluída. */
+/** O que falta para a US ir à Homologação (PO). */
 export interface UsCommitEvidenceState {
   tem_produto: boolean
   commits_vinculados: number
@@ -367,7 +370,7 @@ export interface ProjectScheduleBindingInput {
   is_active: boolean
 }
 
-export type ProjectStageAgentKind = "ask" | "classify_and_advance"
+export type ProjectStageAgentKind = "ask" | "classify_and_advance" | "review_and_route"
 
 export interface ProjectStageAgentBinding {
   id: string
@@ -385,6 +388,7 @@ export interface ProjectStageAgentBinding {
   continue_thread: boolean
   add_comment_on_success: boolean
   advance_to_status_id: string | null
+  fail_to_status_id: string | null
   is_active: boolean
   created_at: string
   updated_at: string
@@ -401,6 +405,7 @@ export interface ProjectStageAgentBindingInput {
   continue_thread?: boolean
   add_comment_on_success?: boolean
   advance_to_status_id?: string | null
+  fail_to_status_id?: string | null
   is_active?: boolean
 }
 
@@ -538,6 +543,9 @@ export interface ProjectDeliveryKpis {
   total: number
   com_servicos: number
   com_processos_e_documentos: number
+  servicos_no_mes: number
+  processos_no_mes: number
+  documentos_no_mes: number
 }
 
 export interface UsDeliveryReport {
@@ -1910,6 +1918,11 @@ export const projetosApi = {
         tasks: r.data,
         doneTotal: Number(r.headers["x-done-total"] ?? NaN),
       })),
+  /** Card completo, com os campos que `listBoardTasks` omite (description, anexos,
+   *  procurement_meta). Usado ao abrir o card no drawer. */
+  getTask: (projectId: string, taskId: string) =>
+    api.get<ProjectTask>(`/projetos/projects/${projectId}/tasks/${taskId}`).then((r) => r.data),
+
   listPrograms: (projectId: string) =>
     api.get<{ id: string; name: string }[]>(`/projetos/projects/${projectId}/programs`).then((r) => r.data),
   createTask: (projectId: string, data: {
