@@ -211,4 +211,25 @@ app.include_router(docs_router, prefix="/api/v1")
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    """Saúde de verdade: banco é obrigatório (503 se cair); Redis é cache fail-open, então
+    fora do ar só marca "degraded". Timeouts curtos para o monitor não pendurar."""
+    import asyncio
+    from fastapi.responses import JSONResponse
+    from sqlalchemy import text as _text
+    from app.core.database import engine
+    from app.core.cache import get_redis
+
+    async def _db() -> None:
+        async with engine.connect() as conn:
+            await conn.execute(_text("SELECT 1"))
+
+    checks: dict[str, str] = {}
+    for name, probe in (("database", _db), ("redis", lambda: get_redis().ping())):
+        try:
+            await asyncio.wait_for(probe(), timeout=2)
+            checks[name] = "ok"
+        except Exception:  # noqa: BLE001 — health nunca levanta
+            checks[name] = "fail"
+    if checks["database"] != "ok":
+        return JSONResponse({"status": "fail", **checks}, status_code=503)
+    return {"status": "ok" if checks["redis"] == "ok" else "degraded", **checks}

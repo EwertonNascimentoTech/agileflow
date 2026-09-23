@@ -1380,6 +1380,9 @@ class AbsenceService:
 
     @staticmethod
     async def get(db: AsyncSession, absence_id: uuid.UUID) -> Absence:
+        # populate_existing: depois de aprovar/editar, as relações (ex.: approver_person) já
+        # estavam carregadas na sessão como antes da mudança — a resposta vinha com o aprovador
+        # nulo embora o banco estivesse certo.
         result = await db.execute(
             select(Absence)
             .options(
@@ -1388,11 +1391,45 @@ class AbsenceService:
                 selectinload(Absence.approver_person),
             )
             .where(Absence.id == absence_id)
+            .execution_options(populate_existing=True)
         )
         item = result.scalar_one_or_none()
         if not item:
             raise HTTPException(status_code=404, detail="Ausência não encontrada.")
         return item
+
+    # Ausências que ainda valem (bloqueiam outra no mesmo período da mesma pessoa).
+    _ACTIVE_STATUSES = (AbsenceStatus.PENDENTE, AbsenceStatus.APROVADA)
+
+    @staticmethod
+    async def _assert_no_overlap(
+        db: AsyncSession,
+        person_id: uuid.UUID,
+        start: date,
+        end: date,
+        exclude_id: Optional[uuid.UUID] = None,
+    ) -> None:
+        """A mesma pessoa não pode ter duas ausências pendentes/aprovadas sobrepostas (contaria
+        a folga duas vezes na capacidade). Recusadas/canceladas não bloqueiam."""
+        q = select(Absence).options(selectinload(Absence.absence_type)).where(
+            Absence.person_id == person_id,
+            Absence.status.in_(AbsenceService._ACTIVE_STATUSES),
+            Absence.start_date <= end,
+            Absence.end_date >= start,
+        )
+        if exclude_id is not None:
+            q = q.where(Absence.id != exclude_id)
+        other = (await db.execute(q.limit(1))).scalar_one_or_none()
+        if other is not None:
+            tipo = ((other.absence_type.name if other.absence_type else "") or "").strip() or "Ausência"
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Já existe {tipo} ({other.status.value}) de "
+                    f"{other.start_date.strftime('%d/%m/%Y')} a {other.end_date.strftime('%d/%m/%Y')} "
+                    "que se sobrepõe a este período."
+                ),
+            )
 
     @staticmethod
     async def create(db: AsyncSession, data: AbsenceCreate, requested_by: Optional[uuid.UUID]) -> Absence:
@@ -1400,6 +1437,7 @@ class AbsenceService:
         absence_type = await AbsenceTypeService.get(db, data.absence_type_id)
         if data.end_date < data.start_date:
             raise HTTPException(status_code=400, detail="Data fim deve ser igual ou posterior à data início.")
+        await AbsenceService._assert_no_overlap(db, data.person_id, data.start_date, data.end_date)
         initial_status = (
             AbsenceStatus.PENDENTE if absence_type.requires_approval else AbsenceStatus.APROVADA
         )
@@ -1427,6 +1465,9 @@ class AbsenceService:
         new_end = payload.get("end_date", item.end_date)
         if new_end < new_start:
             raise HTTPException(status_code=400, detail="Data fim deve ser igual ou posterior à data início.")
+        await AbsenceService._assert_no_overlap(
+            db, payload.get("person_id", item.person_id), new_start, new_end, exclude_id=item.id,
+        )
         for key, value in payload.items():
             setattr(item, key, value)
         item.updated_at = datetime.utcnow()
@@ -1614,7 +1655,11 @@ class AbsenceService:
         else:
             last = date(year_i, month_i + 1, 1) - timedelta(days=1)
 
-        absences = await AbsenceService.list(db, start_from=first, end_to=last)
+        # Calendário = quem está (ou pode estar) fora: recusadas e canceladas não aparecem.
+        absences = [
+            a for a in await AbsenceService.list(db, start_from=first, end_to=last)
+            if a.status in AbsenceService._ACTIVE_STATUSES
+        ]
         days: list[AbsenceCalendarDay] = []
         cur = first
         while cur <= last:

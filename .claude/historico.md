@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-23 — Auditoria · bloco 6 (itens menores P3)
+
+- **Pedido:** Corrigir os itens menores (P3) da auditoria geral.
+- **Feito:** Área com id do TeamOps: `assert_select_values` barra Diretoria/Área fora das opções do formulário (valor igual ao já salvo passa); os 2 cards VisitasHUB foram para "Tecnologia e Inovação" (opcao_8), decisão do usuário. PDF da RTD com acentos certos ("Voltar à reunião"). Dashboard usa `role_name` do /auth/me (sem 403 em /company/admin/roles). Sino sem tenant (super admin): lista vazia/contador 0 em vez de 500. Rota de módulo desativado mostra "Módulo não disponível" e não monta a tela (espera a lista de módulos; erro = não bloqueia). Atalho "Solicitações" do Coordenador/Administrativo removido quando ele vê Processos (decisão do usuário). Ausências: 409 para sobreposição pendente/aprovada da mesma pessoa; calendário sem recusadas/canceladas; aprovar devolve o aprovador (populate_existing). Análise de RTD: 404 para indicador inexistente. /health checa banco (503) e Redis (degraded) e o nginx encaminha /health para a API. Celery "idle in transaction": 24 amostras em 4 min com as tarefas rodando, nenhuma — já resolvido pelo dispose do bloco 2. Prompt do tutorial saiu de docs/usuario para provisorio/notas.
+- **Não mexer:** `assert_select_values` no create/update; `moduleCheckPending`/`moduleUnavailable` no AppLayout (não reativa nem apaga módulos); `_assert_no_overlap`; `populate_existing` no `AbsenceService.get`; `location = /health` do nginx.
+- **Arquivos:** `projetos/service.py`, `teamops/service.py`, `rtd/service.py`, `company/api/routes.py`, `main.py`, `frontend/nginx.conf`, `AppLayout.tsx`, `crm/admin/DashboardPage.tsx`, `RtdPresentationPrintPage.tsx`, `docs/usuario/README.md`, `provisorio/`
+
 ## 2026-09-23 — Auditoria · bloco 5 (desempenho D4, D5, D6, D9; D8 medido)
 
 - **Pedido:** Bloco de desempenho restante da auditoria.

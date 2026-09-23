@@ -817,6 +817,9 @@ class RtdService:
         user_id: uuid.UUID,
     ) -> schemas.IndicadorAnaliseOut:
         """Upsert com semântica PUT: o payload substitui TODOS os campos da análise."""
+        from app.modules.indicadores.models import Indicador
+        if await db.get(Indicador, indicador_id) is None:
+            raise HTTPException(status_code=404, detail="Indicador não encontrado.")
         res = await db.execute(
             select(models.RtdIndicadorAnalise).where(
                 models.RtdIndicadorAnalise.reuniao_id == reuniao.id,

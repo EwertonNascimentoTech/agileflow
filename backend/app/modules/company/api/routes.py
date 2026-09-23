@@ -314,17 +314,17 @@ class NotificationOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-async def _get_tenant_schema(user: User) -> str:
+async def _get_tenant_schema(user: User) -> Optional[str]:
+    """Schema do tenant do usuário. None para quem não tem tenant (super admin da
+    plataforma): o sino não tem notificações para ele — antes era 500 em toda tela."""
     from app.modules.super_admin.models import Tenant
-    from sqlalchemy.ext.asyncio import AsyncSession
     from app.core.database import AsyncSessionLocal
+    if not user.tenant_id:
+        return None
     async with AsyncSessionLocal() as s:
         await s.execute(text("SET search_path TO public"))
         result = await s.execute(select(Tenant.schema_name).where(Tenant.id == user.tenant_id))
-        schema = result.scalar_one_or_none()
-    if not schema:
-        raise Exception("Tenant schema not found")
-    return schema
+        return result.scalar_one_or_none()
 
 
 @router.get("/notifications", response_model=List[NotificationOut])
@@ -334,6 +334,8 @@ async def list_notifications(
     current_user: User = Depends(require_authenticated),
 ):
     schema = await _get_tenant_schema(current_user)
+    if not schema:
+        return []
     async with _tenant_session(schema) as tdb:
         q = text("""
             SELECT id, user_id, title, body, entity_type, entity_id, is_read, created_at
@@ -357,6 +359,8 @@ async def list_notifications(
 @router.get("/notifications/unread-count")
 async def unread_count(current_user: User = Depends(require_authenticated)):
     schema = await _get_tenant_schema(current_user)
+    if not schema:
+        return {"count": 0}
     async with _tenant_session(schema) as tdb:
         result = await tdb.execute(
             text("SELECT COUNT(*) FROM notifications WHERE user_id = :uid AND is_read = FALSE"),
@@ -372,6 +376,8 @@ async def mark_notification_read(
     current_user: User = Depends(require_authenticated),
 ):
     schema = await _get_tenant_schema(current_user)
+    if not schema:
+        return
     async with _tenant_session(schema) as tdb:
         await tdb.execute(
             text("UPDATE notifications SET is_read = TRUE WHERE id = :nid AND user_id = :uid"),
@@ -383,6 +389,8 @@ async def mark_notification_read(
 @router.post("/notifications/read-all", status_code=204)
 async def mark_all_read(current_user: User = Depends(require_authenticated)):
     schema = await _get_tenant_schema(current_user)
+    if not schema:
+        return
     async with _tenant_session(schema) as tdb:
         await tdb.execute(
             text("UPDATE notifications SET is_read = TRUE WHERE user_id = :uid AND is_read = FALSE"),

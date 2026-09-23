@@ -107,3 +107,11 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 - Relatórios que não mostram texto do card carregam tarefas com `_light_task_options()` (raiseload): se passarem a usar description, tirar a opção daquele relatório.
 - PO Sync usa cache chaveado pela versão dos dados (`_VERSION_SQL`); toda tabela nova que o PO Sync ler precisa entrar nessa versão. `health_by_po` tem cache de 60 s.
 - Frontend: `codeSplitting.groups` com vendor-react na maior prioridade; a primeira tela não pode importar vendor-charts/markdown/dnd.
+
+## Itens menores (auditoria 2026-09-23 · bloco 6)
+
+- Diretoria e Área do card só aceitam as opções do formulário padrão (opcao_N); nunca id de área do TeamOps. Valor legado igual ao salvo não trava a edição.
+- Rota de módulo desativado no tenant mostra "Módulo não disponível" e não monta a tela; o código do módulo continua (não reativar nem apagar sem pedido).
+- Mesma pessoa não tem duas ausências pendentes/aprovadas sobrepostas; calendário mostra só pendentes e aprovadas.
+- /health (API e domínio público) checa o banco (503 se cair) e o Redis (degraded).
+- docs/ é lido pelo módulo Documentação e aparece para todos: prompt, rascunho ou material interno vai para provisorio/.

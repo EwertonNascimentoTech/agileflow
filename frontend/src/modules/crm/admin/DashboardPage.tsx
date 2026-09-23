@@ -4,7 +4,6 @@ import { Package, ArrowRight, Loader2, Users2, ClipboardList, CirclePlus } from 
 import { resolveModuleIcon } from "@/lib/moduleIcons"
 import { companyApi, type MyTenant, type ActiveModule } from "@/api/crm"
 import { useAuth } from "@/contexts/AuthContext"
-import type { Role } from "@/types"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -21,7 +20,6 @@ export default function CompanyDashboardPage() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const [tenant, setTenant] = useState<MyTenant | null>(null)
-  const [roles, setRoles] = useState<Role[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -31,17 +29,11 @@ export default function CompanyDashboardPage() {
       .finally(() => setLoading(false))
   }, [])
 
-  useEffect(() => {
-    if (user?.role !== "company_user" || !user.role_id) return
-    companyApi.listRoles()
-      .then(setRoles)
-      .catch(() => setRoles([]))
-  }, [user?.role, user?.role_id])
-
   const firstName = user?.full_name?.split(" ")[0] ?? ""
+  // Nome da Função vem no /auth/me (role_name). Antes a tela listava todas as Funções
+  // (/company/admin/roles), rota de admin: 403 no console para todo usuário comum.
   const userRoleName = (
-    roles.find((r) => r.id === user?.role_id)?.name
-    ?? (user as unknown as { role_name?: string; function_name?: string; role_display_name?: string }).role_name
+    (user as unknown as { role_name?: string; function_name?: string; role_display_name?: string }).role_name
     ?? (user as unknown as { role_name?: string; function_name?: string; role_display_name?: string }).function_name
     ?? (user as unknown as { role_name?: string; function_name?: string; role_display_name?: string }).role_display_name
     ?? ""

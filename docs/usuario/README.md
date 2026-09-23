@@ -14,7 +14,6 @@ Para ficha BPMN / analista, ver [`docs/processo/`](../processo/README.md).
 | 03 | [Operacional — Processos e times](03-operacional-processos.md) | Gestores, PMO, coordenadores |
 | 04 | [Solicitante — abrir e acompanhar pedidos](04-solicitante-minhas-solicitacoes.md) | Utilizador operacional / básico |
 | 05 | [Fluxo de processo de negócio](05-fluxo-processo-negocio.md) | Todos (visão ponta a ponta) |
-| — | [Prompt Claude Code — tutorial com prints](PROMPT-tutorial-prints-claude-code.md) | Quem for gerar o guia visual |
 
 ## Papéis na prática
 

@@ -16,6 +16,7 @@ O que roda o sistema fica na raiz: `backend/`, `frontend/`, `docker-compose.yml`
 | | `projetos_fora_da_regra.xlsx` — planilha de projetos "fora da regra" (exportação) |
 | `notas/` | `integracao-epa.md` — integração IDReport × EPA (planos de ação); citado em `docs/técnico/07-rtd-epa.md` |
 | | `epa_acompanhamentos.md` — endpoints de acompanhamento de planos de ação do EPA |
+| | `PROMPT-tutorial-prints-claude-code.md` — prompt para gerar o tutorial com prints (saiu de `docs/usuario/`: a Documentação mostrava a todos) |
 | `scripts/` | `e2e_flow_pmo.py` — simulação antiga do fluxo PMO → Planejamento → Desenvolvimento no `tenant_ga` |
 | `prototipos/` | `prototipo/` — protótipo HTML/JSX do layout (citado em `frontend/src/styles/agileflow.css`), com prints e uma cópia antiga do `CLAUDE.md` em `uploads/agileflow-hml/` (**não usar**) |
 | | `prototipo2/` — protótipo do Cronograma/Gantt (citado em `GanttChart.tsx`) |

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { Outlet, useNavigate, useLocation, useSearchParams } from "react-router-dom"
 import {
-  LayoutDashboard, Menu, Settings, Search, Moon, Sun, ChevronRight, ClipboardList, CirclePlus,
+  LayoutDashboard, Menu, Settings, Search, Moon, Sun, ChevronRight, ClipboardList, CirclePlus, PackageX,
 } from "lucide-react"
 import { resolveModuleIcon } from "@/lib/moduleIcons"
 import { useAuth } from "@/contexts/AuthContext"
@@ -11,6 +11,7 @@ import { projetosApi } from "@/api/projetos"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { NotificationBell } from "@/components/NotificationBell"
+import { EmptyState } from "@/components/EmptyState"
 import { GlobalSearch } from "@/components/GlobalSearch"
 import {
   moduleNavConfig, getActiveModuleSlug, firstAccessibleModuleRoute,
@@ -53,6 +54,8 @@ export default function AppLayout() {
   const [searchParams] = useSearchParams()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [modules, setModules] = useState<ActiveModule[]>([])
+  // "loading" até a lista de módulos ativos chegar; "error" = não bloqueia nada (fail-open).
+  const [modulesStatus, setModulesStatus] = useState<"loading" | "ok" | "error">("loading")
   const [kanbanItems, setKanbanItems] = useState<SidebarKanbanItem[]>([])
   const [searchOpen, setSearchOpen] = useState(false)
 
@@ -63,6 +66,13 @@ export default function AppLayout() {
     user?.role === "company_user" &&
     (userRoleName === "basic" || userRoleName === "")
   const activeModuleSlug = getActiveModuleSlug(location.pathname)
+  // Rota de módulo desativado para o tenant (CRM, estoque, PDV…): as telas continuam no
+  // código (desativadas de propósito), mas abri-las pela URL só gerava erros de API.
+  const moduleUnavailable =
+    modulesStatus === "ok" && !!activeModuleSlug && !modules.some((m) => m.slug === activeModuleSlug)
+  // Rota de módulo: espera a lista chegar antes de montar a tela, senão a tela de um módulo
+  // desativado já dispara as chamadas de API (404) antes do aviso aparecer.
+  const moduleCheckPending = modulesStatus === "loading" && !!activeModuleSlug
   const inSettings = location.pathname.startsWith("/app/settings")
   const activeModule = activeModuleSlug ? modules.find(m => m.slug === activeModuleSlug) : null
   const activeProjectIdFromPath = useMemo(() => {
@@ -73,15 +83,14 @@ export default function AppLayout() {
   const basicNewRequestRoute = hasProjetosModule ? "/app/modules/projetos/solicitacoes" : "/app/modules/crm/attendances/new"
   const basicMyRequestsRoute = hasProjetosModule ? "/app/modules/projetos/minhas" : "/app/modules/crm/kanban"
   // Abrir/acompanhar solicitações é funcionalidade básica de TODO usuário. Quem já enxerga o
-  // módulo Processos acessa pelos itens do próprio módulo; quem NÃO enxerga ganha um atalho
-  // dedicado "Solicitações" no rail (com uma sidebar mínima: Nova + Minhas).
-  // Coordenadores (e Administrativo, mesmo nível) sempre ganham o atalho, mantendo seus demais módulos.
-  const slug = (user?.position_slug ?? "").trim()
-  const isCoordenador = slug === "coordenador" || slug === "administrativo" || slug === "coord_de_arq_dev_e_sustenta_o"
+  // módulo Processos acessa pelos itens do próprio módulo (Nova/Minhas Solicitações); quem NÃO
+  // enxerga ganha um atalho dedicado "Solicitações" no rail (com uma sidebar mínima).
+  // Coordenador/Administrativo tinham o atalho mesmo vendo Processos — item duplicado no menu
+  // (auditoria 2026-09-23); saiu a pedido.
   // Product Owner (Externo): opera os kanbans dos seus projetos, sem as visões consolidadas.
   const isExternalPO = isExternalProductOwner(user)
   const canSeeProjetos = isAdmin || canSeeModule(user?.permissions, "projetos")
-  const needsSolicitacoesShortcut = !isBasicUser && hasProjetosModule && (!canSeeProjetos || isCoordenador)
+  const needsSolicitacoesShortcut = !isBasicUser && hasProjetosModule && !canSeeProjetos
   const inSolicitacoes =
     location.pathname.startsWith(basicNewRequestRoute) || location.pathname.startsWith(basicMyRequestsRoute)
   const activeFunnelIdFromQuery = searchParams.get("funnel")
@@ -116,8 +125,8 @@ export default function AppLayout() {
 
   useEffect(() => {
     companyApi.getMyTenant()
-      .then(t => setModules(t?.active_modules ?? []))
-      .catch(() => setModules([]))
+      .then(t => { setModules(t?.active_modules ?? []); setModulesStatus(t ? "ok" : "error") })
+      .catch(() => { setModules([]); setModulesStatus("error") })
   }, [])
 
   useEffect(() => {
@@ -376,7 +385,18 @@ export default function AppLayout() {
         {searchOpen && <GlobalSearch onClose={() => setSearchOpen(false)} />}
 
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto p-4 md:p-6">
-          <Outlet />
+          {moduleCheckPending ? (
+            <div className="flex min-h-[40vh] items-center justify-center text-sm text-muted-foreground">Carregando…</div>
+          ) : moduleUnavailable ? (
+            <EmptyState
+              icon={PackageX}
+              title="Módulo não disponível"
+              description="Este módulo não está ativo para a sua empresa. Fale com o administrador se precisar dele."
+              action={{ label: "Voltar ao início", onClick: () => navigate("/app/dashboard") }}
+            />
+          ) : (
+            <Outlet />
+          )}
         </main>
       </div>
     </div>

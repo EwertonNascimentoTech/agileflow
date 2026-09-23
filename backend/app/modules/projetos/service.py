@@ -633,6 +633,27 @@ class ProjectDefaultFormService:
             )
 
     @staticmethod
+    async def assert_select_values(
+        db: AsyncSession, values: dict, existing: Optional["ProjectTask"] = None,
+    ) -> None:
+        """Diretoria e Área são select do formulário padrão: só aceitam as opções configuradas
+        (opcao_N). Um card chegou a gravar o id de uma área do TeamOps e o filtro de Área
+        mostrava o UUID cru. Valor igual ao já salvo passa (não trava edição de legado)."""
+        keys = [k for k in ("diretoria", "area") if values.get(k) not in (None, "")]
+        if not keys:
+            return
+        cfgs = {f.field_key: f for f in await ProjectDefaultFormService.list(db) if f.field_key in keys}
+        for k in keys:
+            cfg = cfgs.get(k)
+            if cfg is None or cfg.field_type != "select":
+                continue
+            if existing is not None and getattr(existing, k, None) == values[k]:
+                continue
+            allowed = ProjectDefaultFormService._option_values(cfg)
+            if allowed and str(values[k]) not in allowed:
+                raise HTTPException(status_code=400, detail=f"Valor inválido para o campo {cfg.label}.")
+
+    @staticmethod
     async def validate_task_data_for_status(
         db: AsyncSession,
         status_id: uuid.UUID,
@@ -4030,6 +4051,7 @@ class ProjectTaskService:
         for key in ("diretoria", "area"):
             if payload.get(key) == "":
                 payload[key] = None
+        await ProjectDefaultFormService.assert_select_values(db, payload)
         # Cronograma manual: as datas informadas na criação valem, inclusive sob um projeto/programa.
         payload["due_date"] = _to_naive_utc(payload.get("due_date"))
         payload["start_date"] = _to_naive_utc(payload.get("start_date"))
@@ -4429,6 +4451,7 @@ class ProjectTaskService:
         for key in ("diretoria", "area"):
             if payload.get(key) == "":
                 payload[key] = None
+        await ProjectDefaultFormService.assert_select_values(db, payload, existing=task)
 
         target_status: Optional[ProjectStatusConfig] = None
         source_status: Optional[ProjectStatusConfig] = None

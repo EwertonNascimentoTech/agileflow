@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "@/lib/toast"
 
 /**
- * Visualiza??o imprim?vel da apresenta??o RTD (capa + indicadores + planos).
+ * Visualização imprimível da apresentação RTD (capa + indicadores + planos).
  * Use "Imprimir / PDF" do navegador para gerar o arquivo.
  */
 export default function RtdPresentationPrintPage() {
@@ -30,7 +30,7 @@ export default function RtdPresentationPrintPage() {
         setPersons(people)
       })
       .catch(() => {
-        if (active) toast.error("Falha ao carregar a apresenta??o da reuni?o")
+        if (active) toast.error("Falha ao carregar a apresentação da reunião")
       })
       .finally(() => {
         if (active) setLoading(false)
@@ -47,7 +47,7 @@ export default function RtdPresentationPrintPage() {
           className="gap-1.5"
           onClick={() => navigate(`/app/modules/rtd/reunioes/${id}`)}
         >
-          <ArrowLeft className="h-4 w-4" /> Voltar ? reuni?o
+          <ArrowLeft className="h-4 w-4" /> Voltar à reunião
         </Button>
         <Button className="ml-auto gap-1.5" onClick={() => window.print()} disabled={!report}>
           <Printer className="h-4 w-4" /> Imprimir / PDF
