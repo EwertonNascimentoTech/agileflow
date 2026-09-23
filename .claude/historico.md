@@ -14,6 +14,12 @@ Modelo:
 
 ---
 
+## 2026-09-23 — Portal: coluna Responsável na lista de ocorrências
+
+- **Pedido:** Trazer o nome do dev que assumiu na lista de ocorrências do Portal do Cliente.
+- **Feito:** Coluna "Responsável" em `ClientOccurrencesPage` com `assignee_name` (já vinha na API do Portal); sem responsável mostra "Aguardando atendimento" (ou "—" se encerrada). O detalhe da ocorrência já mostrava. E2E da OA 72/72 + 18/18, prints 02/03 atualizados.
+- **Arquivos:** `frontend/src/modules/portal/ClientOccurrencesPage.tsx`
+
 ## 2026-09-23 — Ocorrências visíveis só para PO do projeto, devs de atendimento e coordenação
 
 - **Pedido:** O card da ocorrência só pode ser visto pelo PO do projeto, pelos devs que o PO informou ao mover para a Operação Assistida e pela coordenação (vê todas).

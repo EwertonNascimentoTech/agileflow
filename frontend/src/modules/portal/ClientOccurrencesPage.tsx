@@ -122,6 +122,7 @@ export default function ClientOccurrencesPage() {
                 <th className="px-3 py-2 font-semibold">Projeto</th>
                 <th className="px-3 py-2 font-semibold">Prioridade</th>
                 <th className="px-3 py-2 font-semibold">Situação</th>
+                <th className="px-3 py-2 font-semibold">Responsável</th>
                 <th className="px-3 py-2 font-semibold">Aberta</th>
               </tr>
             </thead>
@@ -143,6 +144,12 @@ export default function ClientOccurrencesPage() {
                   </td>
                   <td className="px-3 py-2">
                     <StageBadge stageKey={o.stage_key} name={o.stage_name} mine={o.opened_by_me} />
+                  </td>
+                  {/* Quem assumiu no time (antes disso, aguardando alguém assumir). */}
+                  <td className="px-3 py-2">
+                    {o.assignee_name
+                      ? <span className="font-medium">{o.assignee_name}</span>
+                      : <span className="text-xs text-muted-foreground">{o.is_closed ? "—" : "Aguardando atendimento"}</span>}
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">{fmtDateTime(o.created_at)}</td>
                 </tr>
