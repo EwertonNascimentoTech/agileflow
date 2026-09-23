@@ -16,6 +16,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { EmptyState } from "@/components/EmptyState"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { toast } from "@/lib/toast"
+import { FirstAccessLinkButton } from "@/components/FirstAccessLinkButton"
 
 type Form = {
   email: string
@@ -176,7 +177,7 @@ export default function ProjectClientsPage() {
         toast.success("Cliente atualizado.")
       } else {
         await clientesApi.create({ ...fields, email: form.email.trim().toLowerCase(), project_task_ids: form.projectIds })
-        toast.success("Cliente cadastrado. Ele define a senha no primeiro acesso.")
+        toast.success("Cliente cadastrado. Gere o link de primeiro acesso (ícone de chave) e envie a ele.")
       }
       setOpen(false)
       await reload()
@@ -290,15 +291,25 @@ export default function ProjectClientsPage() {
                     </div>
                   </td>
                   <td className="px-3 py-2 text-right">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-muted-foreground hover:text-primary"
-                      onClick={() => openEdit(c)}
-                      aria-label="Editar cliente"
-                    >
-                      <Pencil size={14} />
-                    </Button>
+                    <div className="flex items-center justify-end gap-1">
+                      {c.first_access_pending && c.is_active && (
+                        <FirstAccessLinkButton
+                          size="icon"
+                          variant="ghost"
+                          personName={c.full_name}
+                          generate={() => clientesApi.firstAccessLink(c.id)}
+                        />
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-muted-foreground hover:text-primary"
+                        onClick={() => openEdit(c)}
+                        aria-label="Editar cliente"
+                      >
+                        <Pencil size={14} />
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -360,8 +371,8 @@ export default function ProjectClientsPage() {
             {lookup?.status === "new" && (
               <Alert>
                 <AlertDescription>
-                  E-mail livre. Depois do cadastro, o cliente entra em “Primeiro acesso” na tela de login com este e-mail
-                  para criar a senha.
+                  E-mail livre. Depois do cadastro, gere o link de primeiro acesso (ícone de chave na lista) e envie ao
+                  cliente — é com ele que o cliente cria a senha.
                 </AlertDescription>
               </Alert>
             )}

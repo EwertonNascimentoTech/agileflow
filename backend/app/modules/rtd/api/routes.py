@@ -5,19 +5,20 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 
-from app.core.dependencies import ModuleContext, require_module, require_permission
+from app.core.dependencies import require_any_permission, ModuleContext, require_module, require_permission
 from app.modules.rtd import models, schemas
 from app.modules.rtd.service import RtdService
 
 router = APIRouter(prefix="/rtd", tags=["RTD"])
 
 _ctx = require_module("rtd")
+_can_view = require_any_permission("rtd.view", "rtd.manage")
 _can_manage = require_permission("rtd.manage")
 
 
 # ── Reuniões ──
 @router.get("/reunioes", response_model=list[schemas.ReuniaoOut])
-async def list_reunioes(ctx: ModuleContext = Depends(_ctx)):
+async def list_reunioes(ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     return await RtdService.list_reunioes(ctx.db)
 
 
@@ -32,7 +33,7 @@ async def create_reuniao(
 
 
 @router.get("/reunioes/{reuniao_id}", response_model=schemas.ReuniaoOut)
-async def get_reuniao(reuniao_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+async def get_reuniao(reuniao_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     r = await RtdService.get_reuniao(ctx.db, reuniao_id)
     if r is None:
         raise HTTPException(status_code=404, detail="Reunião não encontrada")
@@ -65,7 +66,7 @@ async def delete_reuniao(
 
 @router.post("/reunioes/{reuniao_id}/public-token", response_model=schemas.PublicTokenOut)
 async def generate_public_token(
-    reuniao_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx),
+    reuniao_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view),
 ):
     """Gera (ou reusa) o link público da apresentação — acessível sem login.
 
@@ -89,7 +90,7 @@ async def revoke_public_token(
 
 
 @router.get("/reunioes/{reuniao_id}/report")
-async def get_report(reuniao_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+async def get_report(reuniao_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     r = await RtdService.get_reuniao(ctx.db, reuniao_id)
     if r is None:
         raise HTTPException(status_code=404, detail="Reunião não encontrada")
@@ -101,7 +102,7 @@ async def get_report(reuniao_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
 async def get_planos_epa(
     reuniao_id: uuid.UUID,
     categoria: str = "estrategico",
-    ctx: ModuleContext = Depends(_ctx),
+    ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view),
 ):
     """Planos do EPA configurados na reunião — ao vivo (aberta) ou foto (fechada)."""
     if categoria not in ("estrategico", "tatico"):
@@ -134,7 +135,7 @@ async def upsert_indicador_analise(
 
 
 @router.get("/persons", response_model=list[schemas.PersonMiniOut])
-async def list_persons(ctx: ModuleContext = Depends(_ctx)):
+async def list_persons(ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     return await RtdService.list_persons(ctx.db)
 
 
@@ -158,7 +159,7 @@ async def sugerir_indicador_analise(
 
 # ── Deliberações ──
 @router.get("/reunioes/{reuniao_id}/deliberacoes", response_model=list[schemas.DeliberacaoOut])
-async def list_deliberacoes(reuniao_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+async def list_deliberacoes(reuniao_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     return await RtdService.list_deliberacoes(ctx.db, reuniao_id)
 
 

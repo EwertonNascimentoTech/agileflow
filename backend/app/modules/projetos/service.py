@@ -3148,6 +3148,27 @@ class ProjectTaskService:
         return list(result.scalars().all())
 
     @staticmethod
+    async def object_referenced_by_tasks(db: AsyncSession, object_name: str, task_ids: set[uuid.UUID]) -> bool:
+        """O anexo (object_name do MinIO) pertence a algum destes cards? Procura nos anexos do
+        card, nas respostas de formulário e nos comentários."""
+        if not task_ids:
+            return False
+        row = (await db.execute(
+            _sa_text("""
+                SELECT 1 FROM project_tasks t
+                 WHERE t.id = ANY(CAST(:ids AS uuid[]))
+                   AND (CAST(t.anexos AS text) LIKE :pat OR CAST(t.procurement_meta AS text) LIKE :pat
+                        OR EXISTS (SELECT 1 FROM project_demand_form_submissions s
+                                    WHERE s.task_id = t.id AND CAST(s.values AS text) LIKE :pat)
+                        OR EXISTS (SELECT 1 FROM project_task_comments c
+                                    WHERE c.task_id = t.id AND CAST(c.anexos AS text) LIKE :pat))
+                 LIMIT 1
+            """),
+            {"ids": [str(t) for t in task_ids], "pat": f'%"{object_name}"%'},
+        )).first()
+        return row is not None
+
+    @staticmethod
     async def po_external_scope_task_ids(
         db: AsyncSession,
         person_id: uuid.UUID,

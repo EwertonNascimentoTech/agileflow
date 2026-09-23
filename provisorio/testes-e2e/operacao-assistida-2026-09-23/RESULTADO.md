@@ -4,13 +4,13 @@ Executado contra o sistema no ar (`tenant_ss`, `agileflow` via nginx `:18082`), 
 PO / Dev / Coordenador / Cliente de teste (`e2e.*@e2e-agileflow.com.br`) e projetos `[E2E] …`.
 Tudo foi removido ao final (`run.sh cleanup-only` refaz a limpeza se preciso).
 
-**Resultado: 68/68 verificações de API + 18/18 verificações de tela.**
+**Resultado: 69/69 verificações de API + 18/18 verificações de tela** (reexecutado após a auditoria de segurança: primeiro acesso agora é por link gerado por quem cadastra).
 
 ## API (HTTP real, com login)
 
 | Fase | Verificação | Resultado |
 |---|---|---|
-| 1 | Primeiro acesso do PO/Dev/Coordenador cria o login pelo cargo | OK |
+| 1 | Primeiro acesso do PO/Dev/Coordenador (pelo link gerado no cadastro) cria o login pelo cargo | OK |
 | 1 | PO verifica e-mail novo → `new`; cadastra cliente vinculado a 2 projetos | OK |
 | 1 | E-mail já cadastrado → `client` (sem diferenciar maiúsculas); duplicado → 409 | OK |
 | 1 | Dev sem permissão não acessa Clientes (403) | OK |

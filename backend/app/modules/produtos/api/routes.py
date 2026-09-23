@@ -7,7 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 
 from app.core import storage
-from app.core.dependencies import ModuleContext, require_module, require_permission
+from app.core.dependencies import require_any_permission, ModuleContext, require_module, require_permission
 from app.modules.produtos import azure_devops_client, schemas
 from app.modules.produtos.repos_service import (
     CommitAuthorService,
@@ -32,6 +32,9 @@ from app.modules.produtos.service import (
 router = APIRouter(prefix="/produtos", tags=["Produtos"])
 
 _ctx = require_module("produtos")
+# Leitura do módulo exige produtos.view — o menu não é controle de acesso. Detalhe do produto e
+# versões ficam abertos: o card de Processos mostra o produto vinculado.
+_can_view = require_any_permission("produtos.view", "produtos.manage")
 _can_manage = require_permission("produtos.manage")
 _can_view_repos = require_permission("produtos.repos.view")
 _MAX_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -56,22 +59,22 @@ def _uuids(value: Optional[str]) -> Optional[list[uuid.UUID]]:
 
 # ── Dashboard / lookups / projetos finalizados ──
 @router.get("/dashboard", response_model=schemas.DashboardKpis)
-async def dashboard(ctx: ModuleContext = Depends(_ctx)):
+async def dashboard(ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     return await ProductService.dashboard(ctx.db)
 
 
 @router.get("/inteligencia/portfolio", response_model=schemas.PortfolioInteligencia)
-async def inteligencia_portfolio(ctx: ModuleContext = Depends(_ctx)):
+async def inteligencia_portfolio(ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     return await ProductService.portfolio_intelligence(ctx.db)
 
 
 @router.get("/inteligencia/contratos", response_model=schemas.ContratosInteligencia)
-async def inteligencia_contratos(ctx: ModuleContext = Depends(_ctx)):
+async def inteligencia_contratos(ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     return await ProductService.contratos_intelligence(ctx.db)
 
 
 @router.get("/config/health", response_model=schemas.HealthConfigResponse)
-async def get_health_config(ctx: ModuleContext = Depends(_ctx)):
+async def get_health_config(ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     return await HealthConfigService.get(ctx.db)
 
 
@@ -81,7 +84,7 @@ async def update_health_config(data: schemas.HealthConfigUpdate, ctx: ModuleCont
 
 
 @router.get("/areas", response_model=list[schemas.AreaRefMini])
-async def list_areas(ctx: ModuleContext = Depends(_ctx)):
+async def list_areas(ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     try:
         return await ProductService.list_areas(ctx.db)
     except Exception:
@@ -89,7 +92,7 @@ async def list_areas(ctx: ModuleContext = Depends(_ctx)):
 
 
 @router.get("/setores", response_model=list[schemas.AreaRefMini])
-async def list_setores(ctx: ModuleContext = Depends(_ctx)):
+async def list_setores(ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     try:
         return await ProductService.list_setores(ctx.db)
     except Exception:
@@ -97,7 +100,7 @@ async def list_setores(ctx: ModuleContext = Depends(_ctx)):
 
 
 @router.get("/persons", response_model=list[schemas.PersonMini])
-async def list_persons(ctx: ModuleContext = Depends(_ctx)):
+async def list_persons(ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     try:
         return await ProductService.list_persons(ctx.db)
     except Exception:
@@ -105,7 +108,7 @@ async def list_persons(ctx: ModuleContext = Depends(_ctx)):
 
 
 @router.get("/pos", response_model=list[schemas.PersonMini])
-async def list_pos(ctx: ModuleContext = Depends(_ctx)):
+async def list_pos(ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     """Pessoas com cargo PO/Product Owner — para o campo Responsável do produto."""
     try:
         return await ProductService.list_pos(ctx.db)
@@ -114,7 +117,7 @@ async def list_pos(ctx: ModuleContext = Depends(_ctx)):
 
 
 @router.get("/tech-references", response_model=list[schemas.PersonMini])
-async def list_tech_references(ctx: ModuleContext = Depends(_ctx)):
+async def list_tech_references(ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     """Pessoas com cargo Referência Técnica — para o Responsável técnico do produto."""
     try:
         return await ProductService.list_tech_references(ctx.db)
@@ -123,7 +126,7 @@ async def list_tech_references(ctx: ModuleContext = Depends(_ctx)):
 
 
 @router.get("/stacks", response_model=list[schemas.StackMini])
-async def list_stacks(ctx: ModuleContext = Depends(_ctx)):
+async def list_stacks(ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     """Catálogo de stacks (reusa team_stacks) — para o multi-select do produto."""
     try:
         return await ProductService.list_stacks(ctx.db)
@@ -132,13 +135,13 @@ async def list_stacks(ctx: ModuleContext = Depends(_ctx)):
 
 
 @router.get("/finalized-projects", response_model=list[schemas.FinalizedProjectItem])
-async def list_finalized_projects(ctx: ModuleContext = Depends(_ctx)):
+async def list_finalized_projects(ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     return await ProductService.list_finalized_projects(ctx.db)
 
 
 # Modelo Markdown padrão para nova documentação (registrado antes de /{product_id}).
 @router.get("/documentation-template", response_model=dict)
-async def documentation_template(ctx: ModuleContext = Depends(_ctx)):
+async def documentation_template(ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     return {"conteudo_md": DocumentationService.template()}
 
 
@@ -161,7 +164,7 @@ async def upload_file(file: UploadFile = File(...), ctx: ModuleContext = Depends
 
 
 @router.get("/uploads/url", response_model=schemas.ProductUploadUrlResponse)
-async def get_file_url(object_name: str = Query(...), ctx: ModuleContext = Depends(_ctx)):
+async def get_file_url(object_name: str = Query(...), ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     if not object_name.startswith(f"produtos/{ctx.schema}/"):
         raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
     url = storage.get_presigned_url(object_name)
@@ -172,7 +175,7 @@ async def get_file_url(object_name: str = Query(...), ctx: ModuleContext = Depen
 
 # ── Catálogo global de processos ──────────────
 @router.get("/processos", response_model=list[schemas.ProcessoResponse])
-async def list_processos(ctx: ModuleContext = Depends(_ctx)):
+async def list_processos(ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     return await ProcessoService.list_tree(ctx.db)
 
 
@@ -194,7 +197,7 @@ async def delete_processo(processo_id: uuid.UUID, ctx: ModuleContext = Depends(_
 # ── Portfólio de Processos (versionado) ───────
 # IMPORTANTE: registrado ANTES das rotas /{product_id} para não colidir com o catch-all.
 @router.get("/process-portfolios", response_model=list[schemas.ProcessPortfolioResponse])
-async def list_process_portfolios(ctx: ModuleContext = Depends(_ctx)):
+async def list_process_portfolios(ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     return await ProcessPortfolioService.list_portfolios(ctx.db)
 
 
@@ -214,12 +217,12 @@ async def delete_process_portfolio(portfolio_id: uuid.UUID, ctx: ModuleContext =
 
 
 @router.get("/process-portfolios/{portfolio_id}/current", response_model=schemas.ProcessVersionTree)
-async def get_current_portfolio_tree(portfolio_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+async def get_current_portfolio_tree(portfolio_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     return await ProcessPortfolioService.get_current_tree(ctx.db, portfolio_id)
 
 
 @router.get("/process-portfolios/{portfolio_id}/versions", response_model=list[schemas.ProcessVersionSummary])
-async def list_portfolio_versions(portfolio_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+async def list_portfolio_versions(portfolio_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     return await ProcessPortfolioService.list_versions(ctx.db, portfolio_id)
 
 
@@ -229,7 +232,7 @@ async def create_portfolio_version(portfolio_id: uuid.UUID, data: schemas.Create
 
 
 @router.get("/process-portfolios/versions/{version_id}/tree", response_model=schemas.ProcessVersionTree)
-async def get_version_tree(version_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+async def get_version_tree(version_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     return await ProcessPortfolioService.get_version_tree(ctx.db, version_id)
 
 
@@ -261,7 +264,7 @@ async def delete_portfolio_item(version_id: uuid.UUID, item_id: uuid.UUID, ctx: 
 
 # ── Vínculo serviço ↔ sub-processo ────────────
 @router.get("/servicos/{servico_id}/process-links", response_model=list[schemas.ServiceLinkItem])
-async def list_service_process_links(servico_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+async def list_service_process_links(servico_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     return await ProcessPortfolioService.list_service_links(ctx.db, servico_id)
 
 
@@ -272,7 +275,7 @@ async def set_service_process_links(servico_id: uuid.UUID, data: schemas.Service
 
 # ── Fornecedores ──────────────────────────────
 @router.get("/fornecedores", response_model=list[schemas.FornecedorResponse])
-async def list_fornecedores(ctx: ModuleContext = Depends(_ctx)):
+async def list_fornecedores(ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     return await FornecedorService.list(ctx.db)
 
 
@@ -294,24 +297,24 @@ async def delete_fornecedor(fornecedor_id: uuid.UUID, ctx: ModuleContext = Depen
 # ── Indicadores ───────────────────────────────
 @router.get("/indicadores", response_model=schemas.IndicadorResponse)
 async def indicadores(ano: int | None = Query(None),
-                      group_by: schemas._GROUP_BY = Query("produto"), ctx: ModuleContext = Depends(_ctx)):
+                      group_by: schemas._GROUP_BY = Query("produto"), ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     return await IndicadorService.indicadores(ctx.db, ano or date.today().year, group_by)
 
 
 @router.get("/indicadores/series", response_model=list[schemas.IndicadorSeriesPoint])
-async def indicadores_series(anos: list[int] = Query(...), ctx: ModuleContext = Depends(_ctx)):
+async def indicadores_series(anos: list[int] = Query(...), ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     return await IndicadorService.series(ctx.db, anos)
 
 
 @router.get("/indicadores/processos", response_model=list[schemas.ProcessoConsolidacaoNode])
 async def indicadores_processos(ano: int | None = Query(None),
-                                product_id: uuid.UUID | None = Query(None), ctx: ModuleContext = Depends(_ctx)):
+                                product_id: uuid.UUID | None = Query(None), ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     return await IndicadorService.consolidacao(ctx.db, ano or date.today().year, product_id)
 
 
 # ── Alertas ───────────────────────────────────
 @router.get("/alertas/contratos", response_model=list[schemas.AlertaContrato])
-async def alertas_contratos(ctx: ModuleContext = Depends(_ctx)):
+async def alertas_contratos(ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     return await AlertaService.contratos(ctx.db)
 
 
@@ -445,7 +448,7 @@ async def list_commits(
 
 # ── Produtos (CRUD) ───────────────────────────
 @router.get("", response_model=list[schemas.ProductListItem])
-async def list_products(ctx: ModuleContext = Depends(_ctx)):
+async def list_products(ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     return await ProductService.list_products(ctx.db)
 
 
@@ -577,7 +580,7 @@ async def delete_release(product_id: uuid.UUID, release_id: uuid.UUID, ctx: Modu
 
 # ── Documentação (Markdown) ───────────────────
 @router.get("/{product_id}/documentations", response_model=list[schemas.DocumentationResponse])
-async def list_documentations(product_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+async def list_documentations(product_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     return await DocumentationService.list(ctx.db, product_id)
 
 
@@ -599,7 +602,7 @@ async def delete_documentation(product_id: uuid.UUID, doc_id: uuid.UUID, ctx: Mo
 # ── Sustentação / SLA ─────────────────────────
 # ── Sustentação / SLA ─────────────────────────
 @router.get("/{product_id}/supports", response_model=list[schemas.SupportResponse])
-async def list_supports(product_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+async def list_supports(product_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     return await SupportService.list(ctx.db, product_id)
 
 

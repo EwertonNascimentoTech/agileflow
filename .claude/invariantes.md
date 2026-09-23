@@ -77,3 +77,8 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 - Admin da empresa só atribui `company_admin`/`company_user` e Funções do próprio tenant; `super_admin` só via /super-admin.
 - Catálogo de Programas = `projetos.program.manage`; baseline/revisão do cronograma = `projetos.schedule.manage` (+ escopo do PO Externo). `task.manage` sozinho (Dev) não basta.
 - PATCH do card com `form_values` grava o merge com o formulário salvo — nunca substitui pelo parcial.
+- PO Externo: toda rota por card/projeto/raiz aplica `_assert_task_in_scope`/`_po_external_scope` (leitura e escrita); lista de travas, matriz etc. filtradas pelo escopo.
+- Permissão `.view` é checada no backend (`require_any_permission`), não só no menu. Exceções deliberadas: detalhe do produto/versões e lista de Pessoas (diretório sem contato pessoal).
+- Primeiro acesso: token só no link gerado por quem cadastra (72 h, uso único). `/auth/first-access/check` nunca devolve token.
+- Desligar/excluir Pessoa desativa o login vinculado.
+- Tarefas Celery: `_run` descarta o pool (engine.dispose) e o Redis ao fim de cada execução.

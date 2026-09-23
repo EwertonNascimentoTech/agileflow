@@ -8,7 +8,7 @@ import importlib.util
 spec = importlib.util.spec_from_file_location("h", f"{SP}/e2e_http.py")
 # reaproveita helpers sem reexecutar o fluxo da parte 1
 src = open(f"{SP}/e2e_http.py").read().split("# ═════════════ FASE 1")[0]
-ns: dict = {}
+ns: dict = {"__file__": f"{SP}/e2e_http.py"}
 exec(compile(src, "helpers", "exec"), ns)
 req, check, notifs, patch_status, results = ns["req"], ns["check"], ns["notifs"], ns["patch_status"], ns["results"]
 IDS = ns["IDS"]; ST = ns["ST"]; ROOT_OA = ns["ROOT_OA"]

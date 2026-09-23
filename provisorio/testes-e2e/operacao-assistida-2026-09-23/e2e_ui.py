@@ -16,6 +16,7 @@ def login(page, email):
     page.fill('input[name="email"]', email)
     page.fill('input[name="password"]', PWD)
     page.click('button[type="submit"]')
+    page.wait_for_url(lambda u: "/login" not in u, timeout=20000)
     page.wait_for_load_state("networkidle")
 
 
@@ -42,7 +43,12 @@ with sync_playwright() as p:
         page = ctx.new_page()
         errors = []
         page.on("pageerror", lambda e, errors=errors: errors.append(f"pageerror: {e}"))
-        page.on("console", lambda m, errors=errors: errors.append(f"console.{m.type}: {m.text}") if m.type == "error" else None)
+        # Falhas de rede vão pelo evento "response" (com URL). /company/admin/roles no dashboard
+        # da empresa é o 403 conhecido (anterior à Operação Assistida) — não conta.
+        page.on("console", lambda m, errors=errors: errors.append(f"console.{m.type}: {m.text}")
+                if m.type == "error" and "Failed to load resource" not in m.text else None)
+        page.on("response", lambda r, errors=errors: errors.append(f"http {r.status}: {r.url.replace(URL, '')}")
+                if r.status >= 400 and "/api/" in r.url and "/company/admin/roles" not in r.url else None)
         login(page, email)
         if who == "cliente":
             report.append({"tela": "cliente-login-redireciona", "url": page.url.replace(URL, ""), "ok": page.url.endswith("/portal")})

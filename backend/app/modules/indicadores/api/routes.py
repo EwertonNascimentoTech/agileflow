@@ -6,19 +6,20 @@ from typing import Optional
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 
 from app.core import storage
-from app.core.dependencies import ModuleContext, require_module, require_permission
+from app.core.dependencies import require_any_permission, ModuleContext, require_module, require_permission
 from app.modules.indicadores import schemas
 from app.modules.indicadores.service import IndicadorService
 
 router = APIRouter(prefix="/indicadores", tags=["Indicadores"])
 
 _ctx = require_module("indicadores")
+_can_view = require_any_permission("indicadores.view", "indicadores.manage")
 _can_manage = require_permission("indicadores.manage")
 _MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 
 @router.get("/areas", response_model=list[schemas.AreaRefMini])
-async def list_areas(ctx: ModuleContext = Depends(_ctx)):
+async def list_areas(ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     try:
         return await IndicadorService.list_areas(ctx.db)
     except Exception:
@@ -26,7 +27,7 @@ async def list_areas(ctx: ModuleContext = Depends(_ctx)):
 
 
 @router.get("/persons", response_model=list[schemas.PersonMini])
-async def list_persons(ctx: ModuleContext = Depends(_ctx)):
+async def list_persons(ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     try:
         return await IndicadorService.list_persons(ctx.db)
     except Exception:
@@ -41,7 +42,7 @@ async def dashboard(
     responsavel_id: Optional[uuid.UUID] = Query(None),
     granularidade: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
-    ctx: ModuleContext = Depends(_ctx),
+    ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view),
 ):
     return await IndicadorService.dashboard(
         ctx.db,
@@ -62,7 +63,7 @@ async def dashboard_graficos(
     responsavel_id: Optional[uuid.UUID] = Query(None),
     granularidade: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
-    ctx: ModuleContext = Depends(_ctx),
+    ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view),
 ):
     return await IndicadorService.dashboard_graficos(
         ctx.db,
@@ -100,7 +101,7 @@ async def upload_file(
 
 
 @router.get("/uploads/url", response_model=schemas.UploadUrlResponse)
-async def get_file_url(object_name: str = Query(...), ctx: ModuleContext = Depends(_ctx)):
+async def get_file_url(object_name: str = Query(...), ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     allowed = (f"indicadores/{ctx.schema}/", f"produtos/{ctx.schema}/")
     if not any(object_name.startswith(p) for p in allowed):
         raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
@@ -118,7 +119,7 @@ async def list_indicadores(
     responsavel_id: Optional[uuid.UUID] = Query(None),
     granularidade: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
-    ctx: ModuleContext = Depends(_ctx),
+    ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view),
 ):
     return await IndicadorService.list_indicadores(
         ctx.db,
@@ -141,7 +142,7 @@ async def create_indicador(
 
 
 @router.get("/{indicador_id}", response_model=schemas.IndicadorResponse)
-async def get_indicador(indicador_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+async def get_indicador(indicador_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     return await IndicadorService.get(ctx.db, indicador_id)
 
 
@@ -168,7 +169,7 @@ async def delete_indicador(
 async def list_acompanhamentos(
     indicador_id: uuid.UUID,
     ano: Optional[int] = Query(None),
-    ctx: ModuleContext = Depends(_ctx),
+    ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view),
 ):
     return await IndicadorService.list_acompanhamentos(ctx.db, indicador_id, ano)
 
@@ -212,5 +213,5 @@ async def update_acompanhamento(
 
 
 @router.get("/acompanhamentos/{acomp_id}/evidencias", response_model=schemas.AcompanhamentoEvidenciasResponse)
-async def get_acompanhamento_evidencias(acomp_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+async def get_acompanhamento_evidencias(acomp_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     return await IndicadorService.get_evidencias(ctx.db, acomp_id)

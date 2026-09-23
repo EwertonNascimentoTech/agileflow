@@ -889,6 +889,13 @@ class PersonService:
         for key, value in payload.items():
             setattr(item, key, value)
         PersonService.assert_allocation_split(item)
+        if becoming_offboarded:
+            # Desligou: o acesso ao sistema acaba junto (antes o login seguia ativo).
+            await PersonService._revoke_login(db, item.user_id)
+        if item.status == PersonStatus.DESLIGADO and access_level not in (None, "none"):
+            # O formulário sempre manda access_level; em pessoa desligada ele não pode
+            # reativar o login. Religar = voltar o status e liberar o acesso de propósito.
+            access_level = None
         item.updated_at = datetime.utcnow()
         if access_level is not None or reset_password:
             await PersonService._provision_user(db, item, access_level, password, reset_password, tenant_id)
@@ -902,6 +909,8 @@ class PersonService:
         if item.user_id:
             from app.core.cache import invalidate_po_external
             await invalidate_po_external(item.user_id)
+        if becoming_offboarded:
+            await PersonService._invalidate_login_cache(item.user_id)
         return await PersonService.get(db, item.id)
 
     @staticmethod
@@ -1228,8 +1237,31 @@ class PersonService:
         Para apenas marcar como desligado, edite o status da pessoa.
         """
         item = await PersonService.get(db, person_id)
+        user_id = item.user_id
+        await PersonService._revoke_login(db, user_id)
         await db.delete(item)
         await db.commit()
+        await PersonService._invalidate_login_cache(user_id)
+
+    @staticmethod
+    async def _revoke_login(db: AsyncSession, user_id: Optional[uuid.UUID]) -> None:
+        """Desliga o login da Pessoa (desligamento/exclusão). O access token atual morre na
+        próxima checagem de `is_active` (cache de auth invalidado) e o refresh passa a dar 401."""
+        if not user_id:
+            return
+        user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+        if user is not None and user.is_active:
+            user.is_active = False
+            user.updated_at = datetime.utcnow()
+
+    @staticmethod
+    async def _invalidate_login_cache(user_id: Optional[uuid.UUID]) -> None:
+        if not user_id:
+            return
+        from app.core.cache import invalidate_po_external, invalidate_user
+
+        await invalidate_user(user_id)
+        await invalidate_po_external(user_id)
 
 
 # ─────────────────────────────────────────────

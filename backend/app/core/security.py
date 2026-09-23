@@ -148,8 +148,10 @@ def create_first_access_token(
     user_id: uuid.UUID | None = None,
     person_id: uuid.UUID | None = None,
     tenant_id: uuid.UUID | None = None,
+    hours: float = 0.5,
 ) -> str:
-    """Token de primeiro acesso — válido por 30 minutos."""
+    """Token de primeiro acesso. Vai no link gerado por quem cadastrou a pessoa (gestor, PO
+    ou admin) — nunca na resposta de uma consulta por e-mail."""
     payload: dict = {"typ": "first_access"}
     if user_id:
         payload["sub"] = str(user_id)
@@ -157,7 +159,11 @@ def create_first_access_token(
         payload["person_id"] = str(person_id)
     if tenant_id:
         payload["tenant_id"] = str(tenant_id)
-    return _create_token(payload, timedelta(minutes=30))
+    return _create_token(payload, timedelta(hours=hours))
+
+
+# Validade do link de primeiro acesso enviado à pessoa.
+FIRST_ACCESS_LINK_HOURS = 72
 
 
 def decode_first_access_token(token: str) -> dict:

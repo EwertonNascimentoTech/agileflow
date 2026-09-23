@@ -537,7 +537,9 @@ class UserService:
 
     @staticmethod
     async def check_first_access(db: AsyncSession, email: str) -> dict:
-        """Verifica se o e-mail está cadastrado e ainda não realizou o primeiro acesso."""
+        """Diz se o e-mail pode fazer o primeiro acesso. NÃO devolve token: quem sabe só o
+        e-mail não pode definir a senha de outra pessoa. O token vai no link que o gestor,
+        o PO ou o admin gera (`first_access_link_*`)."""
         normalized = email.strip().lower()
         result = await db.execute(
             select(User).where(func.lower(User.email) == normalized)
@@ -557,15 +559,7 @@ class UserService:
             if person.get("user_id"):
                 user = await UserService.get_user(db, uuid.UUID(str(person["user_id"])))
             else:
-                return {
-                    "setup_token": create_first_access_token(
-                        person_id=uuid.UUID(str(person["id"])),
-                        tenant_id=tenant.id,
-                    ),
-                    "full_name": person["full_name"],
-                    "email": person["email"],
-                    "message": "Primeiro acesso confirmado. Defina sua senha para continuar.",
-                }
+                return {"eligible": True, "message": UserService._FIRST_ACCESS_HINT}
 
         if not user.is_active:
             raise HTTPException(
@@ -577,12 +571,56 @@ class UserService:
                 status_code=400,
                 detail="Este e-mail já realizou o primeiro acesso. Faça login ou recupere a senha.",
             )
-        return {
-            "setup_token": create_first_access_token(user_id=user.id),
-            "full_name": user.full_name,
-            "email": user.email,
-            "message": "Primeiro acesso confirmado. Defina sua senha para continuar.",
-        }
+        return {"eligible": True, "message": UserService._FIRST_ACCESS_HINT}
+
+    _FIRST_ACCESS_HINT = (
+        "Cadastro encontrado. Para criar sua senha, use o link de primeiro acesso enviado por "
+        "quem cadastrou você (gestor, PO ou administrador). Se não recebeu, peça a essa pessoa."
+    )
+
+    @staticmethod
+    def first_access_link_for_user(user: User) -> dict:
+        from app.core.security import FIRST_ACCESS_LINK_HOURS
+
+        if not user.is_active:
+            raise HTTPException(status_code=400, detail="Usuário inativo.")
+        if user.last_login is not None:
+            raise HTTPException(status_code=400, detail="Esta pessoa já fez o primeiro acesso.")
+        token = create_first_access_token(user_id=user.id, hours=FIRST_ACCESS_LINK_HOURS)
+        return {"path": f"/primeiro-acesso?token={token}", "expires_hours": FIRST_ACCESS_LINK_HOURS}
+
+    @staticmethod
+    def first_access_link_for_person(person_id: uuid.UUID, tenant_id: uuid.UUID) -> dict:
+        from app.core.security import FIRST_ACCESS_LINK_HOURS
+
+        token = create_first_access_token(person_id=person_id, tenant_id=tenant_id, hours=FIRST_ACCESS_LINK_HOURS)
+        return {"path": f"/primeiro-acesso?token={token}", "expires_hours": FIRST_ACCESS_LINK_HOURS}
+
+    @staticmethod
+    async def inspect_first_access(db: AsyncSession, token: str) -> dict:
+        """Para a tela do link: nome/e-mail de quem vai criar a senha (valida o token)."""
+        payload = decode_first_access_token(token)
+        if payload.get("sub"):
+            user = await UserService.get_user(db, uuid.UUID(payload["sub"]))
+            if not user.is_active or user.last_login is not None:
+                raise HTTPException(status_code=400, detail="Link já utilizado ou inválido. Faça login.")
+            return {"full_name": user.full_name, "email": user.email}
+        if payload.get("person_id") and payload.get("tenant_id"):
+            tenant = (await db.execute(select(Tenant).where(Tenant.id == uuid.UUID(payload["tenant_id"])))).scalar_one_or_none()
+            if tenant is None:
+                raise HTTPException(status_code=400, detail="Link inválido.")
+            row = (await db.execute(
+                text(f'SELECT full_name, email, user_id, status FROM "{tenant.schema_name}".team_persons WHERE id = :pid'),
+                {"pid": payload["person_id"]},
+            )).mappings().first()
+            if row is None or row["status"] != "ativo":
+                raise HTTPException(status_code=400, detail="Link inválido.")
+            if row["user_id"]:
+                linked = await UserService.get_user(db, uuid.UUID(str(row["user_id"])))
+                if linked.last_login is not None:
+                    raise HTTPException(status_code=400, detail="Link já utilizado. Faça login.")
+            return {"full_name": row["full_name"], "email": row["email"]}
+        raise HTTPException(status_code=400, detail="Link inválido.")
 
     @staticmethod
     async def complete_first_access(db: AsyncSession, token: str, password: str) -> User:

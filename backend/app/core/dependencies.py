@@ -206,6 +206,19 @@ def require_permission(code: str):
     return dependency
 
 
+def require_any_permission(*codes: str):
+    """Dependency: passa se o usuário tiver QUALQUER uma das permissões (admins sempre)."""
+    async def dependency(current_user: User = Depends(require_authenticated)) -> User:
+        for code in codes:
+            if await has_permission_cached(current_user, code):
+                return current_user
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sua função não tem acesso a esta informação.",
+        )
+    return dependency
+
+
 def require_module(module_slug: str, allow_client: bool = False):
     """
     Factory que retorna uma dependency FastAPI.

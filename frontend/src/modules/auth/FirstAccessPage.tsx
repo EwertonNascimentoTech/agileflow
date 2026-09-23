@@ -1,5 +1,5 @@
-import { useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { useEffect, useState } from "react"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, Mail, KeyRound, UserCheck } from "lucide-react"
 import { authApi } from "@/api/auth"
 import { useAuth } from "@/contexts/AuthContext"
@@ -22,8 +22,11 @@ function getErrorMessage(err: unknown): string {
 
 export default function FirstAccessPage() {
   const navigate = useNavigate()
+  const [params] = useSearchParams()
   const { establishSession } = useAuth()
   const [step, setStep] = useState<Step>("check")
+  // Sem link, só confirmamos o cadastro e orientamos a pedir o link (o token não vem por e-mail).
+  const [hint, setHint] = useState("")
   const [email, setEmail] = useState("")
   const [fullName, setFullName] = useState("")
   const [token, setToken] = useState("")
@@ -32,15 +35,31 @@ export default function FirstAccessPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
 
+  // Link de primeiro acesso (?token=) enviado por quem cadastrou: vai direto para a senha.
+  useEffect(() => {
+    const t = params.get("token")
+    if (!t) return
+    setLoading(true)
+    authApi
+      .inspectFirstAccess(t)
+      .then((info) => {
+        setToken(t)
+        setFullName(info.full_name)
+        setEmail(info.email)
+        setStep("password")
+      })
+      .catch((err) => setError(getErrorMessage(err)))
+      .finally(() => setLoading(false))
+  }, [params])
+
   async function checkEmail(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
     setError("")
+    setHint("")
     try {
       const data = await authApi.checkFirstAccess(email)
-      setFullName(data.full_name)
-      setToken(data.setup_token)
-      setStep("password")
+      setHint(data.message)
     } catch (err) {
       setError(getErrorMessage(err))
     } finally {
@@ -90,7 +109,7 @@ export default function FirstAccessPage() {
             </h2>
             <p className="text-sm text-muted-foreground mt-0.5">
               {step === "check"
-                ? "Informe o e-mail cadastrado pelo administrador para ativar sua conta."
+                ? "Use o link de primeiro acesso que você recebeu. Sem o link, informe seu e-mail para confirmar o cadastro."
                 : `Olá, ${fullName}. Crie uma senha para acessar a plataforma.`}
             </p>
           </div>
@@ -98,6 +117,11 @@ export default function FirstAccessPage() {
           {error && (
             <Alert variant="destructive">
               <AlertDescription className="text-sm">{error}</AlertDescription>
+            </Alert>
+          )}
+          {hint && (
+            <Alert>
+              <AlertDescription className="text-sm">{hint}</AlertDescription>
             </Alert>
           )}
 

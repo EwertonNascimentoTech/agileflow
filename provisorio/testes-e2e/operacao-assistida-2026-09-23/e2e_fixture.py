@@ -8,11 +8,16 @@ async def main():
     async with AsyncSessionLocal() as db:
         await db.execute(text("SET search_path TO tenant_ss, public"))
         pos = {p.slug: p for p in (await db.execute(select(Position))).scalars()}
-        people = {}
+        people, links = {}, {}
+        from app.modules.super_admin.models import Tenant
+        from app.modules.super_admin.service import UserService
+        tenant = (await db.execute(select(Tenant).where(Tenant.schema_name == "tenant_ss"))).scalar_one()
         for key, slug, name in (("po", "po", "PO Teste E2E"), ("dev", "desenvolvedor", "Dev Teste E2E"), ("coord", "coordenador", "Coord Teste E2E")):
             p = Person(full_name=name, email=f"e2e.{key}@e2e-agileflow.com.br", position_id=pos[slug].id,
                        daily_hours=8, weekly_hours=40, project_allocation_pct=100, status=PersonStatus.ATIVO, visible_in_org_chart=False)
             db.add(p); await db.flush(); people[key] = str(p.id)
+            # Primeiro acesso é por link gerado por quem cadastra (auditoria 23/09).
+            links[key] = UserService.first_access_link_for_person(p.id, tenant.id)["path"].split("token=", 1)[1]
         f = (await db.execute(select(ProjectFunnel).where(ProjectFunnel.name.ilike("projetos e programas")))).scalars().first()
         sts = {s.name: s for s in (await db.execute(select(ProjectStatusConfig).where(ProjectStatusConfig.funnel_id == f.id))).scalars()}
         dt = (await db.execute(select(ProjectDemandType).where(ProjectDemandType.slug == "item_planejamento"))).scalar_one()
@@ -45,6 +50,6 @@ async def main():
             "client_role_existed": bool((await db.execute(text("select 1 from public.roles where name='Cliente (Operação Assistida)'"))).first()),
         }
         await db.commit()
-        print(json.dumps({"container": str(f.project_id), "people": people, "roots": roots,
+        print(json.dumps({"container": str(f.project_id), "people": people, "links": links, "roots": roots,
                           "statuses": {k: str(v.id) for k, v in sts.items()}, "pre": pre}))
 asyncio.run(main())

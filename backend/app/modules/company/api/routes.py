@@ -136,7 +136,17 @@ async def list_users(
         raise HTTPException(status_code=403, detail="Usuário sem empresa vinculada.")
     if current_user.role not in (UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN, UserRole.COMPANY_USER):
         raise HTTPException(status_code=403, detail="Acesso negado.")
+    # Diretório interno: cliente da Operação Assistida não lista a empresa; PO Externo
+    # (de fora da casa) só enxerga a si mesmo.
+    from app.core.dependencies import _is_po_external, is_client_only
+
+    if await is_client_only(current_user):
+        raise HTTPException(status_code=403, detail="Acesso negado.")
     q = select(User).where(User.tenant_id == current_user.tenant_id)
+    if current_user.role == UserRole.COMPANY_USER:
+        schema = (await db.execute(select(Tenant.schema_name).where(Tenant.id == current_user.tenant_id))).scalar_one_or_none()
+        if schema and await _is_po_external(current_user, schema):
+            q = q.where(User.id == current_user.id)
     if active_only:
         q = q.where(User.is_active == True)
     if search:
@@ -199,6 +209,19 @@ async def get_user(
         from fastapi import HTTPException
         raise HTTPException(403, "Acesso negado.")
     return user
+
+
+@router.post("/users/{user_id}/first-access-link")
+async def user_first_access_link(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_company_admin),
+):
+    """Link de primeiro acesso (72 h) para o admin enviar ao usuário."""
+    user = await UserService.get_user(db, user_id)
+    if user.tenant_id != current_user.tenant_id:
+        raise HTTPException(403, "Acesso negado.")
+    return UserService.first_access_link_for_user(user)
 
 
 @router.patch("/users/{user_id}", response_model=UserResponse)

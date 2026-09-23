@@ -41,10 +41,10 @@ def check(fase, nome, cond, detalhe=""):
     print(f"[{'OK' if cond else 'FALHA'}] F{fase} {nome}" + (f" — {detalhe}" if detalhe and not cond else ""))
 
 
-def first_access(email):
-    s, b = req("POST", "/auth/first-access/check", body={"email": email})
-    assert s == 200, (s, b)
-    s, b = req("POST", "/auth/first-access/complete", body={"token": b["setup_token"], "password": PWD})
+def first_access(email, token=None):
+    """Primeiro acesso pelo link (token gerado por quem cadastrou a pessoa)."""
+    token = token or IDS["links"][email.split("@")[0].split(".", 1)[1]]
+    s, b = req("POST", "/auth/first-access/complete", body={"token": token, "password": PWD})
     assert s == 200, (s, b)
     return b["access_token"], b["user"]
 
@@ -87,7 +87,9 @@ check(1, "cadastro duplicado é recusado (409)", s == 409, f"{s}")
 s, _ = req("GET", "/projetos/clients", DEV)
 check(1, "dev sem permissão não acessa Clientes (403)", s == 403, f"{s}")
 
-CLIENT, client_user = first_access(CLIENT_EMAIL)
+s, link = req("POST", f"/projetos/clients/{state['client_id']}/first-access-link", PO)
+check(1, "PO gera o link de primeiro acesso do cliente", s == 200 and "token=" in link["path"], f"{s} {link}")
+CLIENT, client_user = first_access(CLIENT_EMAIL, link["path"].split("token=", 1)[1])
 s, b = req("POST", "/auth/login", body={"email": CLIENT_EMAIL, "password": PWD})
 check(1, "cliente faz login com a senha criada no 1º acesso", s == 200, f"{s}")
 CLIENT = b["access_token"] if s == 200 else CLIENT

@@ -315,6 +315,15 @@ async def _deny_po_external(ctx: ModuleContext = Depends(_ctx)) -> None:
         )
 
 
+async def _assert_all_in_scope(ctx: ModuleContext, task_ids) -> None:
+    """Versão em lote de `_assert_task_in_scope` (escritas que tocam vários cards)."""
+    scope = await _po_external_scope(ctx)
+    if scope is None:
+        return
+    if any(t is not None and t not in scope for t in task_ids):
+        raise HTTPException(status_code=404, detail="Tarefa não encontrada.")
+
+
 async def _assert_task_in_scope(ctx: ModuleContext, task_id: uuid.UUID) -> None:
     """Barra o PO Externo em qualquer card fora dos projetos que ele lidera.
     Responde 404 (e não 403) para não revelar a existência do card."""
@@ -840,6 +849,9 @@ async def get_attachment_url(
     prefixo do tenant para evitar acesso cruzado entre schemas."""
     if not object_name.startswith(f"projetos/{ctx.schema}/"):
         raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
+    scope = await _po_external_scope(ctx)
+    if scope is not None and not await ProjectTaskService.object_referenced_by_tasks(ctx.db, object_name, scope):
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
     url = storage.get_presigned_url(object_name)
     if not url:
         raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
@@ -1120,6 +1132,9 @@ async def create_task(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Este tipo de solicitação não está disponível para você.",
             )
+    if data.parent_task_id:
+        # PO Externo não pendura card em projeto de outro PO.
+        await _assert_task_in_scope(ctx, data.parent_task_id)
     payload = data
     if not can_manage:
         payload = ProjectTaskCreate(**{**data.model_dump(), "assigned_to": await _person_id_for_user(ctx)})
@@ -1151,7 +1166,9 @@ async def import_template(project_id: uuid.UUID, ctx: ModuleContext = Depends(_c
 @router.get("/projects/{project_id}/planning-nodes", response_model=list[ProjectTaskResponse])
 async def list_planning_nodes(project_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
     """Nós de planejamento (Projetos/Programas) do projeto — destino da importação."""
-    return await ProjectTaskService.list_planning_nodes(ctx.db, project_id)
+    nodes = await ProjectTaskService.list_planning_nodes(ctx.db, project_id)
+    scope = await _po_external_scope(ctx)
+    return nodes if scope is None else [n for n in nodes if n.id in scope]
 
 
 @router.post("/projects/{project_id}/import-tasks", response_model=TaskImportResult)
@@ -1168,6 +1185,11 @@ async def import_tasks(
     (se omitido, as US herdam a etapa das Features)."""
     if not await _has_permission(ctx, "projetos.task.manage"):
         raise HTTPException(status_code=403, detail="Sem permissão para importar tarefas.")
+    if await _po_external_scope(ctx) is not None:
+        # PO Externo só importa dentro de um projeto dele.
+        if parent_task_id is None:
+            raise HTTPException(status_code=403, detail="Escolha um projeto seu para importar.")
+        await _assert_task_in_scope(ctx, parent_task_id)
     fname = (file.filename or "").lower()
     if not fname.endswith(".xlsx"):
         raise HTTPException(status_code=400, detail="Envie um arquivo .xlsx.")
@@ -1190,6 +1212,13 @@ async def reorder_tasks(
 ):
     if not await _has_permission(ctx, "projetos.task.manage"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sem permissão para reordenar o cronograma.")
+    ids = []
+    for it in data.items:
+        try:
+            ids.append(uuid.UUID(str(it.get("id"))))
+        except (ValueError, TypeError):
+            continue
+    await _assert_all_in_scope(ctx, ids)
     return await ProjectTaskService.reorder(ctx.db, project_id, data.items)
 
 
@@ -1310,7 +1339,11 @@ async def list_dependencies(
     project_id: uuid.UUID,
     ctx: ModuleContext = Depends(_ctx),
 ):
-    return await TaskDependencyService.list(ctx.db, project_id)
+    deps = await TaskDependencyService.list(ctx.db, project_id)
+    scope = await _po_external_scope(ctx)
+    if scope is None:
+        return deps
+    return [d for d in deps if d.predecessor_id in scope and d.successor_id in scope]
 
 
 @router.post("/projects/{project_id}/dependencies", response_model=TaskDependencyResponse, status_code=201)
@@ -1321,6 +1354,7 @@ async def create_dependency(
 ):
     if not await _has_permission(ctx, "projetos.task.manage"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sem permissão para editar o cronograma.")
+    await _assert_all_in_scope(ctx, [data.predecessor_id, data.successor_id])
     return await TaskDependencyService.create(ctx.db, project_id, data)
 
 
@@ -1332,6 +1366,13 @@ async def delete_dependency(
 ):
     if not await _has_permission(ctx, "projetos.task.manage"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sem permissão para editar o cronograma.")
+    if await _po_external_scope(ctx) is not None:
+        from app.modules.projetos.models import ProjectTaskDependency
+
+        dep = await ctx.db.get(ProjectTaskDependency, dep_id)
+        if dep is None:
+            raise HTTPException(status_code=404, detail="Dependência não encontrada.")
+        await _assert_all_in_scope(ctx, [dep.predecessor_id, dep.successor_id])
     await TaskDependencyService.delete(ctx.db, project_id, dep_id)
 
 
@@ -1348,6 +1389,11 @@ async def get_workload(
 
     df = _date.fromisoformat(date_from) if date_from else None
     dt = _date.fromisoformat(date_to) if date_to else None
+    if await _po_external_scope(ctx) is not None:
+        # PO Externo: só a carga do projeto dele (sem root seria o portfólio inteiro).
+        if root is None:
+            return WorkloadResponse(unit="day", cells=[])
+        await _assert_task_in_scope(ctx, root)
     cells = await TaskDependencyService.compute_workload(
         ctx.db, project_id, df, dt, unit=unit, root_task_id=root,
     )
@@ -1363,6 +1409,15 @@ async def get_assignee_absences(
     cronograma. Gated só pelo acesso ao módulo projetos (planner sem permissão de
     teamops também recebe — é informação do próprio cronograma)."""
     mapping = await TaskDependencyService.assignee_absences(ctx.db, project_id)
+    scope = await _po_external_scope(ctx)
+    if scope is not None:
+        # PO Externo: só as ausências de quem trabalha nos projetos dele.
+        from app.modules.projetos.models import ProjectTask as _PT
+
+        people = set((await ctx.db.execute(
+            select(_PT.assigned_to).where(_PT.id.in_(scope), _PT.assigned_to.isnot(None))
+        )).scalars().all())
+        mapping = {uid: items for uid, items in mapping.items() if uid in people}
     return AssigneeAbsencesResponse(by_user={
         str(uid): [
             AssigneeAbsenceItem(start_date=s, end_date=e, type_name=tn, status=st, partial_hours=ph)
@@ -1380,7 +1435,28 @@ async def get_schedule_overload(
 ):
     """Tarefas do cronograma cujo responsável está superlotado no período — alimenta o
     marcador de sobrecarga no avatar do Gantt. Mesmo gating de /assignee-absences."""
-    return await CapacityService.compute_schedule_overload(ctx.db, project_id, root)
+    scope = await _po_external_scope(ctx)
+    if scope is None:
+        return await CapacityService.compute_schedule_overload(ctx.db, project_id, root)
+    if root is None:
+        return ScheduleOverloadResponse(rows=[])
+    await _assert_task_in_scope(ctx, root)
+    res = await CapacityService.compute_schedule_overload(ctx.db, project_id, root)
+    # O que disputa o dia do responsável pode ser de outro projeto: sem título para o PO Externo.
+    from app.modules.projetos.models import ProjectTask as _PT
+
+    own = set((await ctx.db.execute(
+        select(_PT.title).where(_PT.id.in_(scope), _PT.parent_task_id.is_(None))
+    )).scalars().all())
+    rows = []
+    for r in res.rows:
+        if r.task_id not in scope:
+            continue
+        for c in r.conflicts:
+            if c.project_name not in own:
+                c.project_name, c.task_title = "Outro projeto", "Outra demanda"
+        rows.append(r)
+    return ScheduleOverloadResponse(rows=rows)
 
 
 # ─────────────────────────────────────────────
@@ -1649,6 +1725,7 @@ async def get_schedule_lock(
     ctx: ModuleContext = Depends(_ctx),
 ):
     """Estado do controle de baseline do projeto: open | locked | revision."""
+    await _assert_task_in_scope(ctx, root)
     return await ScheduleBaselineService.lock_state(ctx.db, project_id, root)
 
 
@@ -1658,7 +1735,12 @@ async def list_schedule_locks(
     ctx: ModuleContext = Depends(_ctx),
 ):
     """Estado da trava de TODAS as raízes de planejamento do projeto (visão completa do cronograma)."""
-    return await ScheduleBaselineService.lock_states(ctx.db, project_id)
+    states = await ScheduleBaselineService.lock_states(ctx.db, project_id)
+    scope = await _po_external_scope(ctx)
+    if scope is None:
+        return states
+    allowed = {str(t) for t in scope}
+    return [s_ for s_ in states if str(s_["root_task_id"]) in allowed]
 
 
 @router.get("/projects/{project_id}/schedule-lock-for-task", response_model=ScheduleLockState)
@@ -1668,6 +1750,7 @@ async def get_schedule_lock_for_task(
     ctx: ModuleContext = Depends(_ctx),
 ):
     """Estado da trava da raiz de planejamento à qual a tarefa pertence (resolve o root)."""
+    await _assert_task_in_scope(ctx, task)
     return await ScheduleBaselineService.lock_state_for_task(ctx.db, project_id, task)
 
 
@@ -1681,6 +1764,7 @@ async def get_schedule_readiness(
 
     Read-only. O board consulta para explicar o bloqueio antes de tentar mover; quem
     decide de fato é o guard em `ProjectTaskService.update` (423)."""
+    await _assert_task_in_scope(ctx, task)
     return await ProjectTaskService.schedule_readiness(ctx.db, project_id, task)
 
 
@@ -1691,6 +1775,7 @@ async def list_baselines(
     ctx: ModuleContext = Depends(_ctx),
 ):
     """Histórico de baselines (snapshots versionados + justificativa), mais recente primeiro."""
+    await _assert_task_in_scope(ctx, root)
     return await ScheduleBaselineService.list_baselines(ctx.db, project_id, root)
 
 
@@ -1778,7 +1863,12 @@ async def list_project_form_values(
 ):
     """Mapa { task_id: values } das submissões do projeto — usado pelo quadro para
     renderizar campos personalizados nos cards."""
-    return await ProjectDemandFormSubmissionService.values_map_by_project(ctx.db, project_id)
+    values = await ProjectDemandFormSubmissionService.values_map_by_project(ctx.db, project_id)
+    scope = await _po_external_scope(ctx)
+    if scope is None:
+        return values
+    allowed = {str(t) for t in scope}
+    return {k: v for k, v in values.items() if k in allowed}
 
 
 @router.get("/projects/{project_id}/tasks/{task_id}/form-submission", response_model=ProjectDemandFormSubmissionResponse | None)
@@ -1967,7 +2057,19 @@ async def list_stage_agents(
     project_id: Optional[uuid.UUID] = Query(None),
     ctx: ModuleContext = Depends(_ctx),
 ):
-    return await ProjectStageAgentService.list(ctx.db, project_id)
+    agents = await ProjectStageAgentService.list(ctx.db, project_id)
+    if await _has_permission(ctx, "projetos.automation.manage"):
+        return agents
+    # O board só precisa saber quais etapas têm agente (ícone). Prompt, credencial e gateway
+    # ficam com quem configura automações.
+    out = []
+    for a in agents:
+        r = ProjectStageAgentBindingResponse.model_validate(a)
+        out.append(r.model_copy(update={
+            "agent_id": "", "usuario": "", "prompt_template": "",
+            "gateway_url": None, "gateway_client_id": None, "has_gateway_client_secret": False,
+        }))
+    return out
 
 
 @router.post("/config/stage-agents", response_model=ProjectStageAgentBindingResponse, status_code=201)
@@ -2131,7 +2233,12 @@ async def priority_matrix(
     pillar_id: Optional[uuid.UUID] = Query(None),
     ctx: ModuleContext = Depends(_ctx),
 ):
-    return await PriorityScoreService.matrix(ctx.db, funnel_id=funnel_id, quadrant=quadrant, pillar_id=pillar_id)
+    items = await PriorityScoreService.matrix(ctx.db, funnel_id=funnel_id, quadrant=quadrant, pillar_id=pillar_id)
+    scope = await _po_external_scope(ctx)
+    if scope is None:
+        return items
+    allowed = {str(t) for t in scope}
+    return [i for i in items if str(i["task_id"]) in allowed]
 
 
 @router.post("/tasks/{task_id}/priority/preview", response_model=PriorityComputeResult)
@@ -2141,6 +2248,7 @@ async def preview_task_priority(
     ctx: ModuleContext = Depends(_ctx),
     _=Depends(_can_priority_score),
 ):
+    await _assert_task_in_scope(ctx, task_id)
     return await PriorityScoreService.preview(ctx.db, data)
 
 

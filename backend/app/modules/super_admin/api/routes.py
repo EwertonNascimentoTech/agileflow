@@ -203,6 +203,13 @@ async def first_access_check(
     return await UserService.check_first_access(db, data.email)
 
 
+@auth_router.get("/first-access/inspect")
+@limiter.limit("20/minute")
+async def first_access_inspect(request: Request, token: str, db: AsyncSession = Depends(get_db)):
+    """Valida o link de primeiro acesso e devolve nome/e-mail para a tela de criar senha."""
+    return await UserService.inspect_first_access(db, token)
+
+
 @auth_router.post("/first-access/complete", response_model=TokenResponse)
 @limiter.limit("10/minute")
 async def first_access_complete(

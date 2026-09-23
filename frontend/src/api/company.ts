@@ -62,6 +62,8 @@ export const companyApi = {
 
   updateUser: (id: string, data: UserUpdatePayload) =>
     api.patch<User>(`/company/admin/users/${id}`, data).then((r) => r.data),
+  userFirstAccessLink: (id: string) =>
+    api.post<{ path: string; expires_hours: number }>(`/company/admin/users/${id}/first-access-link`).then((r) => r.data),
 
   listPermissions: () =>
     api.get<ModulePermission[]>("/company/admin/permissions").then((r) => r.data),

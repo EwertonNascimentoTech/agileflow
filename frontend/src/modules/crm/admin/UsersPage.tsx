@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react"
+import { FirstAccessLinkButton } from "@/components/FirstAccessLinkButton"
+import { companyApi as companyAdminApi } from "@/api/company"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -194,6 +196,14 @@ export default function UsersPage() {
                     {user.is_active ? "Ativo" : "Inativo"}
                   </Badge>
                 </div>
+                {!user.last_login && user.is_active && (
+                  <FirstAccessLinkButton
+                    size="icon"
+                    variant="ghost"
+                    personName={user.full_name}
+                    generate={() => companyAdminApi.userFirstAccessLink(user.id)}
+                  />
+                )}
                 <Button
                   variant="ghost"
                   size="icon"

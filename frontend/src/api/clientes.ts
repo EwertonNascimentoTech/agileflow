@@ -62,6 +62,8 @@ export const clientesApi = {
     api
       .put<ProjectClient>(`/projetos/clients/${id}/projects`, { project_task_ids: projectTaskIds })
       .then((r) => r.data),
+  firstAccessLink: (id: string) =>
+    api.post<{ path: string; expires_hours: number }>(`/projetos/clients/${id}/first-access-link`).then((r) => r.data),
   listForProject: (taskId: string) =>
     api.get<ProjectClient[]>(`/projetos/tasks/${taskId}/clients`).then((r) => r.data),
 }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
+import { FirstAccessLinkButton } from "@/components/FirstAccessLinkButton"
 import { AllocationSplitBar, allocationSplit } from "@/modules/teamops/AllocationSplit"
 import { useNavigate, useParams } from "react-router-dom"
 import { ArrowLeft, Plus, Trash2, Pencil, UserMinus } from "lucide-react"
@@ -97,6 +98,12 @@ export default function PersonDetailPage() {
         </Button>
         {canManage && (
           <div className="flex gap-2">
+            {person.status === "ativo" && (
+              <FirstAccessLinkButton
+                personName={person.full_name}
+                generate={() => teamopsApi.personFirstAccessLink(person.id)}
+              />
+            )}
             <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
               <Pencil className="mr-2 h-4 w-4" /> Editar
             </Button>

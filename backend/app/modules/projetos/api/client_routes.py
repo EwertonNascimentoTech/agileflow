@@ -86,6 +86,28 @@ async def create_client(
     )
 
 
+@router.post("/clients/{client_id}/first-access-link")
+async def client_first_access_link(
+    client_id: uuid.UUID,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_client_manage),
+):
+    """Link de primeiro acesso (72 h) para o PO enviar ao cliente."""
+    from sqlalchemy import select as _select
+
+    from app.modules.super_admin.models import User as _User
+    from app.modules.super_admin.service import UserService
+
+    client = await ProjectClientService.get(ctx.db, client_id)
+    scope = await _po_external_scope(ctx)
+    if scope is not None and not any(p.task_id in scope for p in client.projects):
+        raise HTTPException(status_code=404, detail="Cliente não encontrado.")
+    user = (await ctx.db.execute(_select(_User).where(_User.id == client.user_id))).scalar_one_or_none() if client.user_id else None
+    if user is None:
+        raise HTTPException(status_code=400, detail="Cliente sem login.")
+    return UserService.first_access_link_for_user(user)
+
+
 @router.get("/clients/{client_id}", response_model=ProjectClientResponse)
 async def get_client(
     client_id: uuid.UUID,

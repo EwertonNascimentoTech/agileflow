@@ -10,10 +10,30 @@ logger = logging.getLogger(__name__)
 
 
 def _run(coro):
+    """Roda a corrotina num loop próprio e, ao final, fecha as conexões abertas NELE.
+
+    A engine async (e o cliente Redis) são globais do processo: sem descartar o pool, a
+    próxima tarefa do mesmo worker pega conexões presas ao loop já fechado e falha com
+    "attached to a different loop" / "Event loop is closed" (SLA, commits e ocorrências
+    falhavam de forma intermitente)."""
     loop = asyncio.new_event_loop()
     try:
         return loop.run_until_complete(coro)
     finally:
+        try:
+            from app.core.database import engine
+
+            loop.run_until_complete(engine.dispose())
+        except Exception:  # noqa: BLE001
+            logger.exception("[celery] falha ao descartar o pool do banco")
+        try:
+            import app.core.cache as _cache
+
+            if _cache._redis is not None:
+                loop.run_until_complete(_cache._redis.aclose())
+                _cache._redis = None
+        except Exception:  # noqa: BLE001
+            pass
         loop.close()
 
 

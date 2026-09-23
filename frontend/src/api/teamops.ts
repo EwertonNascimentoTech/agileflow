@@ -496,6 +496,8 @@ export const teamopsApi = {
   getPerson: (id: string) => api.get<Person>(`/teamops/persons/${id}`).then((r) => r.data),
   createPerson: (data: Partial<Person> & { full_name: string; email: string; access_level?: AccessLevel; password?: string }) =>
     api.post<Person>("/teamops/persons", data).then((r) => r.data),
+  personFirstAccessLink: (id: string) =>
+    api.post<{ path: string; expires_hours: number }>(`/teamops/persons/${id}/first-access-link`).then((r) => r.data),
   updatePerson: (id: string, data: Partial<Person> & {
     access_level?: AccessLevel
     password?: string

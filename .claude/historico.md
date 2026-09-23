@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-23 — Auditoria · bloco 2 (escopo, permissões de leitura, desligamento, primeiro acesso)
+
+- **Pedido:** Segundo bloco da auditoria geral.
+- **Feito:** S3 — PO Externo recortado em planning-nodes, form-values, matriz, dependências, workload, ausências, sobrecarga, travas/baselines, URL de anexo, reorder, import e criação com pai alheio; config dos agentes sem prompt/credencial para quem não tem `automation.manage`. S5 — `require_any_permission`: leituras de Produtos (exceto detalhe/versões, usados no card), Indicadores e RTD exigem `.view`; TeamOps: dashboard/alertas (`teamops.view`), organograma (`org.view`), competências (`stack.view`), detalhe da Pessoa (`person.view`); lista de Pessoas sem contato pessoal para quem não tem `person.view`; ausências (lista e calendário) do time só para `view_team`/`approve`/`manage` — corrige a aba Aprovações do coordenador; `/company/admin/users` barra cliente externo e PO Externo vê só a si. S6 — desligar/excluir Pessoa desativa o login (e o formulário não reativa). S2 — `/auth/first-access/check` não devolve token; link de 72 h gerado por quem cadastra (Pessoas, Clientes, Usuários) + `/auth/first-access/inspect`; tela `/primeiro-acesso?token=`. Celery: `_run` descarta o pool do banco/Redis ao fim de cada tarefa (SLA, commits e ocorrências falhavam de forma intermitente).
+- **Não mexer:** detalhe do produto e versões seguem abertos a quem usa o módulo; lista de Pessoas continua aberta como diretório (sem contato pessoal); o token de primeiro acesso nunca volta numa consulta por e-mail.
+- **Arquivos:** `core/dependencies.py`, `core/security.py`, `super_admin/service.py`, `super_admin/api/routes.py`, `company/api/routes.py`, `projetos/api/routes.py`, `projetos/api/client_routes.py`, `projetos/service.py`, `produtos|indicadores|rtd/api/routes.py`, `teamops/api/routes.py`, `teamops/service.py`, `tasks/scheduled.py`; front `FirstAccessPage.tsx`, `FirstAccessLinkButton.tsx`, `ProjectClientsPage.tsx`, `PersonDetailPage.tsx`, `crm/admin/UsersPage.tsx`, `api/*`.
+
 ## 2026-09-23 — Correções rápidas da auditoria (segurança + quebras)
 
 - **Pedido:** Primeiro bloco da auditoria geral (`provisorio/testes-e2e/auditoria-geral-2026-09-23/RELATORIO.md`).

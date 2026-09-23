@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 
-from app.core.dependencies import ModuleContext, require_module, require_permission
+from app.core.dependencies import ModuleContext, has_permission_cached, require_any_permission, require_module, require_permission
 from app.modules.teamops.models import AbsenceStatus, PersonStatus
 from app.modules.teamops.schemas import (
     AbsenceCalendarResponse,
@@ -77,6 +77,11 @@ _can_person_stack_manage = require_permission("teamops.person_stack.manage")
 _can_absence_approve = require_permission("teamops.absence.approve")
 _can_absence_manage = require_permission("teamops.absence.manage")
 _can_config_manage = require_permission("teamops.config.manage")
+# Leituras do módulo — o menu esconde, mas a API também precisa barrar.
+_can_view = require_any_permission("teamops.view", "teamops.person.manage")
+_can_org_view = require_any_permission("teamops.org.view", "teamops.org.manage")
+_can_person_view = require_any_permission("teamops.person.view", "teamops.person.manage")
+_can_stack_view = require_any_permission("teamops.stack.view", "teamops.stack.manage", "teamops.person_stack.manage")
 _PEOPLE_MANAGER_POSITION_SLUGS = {
     "coordenador",
     "coord_de_arq_dev_e_sustenta_o",
@@ -90,6 +95,15 @@ async def _current_person_id(ctx: ModuleContext) -> Optional[uuid.UUID]:
         return None
     result = await ctx.db.execute(select(Person.id).where(Person.user_id == ctx.user.id))
     return result.scalar_one_or_none()
+
+
+async def _sees_team_absences(ctx: ModuleContext) -> bool:
+    if ctx.user.role in (UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN):
+        return True
+    for code in ("teamops.absence.view_team", "teamops.absence.approve", "teamops.absence.manage"):
+        if await has_permission_cached(ctx.user, code):
+            return True
+    return False
 
 
 async def _ensure_people_manager(ctx: ModuleContext) -> None:
@@ -116,22 +130,22 @@ async def _ensure_people_manager(ctx: ModuleContext) -> None:
 
 
 @router.get("/dashboard", response_model=DashboardKpis)
-async def get_dashboard(ctx: ModuleContext = Depends(_ctx)):
+async def get_dashboard(ctx: ModuleContext = Depends(_ctx), _v=Depends(_can_view)):
     return await DashboardService.kpis(ctx.db)
 
 
 @router.get("/alerts", response_model=AlertsResponse)
-async def get_alerts(ctx: ModuleContext = Depends(_ctx)):
+async def get_alerts(ctx: ModuleContext = Depends(_ctx), _v=Depends(_can_view)):
     return await AlertsService.build(ctx.db)
 
 
 @router.get("/org/tree", response_model=OrgTreeResponse)
-async def get_org_tree(ctx: ModuleContext = Depends(_ctx)):
+async def get_org_tree(ctx: ModuleContext = Depends(_ctx), _v=Depends(_can_org_view)):
     return await OrgService.area_tree(ctx.db)
 
 
 @router.get("/competency-map", response_model=CompetencyMapResponse)
-async def get_competency_map(ctx: ModuleContext = Depends(_ctx)):
+async def get_competency_map(ctx: ModuleContext = Depends(_ctx), _v=Depends(_can_stack_view)):
     return await CompetencyMapService.build(ctx.db)
 
 
@@ -391,9 +405,20 @@ async def list_persons(
     search: Optional[str] = Query(None),
     ctx: ModuleContext = Depends(_ctx),
 ):
-    return await PersonService.list(
+    persons = await PersonService.list(
         ctx.db, area_id=area_id, position_id=position_id, status=status, search=search,
     )
+    if await has_permission_cached(ctx.user, "teamops.person.view") or await has_permission_cached(
+        ctx.user, "teamops.person.manage"
+    ):
+        return persons
+    # Diretório para escolher responsável (Processos): sem dados pessoais de contato.
+    return [
+        PersonResponse.model_validate(p).model_copy(
+            update={"phone": None, "whatsapp": None, "birth_date": None, "notes": None}
+        )
+        for p in persons
+    ]
 
 
 @router.get("/members", response_model=list[TeamMemberResponse])
@@ -412,8 +437,29 @@ async def create_person(
     return await PersonService.create(ctx.db, data, tenant_id=ctx.user.tenant_id)
 
 
+@router.post("/persons/{person_id}/first-access-link")
+async def person_first_access_link(
+    person_id: uuid.UUID,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_person_manage),
+):
+    """Gera o link de primeiro acesso (válido 72 h) para quem cadastra enviar à pessoa."""
+    from app.modules.super_admin.models import User as _User
+    from app.modules.super_admin.service import UserService
+
+    await _ensure_people_manager(ctx)
+    person = await PersonService.get(ctx.db, person_id)
+    if person.status != PersonStatus.ATIVO:
+        raise HTTPException(status_code=400, detail="Só pessoas ativas recebem link de primeiro acesso.")
+    if person.user_id:
+        user = (await ctx.db.execute(select(_User).where(_User.id == person.user_id))).scalar_one_or_none()
+        if user is not None:
+            return UserService.first_access_link_for_user(user)
+    return UserService.first_access_link_for_person(person.id, ctx.user.tenant_id)
+
+
 @router.get("/persons/{person_id}", response_model=PersonResponse)
-async def get_person(person_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+async def get_person(person_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _v=Depends(_can_person_view)):
     return await PersonService.get(ctx.db, person_id)
 
 
@@ -455,7 +501,7 @@ async def delete_person(
 
 
 @router.get("/persons/{person_id}/stacks", response_model=list[PersonStackResponse])
-async def list_person_stacks(person_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+async def list_person_stacks(person_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _v=Depends(_can_stack_view)):
     return await PersonStackService.list_for_person(ctx.db, person_id)
 
 
@@ -504,11 +550,10 @@ async def list_absences(
     area_id: Optional[uuid.UUID] = Query(None),
     ctx: ModuleContext = Depends(_ctx),
 ):
-    # Usuário comum (sem manage/approve) só vê as próprias
-    if ctx.user.role == UserRole.COMPANY_USER:
-        my_pid = await _current_person_id(ctx)
-        if my_pid:
-            person_id = my_pid
+    # Quem aprova/gerencia/vê o time enxerga todas (aba Aprovações do coordenador);
+    # o resto só as próprias.
+    if not await _sees_team_absences(ctx):
+        person_id = await _current_person_id(ctx) or uuid.UUID(int=0)
     return await AbsenceService.list(
         ctx.db,
         person_id=person_id,
@@ -521,7 +566,15 @@ async def list_absences(
 
 @router.get("/absences/calendar", response_model=AbsenceCalendarResponse)
 async def absences_calendar(month: str = Query(..., pattern=r"^\d{4}-\d{2}$"), ctx: ModuleContext = Depends(_ctx)):
-    return await AbsenceService.calendar(ctx.db, month)
+    cal = await AbsenceService.calendar(ctx.db, month)
+    if await _sees_team_absences(ctx):
+        return cal
+    # Só as próprias ausências (motivo/observações de colegas são dado pessoal).
+    my_pid = await _current_person_id(ctx)
+    for day in cal.days:
+        day.absences = [a for a in day.absences if a.person_id == my_pid]
+        day.conflict_flags = []
+    return cal
 
 
 @router.get("/absences/impact-analysis", response_model=AbsenceImpactResponse)
