@@ -322,8 +322,29 @@ async def _deny_po_external(ctx: ModuleContext = Depends(_ctx)) -> None:
         )
 
 
+async def _hidden_occurrences(ctx: ModuleContext) -> set[uuid.UUID]:
+    """Ocorrências da Operação Assistida que o usuário não vê (só PO do projeto, devs de
+    atendimento e coordenação/admin veem). Memoizado na requisição."""
+    cached = getattr(ctx, "_hidden_occ", None)
+    if cached is None:
+        from app.modules.projetos.assisted_ops import AssistedOpsService
+        cached = await AssistedOpsService.hidden_occurrence_task_ids(ctx.db, ctx.user)
+        try:
+            ctx._hidden_occ = cached
+        except Exception:  # noqa: BLE001 — ctx imutável: só não memoiza
+            pass
+    return cached
+
+
+def _drop_hidden(tasks: list, hidden: set[uuid.UUID]) -> list:
+    return [t for t in tasks if t.id not in hidden] if hidden else tasks
+
+
 async def _assert_all_in_scope(ctx: ModuleContext, task_ids) -> None:
     """Versão em lote de `_assert_task_in_scope` (escritas que tocam vários cards)."""
+    hidden = await _hidden_occurrences(ctx)
+    if hidden and any(t in hidden for t in task_ids if t is not None):
+        raise HTTPException(status_code=404, detail="Tarefa não encontrada.")
     scope = await _po_external_scope(ctx)
     if scope is None:
         return
@@ -332,8 +353,11 @@ async def _assert_all_in_scope(ctx: ModuleContext, task_ids) -> None:
 
 
 async def _assert_task_in_scope(ctx: ModuleContext, task_id: uuid.UUID) -> None:
-    """Barra o PO Externo em qualquer card fora dos projetos que ele lidera.
+    """Barra o PO Externo em qualquer card fora dos projetos que ele lidera e qualquer um numa
+    ocorrência que não é dele (PO do projeto, devs de atendimento, coordenação/admin).
     Responde 404 (e não 403) para não revelar a existência do card."""
+    if task_id in await _hidden_occurrences(ctx):
+        raise HTTPException(status_code=404, detail="Tarefa não encontrada.")
     scope = await _po_external_scope(ctx)
     if scope is None:
         return
@@ -814,8 +838,9 @@ async def list_all_tasks(
     )
     if not can_view_all:
         raise HTTPException(status_code=403, detail="Sem permissão para visualizar todas as demandas.")
-    return await ProjectTaskService.list_all(
-        ctx.db, project_id=project_id, only_task_ids=await _po_external_scope(ctx)
+    return _drop_hidden(
+        await ProjectTaskService.list_all(ctx.db, project_id=project_id, only_task_ids=await _po_external_scope(ctx)),
+        await _hidden_occurrences(ctx),
     )
 
 
@@ -1077,6 +1102,9 @@ async def list_tasks(
             only_task_ids=await _po_external_scope(ctx),
             slim=slim,
         )
+
+    # Ocorrências só para o PO do projeto, os devs de atendimento e a coordenação.
+    tasks = _drop_hidden(tasks, await _hidden_occurrences(ctx))
 
     if done_limit is not None:
         tasks, done_total = await ProjectTaskService.trim_done_column(
@@ -1714,8 +1742,9 @@ async def reschedule_schedule(
         )
     await _assert_task_in_scope(ctx, task_id)
     await ProjectTaskService.reschedule_on_demand(ctx.db, project_id, task_id)
-    return await ProjectTaskService.list(
-        ctx.db, project_id=project_id, only_task_ids=await _po_external_scope(ctx)
+    return _drop_hidden(
+        await ProjectTaskService.list(ctx.db, project_id=project_id, only_task_ids=await _po_external_scope(ctx)),
+        await _hidden_occurrences(ctx),
     )
 
 

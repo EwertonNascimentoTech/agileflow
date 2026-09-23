@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-23 — Ocorrências visíveis só para PO do projeto, devs de atendimento e coordenação
+
+- **Pedido:** O card da ocorrência só pode ser visto pelo PO do projeto, pelos devs que o PO informou ao mover para a Operação Assistida e pela coordenação (vê todas).
+- **Feito:** `AssistedOpsService.hidden_occurrence_task_ids` (vazio para admin/coordenação; senão, ocorrências de projetos em que a pessoa não é PO nem dev de atendimento; sem Pessoa = nenhuma). Aplicado em `_assert_task_in_scope`/`_assert_all_in_scope` (404, como o PO Externo — cobre card, painel, comentários, histórico, assumir, encaminhar, mover) e nas listas (board, /tasks, retorno do recalcular). Memoizado por requisição. Verificado por perfil: 22/22 (PO e dev de cada projeto veem só a sua; dev de fora nenhuma; coordenação/admin todas); board 0,46 s; E2E da OA 72/72 + 18/18.
+- **Não mexer:** toda rota por card precisa passar por `_assert_task_in_scope`; listas de cards filtram com `_drop_hidden`.
+- **Arquivos:** `projetos/assisted_ops.py`, `projetos/api/routes.py`
+
 ## 2026-09-23 — Ocorrência: "Assumir" visível e coordenação também assume
 
 - **Pedido:** Na ocorrência gerada não ficava claro como o dev assume e vira responsável.

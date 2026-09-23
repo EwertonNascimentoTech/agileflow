@@ -253,6 +253,27 @@ class AssistedOpsService:
         pid = await AssistedOpsService._person_id_for_user(db, user.id)
         return bool(root and pid and root.assigned_to == pid)
 
+    # ── Visibilidade das ocorrências no time ─────────────────────────────────
+    @staticmethod
+    async def hidden_occurrence_task_ids(db: AsyncSession, user: Optional[User]) -> set[uuid.UUID]:
+        """Ocorrências que o usuário NÃO vê no kanban/card. Veem cada ocorrência: o PO do projeto,
+        os devs de atendimento do projeto (definidos ao mover para a Operação Assistida) e a
+        coordenação/admin (todas). Conjunto vazio = vê todas. Sem Pessoa vinculada = não vê nenhuma."""
+        from app.modules.projetos.service import ProjectTaskService
+        if user is None or _is_admin(user) or await ProjectTaskService._is_coordination(db, user):
+            return set()
+        pid = await AssistedOpsService._person_id_for_user(db, user.id)
+        if pid is None:
+            return set((await db.execute(select(ProjectOccurrence.task_id))).scalars().all())
+        rows = await db.execute(text("""
+            SELECT o.task_id FROM project_occurrences o
+              JOIN project_tasks r ON r.id = o.project_task_id
+             WHERE r.assigned_to IS DISTINCT FROM CAST(:pid AS uuid)
+               AND NOT EXISTS (SELECT 1 FROM project_assisted_ops_devs d
+                                WHERE d.project_task_id = r.id AND d.person_id = CAST(:pid AS uuid))
+        """), {"pid": str(pid)})
+        return {r[0] for r in rows.all()}
+
     # ── Devs fixos ───────────────────────────────────────────────────────────
     @staticmethod
     async def _dev_person_ids(db: AsyncSession, root_id: uuid.UUID) -> list[uuid.UUID]:
