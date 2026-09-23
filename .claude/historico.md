@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-23 — Coordenação define o atendimento da OA no próprio modal
+
+- **Pedido:** O modal da Operação Assistida não é só aviso: quem move (o coordenador) faz a ação ali.
+- **Feito:** `set_devs` aceita PO do projeto, admin ou coordenação (`_is_coordination`); o modal (board e drawer) abre o editor para o PO ou a coordenação (`isCoordination`), e o aviso fica só para os demais. Dev continua 403. Verificado: coordenador escolhe o dev no modal e o card entra na OA (14/14 telas); E2E da OA 71/71 + 18/18.
+- **Não mexer:** quem define os devs de atendimento = PO do projeto, admin ou coordenação.
+- **Arquivos:** `projetos/assisted_ops.py`, `AssistedOpsDevsDialog.tsx`, `ProjectBoardPage.tsx`, `ProjectTaskDrawer.tsx`
+
 ## 2026-09-23 — Operação Assistida só com devs de atendimento definidos
 
 - **Pedido:** Ao mover o projeto para Operação Assistida, abrir o modal para o PO definir o atendimento; o card só entra na raia depois de salvar.

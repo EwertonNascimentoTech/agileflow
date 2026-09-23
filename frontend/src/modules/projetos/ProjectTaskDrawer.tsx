@@ -33,6 +33,7 @@ import { toast } from "@/lib/toast"
 import { UsChecklistSection } from "@/modules/projetos/UsChecklistSection"
 import { UsCommitsSection } from "@/modules/projetos/UsCommitsSection"
 import { AssistedOpSkipDialog, isAssistedOpSkipRequired } from "@/modules/projetos/AssistedOpSkipDialog"
+import { isCoordination } from "@/lib/permissions"
 import { AssistedOpsDevsDialog, isAssistedOpsDevsRequired } from "@/modules/projetos/AssistedOpsDevsDialog"
 import { OccurrenceTeamPanel } from "@/modules/projetos/OccurrenceTeamPanel"
 import { AssistedOpsDevsSection } from "@/modules/projetos/AssistedOpsDevsSection"
@@ -1869,7 +1870,7 @@ export function ProjectTaskDrawer({
       projectTaskId={task?.id ?? null}
       projectTitle={task?.title}
       canEdit={
-        authUser?.role === "super_admin" || authUser?.role === "company_admin" ||
+        isCoordination(authUser) ||
         (!!task?.assigned_to && task.assigned_to === users.find((u) => (u as unknown as { user_id?: string | null }).user_id === authUser?.id)?.id)
       }
       poName={users.find((u) => u.id === task?.assigned_to)?.full_name}

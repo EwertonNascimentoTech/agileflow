@@ -64,7 +64,7 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 - Colaborador interno que também é cliente mantém a Função dele e ganha o Portal (`has_client_portal`).
 - Vínculo cliente <-> projeto só com card-raiz do kanban Projetos e Programas.
 - Notificação in-app passa por `core/notifications.py`; destinatário é users.id (resolver Person -> user com `user_ids_for_persons`).
-- Raia Operação Assistida (`is_assisted_operation`) fica antes de Concluído e **não** é final. Projeto/Programa só entra nela com devs de atendimento definidos (428 `assisted_ops_devs_required`: modal do PO e reenvio do movimento). Projeto/Programa que vai a Concluído sem ter passado por ela exige justificativa (HTTP 428 -> diálogo -> `assisted_op_skip_reason`).
+- Raia Operação Assistida (`is_assisted_operation`) fica antes de Concluído e **não** é final. Projeto/Programa só entra nela com devs de atendimento definidos (428 `assisted_ops_devs_required`: modal para o PO ou a coordenação definir, e reenvio do movimento). Projeto/Programa que vai a Concluído sem ter passado por ela exige justificativa (HTTP 428 -> diálogo -> `assisted_op_skip_reason`).
 - Nos relatórios, Operação Assistida conta como **entregue** (data = `assisted_op_entered_at`) com selo `em_operacao_assistida`; travas de movimento continuam usando só Concluído.
 - Ocorrência = ProjectTask no funil `is_assisted_ops` + linha em `project_occurrences`; regras leem `assisted_stage_key`, não o nome da etapa.
 - Só abre ocorrência cliente vinculado a projeto que está na raia Operação Assistida. Projeto não vai a Concluído com ocorrência aberta. Ocorrência encerrada (etapa final) não reabre.

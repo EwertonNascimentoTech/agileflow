@@ -302,8 +302,18 @@ class AssistedOpsService:
         root = await db.get(ProjectTask, root_id)
         if root is None or root.parent_task_id is not None:
             raise HTTPException(status_code=404, detail="Projeto não encontrado.")
-        if not (_is_admin(user) or await AssistedOpsService._is_project_po(db, user, root_id)):
-            raise HTTPException(status_code=403, detail="Só o PO do projeto define os desenvolvedores de atendimento.")
+        # PO do projeto ou coordenação (Coordenador/Administrativo/Gerente — `_is_coordination`):
+        # quem move o projeto para a Operação Assistida define o atendimento no próprio modal.
+        from app.modules.projetos.service import ProjectTaskService
+        if not (
+            _is_admin(user)
+            or await AssistedOpsService._is_project_po(db, user, root_id)
+            or await ProjectTaskService._is_coordination(db, user)
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="Só o PO do projeto ou a coordenação definem os desenvolvedores de atendimento.",
+            )
         wanted = set(person_ids)
         if wanted:
             found = set((await db.execute(select(Person.id).where(Person.id.in_(wanted)))).scalars().all())

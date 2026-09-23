@@ -2506,7 +2506,7 @@ export default function ProjectBoardPage() {
         projectTaskId={oaDevsPrompt?.task.id ?? null}
         projectTitle={oaDevsPrompt?.task.title}
         canEdit={
-          user?.role === "super_admin" || user?.role === "company_admin" ||
+          isCoordination(user) ||
           (!!oaDevsPrompt?.task.assigned_to &&
             oaDevsPrompt.task.assigned_to === persons.find((p) => p.user_id === user?.id)?.id)
         }

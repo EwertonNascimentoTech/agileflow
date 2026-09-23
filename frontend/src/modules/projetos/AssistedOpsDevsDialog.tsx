@@ -14,8 +14,8 @@ export function isAssistedOpsDevsRequired(err: unknown): boolean {
 }
 
 /** Modal que aparece ao mover o projeto para a Operação Assistida sem devs de atendimento:
- *  o PO define quem recebe as ocorrências e, ao salvar, o movimento é reenviado. Quem não é
- *  o PO (nem admin) vê só o aviso — o card não entra na raia. */
+ *  o PO do projeto ou a coordenação define quem recebe as ocorrências ali mesmo e, ao salvar,
+ *  o movimento é reenviado. Os demais veem só o aviso — o card não entra na raia. */
 export function AssistedOpsDevsDialog({
   open, projectTaskId, projectTitle, canEdit, poName, onCancel, onSaved,
 }: {
@@ -51,8 +51,8 @@ export function AssistedOpsDevsDialog({
         ) : (
           <>
             <p className="text-sm text-muted-foreground">
-              Só o PO do projeto{poName ? ` (${poName})` : ""} define os desenvolvedores de atendimento.
-              Peça a ele para definir antes de mover o projeto para a Operação Assistida.
+              Só o PO do projeto{poName ? ` (${poName})` : ""} ou a coordenação definem os desenvolvedores de
+              atendimento. Peça a um deles para definir antes de mover o projeto para a Operação Assistida.
             </p>
             <DialogFooter>
               <Button onClick={onCancel}>Entendi</Button>
