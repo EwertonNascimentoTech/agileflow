@@ -136,7 +136,8 @@ class Settings(BaseSettings):
     # Login "Entre com o IDigital" ao lado do login por senha. O navegador faz o Authorization
     # Code + PKCE (client público: o IdP só aceita token_endpoint_auth_method "none") e manda o
     # id_token para /auth/sso/exchange, que valida (JWKS, iss, aud, exp) e devolve a sessão
-    # AgileFlow de sempre. Vínculo pelo e-mail no 1º login; sem auto-cadastro.
+    # AgileFlow de sempre. Vínculo pelo e-mail no 1º login; quem não tem login vira colaborador (se está em
+    # Pessoas) ou cliente do Portal (se não está).
     # Desligado até o client ser cadastrado no IdP.
     SSO_ENABLED: bool = False
     # Base dos endpoints (discovery em {authority}/.well-known/openid-configuration). O `iss`
@@ -148,6 +149,8 @@ class Settings(BaseSettings):
     SSO_SCOPE: str = "openid email profile"
     # Idade máxima do id_token aceito na troca (segundos).
     SSO_MAX_TOKEN_AGE: int = 600
+    # Quem entra pelo IDigital sem login e sem cadastro em Pessoas vira cliente (Portal) neste tenant (slug).
+    SSO_CLIENT_TENANT: str = "ss"
 
     # ── EPA (Sistema de Planos de Ação — sysepa) ──
     # Integração usada pelo RTD (slide de Planos Estratégicos). Login/senha únicos da

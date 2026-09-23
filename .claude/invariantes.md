@@ -133,8 +133,9 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 ## SSO IDigital (login)
 
 - Login pelo IDigital termina no mesmo `create_tokens` do login por senha: RBAC, tenant e API não dependem do token do IdP.
-- Vínculo pelo e-mail só no 1º login SSO; depois casa pelo `sub` (`user_sso_identities`). Sem auto-cadastro: e-mail sem usuário = 403.
-- Senha continua valendo para todos; clientes externos do Portal não têm IDigital e seguem com senha.
+- Vínculo pelo e-mail só no 1º login SSO; depois casa pelo `sub` (`user_sso_identities`).
+- 1º login SSO sem login no AgileFlow: está em Pessoas = colaborador (role do cargo, como o 1º acesso); Pessoa inativa = 403; fora de Pessoas = sempre cliente do Portal sem projetos (tenant `SSO_CLIENT_TENANT`), o PO vincula. Do IDigital só nome e e-mail.
+- Senha continua valendo para todos; clientes cadastrados pelo PO sem IDigital seguem com senha.
 - id_token validado por JWKS (RS256), `iss` da discovery (host, sem `/sso/oidc`), `aud` = client, `exp`, `iat` recente e `at_hash`; cada id_token vale uma troca (Redis).
 - Client público (PKCE, sem `client_secret`): o IdP só aceita `none`. Nunca pedir nem guardar o `document` (CPF).
 - CSP `connect-src` precisa listar o host do IdP; chamadas do SSO no front não passam pelo interceptor do axios (401 da troca não é sessão vencida).

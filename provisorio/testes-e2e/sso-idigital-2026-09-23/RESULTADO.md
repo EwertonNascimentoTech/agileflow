@@ -3,7 +3,7 @@
 Executado contra o sistema no ar (`tenant_ss`, nginx `:18082`). Os testes não mudam a configuração real
 (SSO ligado em produção desde 23/09/2026, client cadastrado no IdP).
 
-**Resultado: 29/29 verificações de backend + 17/17 verificações de tela.**
+**Resultado: 37/37 verificações de backend + 17/17 verificações de tela.**
 
 ## Backend (`service_test.py`, dentro do `saas_api`)
 
@@ -12,7 +12,11 @@ transação desfeita no fim (commit vira flush); chaves de reuso no Redis apagad
 
 - 1º login vincula pelo e-mail (sem diferenciar maiúsculas); último acesso e auditoria `sso_login`.
 - Mesmo id_token não serve duas vezes; logins seguintes casam pelo `sub` mesmo com o e-mail trocado no IdP.
-- Recusas: e-mail sem cadastro (403 + `sso_login_denied`), usuário já ligado a outra conta (409), inativo (403, sem vínculo),
+- Sem login e fora de Pessoas: vira cliente do Portal (project_clients + login com a função de cliente), nome do IDigital
+  (nome + sobrenome), sem projetos, observação "IDigital", auditoria `provisioned=cliente`; 2º login casa pelo `sub`.
+- Em Pessoas sem login: vira colaborador ligado à Pessoa, role do cargo, nome de Pessoas, `provisioned=colaborador`.
+  Pessoa desligada: 403 e não vira cliente. Tenant de clientes inexistente: 403 auditado.
+- Recusas: usuário já ligado a outra conta (409), inativo (403, sem vínculo),
   `aud`/`iss` errados, outra chave, HS256, expirado, `iat` antigo, `kid` desconhecido, sem e-mail, `at_hash` sem/errado, lixo.
 - SSO desligado: troca 404 e config `{"enabled": false}`; ligado: config só com dados do client público.
 - Rota HTTP `/auth/sso/exchange` devolve o mesmo formato do `/login`, com token do próprio usuário (sub, role, tenant); reuso 401.

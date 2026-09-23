@@ -10,8 +10,10 @@
 Decisões:
 
 - Vínculo pelo **e-mail** no 1º login; depois pelo `sub` do IDigital (tabela `public.user_sso_identities`).
-- **Sem auto-cadastro**: e-mail sem usuário no AgileFlow é recusado (tenant, cargo e permissões são do admin).
-- **Senha continua valendo** para todos. Clientes externos do Portal não têm IDigital e seguem com senha.
+- 1º login de quem ainda **não tem login** no AgileFlow:
+  - está em **Pessoas** (TeamOps) → ganha o login de **colaborador** com a role do cargo (mesma regra do 1º acesso);
+  - **não está em Pessoas** → vira **cliente** do Portal (Operação Assistida), sem projetos; o PO vincula os projetos na tela Clientes.
+- **Senha continua valendo** para todos. Clientes cadastrados pelo PO sem IDigital seguem com senha.
 
 ## B. Matriz RACI simplificada
 
@@ -47,9 +49,14 @@ flowchart TD
   K -->|não| L{vínculo pelo sub?}
   L -->|sim| N{usuário ativo?}
   L -->|não| M{usuário com o e-mail?}
-  M -->|não| X4[403 sem acesso + auditoria sso_login_denied]
   M -->|sim, já vinculado a outro sub| X5[409]
   M -->|sim| N
+  M -->|não| T{está em Pessoas?}
+  T -->|sim, inativo| X4[403 cadastro em Pessoas inativo]
+  T -->|sim| U[cria login de colaborador com a role do cargo]
+  T -->|não| V[cria cliente do Portal sem projetos, no tenant SSO_CLIENT_TENANT]
+  U --> N
+  V --> N
   N -->|não| X6[403 inativo]
   N -->|sim| O[cria/atualiza vínculo, last_login, auditoria sso_login]
   O --> Q[create_tokens: sessão AgileFlow]
@@ -68,7 +75,10 @@ flowchart TD
 | `at_hash` sem access_token ou que não bate | 401 | `jwt.decode(..., access_token=)` |
 | Mesmo id_token pela 2ª vez | 401 "já foi usado" (Redis fora: segue, fail-open) | `_mark_used` |
 | Sem e-mail no id_token nem no userinfo | 401 | `_email` |
-| E-mail sem usuário | 403 + `audit_logs.action = sso_login_denied` | `exchange` |
+| E-mail sem usuário, está em Pessoas (ativo) | cria login de colaborador (role do cargo), auditoria `provisioned = colaborador` | `_provision_collaborator` |
+| E-mail sem usuário, está em Pessoas (inativo) | 403, nada é criado | `_provision` |
+| E-mail sem usuário e fora de Pessoas | cria cliente do Portal sem projetos, auditoria `provisioned = cliente` | `_provision_client` |
+| Tenant de clientes (`SSO_CLIENT_TENANT`) inexistente | 403 + `sso_login_denied` | `_provision` |
 | Usuário já ligado a outra conta IDigital | 409 | `exchange` |
 | Usuário inativo | 403 (não ganha vínculo) | `exchange` |
 | Discovery/JWKS fora do ar | 503 (usa o cache se houver) | `metadata`, `signing_key` |
@@ -90,6 +100,19 @@ Logout: se a sessão veio do SSO (`localStorage.auth_via = "sso"`), o "Sair" tam
 | `last_login_at` | timestamp | último login SSO |
 
 O CPF (`document`) que o IdP oferece **não** é pedido nem guardado.
+
+### O que vem do IDigital no cadastro automático
+
+| Campo | Cliente (`project_clients` + login) | Colaborador (login de quem está em Pessoas) |
+| :--- | :--- | :--- |
+| E-mail | `email` do IDigital | `email` (é o que casa com Pessoas) |
+| Nome | `name` → `displayName` → `given_name` + `family_name` → `firstName` + `lastName` → `preferred_username`/`nickname` → parte local do e-mail | o de Pessoas (fonte da verdade do colaborador) |
+| Telefone, organização, departamento | não existem no IdP; o PO completa em Clientes | seguem de Pessoas |
+| Observação | "Cadastro criado no 1º login pelo IDigital em dd/mm/aaaa. Vincule os projetos em Clientes." | — |
+| Projetos | nenhum (o PO vincula) | os do cargo/permissões |
+| CPF (`document`) | não pedido nem guardado (LGPD) | idem |
+
+Senha: quem nasce pelo SSO recebe uma senha aleatória que ninguém conhece (entra pelo IDigital). Colaborador pode ter senha redefinida pelo admin em Pessoas.
 
 ## F. Fatos do IdP (discovery de produção)
 

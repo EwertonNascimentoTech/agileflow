@@ -14,8 +14,10 @@ from app.core.cache import get_redis
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.modules.super_admin import sso as sso_mod
+from app.core.dependencies import is_client_only
 from app.modules.super_admin.models import AuditLog, Tenant, User, UserRole, UserSsoIdentity
 from app.modules.super_admin.sso import SsoService
+from app.modules.teamops.models import Person, PersonStatus
 
 ISS = "https://idp.e2e.invalid"
 CLIENT = "agileflow-e2e"
@@ -97,11 +99,63 @@ async def main():
             user = await SsoService.exchange(db, t2, at2)
             check("logins seguintes casam pelo sub (e-mail no IdP pode mudar)", user.id == u1.id and ident.email == "outro.email@fiea.invalid")
 
+            # Sem login e sem Pessoa: vira cliente do Portal (sem projetos), nome vindo do IDigital.
+            subc = "sub-" + uuid.uuid4().hex
+            t, at = token(subc, email="e2e.sso.cliente@e2e-agileflow.com.br", given_name="Maria", family_name="Cliente E2E")
+            cu = await SsoService.exchange(db, t, at)
+            await db.execute(text("SET search_path TO tenant_ss, public"))
+            crow = (await db.execute(text(
+                "SELECT id, user_id, full_name, notes, (SELECT count(*) FROM project_client_access a WHERE a.client_id = c.id) AS n "
+                "FROM project_clients c WHERE lower(email) = 'e2e.sso.cliente@e2e-agileflow.com.br'"))).mappings().first()
+            await db.execute(text("SET search_path TO public"))
+            check("sem cadastro em Pessoas: vira cliente (project_clients + login do Portal)",
+                  crow is not None and crow["user_id"] == cu.id and await is_client_only(cu), f"{crow}")
+            check("cliente nasce com nome do IDigital (nome + sobrenome) e sem projetos",
+                  crow is not None and crow["full_name"] == "Maria Cliente E2E" and cu.full_name == "Maria Cliente E2E" and crow["n"] == 0, f"{crow}")
+            check("cadastro do cliente diz que veio do IDigital", crow is not None and "IDigital" in (crow["notes"] or ""))
+            aud = (await db.execute(select(AuditLog).where(AuditLog.user_id == cu.id, AuditLog.action == "sso_login"))).scalars().all()
+            check("auditoria registra provisioned=cliente", len(aud) == 1 and aud[0].details.get("provisioned") == "cliente", f"{[a.details for a in aud]}")
+            t, at = token(subc, email="e2e.sso.cliente@e2e-agileflow.com.br")
+            again = await SsoService.exchange(db, t, at)
+            n_users = (await db.execute(text("SELECT count(*) FROM public.users WHERE lower(email) = 'e2e.sso.cliente@e2e-agileflow.com.br'"))).scalar()
+            check("2º login do cliente casa pelo sub (não duplica)", again.id == cu.id and n_users == 1)
+
+            # Está em Pessoas e nunca entrou: vira colaborador com a role do cargo (não cliente).
+            await db.execute(text("SET search_path TO tenant_ss, public"))
+            pos_id = (await db.execute(text("SELECT id FROM team_positions ORDER BY name LIMIT 1"))).scalar()
+            pessoa = Person(full_name="[E2E] Pessoa SSO", email="e2e.sso.pessoa@e2e-agileflow.com.br", position_id=pos_id)
+            desligada = Person(full_name="[E2E] Pessoa desligada", email="e2e.sso.desligada@e2e-agileflow.com.br",
+                               position_id=pos_id, status=PersonStatus.DESLIGADO)
+            db.add_all([pessoa, desligada])
+            await db.flush()
+            await db.execute(text("SET search_path TO public"))
+            t, at = token("sub-" + uuid.uuid4().hex, email="e2e.sso.pessoa@e2e-agileflow.com.br", name="Pessoa do IDigital")
+            pu = await SsoService.exchange(db, t, at)
+            await db.execute(text("SET search_path TO tenant_ss, public"))
+            prow = (await db.execute(text("SELECT user_id FROM team_persons WHERE id = :i"), {"i": pessoa.id})).scalar()
+            role_pos = (await db.execute(text("SELECT role_id FROM team_positions WHERE id = :i"), {"i": pos_id})).scalar()
+            ncli = (await db.execute(text("SELECT count(*) FROM project_clients WHERE lower(email) = 'e2e.sso.pessoa@e2e-agileflow.com.br'"))).scalar()
+            await db.execute(text("SET search_path TO public"))
+            check("está em Pessoas: vira colaborador ligado à Pessoa (não cliente)",
+                  prow == pu.id and not await is_client_only(pu) and ncli == 0, f"{prow} {pu.id} {ncli}")
+            check("colaborador ganha a role do cargo e o nome de Pessoas", pu.role_id is not None and pu.role_id == role_pos and pu.full_name == "[E2E] Pessoa SSO", f"{pu.role_id} {role_pos} {pu.full_name}")
+            aud = (await db.execute(select(AuditLog).where(AuditLog.user_id == pu.id, AuditLog.action == "sso_login"))).scalars().all()
+            check("auditoria registra provisioned=colaborador", len(aud) == 1 and aud[0].details.get("provisioned") == "colaborador")
+
+            t, at = token("sub-" + uuid.uuid4().hex, email="e2e.sso.desligada@e2e-agileflow.com.br")
+            ok, d = await expect(SsoService.exchange(db, t, at), 403, "Pessoas não está ativo")
+            nu = (await db.execute(text("SELECT count(*) FROM public.users WHERE lower(email) = 'e2e.sso.desligada@e2e-agileflow.com.br'"))).scalar()
+            await db.execute(text("SET search_path TO tenant_ss, public"))
+            nc = (await db.execute(text("SELECT count(*) FROM project_clients WHERE lower(email) = 'e2e.sso.desligada@e2e-agileflow.com.br'"))).scalar()
+            await db.execute(text("SET search_path TO public"))
+            check("Pessoa desligada: recusada e não vira cliente", ok and nu == 0 and nc == 0, f"{d} {nu} {nc}")
+
+            settings.SSO_CLIENT_TENANT = "tenant-que-nao-existe"
             t, at = token("sub-" + uuid.uuid4().hex, email="ninguem@e2e-agileflow.com.br")
             ok, d = await expect(SsoService.exchange(db, t, at), 403, "não tem acesso ao AgileFlow")
-            check("e-mail sem cadastro no AgileFlow é recusado (sem auto-cadastro)", ok, d)
+            settings.SSO_CLIENT_TENANT = "ss"
             den = (await db.execute(select(AuditLog).where(AuditLog.action == "sso_login_denied"))).scalars().all()
-            check("recusa por falta de cadastro vai para a auditoria", any(a.details.get("email") == "ninguem@e2e-agileflow.com.br" for a in den))
+            check("sem tenant de clientes configurado: recusa auditada", ok and any(a.details.get("email") == "ninguem@e2e-agileflow.com.br" for a in den), d)
 
             t, at = token("sub-" + uuid.uuid4().hex, email="e2e.sso@e2e-agileflow.com.br")
             ok, d = await expect(SsoService.exchange(db, t, at), 409, "outra conta IDigital")

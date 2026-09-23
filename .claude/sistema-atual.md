@@ -33,7 +33,7 @@ Produto: **AgileFlow** (c?digo ainda cita Kore/SaaS). Tenant principal: `tenant_
 3. `company_user` — operacional; permiss?es por cargo ? fun??o.
 
 Auth: `POST /api/v1/auth/login`, refresh token no interceptor axios. Primeiro acesso: `/primeiro-acesso`.
-SSO IDigital (OIDC, desligado até o client existir no IdP): `GET /api/v1/auth/sso/config` (pública), `POST /api/v1/auth/sso/exchange` (id_token do IdP, sessão AgileFlow); tela `/sso/callback`; botão "Entre com o IDigital" no `/login` só com `SSO_ENABLED`. Vínculo em `public.user_sso_identities` (Alembic 007). Detalhe: `docs/técnico/09-sso-idigital.md`.
+SSO IDigital (OIDC, desligado até o client existir no IdP): `GET /api/v1/auth/sso/config` (pública), `POST /api/v1/auth/sso/exchange` (id_token do IdP, sessão AgileFlow); tela `/sso/callback`; botão "Entre com o IDigital" no `/login` só com `SSO_ENABLED`. Vínculo em `public.user_sso_identities` (Alembic 007). 1º login sem cadastro: em Pessoas = colaborador; fora = cliente do Portal sem projetos. Detalhe: `docs/técnico/09-sso-idigital.md`.
 
 ## Processos (`projetos`) — o n?cleo
 

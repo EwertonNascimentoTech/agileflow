@@ -2,12 +2,18 @@
 
 O IdP só aceita client público (PKCE, sem client_secret) e não emite refresh_token, então o
 token do IDigital serve uma vez, como prova de identidade: daqui sai a sessão AgileFlow de
-sempre (mesmos tokens do login por senha). Clientes externos do Portal não têm IDigital e
-seguem com senha.
+sempre (mesmos tokens do login por senha).
+
+1º login SSO de quem ainda não tem login no AgileFlow:
+- está em Pessoas (TeamOps) → ganha o login de colaborador com a role do cargo (como no 1º acesso);
+- não está → vira cliente do Portal (Operação Assistida) sem projetos; o PO vincula depois.
+Do IDigital só vêm nome e e-mail (o IdP não tem telefone/organização); o CPF (`document`) não é pedido.
 """
 import hashlib
 import logging
+import secrets
 import time
+import uuid
 from datetime import datetime
 from typing import Any, Optional
 
@@ -15,13 +21,14 @@ import httpx
 from fastapi import HTTPException
 from jose import jwt
 from jose.exceptions import ExpiredSignatureError, JWTClaimsError, JWTError
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import get_redis
 from app.core.config import settings
-from app.modules.super_admin.models import User, UserSsoIdentity
-from app.modules.super_admin.service import AuditService
+from app.core.security import get_password_hash
+from app.modules.super_admin.models import Tenant, User, UserRole, UserSsoIdentity
+from app.modules.super_admin.service import AuditService, UserService
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +43,29 @@ _jwks: dict[str, Any] = {}
 
 def _invalid(detail: str = "Não foi possível validar o login do IDigital. Entre de novo.") -> HTTPException:
     return HTTPException(status_code=401, detail=detail)
+
+
+def _random_password() -> str:
+    """Senha que ninguém conhece (quem nasce pelo SSO entra pelo IDigital); passa na regra de força."""
+    return secrets.token_urlsafe(24) + "Aa1!"
+
+
+def _display_name(claims: dict, email: str) -> str:
+    """Nome do IDigital: name → displayName → nome + sobrenome → apelido → parte local do e-mail."""
+    def val(key: str) -> str:
+        return str(claims.get(key) or "").strip()
+
+    for key in ("name", "displayName"):
+        if val(key):
+            return val(key)[:200]
+    for first, last in (("given_name", "family_name"), ("firstName", "lastName")):
+        full = " ".join(v for v in (val(first), val(last)) if v)
+        if full:
+            return full[:200]
+    for key in ("preferred_username", "nickname"):
+        if val(key) and "@" not in val(key):
+            return val(key)[:200]
+    return email.split("@")[0][:200]
 
 
 class SsoService:
@@ -188,20 +218,14 @@ class SsoService:
             select(UserSsoIdentity).where(UserSsoIdentity.provider == PROVIDER, UserSsoIdentity.subject == sub)
         )).scalar_one_or_none()
         linked_now = False
+        provisioned: Optional[str] = None
         if ident is not None:
             user = await db.get(User, ident.user_id)
         else:
-            # 1º login: vincula pelo e-mail. Sem cadastro no AgileFlow não entra (tenant, cargo e
-            # permissões são definidos pelo admin).
+            # 1º login: vincula pelo e-mail; sem login ainda, nasce colaborador (Pessoas) ou cliente.
             user = (await db.execute(select(User).where(func.lower(User.email) == email))).scalar_one_or_none()
             if user is None:
-                await AuditService.log(
-                    db, "sso_login_denied", "user", details={"provider": PROVIDER, "reason": "sem_cadastro", "email": email}, ip=ip,
-                )
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"O e-mail {email} não tem acesso ao AgileFlow. Peça ao administrador para cadastrá-lo.",
-                )
+                user, provisioned = await SsoService._provision(db, email, claims, ip)
             other = (await db.execute(
                 select(UserSsoIdentity).where(UserSsoIdentity.user_id == user.id, UserSsoIdentity.provider == PROVIDER)
             )).scalar_one_or_none()
@@ -224,6 +248,98 @@ class SsoService:
         await db.commit()
         await AuditService.log(
             db, "sso_login", "user", user_id=user.id, tenant_id=user.tenant_id, entity_id=user.id,
-            details={"provider": PROVIDER, "linked_now": linked_now}, ip=ip,
+            details={"provider": PROVIDER, "linked_now": linked_now, "provisioned": provisioned}, ip=ip,
         )
+        return user
+
+    # ── 1º login sem cadastro: colaborador (Pessoas) ou cliente (Portal) ─────
+    @staticmethod
+    async def _provision(db: AsyncSession, email: str, claims: dict, ip: Optional[str]) -> tuple[User, str]:
+        match = await UserService._find_person_by_email(db, email)
+        if match is not None:
+            tenant, person = match
+            if person.get("status") != "ativo":
+                raise HTTPException(
+                    status_code=403,
+                    detail="Seu cadastro em Pessoas não está ativo. Fale com o administrador da sua empresa.",
+                )
+            if person.get("user_id"):
+                linked = await db.get(User, uuid.UUID(str(person["user_id"])))
+                if linked is not None:
+                    return linked, "colaborador"
+            return await SsoService._provision_collaborator(db, tenant, uuid.UUID(str(person["id"]))), "colaborador"
+
+        tenant = (await db.execute(
+            select(Tenant).where(Tenant.slug == settings.SSO_CLIENT_TENANT, Tenant.is_active.is_(True))
+        )).scalar_one_or_none()
+        if tenant is None:
+            await AuditService.log(
+                db, "sso_login_denied", "user", details={"provider": PROVIDER, "reason": "sem_tenant_cliente", "email": email}, ip=ip,
+            )
+            raise HTTPException(
+                status_code=403,
+                detail=f"O e-mail {email} não tem acesso ao AgileFlow. Peça ao administrador para cadastrá-lo.",
+            )
+        return await SsoService._provision_client(db, tenant, email, claims), "cliente"
+
+    @staticmethod
+    async def _provision_collaborator(db: AsyncSession, tenant: Tenant, person_id: uuid.UUID) -> User:
+        """Login de colaborador para quem está em Pessoas e nunca entrou (mesma regra do 1º acesso: role do cargo)."""
+        from app.modules.teamops.models import Person
+        from app.modules.teamops.service import PersonService
+
+        await db.execute(text(f'SET search_path TO "{tenant.schema_name}", public'))
+        try:
+            person = await db.get(Person, person_id)
+            if person is None:
+                raise _invalid()
+            await PersonService._provision_user(db, person, "com_acesso", _random_password(), None, tenant.id)
+            await db.flush()  # grava team_persons.user_id antes de voltar ao search_path public
+            user = await db.get(User, person.user_id)
+        finally:
+            await db.execute(text("SET search_path TO public"))
+        if user is None:
+            raise HTTPException(status_code=500, detail="Não foi possível criar o acesso.")
+        return user
+
+    @staticmethod
+    async def _provision_client(db: AsyncSession, tenant: Tenant, email: str, claims: dict) -> User:
+        """Cliente do Portal (Operação Assistida) sem projetos: o PO vincula na tela Clientes.
+        Do IDigital vêm só nome e e-mail; telefone, organização e departamento o PO completa."""
+        from app.modules.projetos.clients import ProjectClientService
+        from app.modules.projetos.models import ProjectClient
+
+        name = _display_name(claims, email)
+        await db.execute(text(f'SET search_path TO "{tenant.schema_name}", public'))
+        try:
+            role = await ProjectClientService._get_or_create_client_role(db, tenant.id)
+            user = User(
+                email=email,
+                full_name=name,
+                hashed_password=get_password_hash(_random_password()),
+                role=UserRole.COMPANY_USER,
+                role_id=role.id,
+                tenant_id=tenant.id,
+                is_active=True,
+            )
+            db.add(user)
+            await db.flush()
+            client = (await db.execute(
+                select(ProjectClient).where(func.lower(ProjectClient.email) == email)
+            )).scalar_one_or_none()
+            if client is None:
+                db.add(ProjectClient(
+                    user_id=user.id,
+                    full_name=name,
+                    email=email,
+                    notes=(
+                        f"Cadastro criado no 1º login pelo IDigital em {datetime.utcnow():%d/%m/%Y}. "
+                        "Vincule os projetos em Clientes."
+                    ),
+                ))
+            else:
+                client.user_id = user.id
+            await db.flush()  # grava project_clients antes de voltar ao search_path public
+        finally:
+            await db.execute(text("SET search_path TO public"))
         return user

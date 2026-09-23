@@ -14,6 +14,15 @@ Modelo:
 
 ---
 
+## 2026-09-23 — SSO: quem não está em Pessoas vira cliente do Portal
+
+- **Pedido:** Quem tem IDigital mas não tem cadastro no módulo de Times deve sempre ser vinculado como cliente; e o que dá para preencher com dados do SSO.
+- **Feito:** 1º login SSO sem login no AgileFlow: se está em Pessoas (ativo), cria o login de colaborador com a role do cargo (`PersonService._provision_user`, senha aleatória); Pessoa inativa = 403; fora de Pessoas, cria cliente do Portal (`project_clients` + login com a função "Cliente (Operação Assistida)") sem projetos no tenant `SSO_CLIENT_TENANT` (padrão `ss`), com observação "criado no 1º login pelo IDigital". Tudo na mesma transação (search_path trocado e restaurado com flush antes). Auditoria `sso_login` com `provisioned`.
+- **Dados do IDigital:** só nome (name, displayName, nome + sobrenome, apelido ou parte do e-mail) e e-mail. O IdP não tem telefone, organização nem departamento (o PO completa). CPF (`document`) não é pedido.
+- **Testes:** SSO backend 37/37 (cliente novo, colaborador de Pessoas, Pessoa desligada, tenant ausente, 2º login) + telas 17/17; sem resíduo; vínculo real preservado.
+- **Não mexer:** colaborador usa o nome de Pessoas (fonte da verdade); cliente automático nasce sem projetos.
+- **Arquivos:** `backend/app/modules/super_admin/sso.py`, `backend/app/core/config.py`, `docs/técnico/09-sso-idigital.md`, `provisorio/testes-e2e/sso-idigital-2026-09-23/*`
+
 ## 2026-09-23 — SSO IDigital ligado em produção
 
 - **Pedido:** Cadastrar o client no IdP e ligar o SSO.
