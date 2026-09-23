@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-23 — Coordenador move US de outro responsável também no board
+
+- **Pedido:** Coordenador (Ewerton) recebia "Só o responsável pela User Story ou a coordenação podem movê-la" ao arrastar US.
+- **Feito:** O F9 corrigiu só o backend; o board tinha a mesma checagem no frontend, só com admin da empresa, e barrava antes de chamar a API. `isCoordination` em `lib/permissions.ts` com os mesmos termos do `_is_coordination` do backend (coord, administrativ, gerente, gestor, diretor no slug do Cargo). Verificado no navegador: coordenador move (servidor 200), dev não responsável segue bloqueado sem chamada.
+- **Não mexer:** regra de coordenação igual no frontend (`isCoordination`) e no backend (`_is_coordination`) — mudar uma exige mudar a outra.
+- **Arquivos:** `frontend/src/lib/permissions.ts`, `ProjectBoardPage.tsx`
+
 ## 2026-09-23 — RTD: EPA desligável por reunião (B8 da auditoria)
 
 - **Pedido:** Poder desligar o EPA numa reunião (último item da auditoria).

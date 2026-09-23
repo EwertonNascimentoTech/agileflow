@@ -58,6 +58,21 @@ export function isExternalProductOwner(
   return EXTERNAL_PO_POSITION_SLUGS.includes((user.position_slug ?? "").trim())
 }
 
+/** Cargos de coordenação/gestão — mesmo critério do backend (`_is_coordination` em
+ *  projetos/service.py): palavra-chave no slug do Cargo, cobre cargos customizados. */
+const COORDINATION_CARGO_TOKENS: readonly string[] = ["coord", "administrativ", "gerente", "gestor", "diretor"]
+
+/** Coordenação para as regras de board (ex.: mover US de outro responsável): admin da
+ *  empresa ou Pessoa com Cargo de coordenação/gestão (Coordenador, Administrativo, Gerente). */
+export function isCoordination(
+  user: { role?: string; position_slug?: string | null } | null | undefined,
+): boolean {
+  if (!user) return false
+  if (user.role === "super_admin" || user.role === "company_admin") return true
+  const slug = (user.position_slug ?? "").trim().toLowerCase()
+  return COORDINATION_CARGO_TOKENS.some((t) => slug.includes(t))
+}
+
 export const TEAMOPS_PEOPLE_MANAGER_SLUGS: readonly string[] = [
   "coordenador",
   "coord_de_arq_dev_e_sustenta_o",

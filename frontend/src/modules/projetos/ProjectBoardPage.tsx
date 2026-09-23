@@ -53,7 +53,7 @@ import { FormFieldRenderer, applyAutoFillCurrentFields } from "@/modules/projeto
 import { formatMissingFieldsMessage, resolveFieldMode, resolveSectionMode, validateRequiredFields } from "@/modules/projetos/validation"
 import { getRowBreak, groupIntoRows } from "@/modules/projetos/layout"
 import { toast } from "@/lib/toast"
-import { funnelAccessLevel, hasPermission } from "@/lib/permissions"
+import { funnelAccessLevel, hasPermission, isCoordination } from "@/lib/permissions"
 import {
   buildPlanningProgressBars,
   buildTaskProgressById,
@@ -1630,9 +1630,9 @@ export default function ProjectBoardPage() {
       toast.error("Só o PO responsável pelo projeto pode concluir a Homologação (PO).")
       return
     }
-    // No kanban User Story só o responsável ou a coordenação (admin) movem — exceto
-    // sair da Homologação (PO), que é do PO do projeto.
-    if (!leavingHomologPo && isUserStoryKanbanFunnel(moveFunnelName) && !ehAdmin && !isAssignee) {
+    // No kanban User Story só o responsável ou a coordenação (admin ou Cargo de coordenação/
+    // gestão — mesma regra do backend) movem — exceto sair da Homologação (PO), que é do PO.
+    if (!leavingHomologPo && isUserStoryKanbanFunnel(moveFunnelName) && !isCoordination(user) && !isAssignee) {
       toast.error("Só o responsável pela User Story ou a coordenação podem movê-la.")
       return
     }
