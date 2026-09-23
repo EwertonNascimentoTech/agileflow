@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import {
-  BarChart3, Calendar, CalendarCheck, Check, ChevronDown, Clock, FlaskConical, Folder, GitBranch, Link2, Loader2, Maximize2, Plus, Users, Wand2, X, ZoomIn, ZoomOut,
+  BarChart3, Calendar, CalendarCheck, Check, ChevronDown, ChevronUp, Clock, FlaskConical, Folder, GitBranch, Link2, Loader2, Lock, Maximize2, Plus, Users, Wand2, X, ZoomIn, ZoomOut,
 } from "lucide-react"
 
 const DEP_LABELS: Record<DependencyType, string> = {
@@ -29,6 +29,20 @@ import { toast } from "@/lib/toast"
 
 const DOW = ["DOM", "SEG", "TER", "QUA", "QUI", "SEX", "SÁB"]
 const MON = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"]
+// Largura da coluna "Demanda" da visão completa (igual ao grid-template-columns do CSS).
+const FULL_LABEL_W = 320
+
+/** Agrupa dias consecutivos pela chave (mês, ano…) em faixas do cabeçalho. */
+function daySegments(days: Date[], key: (d: Date) => string, label: (d: Date) => string) {
+  const out: { key: string; label: string; cols: number }[] = []
+  for (const d of days) {
+    const k = key(d)
+    const last = out[out.length - 1]
+    if (last && last.key === k) last.cols += 1
+    else out.push({ key: k, label: label(d), cols: 1 })
+  }
+  return out
+}
 
 function initials(name: string | undefined): string {
   if (!name) return "?"
@@ -129,6 +143,9 @@ export default function GanttPage() {
   const [rescheduling, setRescheduling] = useState(false)  // recálculo automático sob demanda
 
   const [alertsOpen, setAlertsOpen] = useState(false)
+  // Visão completa: as travas de todos os projetos (20+) empurravam o gráfico para baixo da
+  // dobra; ficam num resumo que abre a lista quando pedido.
+  const [locksOpen, setLocksOpen] = useState(false)
 
   // task_id → datas do baseline selecionado (para as barras-fantasma do GanttChart).
   const baselineById = useMemo(() => {
@@ -658,14 +675,14 @@ export default function GanttPage() {
   const todayLeft = todayIdx >= 0 ? (todayIdx + 0.5) * dayPct : -1
 
   const weeks = useMemo(() => {
-    const out: { label: string; cols: number }[] = []
-    let cur: { key: string; label: string; cols: number } | null = null
+    const out: { label: string; short: string; cols: number }[] = []
+    let cur: { key: string; label: string; short: string; cols: number } | null = null
     days.forEach((d) => {
       const monday = new Date(d); monday.setDate(d.getDate() - ((d.getDay() + 6) % 7))
       const key = monday.toDateString()
       if (!cur || cur.key !== key) {
         const sun = new Date(monday); sun.setDate(monday.getDate() + 6)
-        cur = { key, label: `${MON[monday.getMonth()]} ${monday.getDate()}–${sun.getDate()}`, cols: 0 }
+        cur = { key, label: `${MON[monday.getMonth()]} ${monday.getDate()}–${sun.getDate()}`, short: `${monday.getDate()}/${monday.getMonth() + 1}`, cols: 0 }
         out.push(cur)
       }
       cur.cols += 1
@@ -696,18 +713,108 @@ export default function GanttPage() {
   // Grade da faixa de tempo como fundo CSS (linha por dia + fins de semana a cada 7 dias).
   // Antes era um <div> por dia em cada linha: ~1,7 mil demandas × ~2,3 mil dias = 4 milhões de
   // nós, e o layout travava a aba.
+  // Com zoom afastado a grade vira uma linha por semana (segunda-feira) e some abaixo disso.
   const trackBg = useMemo(() => {
     const n = days.length || 1
     const p = 100 / n
-    const lines = `repeating-linear-gradient(to right, var(--af-border) 0 1px, transparent 1px ${p}%)`
-    const stops: string[] = []
-    for (let i = 0; i < 7; i++) {
-      const wd = days[i]?.getDay()
-      const color = wd === 0 || wd === 6 ? "var(--af-muted)" : "transparent"
-      stops.push(`${color} ${i * p}% ${(i + 1) * p}%`)
+    if (dayWidth >= 12) {
+      const lines = `repeating-linear-gradient(to right, var(--af-border) 0 1px, transparent 1px ${p}%)`
+      const stops: string[] = []
+      for (let i = 0; i < 7; i++) {
+        const wd = days[i]?.getDay()
+        const color = wd === 0 || wd === 6 ? "var(--af-muted)" : "transparent"
+        stops.push(`${color} ${i * p}% ${(i + 1) * p}%`)
+      }
+      return `${lines}, repeating-linear-gradient(to right, ${stops.join(", ")})`
     }
-    return `${lines}, repeating-linear-gradient(to right, ${stops.join(", ")})`
-  }, [days])
+    if (dayWidth >= 3) {
+      const m = days.findIndex((d) => d.getDay() === 1)
+      const off = Math.max(0, m) * p
+      return `repeating-linear-gradient(to right, transparent 0 ${off}%, var(--af-border) ${off}% calc(${off}% + 1px), transparent calc(${off}% + 1px) ${7 * p}%)`
+    }
+    return "none"
+  }, [days, dayWidth])
+
+  // Cabeçalho da visão completa conforme o zoom (mesmas faixas do cronograma do projeto):
+  // dias → semanas → meses.
+  const fullSub: "day" | "week" | "month" = dayWidth >= 18 ? "day" : dayWidth * 7 >= 26 ? "week" : "month"
+  const months = useMemo(
+    () => daySegments(days, (d) => `${d.getFullYear()}-${d.getMonth()}`, (d) => `${MON[d.getMonth()]}/${String(d.getFullYear()).slice(2)}`),
+    [days],
+  )
+  const years = useMemo(() => daySegments(days, (d) => String(d.getFullYear()), (d) => String(d.getFullYear())), [days])
+  // Rótulo da faixa inferior pelo espaço disponível: semana "21/9"; mês "set/26", só a
+  // inicial quando estreito e nada abaixo disso (no "ajustar" de anos o texto se embolava).
+  const segLabel = (w: { label: string; cols: number; short?: string }): string => {
+    if (w.short !== undefined) return w.short
+    const px = w.cols * dayWidth
+    if (px >= 40) return w.label
+    if (px >= 11) return w.label.charAt(0).toUpperCase()
+    return ""
+  }
+
+  // Visão completa rola na horizontal. Ao abrir, posiciona em hoje (a janela vai do item
+  // mais antigo ao mais novo — no portfólio atual, de 2025 a 2032).
+  const fullScrollRef = useRef<HTMLDivElement>(null)
+  const fullPositionedRef = useRef<string | null>(null)
+  const fullHasRows = swimlanes.some((sw) => sw.rows.length > 0)
+  useEffect(() => {
+    if (rootParam) { fullPositionedRef.current = null; return }
+    const el = fullScrollRef.current
+    if (!el || !fullHasRows || fullPositionedRef.current === projectId) return
+    fullPositionedRef.current = projectId
+    if (todayIdx >= 0) el.scrollLeft = Math.max(0, (todayIdx - 4) * dayWidth)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rootParam, projectId, fullHasRows, todayIdx])
+
+  // Zoom pelos botões: mantém no centro a data que estava no centro. Roda do mouse e
+  // "ajustar" posicionam por conta própria (skipZoomAnchor).
+  const prevDayWidthRef = useRef(dayWidth)
+  const skipZoomAnchor = useRef(false)
+  useLayoutEffect(() => {
+    const el = fullScrollRef.current
+    const prev = prevDayWidthRef.current
+    prevDayWidthRef.current = dayWidth
+    if (skipZoomAnchor.current) { skipZoomAnchor.current = false; return }
+    if (!el || rootParam || prev === dayWidth) return
+    const half = (el.clientWidth - FULL_LABEL_W) / 2
+    el.scrollLeft = Math.max(0, ((el.scrollLeft + half) / prev) * dayWidth - half)
+  }, [dayWidth, rootParam])
+
+  // "Ajustar à tela" na visão completa (no cronograma do projeto quem ajusta é o GanttChart).
+  const fullFitRef = useRef(fitSignal)
+  useEffect(() => {
+    if (fitSignal === fullFitRef.current) return
+    fullFitRef.current = fitSignal
+    const el = fullScrollRef.current
+    if (rootParam || !el || days.length === 0) return
+    skipZoomAnchor.current = true
+    // Aqui pode ir abaixo do zoom mínimo do cronograma do projeto: o portfólio inteiro cobre
+    // anos. Ao abrir um projeto o GanttChart volta a limitar (clampDayWidth).
+    setDayWidth(Math.max(0.2, Math.min(MAX_DAY_W, (el.clientWidth - FULL_LABEL_W - 16) / days.length)))
+    el.scrollLeft = 0
+  }, [fitSignal, rootParam, days.length])
+
+  // Ctrl/⌘ + roda = zoom ancorado no ponto sob o cursor (como no cronograma do projeto).
+  useEffect(() => {
+    const el = fullScrollRef.current
+    if (rootParam || !el) return
+    const onWheel = (e: globalThis.WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return
+      e.preventDefault()
+      const next = clampDayWidth(dayWidth * (e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP))
+      if (next === dayWidth) return
+      const cursorInView = e.clientX - el.getBoundingClientRect().left
+      const dayAtCursor = (el.scrollLeft + cursorInView - FULL_LABEL_W) / dayWidth
+      skipZoomAnchor.current = true
+      setDayWidth(next)
+      requestAnimationFrame(() => {
+        if (fullScrollRef.current) fullScrollRef.current.scrollLeft = Math.max(0, dayAtCursor * next + FULL_LABEL_W - cursorInView)
+      })
+    }
+    el.addEventListener("wheel", onWheel, { passive: false })
+    return () => el.removeEventListener("wheel", onWheel)
+  }, [dayWidth, rootParam, fullHasRows])
   const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users])
 
   function barColor(t: ProjectTask): string {
@@ -927,15 +1034,42 @@ export default function GanttPage() {
         {zoomControl}
       </div>
 
-      {lockStates.filter((l) => l.state !== "open").map((l) => (
-        <ScheduleLockBanner
-          key={l.root_task_id}
-          projectId={projectId}
-          lock={l}
-          showTitle
-          onChanged={() => void reloadFullLocks()}
-        />
-      ))}
+      {(() => {
+        const nonOpen = lockStates.filter((l) => l.state !== "open")
+        if (nonOpen.length === 0) return null
+        const nLocked = nonOpen.filter((l) => l.state === "locked").length
+        const nRevision = nonOpen.length - nLocked
+        return (
+          <>
+            <div
+              style={{
+                display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", margin: "8px 0",
+                borderRadius: 8, border: "1px solid var(--af-border)", background: "var(--af-muted)", fontSize: 13,
+              }}
+            >
+              <Lock size={15} style={{ color: "var(--af-muted-fg)", flexShrink: 0 }} />
+              <span style={{ flex: 1 }}>
+                {nLocked > 0 && <><b>{nLocked}</b> cronograma{nLocked !== 1 ? "s" : ""} travado{nLocked !== 1 ? "s" : ""}</>}
+                {nLocked > 0 && nRevision > 0 && " · "}
+                {nRevision > 0 && <><b>{nRevision}</b> em revisão</>}
+                <span style={{ color: "var(--af-muted-fg)" }}> — liberar alteração, concluir revisão e histórico ficam na lista.</span>
+              </span>
+              <button className="btn ghost" onClick={() => setLocksOpen((o) => !o)}>
+                {locksOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />} {locksOpen ? "Ocultar" : "Ver"}
+              </button>
+            </div>
+            {locksOpen && nonOpen.map((l) => (
+              <ScheduleLockBanner
+                key={l.root_task_id}
+                projectId={projectId}
+                lock={l}
+                showTitle
+                onChanged={() => void reloadFullLocks()}
+              />
+            ))}
+          </>
+        )
+      })()}
 
       {isEmpty ? (
         <EmptyState
@@ -952,36 +1086,49 @@ export default function GanttPage() {
         />
       ) : (
         <div className="gantt">
-          {/* Week strip */}
+          <div className="gantt-scroll" ref={fullScrollRef}>
+          <div className="gantt-inner" style={{ width: FULL_LABEL_W + days.length * dayWidth }}>
+          <div className="gantt-head">
+          {/* Faixa superior: semanas (zoom em dias), meses (em semanas) ou anos (em meses) */}
           <div className="gantt-row-grid">
             <div className="gantt-head-cell">Demanda</div>
             <div className="gantt-head-cell right">
               <div className="gantt-weeks">
-                {weeks.map((w, i) => <div key={i} className="gantt-week" style={{ flex: w.cols }}>{w.label}</div>)}
+                {(fullSub === "day" ? weeks : fullSub === "week" ? months : years).map((w, i) => (
+                  <div key={i} className="gantt-week" style={{ width: `${(w.cols / days.length) * 100}%`, flex: "none" }} title={w.label}>
+                    {w.label}
+                  </div>
+                ))}
               </div>
             </div>
           </div>
-          {/* Day strip */}
+          {/* Faixa inferior: dias, semanas ou meses */}
           <div className="gantt-row-grid">
             <div className="gantt-head-cell" style={{ color: "var(--af-muted-fg)", fontWeight: 500 }}>
               {visible.length} demanda{visible.length !== 1 ? "s" : ""}
             </div>
             <div className="gantt-head-cell right">
               <div className="gantt-days">
-                {days.map((d, i) => {
-                  const weekend = d.getDay() === 0 || d.getDay() === 6
-                  const isToday = d.toDateString() === today.toDateString()
-                  return (
-                    <div key={i} className={`gantt-day ${weekend ? "weekend" : ""} ${isToday ? "today" : ""}`}>
-                      <div className="dow">{DOW[d.getDay()]}</div>
-                      <div className="num">{d.getDate()}</div>
-                    </div>
-                  )
-                })}
+                {fullSub === "day"
+                  ? days.map((d, i) => {
+                      const weekend = d.getDay() === 0 || d.getDay() === 6
+                      const isToday = d.toDateString() === today.toDateString()
+                      return (
+                        <div key={i} className={`gantt-day ${weekend ? "weekend" : ""} ${isToday ? "today" : ""}`} style={{ width: `${dayPct}%`, flex: "none", minWidth: 0 }}>
+                          <div className="dow">{DOW[d.getDay()]}</div>
+                          <div className="num">{d.getDate()}</div>
+                        </div>
+                      )
+                    })
+                  : (fullSub === "week" ? weeks : months).map((w, i) => (
+                      <div key={i} className="gantt-day" style={{ width: `${(w.cols / days.length) * 100}%`, flex: "none", minWidth: 0 }} title={w.label}>
+                        <div className="num" style={{ fontSize: 11 }}>{segLabel(w)}</div>
+                      </div>
+                    ))}
               </div>
             </div>
           </div>
-
+          </div>
           {swimlanes.map((sw) => (
             <div key={sw.funnel.id}>
               <div className="gantt-group-row">
@@ -1008,7 +1155,7 @@ export default function GanttPage() {
                         {assignee ? initials(assignee.full_name) : "?"}
                       </span>
                     </div>
-                    <div className="gantt-track" style={{ minHeight: 44, minWidth: days.length * 38, backgroundImage: trackBg }}>
+                    <div className="gantt-track" style={{ minHeight: 44, backgroundImage: trackBg }}>
                       {todayLeft >= 0 && <div className="gantt-today-line" style={{ left: todayLeft + "%" }} />}
                       <div className="gantt-bar" style={{ left: left + "%", width: width + "%", background: color }} onClick={() => setEditing(bar.task)}>
                         <span className="bar-title">{bar.task.title}</span>
@@ -1019,6 +1166,8 @@ export default function GanttPage() {
               })}
             </div>
           ))}
+          </div>
+          </div>
         </div>
       )}
 
