@@ -98,3 +98,12 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 - Rollup Feature: todas as US concluídas levam a Feature para Homologação (PO); quem conclui a Feature é o PO. Todo movimento automático grava histórico.
 - Agente de triagem (review_and_route): contexto e lacunas seguem a visibilidade da etapa (`_stage_field_modes`, mesma regra da tela). Campo oculto ou opcional não é lacuna; Descrição é cobrada sempre que visível. Classificação recebe o contexto completo.
 - Link do board sem o processo mantém a visão (/lista, /calendario) e a query (?funnel=).
+
+## Desempenho (auditoria 2026-09-23 · bloco 5)
+
+- Rollup do cronograma (`_rollup_tree`) carrega só a subárvore da raiz (`_subtree_tasks`), nunca o processo inteiro.
+- Board e Lista desenham em lotes com "Mostrar mais" (40 cards por coluna, 60 linhas por etapa); contador, busca e rollups usam todos os cards.
+- Lista slim do board não lê description/anexos/procurement_meta; `ProjectTaskCardResponse` não pode ler esses atributos (alias inexistente).
+- Relatórios que não mostram texto do card carregam tarefas com `_light_task_options()` (raiseload): se passarem a usar description, tirar a opção daquele relatório.
+- PO Sync usa cache chaveado pela versão dos dados (`_VERSION_SQL`); toda tabela nova que o PO Sync ler precisa entrar nessa versão. `health_by_po` tem cache de 60 s.
+- Frontend: `codeSplitting.groups` com vendor-react na maior prioridade; a primeira tela não pode importar vendor-charts/markdown/dnd.

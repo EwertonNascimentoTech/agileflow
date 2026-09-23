@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-23 — Auditoria · bloco 5 (desempenho D4, D5, D6, D9; D8 medido)
+
+- **Pedido:** Bloco de desempenho restante da auditoria.
+- **Feito:** D5 — mover card: `_rollup_tree` carrega só a subárvore (CTE recursiva, resultado idêntico nas 123 raízes, 143 para 10 ms por raiz); `sync_family` só quando muda etapa ou pai. PATCH de mover 360–440 para 160–200 ms; editar progresso 325 para 36 ms. D4 — board: lista slim não lê description/anexos/procurement_meta (prévia vem do SQL; JSON idêntico), requisitante só pela chave do formulário; colunas desenham 40 cards e a Lista 60 linhas por etapa, com "Mostrar mais" (kanban US 3,9 s/2,95 s travado/30 mil nós para 1,6 s/0,5 s/3,8 mil; Lista 1,7 s travada para 0,45 s). D6 — relatórios: `_light_task_options` (defer com raiseload) em PO Sync, US delivery, janela de capacidade e dataset de Indicadores; `health_by_po` carrega só as coleções usadas e tem cache de 60 s; Desempenho não calcula saúde de Produtos; PO Sync com cache chaveado pela versão dos dados (`_VERSION_SQL`), recalcula na hora quando qualquer card muda (PO Sync 0,76 para 0,38 s e 8–22 ms no cache; RTD 1,2 para 0,73 s; Desempenho 1,3 para 0,7 s; saídas idênticas). D9 — Vite/Rolldown `codeSplitting.groups` com vendor-react em prioridade: a primeira tela não baixa mais gráficos, markdown e dnd (~160 kB gzip). D8 — medido: com 2 relatórios pesados simultâneos o sino fica em 16 ms (p95 160 ms); com 4, p95 0,6 s. Subir para 6 workers exige max_connections maior (restart do Postgres) — não feito.
+- **Não mexer:** `_subtree_tasks`; `COLUMN_RENDER_STEP`/`LIST_RENDER_STEP`; `validation_alias` do `ProjectTaskCardResponse`; `_light_task_options` (se um relatório passar a usar description, tirar a opção dele); `_VERSION_SQL` (tabela nova lida pelo PO Sync entra na versão); grupos do `codeSplitting` (não voltar ao `manualChunks`).
+- **Arquivos:** `projetos/service.py`, `projetos/schemas.py`, `projetos/api/routes.py`, `produtos/service.py`, `indicadores/portfolio_projetos.py`, `ProjectBoardPage.tsx`, `frontend/vite.config.ts`
+
 ## 2026-09-23 — Auditoria · bloco 4 (funções quebradas F7–F15)
 
 - **Pedido:** Corrigir F7 a F15 da auditoria geral.

@@ -152,6 +152,10 @@ function SlaChip({ state }: { state: ProjectTask["sla_state"] }) {
 // Quantos card-raiz concluídos vêm na primeira carga do board. O resto fica atrás
 // de "carregar mais" — no portfólio medido isso tira 56% dos cards do primeiro paint.
 const DEFAULT_DONE_LIMIT = 25
+// Cards desenhados por coluna antes do "Mostrar mais".
+const COLUMN_RENDER_STEP = 40
+// Linhas por etapa na visão Lista antes do "Mostrar mais".
+const LIST_RENDER_STEP = 60
 
 // Referência estável: uma coluna vazia não deve gerar um array novo a cada render
 // (com BoardColumn memoizado, isso invalidaria a memo sem que nada tenha mudado).
@@ -488,6 +492,18 @@ const BoardColumn = memo(function BoardColumn({
   // O contador da coluna precisa refletir o total real, não só o que foi baixado.
   const shownCount = tasks.length
   const totalCount = shownCount + hiddenCount
+  // Desenha os cards em lotes: o kanban User Story tinha ~1,7 mil cards (Backlog 697,
+  // Concluído 856) e travava a aba por ~3 s montando 30 mil nós. Os dados continuam todos
+  // na tela (contador, busca, rollups); só o desenho é limitado.
+  const [renderLimit, setRenderLimit] = useState(COLUMN_RENDER_STEP)
+  const ordered = useMemo(() => {
+    if (!status.is_final || tasks.length <= renderLimit) return tasks
+    // Coluna final: os concluídos mais recentes primeiro (como diz o contador).
+    const at = (t: ProjectTask) => t.completed_at ?? t.updated_at ?? t.created_at ?? ""
+    return [...tasks].sort((a, b) => at(b).localeCompare(at(a)))
+  }, [tasks, status.is_final, renderLimit])
+  const visibleTasks = ordered.length > renderLimit ? ordered.slice(0, renderLimit) : ordered
+  const notRendered = ordered.length - visibleTasks.length
   return (
     <section className={`column ${isOver ? "drag-over" : ""}`}>
       <div className="col-bar" style={{ background: status.color }} />
@@ -515,10 +531,20 @@ const BoardColumn = memo(function BoardColumn({
       <div ref={setNodeRef} className="col-body">
         {tasks.length === 0 ? (
           <div className="col-empty">Nenhuma demanda</div>
-        ) : tasks.map((task) => (
+        ) : visibleTasks.map((task) => (
           <BoardCard key={task.id} task={task} ctx={ctx} onOpen={onOpen} />
         ))}
-        {hiddenCount > 0 && onLoadMore && (
+        {notRendered > 0 && (
+          <button
+            type="button"
+            className="btn ghost"
+            style={{ width: "100%", marginTop: 6 }}
+            onClick={() => setRenderLimit((n) => n + COLUMN_RENDER_STEP * 2)}
+          >
+            Mostrar mais {Math.min(notRendered, COLUMN_RENDER_STEP * 2)} (de {notRendered})
+          </button>
+        )}
+        {notRendered === 0 && hiddenCount > 0 && onLoadMore && (
           <button type="button" className="btn ghost" style={{ width: "100%", marginTop: 6 }} onClick={onLoadMore}>
             Carregar mais {hiddenCount}
           </button>
@@ -591,6 +617,9 @@ function ListView({
 }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const toggle = (k: string) => setCollapsed((c) => ({ ...c, [k]: !c[k] }))
+  // Linhas por etapa desenhadas em lotes (mesma ideia das colunas do quadro): a Lista do
+  // kanban User Story montava ~26 mil nós e travava ~1,7 s.
+  const [limits, setLimits] = useState<Record<string, number>>({})
   const today = new Date(new Date().toDateString())
   return (
     <div className="list-card">
@@ -614,7 +643,7 @@ function ListView({
               <span>{s.name}</span>
               <span style={{ color: "var(--af-muted-fg)", fontWeight: 500 }} title={iaSummaryTitle(stTasks)}>{stTasks.length}</span>
             </div>
-            {!collapsed[s.id] && stTasks.map((t) => {
+            {!collapsed[s.id] && stTasks.slice(0, limits[s.id] ?? LIST_RENDER_STEP).map((t) => {
               const a = resolveAssignee(t.assigned_to)
               const due = t.due_date ? new Date(t.due_date) : null
               const overdue = due && !t.completed_at ? due < today : false
@@ -683,6 +712,17 @@ function ListView({
                 </div>
               )
             })}
+            {!collapsed[s.id] && stTasks.length > (limits[s.id] ?? LIST_RENDER_STEP) && (
+              <div className="list-row" style={{ justifyContent: "center" }}>
+                <button
+                  type="button"
+                  className="btn ghost"
+                  onClick={() => setLimits((l) => ({ ...l, [s.id]: (l[s.id] ?? LIST_RENDER_STEP) + LIST_RENDER_STEP * 2 }))}
+                >
+                  Mostrar mais {Math.min(stTasks.length - (limits[s.id] ?? LIST_RENDER_STEP), LIST_RENDER_STEP * 2)} (de {stTasks.length - (limits[s.id] ?? LIST_RENDER_STEP)})
+                </button>
+              </div>
+            )}
           </div>
         )
       })}

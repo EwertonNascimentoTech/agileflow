@@ -82,10 +82,11 @@ async def load_dataset(db: AsyncSession) -> ProjetosDataset:
         ProjectScheduleBaseline, ProjectStatusConfig, ProjectTask,
     )
     from app.modules.projetos.service import (
-        CapacityService, PoPortfolioService, PoSyncService,
+        CapacityService, PoPortfolioService, PoSyncService, _light_task_options,
     )
 
-    tasks = list((await db.execute(select(ProjectTask))).scalars().all())
+    # Sem description/anexos/procurement_meta: os calculadores e o RTD não leem texto do card.
+    tasks = list((await db.execute(select(ProjectTask).options(*_light_task_options()))).scalars().all())
     status_rows = (await db.execute(
         select(ProjectStatusConfig.id, ProjectStatusConfig.name, ProjectStatusConfig.is_final)
     )).all()

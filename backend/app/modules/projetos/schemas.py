@@ -558,9 +558,12 @@ class ProjectTaskCardResponse(ProjectTaskResponse):
     Herda de `ProjectTaskResponse` de propósito: campo novo no card completo aparece aqui
     automaticamente, e só é omitido quem estiver explicitamente na lista abaixo.
     """
-    description: Optional[str] = Field(default=None, exclude=True)
-    anexos: Optional[list] = Field(default=None, exclude=True)
-    procurement_meta: Optional[dict] = Field(default=None, exclude=True)
+    # A lista slim nem lê essas colunas (defer): o alias aponta para um atributo que não
+    # existe, então o from_attributes não as toca (senão dispararia o lazy-load, que no
+    # asyncio quebra). A prévia vem pronta do SQL em `description_preview`.
+    description: Optional[str] = Field(default=None, exclude=True, validation_alias="_card_omits_description")
+    anexos: Optional[list] = Field(default=None, exclude=True, validation_alias="_card_omits_anexos")
+    procurement_meta: Optional[dict] = Field(default=None, exclude=True, validation_alias="_card_omits_meta")
     description_preview: Optional[str] = None
 
     @model_validator(mode="after")

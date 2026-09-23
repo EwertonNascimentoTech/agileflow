@@ -1769,17 +1769,48 @@ class ProductService:
     def _score_medio(soma: int, total: int) -> Optional[float]:
         return round(soma / total, 1) if total else None
 
+    # Agregado por PO usado nos relatórios (PO Sync, Status Report, RTD, Desempenho). Produto
+    # muda pouco; 60 s de cache evitam recalcular a cada relatório. As telas de Produtos
+    # continuam calculando a saúde na hora (`_health`), sem este cache.
+    _HEALTH_BY_PO_TTL = 60
+
     @classmethod
     async def health_by_po(cls, db: AsyncSession) -> dict:
         """Saúde do portfólio de produtos agregada por PO (Responsável). Produtos corporativos
         (PO definido por serviço) são atribuídos a cada PO dos seus serviços ativos; produtos
-        sem PO caem em "Sem PO". Read-only — reusa `_health` (mesma regra do Índice de Saúde)."""
+        sem PO caem em "Sem PO". Read-only — reusa `_health` (mesma regra do Índice de Saúde).
+        Resultado normalizado para JSON (igual com ou sem cache)."""
+        import json
+        from sqlalchemy import text
+        from app.core.cache import cache_get, cache_set
+        schema = (await db.execute(text("SELECT current_schema()"))).scalar()
+        key = f"produtos:health_by_po:{schema}"
+        cached = await cache_get(key)
+        if cached is not None:
+            return cached
+        result = json.loads(json.dumps(await cls._health_by_po_compute(db), default=str))
+        await cache_set(key, result, cls._HEALTH_BY_PO_TTL)
+        return result
+
+    @classmethod
+    async def _health_by_po_compute(cls, db: AsyncSession) -> dict:
+        from sqlalchemy.orm import raiseload, selectinload
         today = date.today()
         tech_ref_ids = await cls._tech_reference_ids(db)
         hw, hsaud, haten = await cls._load_health_params(db)
         repo_stats = await cls._repo_stats(db)
-        products = list((await db.execute(select(Product).where(Product.is_active.is_(True)))).scalars().all())
-        name_by_id = {p.id: p.full_name for p in (await db.execute(select(Person))).scalars().all()}
+        # Só as coleções que a saúde lê. Pessoas/área/fornecedor/processos/releases (e as
+        # pessoas de serviços e contratos) eram carregados em cascata sem uso — metade do custo.
+        products = list((await db.execute(
+            select(Product).where(Product.is_active.is_(True)).options(
+                raiseload(Product.area), raiseload(Product.responsavel),
+                raiseload(Product.responsavel_tecnico), raiseload(Product.dono_negocio),
+                raiseload(Product.fornecedor), raiseload(Product.processos), raiseload(Product.releases),
+                selectinload(Product.servicos).raiseload(ProductServico.responsavel),
+                selectinload(Product.contratos).raiseload("*"),
+            )
+        )).scalars().all())
+        name_by_id = dict((await db.execute(select(Person.id, Person.full_name))).all())
         link_counts = await cls._servico_link_counts(
             db, [s.id for p in products for s in p.servicos if s.is_active],
         )
@@ -1859,6 +1890,10 @@ class ProductService:
         ]
         por_po.sort(key=lambda x: (-x["critico"], -x["total"], x["score_medio"]))
 
+        # Os produtos vieram com raiseload: tira do identity map para uma leitura posterior
+        # na mesma requisição (ex.: dashboard de Produtos no RTD) carregar completo.
+        for prod in products:
+            db.expunge(prod)
         return {
             "por_po": por_po,
             "resumo": {

@@ -1059,6 +1059,7 @@ async def list_tasks(
             project_id=project_id,
             status_id=status_id,
             assigned_to=assigned_to,
+            slim=slim,
         )
     else:
         can_view_all = await _has_permission(ctx, "projetos.task.view") or await _has_permission(ctx, "projetos.task.manage")
@@ -1074,6 +1075,7 @@ async def list_tasks(
             status_id=status_id,
             assigned_to=assigned_to,
             only_task_ids=await _po_external_scope(ctx),
+            slim=slim,
         )
 
     if done_limit is not None:

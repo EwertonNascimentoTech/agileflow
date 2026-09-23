@@ -15,7 +15,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import and_, delete as sa_delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import defer, selectinload
 
 from app.core.config import settings
 from app.core.anonymize import anonymize_text
@@ -1426,6 +1426,17 @@ class ProjectDemandFormSubmissionService:
         await db.commit()
         await db.refresh(item)
         return item
+
+
+def _light_task_options():
+    """Relatórios que não desenham texto do card: não lê description/anexos/procurement_meta
+    (~60% do peso das linhas). raiseload: se alguém passar a usar esses campos aqui, o erro
+    aparece na hora em vez de virar lazy-load silencioso (que no asyncio quebra)."""
+    return (
+        defer(ProjectTask.description, raiseload=True),
+        defer(ProjectTask.anexos, raiseload=True),
+        defer(ProjectTask.procurement_meta, raiseload=True),
+    )
 
 
 class ProjectTaskService:
@@ -3246,7 +3257,10 @@ class ProjectTaskService:
         status_id: Optional[uuid.UUID] = None,
         assigned_to: Optional[uuid.UUID] = None,
         only_task_ids: Optional[set[uuid.UUID]] = None,
+        slim: bool = False,
     ) -> list[ProjectTask]:
+        """`slim` (lista do board): não lê description/anexos/procurement_meta — a descrição
+        sozinha é ~60% das linhas — e traz só a prévia do card (`description_preview`)."""
         await ProjectService.get(db, project_id)
         filters = [ProjectTask.project_id == project_id]
         if status_id:
@@ -3258,12 +3272,24 @@ class ProjectTaskService:
             if not only_task_ids:
                 return []
             filters.append(ProjectTask.id.in_(only_task_ids))
-        result = await db.execute(
-            select(ProjectTask)
-            .where(and_(*filters))
-            .order_by(ProjectTask.order.asc(), ProjectTask.created_at.asc())
-        )
-        tasks = list(result.scalars().all())
+        order = (ProjectTask.order.asc(), ProjectTask.created_at.asc())
+        if slim:
+            from app.modules.projetos.schemas import CARD_DESCRIPTION_PREVIEW_CHARS
+            preview = func.btrim(func.left(ProjectTask.description, CARD_DESCRIPTION_PREVIEW_CHARS), " \t\r\n")
+            result = await db.execute(
+                select(ProjectTask, preview)
+                .options(defer(ProjectTask.description), defer(ProjectTask.anexos),
+                         defer(ProjectTask.procurement_meta))
+                .where(and_(*filters))
+                .order_by(*order)
+            )
+            tasks = []
+            for task, prev in result.all():
+                task.description_preview = prev or None  # atributo transitório (não mapeado)
+                tasks.append(task)
+        else:
+            result = await db.execute(select(ProjectTask).where(and_(*filters)).order_by(*order))
+            tasks = list(result.scalars().all())
         await ProjectTaskService._attach_requester_names(db, tasks)
         return tasks
 
@@ -3345,13 +3371,14 @@ class ProjectTaskService:
 
         task_ids = [t.id for t in tasks]
         form_req: dict = {}
+        # Só a chave `requisitante` (->>): o JSON inteiro dos ~860 formulários custava ~3×.
         rows = await db.execute(
-            select(ProjectDemandFormSubmission.task_id, ProjectDemandFormSubmission.values).where(
-                ProjectDemandFormSubmission.task_id.in_(task_ids)
-            )
+            select(
+                ProjectDemandFormSubmission.task_id,
+                ProjectDemandFormSubmission.values["requisitante"].astext,
+            ).where(ProjectDemandFormSubmission.task_id.in_(task_ids))
         )
-        for tid, values in rows.all():
-            raw = (values or {}).get("requisitante")
+        for tid, raw in rows.all():
             if isinstance(raw, str) and raw.strip():
                 form_req[tid] = raw.strip()
 
@@ -4813,8 +4840,10 @@ class ProjectTaskService:
             if final_status:
                 await ProjectAgentRunner.dispatch_on_enter(db, project_id, task, final_status)
         # Propaga/herdar a priorização para a família — cobre vínculo de pai, conversão
-        # (novo Projeto com origin_task_id) e subtarefas criadas por automação.
-        await PriorityScoreService.sync_family(db, task.id)
+        # (novo Projeto com origin_task_id) e subtarefas criadas por automação. Só quando a
+        # família pode ter mudado: troca de pai ou de etapa (conversão/automação criam cards).
+        if status_changed or "parent_task_id" in payload:
+            await PriorityScoreService.sync_family(db, task.id)
         return task
 
     @staticmethod
@@ -5349,8 +5378,7 @@ class ProjectTaskService:
 
         Chamado sempre que uma tarefa muda de data/horas/progresso ou entra/sai da árvore.
         Commit a cargo do chamador."""
-        rows = await db.execute(select(ProjectTask).where(ProjectTask.project_id == project_id))
-        by_id: dict[uuid.UUID, ProjectTask] = {t.id: t for t in rows.scalars().all()}
+        by_id = await ProjectTaskService._subtree_tasks(db, project_id, root_id)
         if root_id not in by_id:
             return
 
@@ -5371,6 +5399,26 @@ class ProjectTaskService:
         ProjectTaskService._apply_rollups(
             by_id, root_id, frozen_ids, rollup_dates=rollup_dates,
         )
+
+    @staticmethod
+    async def _subtree_tasks(
+        db: AsyncSession, project_id: uuid.UUID, root_id: uuid.UUID,
+    ) -> dict[uuid.UUID, ProjectTask]:
+        """Raiz + todos os descendentes numa CTE recursiva — o rollup só precisa da subárvore,
+        não das ~2,4 mil tarefas do processo. UNION (não UNION ALL) encerra mesmo se houver
+        ciclo de pais nos dados."""
+        sub = (
+            select(ProjectTask.id)
+            .where(ProjectTask.id == root_id, ProjectTask.project_id == project_id)
+            .cte(name="subtree", recursive=True)
+        )
+        sub = sub.union(
+            select(ProjectTask.id).where(
+                ProjectTask.parent_task_id == sub.c.id, ProjectTask.project_id == project_id,
+            )
+        )
+        rows = await db.execute(select(ProjectTask).where(ProjectTask.id.in_(select(sub.c.id))))
+        return {t.id: t for t in rows.scalars().all()}
 
     @staticmethod
     def _apply_rollups(
@@ -6342,7 +6390,7 @@ class CapacityService:
         conta no PO do projeto, mesmo com assigned_to do card sendo outro)."""
         lower = datetime.combine(date_from, datetime.min.time())
         upper = datetime.combine(date_to, datetime.min.time()) + timedelta(days=1)
-        q = select(ProjectTask).options(selectinload(ProjectTask.status)).where(
+        q = select(ProjectTask).options(selectinload(ProjectTask.status), *_light_task_options()).where(
             ProjectTask.assigned_to.isnot(None),
             ProjectTask.start_date.isnot(None),
             ProjectTask.due_date.isnot(None),
@@ -6729,7 +6777,7 @@ class CapacityService:
         """US em aberto da pessoa com prazo vencido ou SLA estourado — mesma definição
         de 'Atrasadas' do painel de desempenho (snapshot, independente da janela)."""
         today_start = datetime.combine(today, datetime.min.time())
-        q = select(ProjectTask).options(selectinload(ProjectTask.status)).where(
+        q = select(ProjectTask).options(selectinload(ProjectTask.status), *_light_task_options()).where(
             ProjectTask.completed_at.is_(None),
             or_(ProjectTask.due_date < today_start, ProjectTask.sla_state == "breached"),
         )
@@ -8901,7 +8949,7 @@ class UsDeliveryReportService:
 
         roots = list((await db.execute(
             select(ProjectTask)
-            .options(selectinload(ProjectTask.status))
+            .options(selectinload(ProjectTask.status), *_light_task_options())
             .where(ProjectTask.planning_kind.in_(["projeto", "programa"]))
         )).scalars().all())
 
@@ -9657,7 +9705,7 @@ class TeamPerformanceService:
 
         # ── Linhas por PO: só PO Sync (rápido). O build_overview do portfólio
         # recalcula workload/CPM por PO e estourava o timeout do cliente (~16s).
-        posync = await PoSyncService.build(db, diretoria=diretoria, area=area)
+        posync = await PoSyncService.build(db, diretoria=diretoria, area=area, include_produtos=False)
         por_po_by_id = {p["po_id"]: p for p in posync.get("por_po", [])}
         pos: list[PoPerformanceRow] = []
         for rk in posync.get("ranking_pos", []):
@@ -13372,6 +13420,21 @@ class PoSyncService:
         last = _cal.monthrange(ano, mes)[1]
         return (datetime(ano, mes, 1, 0, 0, 0), datetime(ano, mes, last, 23, 59, 59))
 
+    # Versão dos dados que o PO Sync lê: muda a cada card/etapa/kanban/tipo/pessoa alterado
+    # (updated_at tem onupdate no ORM) ou criado/excluído (count). A saúde dos Produtos tem
+    # cache próprio de 60 s.
+    _VERSION_SQL = """
+        SELECT concat_ws('|',
+          (SELECT max(updated_at)::text || '#' || count(*) FROM project_tasks),
+          (SELECT max(updated_at)::text || '#' || count(*) FROM project_status_configs),
+          (SELECT max(updated_at)::text || '#' || count(*) FROM project_funnels),
+          (SELECT max(updated_at)::text || '#' || count(*) FROM project_demand_types),
+          (SELECT max(updated_at)::text || '#' || count(*) FROM project_default_form_fields),
+          (SELECT max(updated_at)::text || '#' || count(*) FROM team_persons),
+          (SELECT max(updated_at)::text || '#' || count(*) FROM team_positions))
+    """
+    _CACHE_TTL = 60
+
     @classmethod
     async def build(
         cls,
@@ -13380,7 +13443,38 @@ class PoSyncService:
         area: Optional[str] = None,
         mes: Optional[int] = None,
         ano: Optional[int] = None,
+        include_produtos: bool = True,
     ) -> dict:
+        """PO Sync (também usado por Status Report, RTD e Desempenho). Cache chaveado pela
+        versão dos dados + filtros + dia: qualquer card movido/editado gera outra chave, então
+        o relatório nunca fica atrás do board; o TTL só cobre o que não entra na versão."""
+        import hashlib
+        from app.core.cache import cache_get, cache_set
+        schema = (await db.execute(_sa_text("SELECT current_schema()"))).scalar()
+        version = (await db.execute(_sa_text(cls._VERSION_SQL))).scalar() or ""
+        raw = json.dumps([schema, diretoria, area, mes, ano, include_produtos,
+                          date.today().isoformat(), version])
+        key = "posync:" + hashlib.sha1(raw.encode()).hexdigest()
+        cached = await cache_get(key)
+        if cached is not None:
+            return cached
+        result = await cls._build(db, diretoria=diretoria, area=area, mes=mes, ano=ano,
+                                  include_produtos=include_produtos)
+        await cache_set(key, result, cls._CACHE_TTL)
+        return result
+
+    @classmethod
+    async def _build(
+        cls,
+        db: AsyncSession,
+        diretoria: Optional[str] = None,
+        area: Optional[str] = None,
+        mes: Optional[int] = None,
+        ano: Optional[int] = None,
+        include_produtos: bool = True,
+    ) -> dict:
+        """`include_produtos=False`: pula a saúde dos Produtos por PO (quem não a mostra, como o
+        painel de Desempenho, não paga pela carga do módulo Produtos)."""
         now = datetime.utcnow()
         # Mês de referência (default: mês corrente). "Próximo ciclo" = mês seguinte.
         ref_mes = mes if (mes and 1 <= mes <= 12) else now.month
@@ -13469,7 +13563,7 @@ class PoSyncService:
         if area:
             roots_filter.append(ProjectTask.area == area)
         roots_res = await db.execute(
-            select(ProjectTask).options(selectinload(ProjectTask.status)).where(*roots_filter)
+            select(ProjectTask).options(selectinload(ProjectTask.status), *_light_task_options()).where(*roots_filter)
         )
         roots = list(roots_res.scalars().all())
         if not roots:
@@ -13479,7 +13573,7 @@ class PoSyncService:
         tasks_res = await db.execute(
             select(ProjectTask)
             .where(ProjectTask.project_id.in_(container_ids))
-            .options(selectinload(ProjectTask.status))
+            .options(selectinload(ProjectTask.status), *_light_task_options())
         )
         all_tasks = list(tasks_res.scalars().all())
         us_ids = {t.id for t in await CapacityService._keep_us_tasks_only(db, all_tasks)}
@@ -13900,7 +13994,10 @@ class PoSyncService:
 
         # ── Saúde do portfólio de PRODUTOS por PO (módulo Produtos, tenant-wide) ──
         from app.modules.produtos.service import ProductService
-        saude_produtos = await ProductService.health_by_po(db)
+        saude_produtos = (
+            await ProductService.health_by_po(db) if include_produtos
+            else empty["saude_produtos"]
+        )
 
         entregas_projeto = {
             "mes": ref_mes, "ano": ref_ano,

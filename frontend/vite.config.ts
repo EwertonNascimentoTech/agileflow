@@ -20,15 +20,22 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        // Isola vendors pesados em chunks próprios, cacheáveis e compartilhados
-        // entre as rotas lazy (evita duplicá-los em cada chunk de página).
-        // Forma de função (a de objeto conflita com a tipagem do Rollup).
-        manualChunks(id: string) {
-          if (!id.includes("node_modules")) return
-          if (id.includes("recharts")) return "vendor-charts"
-          if (id.includes("react-markdown") || id.includes("remark-") || id.includes("micromark") || id.includes("mdast")) return "vendor-markdown"
-          if (id.includes("@dnd-kit")) return "vendor-dnd"
-          if (id.includes("react-router") || id.includes("/react-dom/") || id.includes("/react/")) return "vendor-react"
+        // Isola vendors pesados em chunks próprios, cacheáveis e compartilhados entre as rotas
+        // lazy. Grupos do Rolldown (o `manualChunks` antigo virava grupo e puxava as
+        // dependências junto: o React caía dentro de vendor-charts/markdown e a tela de login
+        // pré-carregava gráficos + markdown + dnd, ~160 kB gzip). O grupo do React tem a maior
+        // prioridade: o que ele captura sai dos outros grupos.
+        codeSplitting: {
+          groups: [
+            {
+              name: "vendor-react",
+              priority: 30,
+              test: /node_modules[\\/](react|react-dom|scheduler|react-router|react-router-dom|react-is|clsx|prop-types|use-sync-external-store)[\\/]/,
+            },
+            { name: "vendor-charts", priority: 20, test: /node_modules[\\/].*recharts/ },
+            { name: "vendor-markdown", priority: 20, test: /node_modules[\\/].*(react-markdown|remark-|micromark|mdast)/ },
+            { name: "vendor-dnd", priority: 20, test: /node_modules[\\/]@dnd-kit[\\/]/ },
+          ],
         },
       },
     },
