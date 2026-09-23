@@ -1447,10 +1447,13 @@ async def get_schedule_overload(
     ctx: ModuleContext = Depends(_ctx),
 ):
     """Tarefas do cronograma cujo responsável está superlotado no período — alimenta o
-    marcador de sobrecarga no avatar do Gantt. Mesmo gating de /assignee-absences."""
+    marcador de sobrecarga no avatar do Gantt. Mesmo gating de /assignee-absences.
+    Serializa direto pelo Pydantic: sem raiz são ~900 linhas com conflitos e a revalidação
+    do response_model custava ~0,3 s (JSON idêntico)."""
     scope = await _po_external_scope(ctx)
     if scope is None:
-        return await CapacityService.compute_schedule_overload(ctx.db, project_id, root)
+        res = await CapacityService.compute_schedule_overload(ctx.db, project_id, root)
+        return Response(content=res.model_dump_json(), media_type="application/json")
     if root is None:
         return ScheduleOverloadResponse(rows=[])
     await _assert_task_in_scope(ctx, root)

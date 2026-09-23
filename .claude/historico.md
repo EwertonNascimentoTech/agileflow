@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-23 — Sobrecarga do cronograma e lentes de capacidade mais rápidas
+
+- **Pedido:** Sobrecarga do cronograma lenta (pendente da auditoria: ~0,9 s sem raiz; ~0,84 s com raiz).
+- **Feito:** `compute_schedule_overload` carrega só a subárvore do card-raiz (`_subtree_tasks`, agora com `options`) ou, sem raiz, o processo sem colunas pesadas (`_light_task_options`). `_select_tasks_in_window` aceita o `assignee_of` já carregado: sobrecarga, grade de capacidade, detalhe do dia, janela da pessoa e cenário de fim deixaram de montar o índice de responsável duas vezes. `_norm_col` com `lru_cache` (função pura do texto; ~8 mil chamadas por requisição). Rota da sobrecarga serializa direto pelo Pydantic. Saídas idênticas nos 9 casos comparados (ordem das linhas pode variar; o Gantt indexa por task_id). HTTP: com raiz 0,84 para 0,16–0,45 s; sem raiz 0,92 para 0,69 s; detalhe do dia 0,78 para 0,23 s; grade por pessoas 0,69 para 0,23 s.
+- **Não mexer:** `assignee_of=` nas chamadas de `_select_tasks_in_window`; `lru_cache` do `_norm_col` (só para funções puras de texto).
+- **Arquivos:** `projetos/service.py`, `projetos/api/routes.py`
+
 ## 2026-09-23 — Gantt: visão completa rolável, com zoom e travas resumidas
 
 - **Pedido:** Visão completa do Gantt ("Ver cronograma completo") não rolava para os lados — só apareciam as ~5 primeiras semanas de uma janela de 2025 a 2032.

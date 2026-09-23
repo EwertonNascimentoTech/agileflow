@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import math
 import time
@@ -2689,8 +2690,11 @@ class ProjectTaskService:
     # é movida (respeitando as travas de governança), além do selo de impedimento.
     # ------------------------------------------------------------------
     @staticmethod
+    @functools.lru_cache(maxsize=4096)
     def _norm_col(name: Optional[str]) -> str:
-        """lower + remove acentos, para casar nomes de coluna entre os dois kanbans."""
+        """lower + remove acentos, para casar nomes de coluna entre os dois kanbans.
+        Cache: função pura do texto, chamada por card em relatórios e capacidade (a
+        sobrecarga do cronograma chegava a ~8 mil chamadas por requisição)."""
         import unicodedata
         if not name:
             return ""
@@ -5425,7 +5429,7 @@ class ProjectTaskService:
 
     @staticmethod
     async def _subtree_tasks(
-        db: AsyncSession, project_id: uuid.UUID, root_id: uuid.UUID,
+        db: AsyncSession, project_id: uuid.UUID, root_id: uuid.UUID, *, options: tuple = (),
     ) -> dict[uuid.UUID, ProjectTask]:
         """Raiz + todos os descendentes numa CTE recursiva — o rollup só precisa da subárvore,
         não das ~2,4 mil tarefas do processo. UNION (não UNION ALL) encerra mesmo se houver
@@ -5440,7 +5444,9 @@ class ProjectTaskService:
                 ProjectTask.parent_task_id == sub.c.id, ProjectTask.project_id == project_id,
             )
         )
-        rows = await db.execute(select(ProjectTask).where(ProjectTask.id.in_(select(sub.c.id))))
+        rows = await db.execute(
+            select(ProjectTask).options(*options).where(ProjectTask.id.in_(select(sub.c.id)))
+        )
         return {t.id: t for t in rows.scalars().all()}
 
     @staticmethod
@@ -6406,8 +6412,10 @@ class CapacityService:
         date_from: date,
         date_to: date,
         person_ids: Optional[list[uuid.UUID]] = None,
+        assignee_of=None,
     ) -> list[ProjectTask]:
         """Todas as User Stories agendadas do tenant que cruzam a janela.
+        `assignee_of`: resolvedor já carregado pelo chamador (evita montar o índice 2×).
 
         Com `person_ids`, inclui US cujo responsável efetivo está na lista (Homologação PO
         conta no PO do projeto, mesmo com assigned_to do card sendo outro)."""
@@ -6425,7 +6433,8 @@ class CapacityService:
         tasks = await CapacityService._keep_us_tasks_only(db, tasks)
         if person_ids:
             want = set(person_ids)
-            assignee_of = await CapacityService._effective_assignee_fn(db)
+            if assignee_of is None:
+                assignee_of = await CapacityService._effective_assignee_fn(db)
             tasks = [t for t in tasks if assignee_of(t) in want]
         return tasks
 
@@ -6520,8 +6529,10 @@ class CapacityService:
         person_ids: Optional[list[uuid.UUID]] = None,
     ) -> CapacityHeatmapResponse:
         calendar = await load_calendar(db)
-        tasks = await CapacityService._select_tasks_in_window(db, date_from, date_to, person_ids)
         assignee_of = await CapacityService._effective_assignee_fn(db)
+        tasks = await CapacityService._select_tasks_in_window(
+            db, date_from, date_to, person_ids, assignee_of=assignee_of,
+        )
         acc, _by_project, all_ids = CapacityService._distribute_hours(
             tasks, calendar, date_from, date_to, assignee_of=assignee_of,
         )
@@ -6691,7 +6702,9 @@ class CapacityService:
         assignee_of = await CapacityService._effective_assignee_fn(db)
         root_of, root_title = await CapacityService._root_index(db)
 
-        day_tasks = await CapacityService._select_tasks_in_window(db, day, day, [person_id])
+        day_tasks = await CapacityService._select_tasks_in_window(
+            db, day, day, [person_id], assignee_of=assignee_of,
+        )
         detail, acc, _ids = CapacityService._distribute_detail(
             day_tasks, calendar, day, day, assignee_of=assignee_of,
         )
@@ -7018,10 +7031,12 @@ class CapacityService:
         por cima do 'já alocado', e a tarefa em edição normalmente já está salva —
         sem a exclusão ela seria contada duas vezes."""
         calendar = await load_calendar(db)
-        tasks = await CapacityService._select_tasks_in_window(db, date_from, date_to, [person_id])
+        assignee_of = await CapacityService._effective_assignee_fn(db)
+        tasks = await CapacityService._select_tasks_in_window(
+            db, date_from, date_to, [person_id], assignee_of=assignee_of,
+        )
         if exclude_task_id is not None:
             tasks = [t for t in tasks if t.id != exclude_task_id]
-        assignee_of = await CapacityService._effective_assignee_fn(db)
         detail, acc, _ids = CapacityService._distribute_detail(
             tasks, calendar, date_from, date_to, assignee_of=assignee_of,
         )
@@ -7162,11 +7177,11 @@ class CapacityService:
         person_set = set(person_ids)
 
         # Alocação de OUTROS projetos: US agendadas do tenant na janela, excluindo a subárvore.
+        assignee_of = await CapacityService._effective_assignee_fn(db)
         portfolio = await CapacityService._select_tasks_in_window(
-            db, start_date, horizon_end, person_ids,
+            db, start_date, horizon_end, person_ids, assignee_of=assignee_of,
         )
         elsewhere = [t for t in portfolio if t.id not in subtree_ids]
-        assignee_of = await CapacityService._effective_assignee_fn(db)
         acc_elsewhere, _bp, _ids = CapacityService._distribute_hours(
             elsewhere, calendar, start_date, horizon_end, assignee_of=assignee_of,
         )
@@ -7277,25 +7292,17 @@ class CapacityService:
 
         Devolve só as tarefas com sobrecarga (linhas limpas para o Gantt marcar o avatar),
         com o pior dia e o que o ocupa, para o tooltip."""
-        q = select(ProjectTask).where(ProjectTask.project_id == project_id)
-        all_tasks = list((await db.execute(q)).scalars().all())
-
-        scope = all_tasks
+        # Com raiz (o Gantt sempre manda): só a subárvore, pela CTE do rollup. Sem raiz: o
+        # processo inteiro. Nos dois casos sem description/anexos/meta (não usados aqui).
         if root_task_id is not None:
-            children: dict[uuid.UUID, list[ProjectTask]] = {}
-            for t in all_tasks:
-                if t.parent_task_id:
-                    children.setdefault(t.parent_task_id, []).append(t)
-            scope = []
-            stack = [t for t in all_tasks if t.id == root_task_id]
-            seen: set[uuid.UUID] = set()
-            while stack:
-                cur = stack.pop()
-                if cur.id in seen:
-                    continue
-                seen.add(cur.id)
-                scope.append(cur)
-                stack.extend(children.get(cur.id, []))
+            scope = list((await ProjectTaskService._subtree_tasks(
+                db, project_id, root_task_id, options=_light_task_options(),
+            )).values())
+        else:
+            scope = list((await db.execute(
+                select(ProjectTask).options(*_light_task_options())
+                .where(ProjectTask.project_id == project_id)
+            )).scalars().all())
 
         assignee_of = await CapacityService._effective_assignee_fn(db)
         targets = [
@@ -7311,7 +7318,7 @@ class CapacityService:
 
         calendar = await load_calendar(db)
         portfolio = await CapacityService._select_tasks_in_window(
-            db, win_from, win_to, list(person_ids),
+            db, win_from, win_to, list(person_ids), assignee_of=assignee_of,
         )
         detail, acc, _ids = CapacityService._distribute_detail(
             portfolio, calendar, win_from, win_to, assignee_of=assignee_of,
