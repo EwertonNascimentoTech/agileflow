@@ -14,6 +14,20 @@ Modelo:
 
 ---
 
+## 2026-09-23 — Portal do Cliente: novo layout (UI/UX)
+
+- **Pedido:** Melhorar o layout do Portal do Cliente olhando para UI e UX.
+- **Feito:**
+  - Casca: cabeçalho fixo alinhado ao conteúdo (marca AgileFlow + "Portal do Cliente", abas com indicador, iniciais do usuário); fundo cinza com cartões brancos; no celular o menu vira ícones. `shrink-0` na casca: dentro do `#root` (flex, 100%) ela encolhia até a janela e o fundo parava no meio da rolagem.
+  - Início: faixa de boas-vindas com "Abrir ocorrência"; contadores clicáveis (Aguardando você, Minhas em aberto, Minhas resolvidas, Projetos em OA); lista "Precisa da sua atenção" (responder/validar); cartões de projeto com "Aceitando ocorrências" ou "Não aceita novas ocorrências" e plural correto.
+  - Lista: abas Em aberto / Aguardando você / Encerradas / Todas com contadores (`?situacao=`), no lugar do checkbox "Mostrar encerradas"; busca por código/título; código e título separados (`occTitle` tira o "OC-0001 ·" do título); coluna Atualizada (tempo relativo); "Responder"/"Validar" na linha; no celular, cartões.
+  - Detalhe: cabeçalho com etapas (Recebida, Em atendimento, Validação, Resolvida; melhoria tem trilha própria) e faixa de próximo passo com a ação (Responder / Validar agora); validação com cartões e NPS colorido; solução em destaque; conversa em balões ("Você" / selo "Time"); caixa de resposta com "Anexar arquivo" compacto e Ctrl+Enter; resumo lateral fixo.
+  - Nova ocorrência: 4 seções numeradas; tipo, impacto e abrangência em cartões com explicação; obrigatórios marcados e erro junto do campo; painel "Como funciona" e dicas. Sem `<form>`: dentro de um form o Select do Radix cria um select nativo que zerava a escolha automática do único projeto (e mandaria projeto vazio).
+  - `AttachmentField` ganhou `compact` (botão no lugar da área de arrastar).
+- **E2E:** OA 76/76 + 36/36. Novos: início com "Precisa da sua atenção", aba Encerradas, projeto pré-selecionado, validação, celular 390 px sem rolagem horizontal (4 telas), tema escuro. Prints 01 a 09, 07b e 30 a 35.
+- **Não mexer:** regras e API do Portal sem mudança; linha da lista abre o detalhe; só um botão "Responder" no detalhe (o E2E depende disso); sem `<form>` em volta de Select Radix com valor escolhido automaticamente.
+- **Arquivos:** `frontend/src/modules/portal/*`, `frontend/src/components/AttachmentField.tsx`, `provisorio/testes-e2e/operacao-assistida-2026-09-23/*`
+
 ## 2026-09-23 — Portal: Andamento da ocorrência no formato da Timeline de raias
 
 - **Pedido:** Deixar a timeline do detalhe da ocorrência (Portal) parecida com a "Timeline de raias" do drawer do card.

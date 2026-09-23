@@ -62,7 +62,7 @@ Kanbans configur?veis (funis + etapas) no mesmo `Project` container:
 - Portal: `GET /projetos/portal/projects` (`require_module("projetos", allow_client=True)`).
 - `/auth/me`: `is_client` (cliente externo) e `has_client_portal`.
 - Raia "Operação Assistida" no kanban Projetos e Programas (antes de Concluído): conta como entregue nos relatórios; pular exige justificativa.
-- Kanban "Ocorrências – Operação Assistida" (criado ao 1º projeto entrar na raia). Portal: `/portal`, `/portal/ocorrencias`, `/portal/ocorrencias/nova`, `/portal/ocorrencias/:id`.
+- Kanban "Ocorrências – Operação Assistida" (criado ao 1º projeto entrar na raia). Portal: `/portal`, `/portal/ocorrencias`, `/portal/ocorrencias/nova`, `/portal/ocorrencias/:id`. Lista aceita `?projeto=`, `?minhas=1` e `?situacao=acao|encerradas|todas` (padrão: em aberto); o início linka para elas.
 - API Portal: `GET /projetos/portal/projects`, `GET/POST /projetos/portal/occurrences`, `GET /projetos/portal/occurrences/{id}`, `POST .../{id}/comments`, `POST /projetos/portal/uploads`, `GET /projetos/portal/uploads/url`. Time: `GET/PATCH /projetos/occurrences/{task_id}`. `POST /projetos/occurrences/{id}/assume`, `POST .../forward-release`, `GET /projetos/occurrences/release-candidates`, `GET/PUT /projetos/tasks/{id}/assisted-ops-devs`, `POST /projetos/portal/occurrences/{id}/homologation`. Celery: `check_unassigned_occurrences` (5 min).
 
 ### Import Excel Features/US

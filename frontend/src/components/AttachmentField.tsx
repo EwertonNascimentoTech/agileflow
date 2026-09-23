@@ -50,6 +50,8 @@ export interface AttachmentFieldProps {
   maxSizeMb?: number
   upload?: (file: File) => Promise<Attachment>
   getUrl?: (objectName: string) => Promise<string>
+  /** Botão "Anexar arquivo" no lugar da área de arrastar (ex.: caixa de resposta). */
+  compact?: boolean
 }
 
 export function AttachmentField({
@@ -62,6 +64,7 @@ export function AttachmentField({
   maxSizeMb = DEFAULT_MAX_MB,
   upload = projetosApi.uploadFile,
   getUrl = projetosApi.getUploadUrl,
+  compact = false,
 }: AttachmentFieldProps) {
   const files = toAttachmentList(value)
   const [uploading, setUploading] = useState(0)
@@ -131,7 +134,32 @@ export function AttachmentField({
 
   return (
     <div className="space-y-2">
-      {canAdd && (
+      {canAdd && compact && (
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={onDrop}
+          title={`Até ${maxSizeMb} MB por arquivo`}
+          className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground ${
+            dragOver ? "border-primary bg-primary/5" : "border-dashed"
+          }`}
+        >
+          {uploading > 0 ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}
+          {uploading > 0 ? "Enviando…" : "Anexar arquivo"}
+          <input
+            ref={inputRef}
+            type="file"
+            className="hidden"
+            accept={accept}
+            multiple={multiple}
+            disabled={disabled}
+            onChange={onInputChange}
+          />
+        </button>
+      )}
+      {canAdd && !compact && (
         <div
           role="button"
           tabIndex={0}

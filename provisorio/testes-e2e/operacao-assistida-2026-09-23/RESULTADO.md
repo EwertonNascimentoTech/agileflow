@@ -4,7 +4,7 @@ Executado contra o sistema no ar (`tenant_ss`, `agileflow` via nginx `:18082`), 
 PO / Dev / Coordenador / Cliente de teste (`e2e.*@e2e-agileflow.com.br`) e projetos `[E2E] …`.
 Tudo foi removido ao final (`run.sh cleanup-only` refaz a limpeza se preciso).
 
-**Resultado: 76/76 verificações de API + 23/23 verificações de tela** (reexecutado após a auditoria de segurança: primeiro acesso agora é por link gerado por quem cadastra; e em 23/09 com a resposta do cliente pela tela).
+**Resultado: 76/76 verificações de API + 36/36 verificações de tela** (reexecutado após a auditoria de segurança: primeiro acesso agora é por link gerado por quem cadastra; em 23/09 com a resposta do cliente pela tela e com o novo layout do Portal).
 
 ## API (HTTP real, com login)
 
@@ -48,11 +48,13 @@ Tudo foi removido ao final (`run.sh cleanup-only` refaz a limpeza se preciso).
 
 ## Telas (Chromium/Playwright) — prints em `prints/`
 
-Cliente: login cai no Portal; Meus projetos; Ocorrências (com filtro e encerradas); ocorrência
-homologada (NPS, conversa pública, anexo, andamento); melhoria encaminhada; dúvida em aberto;
-nova ocorrência; ocorrência aguardando resposta (linha destacada + "Responder"; clique na linha
-abre o detalhe; "Responder" foca a caixa; enviar devolve ao time); tentativa de abrir `/app/...`
-volta ao Portal. PO: Clientes; verificação de
+Cliente: login cai no Portal; início com "Precisa da sua atenção" e contadores; Meus projetos;
+Ocorrências (abas Em aberto / Aguardando você / Encerradas / Todas, busca e filtros); ocorrência
+homologada (etapas, NPS, conversa pública, anexo, andamento); melhoria encaminhada; dúvida em aberto;
+nova ocorrência (único projeto já selecionado; validação junto dos campos); ocorrência aguardando
+resposta (linha destacada + "Responder"; clique na linha abre o detalhe; "Responder" foca a caixa;
+enviar devolve ao time); celular 390 px sem rolagem horizontal (início, lista, detalhe, nova);
+tema escuro (início e detalhe); tentativa de abrir `/app/...` volta ao Portal. PO: Clientes; verificação de
 e-mail já cadastrado; Capacidade (sub-linhas Operação Assistida / Chamados). Coordenador: lista de
 Pessoas (coluna Jornada), detalhe da pessoa (barra 40/40/20), dashboard (Capacidade diária do time).
 
