@@ -1612,22 +1612,29 @@ export default function ProjectBoardPage() {
     const leavingHomologPo = isHomologPoStatusName(fromStatus?.name)
     const toConcluido = !!(toStatus?.is_final) || isConcludedStatusName(toStatus?.name)
     const ehAdmin = user?.role === "super_admin" || user?.role === "company_admin"
-    // Homologação (PO) → Concluído: o PO do projeto passa mesmo sem ser o responsável da US
-    // e mesmo que a raia Concluído tenha lista de funções.
-    const poConcluiHomolog = leavingHomologPo && isProjectPo && toConcluido
+    const moveFunnelName = funnels.find((f) => f.id === (fromStatus?.funnel_id ?? selectedFunnelId))?.name ?? selectedFunnelName
+    // Quem pode tirar o card da Homologação (PO): o PO do projeto; na Feature, também a
+    // coordenação (mesma regra do backend). Na User Story continua só do PO.
+    const podeSairHomolog = isProjectPo || (isFeatureKanbanFunnel(moveFunnelName) && isCoordination(user))
+    // Homologação (PO) → Concluído: passa mesmo sem ser o responsável do card e mesmo que a
+    // raia Concluído tenha lista de funções.
+    const poConcluiHomolog = leavingHomologPo && podeSairHomolog && toConcluido
     if (!poConcluiHomolog && !canMoveTaskOnBoard(
       user,
       fromStatus,
       toStatus,
       funnelAccessForTask(task),
-      isAssignee || (leavingHomologPo && isProjectPo),
+      isAssignee || (leavingHomologPo && podeSairHomolog),
     )) {
       toast.error("Você não tem permissão para mover este card para essa etapa.")
       return
     }
-    const moveFunnelName = funnels.find((f) => f.id === (fromStatus?.funnel_id ?? selectedFunnelId))?.name ?? selectedFunnelName
-    if (leavingHomologPo && !ehAdmin && !isProjectPo) {
-      toast.error("Só o PO responsável pelo projeto pode concluir a Homologação (PO).")
+    if (leavingHomologPo && !ehAdmin && !podeSairHomolog) {
+      toast.error(
+        isFeatureKanbanFunnel(moveFunnelName)
+          ? "Só o PO responsável pelo projeto ou a coordenação podem concluir a Homologação (PO) da Feature."
+          : "Só o PO responsável pelo projeto pode concluir a Homologação (PO).",
+      )
       return
     }
     // No kanban User Story só o responsável ou a coordenação (admin ou Cargo de coordenação/

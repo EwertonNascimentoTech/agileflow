@@ -2628,13 +2628,23 @@ class ProjectTaskService:
         if current_user.role in (UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN):
             return
 
-        # Sair da Homologação (PO) = concluir a homologação: só o PO do projeto.
+        # Sair da Homologação (PO) = concluir a homologação: do PO do projeto. Na Feature,
+        # também da coordenação (pedido do usuário, 2026-09-23); na User Story segue só do PO.
         if ProjectTaskService._is_homolog_po_status(source_status):
             if await ProjectTaskService._is_planning_root_po(db, current_user, task):
+                return
+            src_funnel_name = (await db.execute(
+                select(ProjectFunnel.name).where(ProjectFunnel.id == source_status.funnel_id)
+            )).scalar_one_or_none()
+            is_feature = ProjectTaskService._is_feature_funnel_name(src_funnel_name)
+            if is_feature and await ProjectTaskService._is_coordination(db, current_user):
                 return
             raise HTTPException(
                 status_code=403,
                 detail=(
+                    "Só o PO responsável pelo projeto ou a coordenação podem concluir a "
+                    "Homologação (PO) da Feature."
+                    if is_feature else
                     "Só o PO responsável pelo projeto pode concluir a Homologação (PO). "
                     "O desenvolvedor move o card até essa etapa; dali em diante é o PO."
                 ),

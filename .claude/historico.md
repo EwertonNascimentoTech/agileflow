@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-23 — Coordenação conclui a Homologação (PO) da Feature
+
+- **Pedido:** No kanban Features o coordenador também deve conseguir mover.
+- **Feito:** Única regra de board por papel nas Features era "sair da Homologação (PO) = só o PO do projeto". Agora, na Feature, a coordenação (`_is_coordination` / `isCoordination`) também tira o card da Homologação (PO), no backend (`_check_us_move_authorship`) e no board; mensagem própria para quem não pode. Na User Story a Homologação (PO) continua só do PO. Verificado: coordenador (inclusive o usuário real do Ewerton) passa na Feature; dev bloqueado; coordenador segue bloqueado na US.
+- **Não mexer:** a exceção é só para funil de Features (`_is_feature_funnel_name`); US continua PO.
+- **Arquivos:** `projetos/service.py`, `ProjectBoardPage.tsx`
+
 ## 2026-09-23 — Coordenador move US de outro responsável também no board
 
 - **Pedido:** Coordenador (Ewerton) recebia "Só o responsável pela User Story ou a coordenação podem movê-la" ao arrastar US.
