@@ -248,6 +248,7 @@ export const STATUS_HISTORY_SOURCE_LABELS: Record<string, string> = {
   procurement: "Contratação",
   cascade: "Cascata",
   funnel_transition: "Troca de kanban",
+  client: "Portal do cliente",
 }
 
 export interface ProjectDemandTypeFunnelRef {

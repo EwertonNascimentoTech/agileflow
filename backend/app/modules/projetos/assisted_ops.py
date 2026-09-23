@@ -614,6 +614,13 @@ class AssistedOpsService:
             .where(ProjectTaskStatusHistory.task_id == task.id)
             .order_by(ProjectTaskStatusHistory.moved_at.asc())
         )).scalars().all())
+        mover_ids = {h.moved_by for h in hist if h.moved_by} - set(authors)
+        if mover_ids:
+            authors.update({
+                u.id: u.full_name for u in (await db.execute(
+                    select(User).where(User.id.in_(mover_ids))
+                )).scalars().all()
+            })
 
         # Card da ocorrência (time): do projeto, só o PO responsável e o produto vinculado.
         po_name = product_name = None
@@ -672,8 +679,15 @@ class AssistedOpsService:
                 for c in comments
                 if not (for_client and c.author_id is None)
             ],
+            # Timeline de raias (mesmo formato do drawer do card): de → para, quem moveu, quando e origem.
             history=[
-                {"stage_name": h.to_status_name, "moved_at": h.moved_at.isoformat() if h.moved_at else None}
+                {
+                    "stage_name": h.to_status_name,
+                    "from_stage_name": h.from_status_name,
+                    "moved_at": h.moved_at.isoformat() if h.moved_at else None,
+                    "moved_by_name": authors.get(h.moved_by) if h.moved_by else None,
+                    "source": h.source,
+                }
                 for h in hist
             ],
         )

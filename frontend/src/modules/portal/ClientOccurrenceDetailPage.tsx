@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { Link, useParams } from "react-router-dom"
-import { ArrowLeft, CheckCircle2, Loader2, MessageSquareReply, Send, XCircle } from "lucide-react"
+import { ArrowLeft, CheckCircle2, GitBranch, Loader2, MessageSquareReply, Send, XCircle } from "lucide-react"
 
 import {
   OCCURRENCE_ABRANGENCIA_LABEL,
@@ -17,7 +17,15 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { CommentBody } from "@/modules/projetos/CommentComposer"
 import { toast } from "@/lib/toast"
+import { formatApiDateTime } from "@/lib/utils"
 import { PriorityBadge, StageBadge, apiErrorDetail, fmtDateTime } from "@/modules/portal/occurrenceUi"
+
+/** Origem do movimento na visão do cliente (sem o jargão interno do kanban). */
+const PORTAL_SOURCE_LABELS: Record<string, string> = {
+  client: "Portal do cliente",
+  system: "Automático",
+  automation: "Automático",
+}
 
 function Field({ label, value }: { label: string; value: string | null | undefined }) {
   if (!value) return null
@@ -286,6 +294,40 @@ export default function ClientOccurrenceDetailPage() {
               </p>
             )}
           </div>
+
+          {/* Timeline de raias no formato do drawer do card: mais recente primeiro, de → para, quem, quando e origem. */}
+          <div className="space-y-3 rounded-lg border p-4">
+            <div className="flex items-center gap-2">
+              <span className="h-4 w-1 rounded-full bg-primary" />
+              <h2 className="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">Andamento</h2>
+            </div>
+            {occ.history.length === 0 ? (
+              <p className="text-xs text-muted-foreground">Nenhum movimento registrado ainda.</p>
+            ) : (
+              <ol className="relative ms-1.5 border-s border-border/70 ps-4">
+                {[...occ.history].reverse().map((h, i) => (
+                  <li key={i} className="mb-3 last:mb-0">
+                    <span className="absolute -start-[5px] mt-1.5 h-2.5 w-2.5 rounded-full border-2 border-background bg-primary" />
+                    <div className="rounded bg-muted/40 px-2.5 py-2">
+                      <p className="text-sm font-medium leading-snug">
+                        <span className="text-muted-foreground">{h.from_stage_name ?? "Abertura"}</span>
+                        {" → "}
+                        <span>{h.stage_name ?? "—"}</span>
+                      </p>
+                      <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[11px] text-muted-foreground">
+                        <GitBranch className="inline h-3 w-3 shrink-0" />
+                        <span className="font-medium text-foreground">{h.moved_by_name ?? "Sistema"}</span>
+                        <span>·</span>
+                        <span>{formatApiDateTime(h.moved_at)}</span>
+                        <span>·</span>
+                        <span>{PORTAL_SOURCE_LABELS[h.source ?? ""] ?? "Time de atendimento"}</span>
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
         </div>
 
         <div className="space-y-4">
@@ -302,17 +344,6 @@ export default function ClientOccurrenceDetailPage() {
               <span className="text-muted-foreground">Responsável</span>
               <span>{occ.assignee_name ?? "A definir"}</span>
             </div>
-          </div>
-          <div className="rounded-lg border p-4">
-            <h2 className="mb-2 text-sm font-semibold">Andamento</h2>
-            <ol className="space-y-2 border-l pl-3">
-              {occ.history.map((h, i) => (
-                <li key={i} className="text-sm">
-                  <div className="font-medium">{h.stage_name ?? "—"}</div>
-                  <div className="text-xs text-muted-foreground">{fmtDateTime(h.moved_at)}</div>
-                </li>
-              ))}
-            </ol>
           </div>
         </div>
       </div>

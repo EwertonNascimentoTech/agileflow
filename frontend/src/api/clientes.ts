@@ -179,7 +179,13 @@ export interface OccurrenceDetail extends OccurrenceSummary {
   assisted_ops_dev_names?: string[]
   can_assume: boolean
   comments: OccurrenceComment[]
-  history: Array<{ stage_name: string | null; moved_at: string | null }>
+  history: Array<{
+    stage_name: string | null
+    from_stage_name?: string | null
+    moved_at: string | null
+    moved_by_name?: string | null
+    source?: string | null
+  }>
 }
 
 export interface OccurrenceCreate {

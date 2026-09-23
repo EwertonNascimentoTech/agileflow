@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-23 — Portal: Andamento da ocorrência no formato da Timeline de raias
+
+- **Pedido:** Deixar a timeline do detalhe da ocorrência (Portal) parecida com a "Timeline de raias" do drawer do card.
+- **Feito:** `_detail` passa a mandar em cada item do histórico `from_stage_name`, `moved_by_name` e `source`, além de `stage_name`/`moved_at`. No Portal, o "Andamento" foi para a coluna principal, abaixo da conversa. Segue o visual do drawer: título com barra azul, linha com pontos, mais recente primeiro, "de" (cinza) e "para", ícone, quem moveu, data/hora e origem. Sem o nome do funil, que é sempre o mesmo. Origem para o cliente: "Portal do cliente", "Automático" ou "Time de atendimento". O 1º item mostra "Abertura" e "Backlog". No drawer, a origem `client` agora aparece como "Portal do cliente" (antes, "client" cru). E2E da OA 76/76 + 23/23, prints 04/05/06/09.
+- **Não mexer:** `history` do Portal continua sem dados internos além do nome de quem moveu (o cliente já vê autores dos comentários e o responsável).
+- **Arquivos:** `backend/app/modules/projetos/assisted_ops.py`, `frontend/src/modules/portal/ClientOccurrenceDetailPage.tsx`, `frontend/src/api/clientes.ts`, `frontend/src/api/projetos.ts`
+
 ## 2026-09-23 — Portal: linha da ocorrência abre o detalhe e "Responder" em destaque
 
 - **Pedido:** O dev mandou para Aguardando Cliente, mas clicar na linha da lista não abria o detalhe e o requisitante não conseguiu responder ao dev.
