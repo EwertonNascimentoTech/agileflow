@@ -124,6 +124,10 @@ export interface ProjectTask {
   requester_name?: string | null
   completed_at: string | null
   left_backlog_at?: string | null
+  /** 1ª entrada na Operação Assistida (= data de entrega nos relatórios). */
+  assisted_op_entered_at?: string | null
+  /** Justificativa de ir a Concluído sem passar pela Operação Assistida. */
+  assisted_op_skip_reason?: string | null
   status_entered_at: string | null
   /** Justificativa de ausência de commit (exigida ao enviar a US para Homologação do PO). */
   commit_justificativa?: string | null
@@ -524,6 +528,8 @@ export interface ProjectDeliveryItem {
   title: string
   planning_kind: string | null
   completed_at: string | null
+  /** Entregue, mas ainda na raia Operação Assistida. */
+  em_operacao_assistida?: boolean
   due_date: string | null
   po_name: string | null
   product_id: string | null
@@ -1474,6 +1480,8 @@ export interface PoSyncProjeto {
   po_id: string | null
   po: string | null
   fase: PoSyncFase
+  /** Entregue, mas ainda na raia Operação Assistida (fase = concluido). */
+  em_operacao_assistida?: boolean
   stage_name: string | null
   exec_pct: number | null
   health: "verde" | "vermelho"
@@ -1585,7 +1593,7 @@ export interface PoSyncResponse {
     ano: number
     mes_label: string
     proximo_mes_label: string
-    concluidas: Array<{ task_id: string; title: string; po: string | null; diretoria_label: string | null; completed_at: string | null; prazo_status: string; atraso_dias: number | null }>
+    concluidas: Array<{ task_id: string; title: string; po: string | null; diretoria_label: string | null; completed_at: string | null; prazo_status: string; atraso_dias: number | null; em_operacao_assistida?: boolean }>
     previstas: Array<{ task_id: string; title: string; po: string | null; diretoria_label: string | null; due_date: string | null }>
     riscos: Array<{ task_id: string; title: string; po: string | null; diretoria_label: string | null; fase: string; motivos: string[]; overdue: boolean }>
   }
@@ -1884,6 +1892,7 @@ export const projetosApi = {
     children_to_funnel_id: string | null
     grandchildren_to_funnel_id: string | null
     locks_schedule: boolean
+    is_assisted_operation: boolean
   }>) => api.patch<ProjectStatus>(`/projetos/projects/${projectId}/funnels/${funnelId}/statuses/${statusId}`, data).then((r) => r.data),
   reorderStatuses: (projectId: string, funnelId: string, items: Array<{ id: string; order: number }>) =>
     api.patch<ProjectStatus[]>(`/projetos/projects/${projectId}/funnels/${funnelId}/statuses/reorder`, { items }).then((r) => r.data),
@@ -1975,6 +1984,7 @@ export const projetosApi = {
     procurement_meta: Record<string, unknown> | null
     us_checklist: UsChecklistItem[] | null
     commit_justificativa: string | null
+    assisted_op_skip_reason: string
   }>) => api.patch<ProjectTask>(`/projetos/projects/${projectId}/tasks/${taskId}`, data).then((r) => r.data),
   setPlanningClassification: (projectId: string, taskId: string, data: {
     kind: "projeto" | "programa"

@@ -429,6 +429,14 @@ export default function ProjectStatusesConfigPage() {
     setStatuses((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
   }
 
+  async function handleSetAssistedOperation(status: ProjectStatus, value: boolean) {
+    if (!selectedProjectId || !selectedFunnelId) return
+    const updated = await projetosApi.updateStatus(selectedProjectId, selectedFunnelId, status.id, {
+      is_assisted_operation: value,
+    })
+    setStatuses((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+  }
+
   async function handleSetChildrenToFunnel(status: ProjectStatus, funnelId: string | null) {
     if (!selectedProjectId || !selectedFunnelId) return
     // Sem envio de filhos não faz sentido manter o destino dos netos: zera junto.
@@ -874,6 +882,18 @@ export default function ProjectStatusesConfigPage() {
                     Trava o cronograma (entrada = desenvolvimento)
                   </label>
                   {status.locks_schedule && <Badge variant="warning" className="text-[10px]">congela baseline</Badge>}
+                  <label
+                    className="flex items-center gap-2 text-xs text-muted-foreground"
+                    title="Pós-entrega: o projeto conta como entregue nos relatórios e os clientes vinculados podem abrir Ocorrências. Ir a Concluído sem passar por aqui exige justificativa."
+                  >
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 cursor-pointer rounded border-input accent-primary"
+                      checked={!!status.is_assisted_operation}
+                      onChange={(e) => void handleSetAssistedOperation(status, e.target.checked)}
+                    />
+                    Raia de Operação Assistida
+                  </label>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <Label className="text-xs whitespace-nowrap text-muted-foreground">

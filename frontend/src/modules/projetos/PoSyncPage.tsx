@@ -605,6 +605,9 @@ function ProjetosTable({ projetos }: { projetos: PoSyncProjeto[] }) {
               </td>
               <td className="py-2 px-2">
                 <Badge variant={FASE_VARIANT[p.fase]} className={FASE_CLASS[p.fase]}>{FASE_LABEL[p.fase]}</Badge>
+                {p.em_operacao_assistida && (
+                  <Badge variant="outline" className="ml-1 border-teal-500/40 text-teal-700 dark:text-teal-400">Operação Assistida</Badge>
+                )}
               </td>
               <td className="py-2 px-2">
                 <div className="flex items-center gap-2">
@@ -1120,6 +1123,7 @@ export default function PoSyncPage() {
                       <div className="font-medium">{p.title}</div>
                       <div className="text-muted-foreground">
                         {p.po ?? "—"} · {fmtDate(p.completed_at)}
+                        {p.em_operacao_assistida && <span className="ml-1 text-teal-600">· em operação assistida</span>}
                         {p.prazo_status === "atrasado" && <Badge variant="destructive" className="ml-1">+{p.atraso_dias}d</Badge>}
                         {p.prazo_status === "no_prazo" && <span className="ml-1 text-emerald-600">no prazo</span>}
                       </div>

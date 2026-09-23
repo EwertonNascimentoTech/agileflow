@@ -259,6 +259,10 @@ class ProjectTask(TenantBase):
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     # Primeira saída de etapa is_initial (backlog) — só User Story; não sobrescreve.
     left_backlog_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Operação Assistida: 1ª entrada na raia (= data de entrega nos relatórios) e, quando o
+    # projeto vai a Concluído sem passar por ela, a justificativa obrigatória.
+    assisted_op_entered_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    assisted_op_skip_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # SLA: quando o card entrou na etapa atual + estado calculado pela rotina de SLA.
     status_entered_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     sla_state: Mapped[str] = mapped_column(String(12), nullable=False, default="none")  # none|ok|warning|breached

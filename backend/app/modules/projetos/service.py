@@ -2144,6 +2144,72 @@ class ProjectTaskService:
         return "homolog" in n and "po" in n
 
     @staticmethod
+    def _is_assisted_operation_status(status) -> bool:
+        """Raia Operação Assistida (pós-entrega) do kanban Projetos e Programas."""
+        if status is None:
+            return False
+        if getattr(status, "is_assisted_operation", False):
+            return True
+        n = ProjectTaskService._norm_col(getattr(status, "name", None))
+        return "operacao assistida" in n or "operação assistida" in n
+
+    @staticmethod
+    def _is_delivered_planning_status(status) -> bool:
+        """Projeto entregue para os relatórios: Concluído ou em Operação Assistida."""
+        return ProjectTaskService._is_concluded_planning_status(
+            status
+        ) or ProjectTaskService._is_assisted_operation_status(status)
+
+    @staticmethod
+    def _delivered_at(task) -> Optional[datetime]:
+        """Data de entrega: 1ª entrada na Operação Assistida; sem ela, a conclusão."""
+        return task.assisted_op_entered_at or task.completed_at or task.status_entered_at
+
+    @staticmethod
+    async def _guard_assisted_op_skip(
+        db: AsyncSession,
+        task: ProjectTask,
+        source_status,
+        target_status,
+        reason: Optional[str],
+        current_user: Optional[User],
+    ) -> None:
+        """Projeto/Programa que vai a Concluído sem ter passado pela Operação Assistida
+        precisa de justificativa (HTTP 428 → o front pede o texto e reenvia)."""
+        if task.parent_task_id is not None:
+            return
+        if not ProjectTaskService._is_concluded_planning_status(target_status):
+            return
+        funnel = await db.get(ProjectFunnel, target_status.funnel_id)
+        if funnel is None or not ProjectTaskService._is_planning_funnel_name(funnel.name):
+            return
+        if task.assisted_op_entered_at is not None or ProjectTaskService._is_assisted_operation_status(
+            source_status
+        ):
+            return
+        has_lane = (await db.execute(
+            select(ProjectStatusConfig.id).where(
+                ProjectStatusConfig.funnel_id == target_status.funnel_id,
+                ProjectStatusConfig.is_assisted_operation == True,  # noqa: E712
+                ProjectStatusConfig.is_active == True,  # noqa: E712
+            ).limit(1)
+        )).scalar_one_or_none()
+        if has_lane is None:
+            return
+        texto = (reason or "").strip()
+        if len(texto) < 10:
+            raise HTTPException(
+                status_code=428,
+                detail="Justifique por que o projeto vai para Concluído sem passar pela Operação Assistida (mín. 10 caracteres).",
+            )
+        task.assisted_op_skip_reason = texto
+        db.add(ProjectTaskComment(
+            task_id=task.id,
+            author_id=current_user.id if current_user else None,
+            content=f"[Operação Assistida] Concluído sem passar pela Operação Assistida. Justificativa: {texto}",
+        ))
+
+    @staticmethod
     def _is_concluded_planning_status(status) -> bool:
         """Etapa Concluído do kanban Projetos e Programas.
 
@@ -4193,6 +4259,7 @@ class ProjectTaskService:
             payload["start_date"] = _to_naive_utc(payload.get("start_date"))
         form_values = payload.pop("form_values", None)
         conversion_title = payload.pop("conversion_title", None)
+        assisted_op_skip_reason = payload.pop("assisted_op_skip_reason", None)
         conversion_kind = payload.pop("conversion_kind", None)
         conversion_description = payload.pop("conversion_description", None)
         conversion_items = payload.pop("conversion_items", None)
@@ -8623,9 +8690,10 @@ class UsDeliveryReportService:
         for t in roots:
             # Só o card de Projetos e Programas na etapa Concluído. US/Features prontas
             # (ou completed_at de rollup) com o raiz em Impedimento NÃO contam.
-            if not ProjectTaskService._is_concluded_planning_status(t.status):
+            # Operação Assistida já conta como entregue (data = entrada na raia).
+            if not ProjectTaskService._is_delivered_planning_status(t.status):
                 continue
-            done_at = t.completed_at or t.status_entered_at
+            done_at = ProjectTaskService._delivered_at(t)
             if done_at is None:
                 continue
             if range_start <= done_at < range_end:
@@ -8762,6 +8830,8 @@ class UsDeliveryReportService:
         processos_no_mes = 0
         documentos_no_mes = 0
         for t in delivered:
+            # Em Operação Assistida ainda não há completed_at: a entrega é a entrada na raia.
+            delivered_at = ProjectTaskService._delivered_at(t)
             product = product_by_origin.get(t.id)
             if product is None and t.linked_product_id:
                 product = product_by_id.get(t.linked_product_id)
@@ -8769,7 +8839,7 @@ class UsDeliveryReportService:
             servicos = servicos_by_product.get(product.id, []) if product else []
             servico_items = cls._filter_links_same_month(
                 [{"name": s.name, "item_date": s.data_publicacao} for s in servicos],
-                t.completed_at,
+                delivered_at,
             )
             processo_items: list[dict] = []
             for s in servicos:
@@ -8782,11 +8852,11 @@ class UsDeliveryReportService:
                             "name": f"Dispensa — {s.name}",
                             "item_date": s.data_publicacao,
                         })
-            processo_items = cls._filter_links_same_month(processo_items, t.completed_at)
+            processo_items = cls._filter_links_same_month(processo_items, delivered_at)
             docs = docs_by_product.get(product.id, []) if product else []
             documento_items = cls._filter_links_same_month(
                 [{"name": d.name, "item_date": d.data_documento} for d in docs],
-                t.completed_at,
+                delivered_at,
             )
 
             servicos_count = len(servico_items)
@@ -8812,7 +8882,8 @@ class UsDeliveryReportService:
                 "id": t.id,
                 "title": t.title,
                 "planning_kind": t.planning_kind,
-                "completed_at": t.completed_at,
+                "completed_at": delivered_at,
+                "em_operacao_assistida": ProjectTaskService._is_assisted_operation_status(t.status),
                 "due_date": t.due_date,
                 "po_name": po_name,
                 "product_id": product.id if product else None,
@@ -12773,7 +12844,8 @@ class PoSyncService:
         name = (root.status.name if root.status is not None else "") or ""
         if cls._IMPEDIMENTO_PAT.search(name):
             return "impedimento"
-        if ProjectTaskService._is_concluded_planning_status(root.status):
+        # Operação Assistida conta como entregue (fase concluído); o selo vem do item.
+        if ProjectTaskService._is_delivered_planning_status(root.status):
             return "concluido"
         if cls._PROD_PAT.search(name):
             return "producao"
@@ -13216,11 +13288,12 @@ class PoSyncService:
                 "po": po_name.get(root.assigned_to),
                 "diretoria_label": dlabel(dir_code), "fase": fase,
             }
-            if ProjectTaskService._is_concluded_planning_status(root.status):
-                done_at = root.completed_at or root.status_entered_at
+            if ProjectTaskService._is_delivered_planning_status(root.status):
+                done_at = ProjectTaskService._delivered_at(root)
                 if done_at is not None and mes_ini <= done_at <= mes_fim:
                     proj_concluidas.append({
                         **_base, "completed_at": iso(done_at),
+                        "em_operacao_assistida": ProjectTaskService._is_assisted_operation_status(root.status),
                         "prazo_status": prazo_status, "atraso_dias": atraso_dias,
                     })
             if root.completed_at is None and root.due_date is not None and prox_ini <= root.due_date <= prox_fim:
@@ -13242,6 +13315,7 @@ class PoSyncService:
                 "po_id": str(root.assigned_to) if root.assigned_to else None,
                 "po": po_name.get(root.assigned_to),
                 "fase": fase,
+                "em_operacao_assistida": ProjectTaskService._is_assisted_operation_status(root.status),
                 "stage_name": root.status.name if root.status else None,
                 "exec_pct": exec_pct,
                 "health": "vermelho" if (overdue or prazo_status == "atrasado") else "verde",

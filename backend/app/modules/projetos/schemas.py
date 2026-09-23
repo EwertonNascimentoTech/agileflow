@@ -337,6 +337,7 @@ class ProjectStatusUpdate(BaseModel):
     is_procurement_won: Optional[bool] = None
     is_procurement_lost: Optional[bool] = None
     procurement_stage_key: Optional[str] = None
+    is_assisted_operation: Optional[bool] = None
 
 
 class ProjectStatusReorder(BaseModel):
@@ -430,6 +431,8 @@ class ProjectTaskReorder(BaseModel):
 
 class ProjectTaskUpdate(BaseModel):
     status_id: Optional[uuid.UUID] = None
+    # Projeto que vai a Concluído sem passar pela Operação Assistida: justificativa obrigatória.
+    assisted_op_skip_reason: Optional[str] = Field(None, max_length=2000)
     # Justificativa de ausência de commit na conclusão da US. String vazia limpa.
     commit_justificativa: Optional[str] = Field(None, max_length=2000)
     demand_type_id: Optional[uuid.UUID] = None
@@ -524,6 +527,8 @@ class ProjectTaskResponse(BaseModel):
     requester_name: Optional[str] = None
     completed_at: Optional[datetime]
     left_backlog_at: Optional[datetime] = None
+    assisted_op_entered_at: Optional[datetime] = None
+    assisted_op_skip_reason: Optional[str] = None
     status_entered_at: Optional[datetime] = None
     sla_state: str = "none"
     # Controle de baseline (só relevante no card-raiz de planejamento).
@@ -1346,6 +1351,7 @@ class ProjectDeliveryItem(BaseModel):
     title: str
     planning_kind: Optional[str] = None
     completed_at: Optional[datetime] = None
+    em_operacao_assistida: bool = False
     due_date: Optional[datetime] = None
     po_name: Optional[str] = None
     product_id: Optional[uuid.UUID] = None

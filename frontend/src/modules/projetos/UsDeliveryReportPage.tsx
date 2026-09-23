@@ -115,7 +115,7 @@ function ProjectDeliveriesTable({ items }: { items: ProjectDeliveryItem[] }) {
             <th className="px-3 py-2 font-medium">Projeto / Programa</th>
             <th className="px-3 py-2 font-medium">PO</th>
             <th className="px-3 py-2 font-medium">Produto</th>
-            <th className="px-3 py-2 font-medium whitespace-nowrap">Concluído em</th>
+            <th className="px-3 py-2 font-medium whitespace-nowrap">Entregue em</th>
             <th className="px-3 py-2 font-medium">Vínculos</th>
           </tr>
         </thead>
@@ -124,6 +124,11 @@ function ProjectDeliveriesTable({ items }: { items: ProjectDeliveryItem[] }) {
             <tr key={it.id} className="border-b last:border-b-0 align-top">
               <td className="px-3 py-2">
                 <div className="font-medium">{it.title}</div>
+                {it.em_operacao_assistida && (
+                  <span className="mt-0.5 inline-block rounded-full bg-teal-100 px-1.5 py-0.5 text-[10px] font-medium text-teal-700">
+                    Em operação assistida
+                  </span>
+                )}
                 {it.planning_kind && (
                   <div className="text-xs text-muted-foreground capitalize">{it.planning_kind}</div>
                 )}

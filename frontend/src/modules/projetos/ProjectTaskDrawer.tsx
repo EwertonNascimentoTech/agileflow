@@ -162,6 +162,8 @@ export function ProjectTaskDrawer({
   const [funnels, setFunnels] = useState<ProjectFunnel[]>([])
   const [statusId, setStatusId] = useState("")
   const [changingStatus, setChangingStatus] = useState(false)
+  // Etapa pedida quando o backend exige justificativa de pular a Operação Assistida (428).
+  const [oaSkipStatusId, setOaSkipStatusId] = useState<string | null>(null)
   const [classifyOpen, setClassifyOpen] = useState(false)
   const [statusConvPrompt, setStatusConvPrompt] = useState<{ newStatusId: string; typeName: string; name: string } | null>(null)
   const [assigneeMenuOpen, setAssigneeMenuOpen] = useState(false)
@@ -662,7 +664,7 @@ export function ProjectTaskDrawer({
       .sort((a, b) => a.order - b.order)
   })()
 
-  async function persistStatus(newStatusId: string, conversionTitle?: string) {
+  async function persistStatus(newStatusId: string, conversionTitle?: string, assistedOpSkipReason?: string) {
     if (!task) return
     const before = allStatuses.find((s) => s.id === statusId)
     setChangingStatus(true)
@@ -671,6 +673,7 @@ export function ProjectTaskDrawer({
         status_id: newStatusId,
         form_values: formValues,
         ...(conversionTitle !== undefined ? { conversion_title: conversionTitle } : {}),
+        ...(assistedOpSkipReason ? { assisted_op_skip_reason: assistedOpSkipReason } : {}),
       })
       setStatusId(updated.status_id)
       onSaved(updated)
@@ -678,9 +681,13 @@ export function ProjectTaskDrawer({
       const after = allStatuses.find((s) => s.id === updated.status_id)
       toast.success(after && before && after.funnel_id !== before.funnel_id ? "Card movido para outro kanban." : "Etapa atualizada.")
     } catch (err) {
+      setStatusId(task.status_id)  // reverte o seletor
+      if (isAssistedOpSkipRequired(err)) {
+        setOaSkipStatusId(newStatusId)
+        return
+      }
       const e = err as { response?: { data?: { detail?: unknown } } }
       toast.error(typeof e.response?.data?.detail === "string" ? e.response.data.detail : "Não foi possível mudar a etapa.")
-      setStatusId(task.status_id)  // reverte o seletor
     } finally {
       setChangingStatus(false)
     }
@@ -1775,6 +1782,16 @@ export function ProjectTaskDrawer({
     </Dialog>
 
     {/* Diálogo: nomear o card criado pela conversão ao mudar de etapa */}
+    <AssistedOpSkipDialog
+      open={!!oaSkipStatusId}
+      projectTitle={task?.title}
+      onCancel={() => setOaSkipStatusId(null)}
+      onConfirm={async (reason) => {
+        const target = oaSkipStatusId
+        setOaSkipStatusId(null)
+        if (target) await persistStatus(target, undefined, reason)
+      }}
+    />
     <Dialog open={!!statusConvPrompt} onOpenChange={(v) => { if (!v) setStatusConvPrompt(null) }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>

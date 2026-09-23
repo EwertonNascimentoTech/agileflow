@@ -70,6 +70,7 @@ import {
 } from "@/modules/projetos/kanbanDisplay"
 import { UsCardProgressBar } from "@/modules/projetos/UsChecklistSection"
 import { canEditTaskOnBoard, canMoveTaskOnBoard } from "@/modules/projetos/taskMovePermissions"
+import { AssistedOpSkipDialog, isAssistedOpSkipRequired } from "@/modules/projetos/AssistedOpSkipDialog"
 
 function personToUser(p: Person): User {
   return { id: p.id, full_name: p.full_name, email: p.email } as unknown as User
@@ -837,6 +838,8 @@ export default function ProjectBoardPage() {
   const [openMenu, setOpenMenu] = useState<string | null>(null)
   const [createSectionLinks, setCreateSectionLinks] = useState<ProjectStatusSectionLink[]>([])
   const [createFieldErrors, setCreateFieldErrors] = useState<Record<string, string>>({})
+  // Concluir projeto sem passar pela Operação Assistida: backend pede justificativa (428).
+  const [oaSkipPrompt, setOaSkipPrompt] = useState<{ task: ProjectTask; toStatusId: string } | null>(null)
   const [conversionPrompt, setConversionPrompt] = useState<{
     task: ProjectTask
     toStatusId: string
@@ -1667,10 +1670,12 @@ export default function ProjectBoardPage() {
       releaseId: string | null
       procurementRequired?: boolean | null
     },
+    extra?: { assistedOpSkipReason?: string },
   ) {
     if (!projectId) return
     try {
       const payload: Parameters<typeof projetosApi.updateTask>[2] = { status_id: toStatusId }
+      if (extra?.assistedOpSkipReason) payload.assisted_op_skip_reason = extra.assistedOpSkipReason
       if (classification) {
         payload.card_classification = classification.value
         payload.ia_assisted = classification.iaAssisted
@@ -1715,6 +1720,10 @@ export default function ProjectBoardPage() {
         setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
       }
     } catch (err) {
+      if (isAssistedOpSkipRequired(err)) {
+        setOaSkipPrompt({ task, toStatusId })
+        return
+      }
       // Inclui o 423 da trava de cronograma, cuja mensagem lista as etapas pendentes —
       // longa demais para um alert() do browser.
       const msg = getApiError(err) || "Não foi possível mover o card."
@@ -2417,6 +2426,17 @@ export default function ProjectBoardPage() {
         onConfirm={confirmClassification}
       />
 
+      <AssistedOpSkipDialog
+        open={!!oaSkipPrompt}
+        projectTitle={oaSkipPrompt?.task.title}
+        onCancel={() => setOaSkipPrompt(null)}
+        onConfirm={async (reason) => {
+          if (!oaSkipPrompt) return
+          const { task, toStatusId } = oaSkipPrompt
+          setOaSkipPrompt(null)
+          await performMove(task, toStatusId, undefined, undefined, undefined, { assistedOpSkipReason: reason })
+        }}
+      />
       <Dialog open={!!conversionPrompt} onOpenChange={(v) => { if (!v) setConversionPrompt(null) }}>
         <DialogContent>
           <DialogHeader>
