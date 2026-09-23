@@ -78,4 +78,4 @@ Integração EPA depende de env: `EPA_API_BASE_URL`, `EPA_LOGIN`, `EPA_SENHA`, `
 - `backend/app/modules/rtd/epa_client.py`
 - `backend/app/modules/rtd/permissions.py`
 - `frontend/src/modules/rtd/*`
-- Documento auxiliar: `integracao-epa.md` (raiz do repo)
+- Documento auxiliar: `provisorio/notas/integracao-epa.md`

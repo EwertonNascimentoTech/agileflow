@@ -1,5 +1,5 @@
 /* ───────────────────────────────────────────────────────────────────────────
-   AgileFlow design layer — ported from /prototipo/styles.css
+   AgileFlow design layer — ported from provisorio/prototipos/prototipo/styles.css
    Fully namespaced: tokens are --af-*, all component selectors are scoped under
    .afx, so nothing here leaks into Tailwind/shadcn used by the other modules.
    ─────────────────────────────────────────────────────────────────────────── */

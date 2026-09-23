@@ -9,7 +9,7 @@ O **`CLAUDE.md` da raiz** ? o arquivo lido em toda sess?o (Claude Code / Cursor)
 | [invariantes.md](invariantes.md) | Regras que **n?o se quebra** sem pedido expl?cito |
 | [historico.md](historico.md) | O que mudou e por qu? (append-only) |
 
-H? uma c?pia velha em `prototipo/uploads/agileflow-hml/CLAUDE.md`. **N?o usar.** A fonte ? s? o `CLAUDE.md` da raiz.
+H? uma c?pia velha em `provisorio/prototipos/prototipo/uploads/agileflow-hml/CLAUDE.md`. **N?o usar.** A fonte ? s? o `CLAUDE.md` da raiz.
 
 ## Obrigat?rio em toda altera??o
 

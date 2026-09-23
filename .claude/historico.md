@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-23 — E2E Operação Assistida + organização da raiz
+
+- **Pedido:** Teste de ponta a ponta das Fases 1–5; mover para uma pasta provisória o que não é usado para rodar o sistema.
+- **Feito:** E2E pela API real (68/68) e pelas telas com Playwright (18/18), dados [E2E] isolados e removidos — roteiros, prints e resultado em `provisorio/testes-e2e/operacao-assistida-2026-09-23/` (`run.sh` refaz). Raiz ficou só com o que roda: `backend/`, `frontend/`, `docker-compose.yml`, `.env*`, `docs/` (montado em /docs), `backup/`, `backups/`. Movidos para `provisorio/`: planilhas (CSV/XLSX), notas EPA, `e2e_flow_pmo.py`, `prototipo/`, `prototipo2/`, `skills/`. A cópia antiga do CLAUDE.md agora está em `provisorio/prototipos/prototipo/uploads/agileflow-hml/`.
+- **Não mexer:** `docs/` e `backups/` são montados pelo Compose — não mover.
+- **Arquivos:** `provisorio/**`, `docs/técnico/07-rtd-epa.md` (link), `frontend/src/styles/agileflow.css` (comentário), `.claude/README.md`, `.cursor/rules/nao-regredir.mdc`, `CLAUDE.md`.
+
 ## 2026-09-23 — Operação Assistida · Fase 5 (divisão da jornada e Capacidade)
 
 - **Pedido:** Classificar a jornada da pessoa em % Projetos / % Operação Assistida / % Chamados (o que sobra), cadastrado em Pessoas, refletindo no módulo Gestão de Times e na grade de Capacidade (separado); PO vê e edita ao escolher os devs de atendimento.

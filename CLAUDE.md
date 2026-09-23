@@ -99,3 +99,4 @@ Lista completa: `.claude/invariantes.md`. Em resumo:
 
 - `docs/usuario/` · `docs/processo/` · `docs/técnico/` · `docs/MODULES.md`
 - Processo/cronograma: `docs/processo/04-regras-negocio-fluxos-cronograma.md`
+- `provisorio/` — o que **não** roda o sistema (planilhas, notas, protótipos, scripts antigos, testes E2E). `docs/` e `backups/` são montados pelo Compose: não mover.

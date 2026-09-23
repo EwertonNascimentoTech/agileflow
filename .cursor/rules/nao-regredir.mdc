@@ -12,7 +12,7 @@ Antes de implementar pedido novo:
 1. Ler `CLAUDE.md`, `.claude/invariantes.md` e o trecho de `.claude/sistema-atual.md` da ?rea tocada.
 2. N?o remover, inverter nem “limpar” tela, rota, modal, import, regra de kanban ou c?lculo de capacidade que j? exista, salvo pedido expl?cito.
 3. Feature n?o vai para o kanban User Story; US n?o vai para Features. Capacidade ? s? US. `assigned_to` ? Person.id.
-4. Ignorar `prototipo/uploads/agileflow-hml/CLAUDE.md` — ? snapshot antigo.
+4. Ignorar `provisorio/prototipos/prototipo/uploads/agileflow-hml/CLAUDE.md` — ? snapshot antigo.
 
 Depois de mudar c?digo ou dado operacional:
 
