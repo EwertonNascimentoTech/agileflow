@@ -222,6 +222,27 @@ class User(Base):
     role_obj: Mapped[Optional["Role"]] = relationship(back_populates="users")
 
 
+class UserSsoIdentity(Base):
+    """Conta de um provedor SSO (hoje só o IDigital) vinculada a um usuário do AgileFlow.
+    Nasce no 1º login SSO, pelo e-mail; depois o login casa pelo `sub` do provedor."""
+    __tablename__ = "user_sso_identities"
+    __table_args__ = (
+        UniqueConstraint("provider", "subject", name="uq_user_sso_identities_provider_subject"),
+        UniqueConstraint("user_id", "provider", name="uq_user_sso_identities_user_provider"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(30), nullable=False)
+    subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    # E-mail informado pelo provedor no último login (auditoria do vínculo).
+    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    linked_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
 class AuditLog(Base):
     """Log de auditoria no schema público."""
     __tablename__ = "audit_logs"

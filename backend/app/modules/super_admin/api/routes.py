@@ -25,7 +25,7 @@ from app.core.security import (
     decode_refresh_token,
     validate_password_strength,
 )
-from pydantic import BaseModel as _BaseModel, field_validator
+from pydantic import BaseModel as _BaseModel, Field as _Field, field_validator
 from fastapi import Request
 from app.core.limiter import limiter
 
@@ -160,6 +160,31 @@ class _FirstAccessCompleteRequest(_BaseModel):
     @classmethod
     def _password_strong(cls, v: str) -> str:
         return validate_password_strength(v)
+
+
+class _SsoExchangeRequest(_BaseModel):
+    id_token: str = _Field(..., min_length=20, max_length=16000)
+    access_token: str | None = _Field(None, max_length=16000)
+
+
+@auth_router.get("/sso/config")
+async def sso_config():
+    """Pública: a tela de login mostra "Entre com o IDigital" só quando o SSO está ligado."""
+    from app.modules.super_admin.sso import SsoService
+    return SsoService.public_config()
+
+
+@auth_router.post("/sso/exchange", response_model=TokenResponse)
+@limiter.limit("10/minute")
+async def sso_exchange(request: Request, data: _SsoExchangeRequest, db: AsyncSession = Depends(get_db)):
+    """id_token do IDigital (validado por JWKS/iss/aud/exp) → sessão AgileFlow (mesmos tokens do /login)."""
+    from app.modules.super_admin.sso import SsoService
+    user = await SsoService.exchange(
+        db, data.id_token, data.access_token, ip=request.client.host if request.client else None,
+    )
+    await _attach_role_name(db, user)
+    access_token, refresh_token = create_tokens(user)
+    return TokenResponse(access_token=access_token, refresh_token=refresh_token, user=user)
 
 
 @auth_router.post("/refresh", response_model=TokenResponse)

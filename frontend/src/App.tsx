@@ -17,6 +17,7 @@ import RtdLoadingScreen from "@/modules/rtd/RtdLoadingScreen"
 // ── Auth ──────────────────────────────────────────────────────────────
 const LoginPage = lazy(() => import("@/modules/auth/LoginPage"))
 const FirstAccessPage = lazy(() => import("@/modules/auth/FirstAccessPage"))
+const SsoCallbackPage = lazy(() => import("@/modules/auth/SsoCallbackPage"))
 
 // ── Super Admin ───────────────────────────────────────────────────────
 const AdminLayout = lazy(() => import("@/modules/super-admin/AdminLayout"))
@@ -177,6 +178,7 @@ export default function App() {
               <Route path="/login" element={<LoginPage />} />
               <Route path="/forgot-password" element={<Navigate to="/login" replace />} />
               <Route path="/primeiro-acesso" element={<FirstAccessPage />} />
+              <Route path="/sso/callback" element={<SsoCallbackPage />} />
               <Route path="/p/propostas/:token" element={<PublicProposalPage />} />
               <Route path="/p/rtd/:token" element={<PublicRtdPage />} />
 

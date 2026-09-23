@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react"
 import type { ReactNode } from "react"
 import { authApi } from "@/api/auth"
+import { markPasswordLogin, ssoLogoutIfNeeded } from "@/lib/sso"
 import type { User, TokenResponse } from "@/types"
 
 interface AuthContextValue {
@@ -64,6 +65,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     const data = await authApi.login({ email, password })
+    markPasswordLogin()
     establishSession(data)
   }, [establishSession])
 
@@ -72,6 +74,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem("refresh_token")
     localStorage.removeItem("user")
     setUser(null)
+    // Sessão aberta pelo IDigital: encerra lá também e o IdP devolve para /login.
+    void ssoLogoutIfNeeded()
   }, [])
 
   // Memoiza o value para não recriar o objeto a cada render do provider, o que

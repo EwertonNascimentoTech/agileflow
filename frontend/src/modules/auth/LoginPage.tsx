@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { IDigitalButton } from "@/modules/auth/IDigitalButton"
+import { loadSsoConfig } from "@/lib/sso"
 
 const schema = z.object({
   email: z.string().email("E-mail inválido"),
@@ -31,6 +33,16 @@ export default function LoginPage() {
   const navigate = useNavigate()
   const [showPassword, setShowPassword] = useState(false)
   const [serverError, setServerError] = useState("")
+  // "Entre com o IDigital" só aparece com o SSO ligado no servidor (senha continua valendo).
+  const [ssoEnabled, setSsoEnabled] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    void loadSsoConfig().then((cfg) => alive && setSsoEnabled(cfg.enabled))
+    return () => {
+      alive = false
+    }
+  }, [])
 
   const {
     register,
@@ -69,7 +81,19 @@ export default function LoginPage() {
             Acesse a plataforma da sua empresa.
           </p>
 
-          <form onSubmit={handleSubmit(onSubmit)} className="mt-8 space-y-4" noValidate>
+          {ssoEnabled && (
+            <div className="mt-8 space-y-2">
+              <IDigitalButton onError={setServerError} />
+              <p className="text-center text-xs text-muted-foreground">Colaboradores do Sistema FIEA com conta IDigital.</p>
+              <div className="relative flex items-center py-2" aria-hidden>
+                <span className="h-px flex-1 bg-border" />
+                <span className="px-3 text-xs text-muted-foreground">ou entre com e-mail e senha</span>
+                <span className="h-px flex-1 bg-border" />
+              </div>
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit(onSubmit)} className={`${ssoEnabled ? "mt-2" : "mt-8"} space-y-4`} noValidate>
             {serverError && (
               <Alert variant="destructive">
                 <AlertDescription>{serverError}</AlertDescription>

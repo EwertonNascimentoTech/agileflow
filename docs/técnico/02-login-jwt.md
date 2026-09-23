@@ -5,6 +5,7 @@
 - *Nome do processo:* Autenticação unificada
 - *Trigger:* `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`, `POST /api/v1/auth/first-access/*`, `GET /api/v1/auth/me`
 - *Objetivo:* Emitir e renovar tokens JWT; validar utilizador ativo; provisionar senha no primeiro acesso a partir de colaborador TeamOps
+- *Login pelo IDigital (SSO):* ver [09-sso-idigital.md](09-sso-idigital.md) — termina no mesmo `create_tokens`
 
 ## B. Matriz RACI simplificada
 

@@ -132,6 +132,23 @@ class Settings(BaseSettings):
     # Substrings que marcam o autor como bot/pipeline (separadas por vírgula).
     AZURE_DEVOPS_BOT_EMAIL_PATTERNS: str = "noreply,azuredevops,build@,pipeline,bot@,@bot"
 
+    # ── SSO IDigital (OIDC) ──
+    # Login "Entre com o IDigital" ao lado do login por senha. O navegador faz o Authorization
+    # Code + PKCE (client público: o IdP só aceita token_endpoint_auth_method "none") e manda o
+    # id_token para /auth/sso/exchange, que valida (JWKS, iss, aud, exp) e devolve a sessão
+    # AgileFlow de sempre. Vínculo pelo e-mail no 1º login; sem auto-cadastro.
+    # Desligado até o client ser cadastrado no IdP.
+    SSO_ENABLED: bool = False
+    # Base dos endpoints (discovery em {authority}/.well-known/openid-configuration). O `iss`
+    # dos tokens vem da discovery (em prod é o host, sem /sso/oidc).
+    SSO_AUTHORITY: str = "https://sso.idigital.sistemafiea.com.br/sso/oidc"
+    SSO_CLIENT_ID: str = ""
+    # Resource indicator cadastrado no client (ex.: https://agileflow.tdsistemafiea.com.br). Vazio = não envia.
+    SSO_RESOURCE: str = ""
+    SSO_SCOPE: str = "openid email profile"
+    # Idade máxima do id_token aceito na troca (segundos).
+    SSO_MAX_TOKEN_AGE: int = 600
+
     # ── EPA (Sistema de Planos de Ação — sysepa) ──
     # Integração usada pelo RTD (slide de Planos Estratégicos). Login/senha únicos da
     # instituição, definidos no .env; token JWT obtido em /epa/api/api/login e cacheado.

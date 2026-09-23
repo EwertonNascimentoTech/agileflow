@@ -14,6 +14,19 @@ Modelo:
 
 ---
 
+## 2026-09-23 — Login pelo IDigital (SSO OIDC), desligado até o client existir
+
+- **Pedido:** Analisar a doc do SDK IDigital SSO e integrar. Decisões: vincular pelo e-mail; manter senha e SSO; clientes externos (sem IDigital) seguem com senha.
+- **Feito:**
+  - Backend: `super_admin/sso.py` (discovery + JWKS com cache; valida id_token RS256, iss, aud, exp, iat, at_hash; uso único no Redis; vínculo por e-mail no 1º login e depois pelo `sub`; sem auto-cadastro; auditoria `sso_login` / `sso_login_denied`). Rotas `GET /auth/sso/config` e `POST /auth/sso/exchange` (10/min), que devolvem o mesmo `TokenResponse` do login. Tabela `public.user_sso_identities` (Alembic 007, aplicada). Config `SSO_*` (padrão desligado).
+  - Front: `src/lib/sso.ts` com `oidc-client-ts` (mesma config do SDK: code + PKCE S256, resource, sessionStorage); botão "Entre com o IDigital" (logo oficial) acima do formulário de senha, só com o SSO ligado; tela `/sso/callback`; "Sair" de sessão SSO passa pelo `end_session` do IdP. CSP `connect-src` libera o host do IdP.
+  - Não usei o pacote `@fiea-al/idigital-sso-sdk`: feed npm privado (PAT no build) e o botão dele carrega Google Fonts (bloqueado pela CSP). Mesma API em `sso.ts`.
+  - Fatos do IdP de produção (discovery): `iss` sem `/sso/oidc`; só client público; sem refresh_token.
+- **Testes:** `provisorio/testes-e2e/sso-idigital-2026-09-23/run.sh`: backend 29/29 (IdP falso, transação desfeita) e telas 17/17 (IdP simulado no Playwright; CSP e PKCE reais). OA 76/76 + 36/36 depois da mudança no login.
+- **Para ligar:** cadastro do client `agileflow` no IdP e `SSO_*` no `.env` (ver `docs/técnico/09-sso-idigital.md`).
+- **Não mexer:** troca termina em `create_tokens`; chamadas do SSO no front fora do interceptor do axios; CSP com o host do IdP.
+- **Arquivos:** `backend/app/modules/super_admin/{sso.py,models.py,api/routes.py}`, `backend/app/core/config.py`, `backend/alembic/versions/007_user_sso_identities.py`, `frontend/src/lib/sso.ts`, `frontend/src/modules/auth/{IDigitalButton.tsx,SsoCallbackPage.tsx,LoginPage.tsx}`, `frontend/src/contexts/AuthContext.tsx`, `frontend/src/App.tsx`, `frontend/nginx.conf`, `frontend/package*.json`, `docs/técnico/09-sso-idigital.md`, `.env.example`
+
 ## 2026-09-23 — Portal do Cliente: novo layout (UI/UX)
 
 - **Pedido:** Melhorar o layout do Portal do Cliente olhando para UI e UX.
