@@ -1,7 +1,7 @@
 # E2E — Login pelo IDigital (SSO OIDC) — 23/09/2026
 
-Executado contra o sistema no ar (`tenant_ss`, nginx `:18082`). O SSO segue **desligado** no servidor
-(`SSO_ENABLED=false`) até o client `agileflow` existir no IdP; os testes não mudam a configuração real.
+Executado contra o sistema no ar (`tenant_ss`, nginx `:18082`). Os testes não mudam a configuração real
+(SSO ligado em produção desde 23/09/2026, client cadastrado no IdP).
 
 **Resultado: 29/29 verificações de backend + 17/17 verificações de tela.**
 
@@ -23,7 +23,7 @@ transação desfeita no fim (commit vira flush); chaves de reuso no Redis apagad
 IdP simulado no navegador (discovery, authorize, token, end_session); a CSP e o PKCE do `oidc-client-ts` são reais.
 A troca é simulada (recusa, e sucesso com a sessão real de um usuário `[E2E]` obtida pelo login por senha).
 
-1. SSO desligado (estado real): login sem o botão, formulário de senha intacto.
+1. Config real do servidor: botão IDigital só se `/auth/sso/config` disser `enabled`; formulário de senha sempre.
 2. SSO ligado: botão "Entre com o IDigital" + separador; discovery liberada pela CSP; authorize com client, redirect exato,
    code + PKCE S256, scope e resource; token com `code_verifier` e sem `client_secret`; troca recebe id_token + access_token;
    recusa com mensagem e "Voltar ao login"; sem violação de CSP nem erro de JS.
@@ -38,3 +38,14 @@ A troca é simulada (recusa, e sucesso com a sessão real de um usuário `[E2E]`
 cd provisorio/testes-e2e/sso-idigital-2026-09-23
 ./run.sh
 ```
+
+## Ativação em produção (23/09/2026)
+
+Client público cadastrado no IdP (redirect `/sso/callback`, recurso = origem, pós-logout `/login`, backchannel vazio).
+`SSO_*` no `.env` + `docker compose up -d api`. Smoke no domínio público: botão aparece; o clique leva ao login do
+IDigital (`/interaction/...`, sem erro de client/redirect/resource). A API alcança discovery (`iss` = host) e JWKS (3 chaves).
+1º login real no mesmo dia (23:05): colaborador vinculado pelo e-mail (o id_token traz `email`), auditoria `sso_login` com `linked_now`.
+
+Observação: o `nginx.conf` do front não entrega os cabeçalhos de segurança (CSP, X-Frame-Options, nosniff) no HTML,
+porque o `location /` tem `add_header` próprio. A checagem "discovery liberada pela CSP" do teste de tela, portanto,
+não exercita CSP. É anterior ao SSO; corrigir à parte, com teste das telas.

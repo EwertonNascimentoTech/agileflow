@@ -109,12 +109,14 @@ def shot(page, name):
 with sync_playwright() as p:
     browser = p.chromium.launch()
 
-    # 1) Estado real (SSO desligado no servidor): tela de login como antes.
+    # 1) Estado real do servidor: o botão aparece só se /auth/sso/config disser enabled; a senha sempre.
+    real = json.loads(urllib.request.urlopen(f"{URL}/api/v1/auth/sso/config", timeout=15).read().decode())
     ctx, page, errs = new_ctx(browser)
     page.goto(f"{URL}/login"); page.wait_for_load_state("networkidle")
-    check("SSO desligado: login sem o botão IDigital", page.get_by_role("button", name="Entre com o IDigital").count() == 0)
-    check("SSO desligado: formulário de senha segue lá", page.get_by_label("E-mail").count() == 1)
-    shot(page, "01-login-sso-desligado")
+    n = page.get_by_role("button", name="Entre com o IDigital").count()
+    check(f"config real (enabled={real.get('enabled')}): botão IDigital coerente", n == (1 if real.get("enabled") else 0), f"{n}")
+    check("formulário de senha segue lá", page.get_by_label("E-mail").count() == 1)
+    shot(page, "01-login-config-real")
     ctx.close()
 
     # 2) SSO ligado, e-mail sem acesso: fluxo PKCE até a troca, recusa com mensagem.

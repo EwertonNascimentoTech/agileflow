@@ -188,7 +188,10 @@ async def main():
 
     async with AsyncSessionLocal() as db:
         left = (await db.execute(text("SELECT count(*) FROM public.users WHERE email LIKE 'e2e.sso%'"))).scalar()
-        left2 = (await db.execute(text("SELECT count(*) FROM public.user_sso_identities"))).scalar()
+        # Só os vínculos de teste (com o SSO ligado, a tabela tem os vínculos reais dos colaboradores).
+        left2 = (await db.execute(text(
+            "SELECT count(*) FROM public.user_sso_identities WHERE email LIKE '%@e2e-agileflow.com.br' "
+            "OR email = 'outro.email@fiea.invalid' OR subject LIKE 'sub-%'"))).scalar()
         check("nada ficou no banco (usuários e vínculos de teste)", left == 0 and left2 == 0, f"{left} {left2}")
     print(f"\n=== SSO backend: {sum(ok for _, ok in results)}/{len(results)} OK")
 

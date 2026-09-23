@@ -5,7 +5,7 @@
 - *Nome do processo:* Login "Entre com o IDigital" ao lado do login por senha
 - *Trigger:* botão na tela `/login` → IdP IDigital → `GET /sso/callback` (front) → `POST /api/v1/auth/sso/exchange`
 - *Objetivo:* colaboradores do Sistema FIEA entram com a conta IDigital; o AgileFlow continua emitindo a própria sessão (mesmos tokens do login por senha), então RBAC, tenant e o resto da API não mudam
-- *Estado:* implementado e **desligado** (`SSO_ENABLED=false`) até o client `agileflow` ser cadastrado no IdP
+- *Estado:* **ligado em produção** desde 23/09/2026 (client público cadastrado no IdP; `SSO_*` no `.env` do servidor). Padrão do código continua `SSO_ENABLED=false`
 
 Decisões:
 
@@ -105,9 +105,11 @@ Por que `oidc-client-ts` direto e não o pacote `@fiea-al/idigital-sso-sdk`: o S
 
 1. Cadastro do client no IdP (pedido ao time do IDigital):
 
+   Na tela do IdP ("Cliente de autenticação"): URI de redirecionamento, Servidor de Recurso e URI pós logout como abaixo; URI de logout backchannel **vazia** (fase 2). O IdP gera o client ID, que vai em `SSO_CLIENT_ID`.
+
    | Item | Valor |
    | :--- | :--- |
-   | client_id | `agileflow` — público, `token_endpoint_auth_method=none`, PKCE S256 |
+   | client_id | gerado pelo IdP — público, `token_endpoint_auth_method=none`, PKCE S256 |
    | redirect_uris | `https://agileflow.tdsistemafiea.com.br/sso/callback` |
    | post_logout_redirect_uris | `https://agileflow.tdsistemafiea.com.br/login` |
    | resource | `https://agileflow.tdsistemafiea.com.br` |
@@ -126,7 +128,7 @@ Por que `oidc-client-ts` direto e não o pacote `@fiea-al/idigital-sso-sdk`: o S
    ```
 
 3. `docker compose up -d api` (a API relê o `.env`; o front lê a config em runtime por `/auth/sso/config`, sem rebuild).
-4. CSP: `frontend/nginx.conf` já libera `https://sso.idigital.sistemafiea.com.br` em `connect-src`. Outro host de IdP (homologação) precisa entrar ali e exige rebuild do front.
+4. CSP: `frontend/nginx.conf` já libera `https://sso.idigital.sistemafiea.com.br` em `connect-src`. Outro host de IdP (homologação) precisa entrar ali e exige rebuild do front. Atenção: hoje o `location /` tem `add_header` próprio e o nginx não repassa a CSP do `server` para o HTML (a CSP não está ativa na página); ao corrigir isso, manter o host do IdP no `connect-src`.
 5. Smoke: login → callback → cai na área certa → "Sair" volta ao `/login` passando pelo IdP.
 
 ## H. Testes

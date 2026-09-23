@@ -14,6 +14,14 @@ Modelo:
 
 ---
 
+## 2026-09-23 — SSO IDigital ligado em produção
+
+- **Pedido:** Cadastrar o client no IdP e ligar o SSO.
+- **Feito:** Na tela do IdP: URI de redirecionamento `https://agileflow.tdsistemafiea.com.br/sso/callback`, Servidor de Recurso `https://agileflow.tdsistemafiea.com.br`, pós logout `/login`, backchannel vazio (fase 2). Client ID gerado pelo IdP no `.env` do servidor (`SSO_ENABLED`, `SSO_CLIENT_ID`, `SSO_RESOURCE`; backup do `.env` antes) e `docker compose up -d api`. Conferido: CORS do IdP liberado para a origem (discovery e token), API alcança discovery e JWKS, e no domínio público o botão leva ao login do IDigital sem erro de client/redirect/resource.
+- **Achado (anterior ao SSO):** o `location /` do `frontend/nginx.conf` tem `add_header` próprio, então o nginx não manda CSP, X-Frame-Options nem nosniff no HTML. Corrigir à parte, testando as telas.
+- **1º login real:** 23:05, colaborador vinculado pelo e-mail (id_token traz `email`), auditoria `sso_login` ok. Teste de backend passou a contar só vínculos de teste (a tabela agora tem vínculos reais).
+- **Arquivos:** `.env` (servidor, fora do git), `docs/técnico/09-sso-idigital.md`, `provisorio/testes-e2e/sso-idigital-2026-09-23/{ui_test.py,RESULTADO.md}`
+
 ## 2026-09-23 — Login pelo IDigital (SSO OIDC), desligado até o client existir
 
 - **Pedido:** Analisar a doc do SDK IDigital SSO e integrar. Decisões: vincular pelo e-mail; manter senha e SSO; clientes externos (sem IDigital) seguem com senha.
