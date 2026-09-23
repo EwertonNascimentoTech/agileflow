@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-23 — Produção sem modo debug
+
+- **Pedido:** Deixar DEBUG=false em produção (achado ao revisar os workers).
+- **Feito:** `.env` de produção com DEBUG=false (arquivo fora do git). `openapi_url` passa a seguir o DEBUG como `docs_url`/`redoc_url` — antes o /openapi.json (mapa de todas as rotas) continuava aberto na porta 18084 mesmo sem o Swagger. `.env.example` explica o flag.
+- **Não mexer:** DEBUG=true só em desenvolvimento. A porta 18084 da API segue publicada em todas as interfaces (sem pedido para restringir ao nginx).
+- **Arquivos:** `backend/app/main.py`, `.env.example`, `.env` (servidor)
+
 ## 2026-09-23 — API com 6 workers (D8 da auditoria)
 
 - **Pedido:** Subir os processos da API (D8): relatório pesado atrasava requisições leves do mesmo worker.

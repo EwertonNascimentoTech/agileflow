@@ -54,6 +54,7 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 - API **n?o monta o c?digo-fonte**. Mudan?a Python exige `docker compose up -d --build api`.
 - P?blico: `agileflow.tdsistemafiea.com.br` ? 18082. Tenant operacional: `tenant_ss`.
 - API roda 6 workers com DB_MAX_OVERFLOW=7 (compose): 6 × (5+7) + Celery 4 × (5+10) = 132 <= 147 conexões. Mudar workers/pool exige refazer essa conta.
+- Produção com DEBUG=false: /docs, /redoc e /openapi.json fechados (404).
 
 ## Operação Assistida (clientes)
 
