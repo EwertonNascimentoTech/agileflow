@@ -1,0 +1,20 @@
+---
+description: N?o apagar o que j? existe; ler e atualizar mem?rias .claude e CLAUDE.md
+alwaysApply: true
+---
+
+# N?o regredir o AgileFlow
+
+O `CLAUDE.md` da raiz ? o contexto curto carregado em toda sess?o. Detalhe: `.claude/`.
+
+Antes de implementar pedido novo:
+
+1. Ler `CLAUDE.md`, `.claude/invariantes.md` e o trecho de `.claude/sistema-atual.md` da ?rea tocada.
+2. N?o remover, inverter nem “limpar” tela, rota, modal, import, regra de kanban ou c?lculo de capacidade que j? exista, salvo pedido expl?cito.
+3. Feature n?o vai para o kanban User Story; US n?o vai para Features. Capacidade ? s? US. `assigned_to` ? Person.id.
+4. Ignorar `prototipo/uploads/agileflow-hml/CLAUDE.md` — ? snapshot antigo.
+
+Depois de mudar c?digo ou dado operacional:
+
+1. Acrescentar bloco no topo de `.claude/historico.md` (data, pedido, feito, n?o mexer, arquivos).
+2. Se nasceu ou mudou tela/rota/invariante, atualizar `sistema-atual.md` e/ou `invariantes.md` e o resumo no `CLAUDE.md` da raiz se a regra for permanente.
