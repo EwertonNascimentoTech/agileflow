@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
+import { AllocationSplitBar, allocationSplit } from "@/modules/teamops/AllocationSplit"
 import { useNavigate, useParams } from "react-router-dom"
 import { ArrowLeft, Plus, Trash2, Pencil, UserMinus } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -148,10 +149,12 @@ export default function PersonDetailPage() {
               <p className="text-xs text-muted-foreground">Carga</p>
               <p className="font-medium">
                 {person.daily_hours}h/dia · {person.weekly_hours}h/sem
-                {person.project_allocation_pct != null && person.project_allocation_pct < 100 && (
-                  <> · {person.project_allocation_pct}% projetos ({Math.round(person.daily_hours * person.project_allocation_pct / 100 * 10) / 10}h/dia)</>
-                )}
               </p>
+              <div className="mt-1.5">
+                <AllocationSplitBar
+                  split={allocationSplit(person.daily_hours, person.project_allocation_pct, person.assisted_ops_allocation_pct)}
+                />
+              </div>
             </div>
           </div>
         </CardContent>

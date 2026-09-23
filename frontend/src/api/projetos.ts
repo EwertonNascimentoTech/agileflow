@@ -862,6 +862,10 @@ export interface CapacityPersonMeta {
   position_slug: string | null
   position_label: string | null
   area_ids: string[]
+  /** Divisão da jornada (Pessoas): Projetos / Operação Assistida / Chamados. */
+  projects_pct?: number | null
+  assisted_ops_pct?: number | null
+  tickets_pct?: number | null
 }
 
 export interface CapacitySummary {
@@ -872,11 +876,21 @@ export interface CapacitySummary {
   unmapped_assignees: string[]
 }
 
+export interface CapacityReserveCell {
+  user_id: string
+  date: string
+  oa_capacity_hours: number
+  oa_worked_hours: number
+  tickets_capacity_hours: number
+}
+
 export interface CapacityHeatmapResponse {
   unit: "day" | "week"
   cells: WorkloadCell[]
   persons: CapacityPersonMeta[]
   summary: CapacitySummary
+  /** Fatias fora de Projetos por pessoa×dia (não entram em cells/summary). */
+  reserves?: CapacityReserveCell[]
 }
 
 export interface CapacityDayTask {
@@ -908,6 +922,11 @@ export interface CapacityDayDetail {
   items: CapacityDayTask[]
   overdue: CapacityDayTask[]
   overdue_reference: string
+  /** Fatias fora de Projetos no dia (divisão da jornada em Pessoas). */
+  oa_capacity_hours?: number
+  oa_worked_hours?: number
+  tickets_capacity_hours?: number
+  oa_items?: Array<{ task_id: string; project_id: string; code_label: string; title: string; hours: number }>
 }
 
 export interface CapacityProjectRow {

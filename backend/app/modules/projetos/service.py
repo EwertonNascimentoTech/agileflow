@@ -92,6 +92,7 @@ from app.modules.projetos.schemas import (
     CapacityPersonMeta,
     CapacitySummary,
     CapacityHeatmapResponse,
+    CapacityReserveCell,
     CapacityProjectRow,
     CapacityByProjectResponse,
     CapacityGapRow,
@@ -6178,17 +6179,19 @@ class CapacityService:
         return acc, by_project, user_ids
 
     @staticmethod
-    async def _capacity_resolver(db: AsyncSession, user_ids: set[uuid.UUID], calendar):
+    async def _capacity_resolver(db: AsyncSession, user_ids: set[uuid.UUID], calendar, hours_fn=None):
         """Monta capacity_for(person_id, dia) → horas de capacidade de projeto no dia,
         descontando ausências APROVADAS que afetam capacidade. person_id == assigned_to
-        (responsável é Pessoa do teamops); assignees sem Person caem na jornada padrão."""
+        (responsável é Pessoa do teamops); assignees sem Person caem na jornada padrão.
+        `hours_fn(person, calendar)` troca a base (padrão: horas de projeto por dia)."""
+        hours_fn = hours_fn or project_hours_per_day
         default_cap = calendar.hours_per_day()
         daily_by_user: dict[uuid.UUID, float] = {}
         absences_by_user: dict[uuid.UUID, list[tuple[date, date, Optional[float]]]] = {}
         if user_ids:
             persons = (await db.execute(select(Person).where(Person.id.in_(user_ids)))).scalars().all()
             for p in persons:
-                daily_by_user[p.id] = project_hours_per_day(p, calendar)
+                daily_by_user[p.id] = hours_fn(p, calendar)
             person_ids = [p.id for p in persons]
             if person_ids:
                 abs_rows = (await db.execute(
@@ -6383,7 +6386,65 @@ class CapacityService:
         await CapacityService._attach_breakdown(
             db, cells, tasks, calendar, date_from, date_to, assignee_of=assignee_of,
         )
-        return CapacityService._assemble_heatmap(cells, persons_by_id, unmapped)
+
+        # Fatias Operação Assistida / Chamados: quem tem essa reserva aparece mesmo sem US.
+        q = select(Person).options(selectinload(Person.areas)).where(
+            Person.status == PersonStatus.ATIVO,
+            (Person.assisted_ops_allocation_pct > 0)
+            | ((Person.project_allocation_pct + Person.assisted_ops_allocation_pct) < 100),
+        )
+        if person_ids:
+            q = q.where(Person.id.in_(person_ids))
+        for p in (await db.execute(q)).scalars().all():
+            persons_by_id.setdefault(p.id, p)
+        reserve_ids = {
+            uid for uid, p in persons_by_id.items()
+            if person_allowed(uid) and (
+                uid in present_ids
+                or float(p.assisted_ops_allocation_pct or 0) > 0
+                or float(p.project_allocation_pct or 0) + float(p.assisted_ops_allocation_pct or 0) < 100
+            )
+        }
+        reserves = await CapacityService._reserve_cells(db, reserve_ids, persons_by_id, calendar, date_from, date_to)
+        resp = CapacityService._assemble_heatmap(
+            cells, persons_by_id, unmapped, extra_person_ids={r.user_id for r in reserves},
+        )
+        resp.reserves = reserves
+        return resp
+
+    @staticmethod
+    async def _reserve_cells(db, person_ids: set[uuid.UUID], persons_by_id, calendar, date_from: date, date_to: date):
+        """Reserva diária de Operação Assistida e de Chamados (jornada × %, com as ausências
+        descontadas) + horas trabalhadas em ocorrências. Só dias úteis com algo a mostrar."""
+        from app.modules.projetos.assisted_ops import AssistedOpsService
+
+        if not person_ids:
+            return []
+        full_for = await CapacityService._capacity_resolver(
+            db, person_ids, calendar,
+            hours_fn=lambda p, cal: float(p.daily_hours) if p.daily_hours else cal.hours_per_day(),
+        )
+        worked = await AssistedOpsService.worked_by_day(db, person_ids, date_from, date_to)
+        out: list[CapacityReserveCell] = []
+        d = date_from
+        while d <= date_to:
+            if calendar.is_working_day(d):
+                for pid in person_ids:
+                    p = persons_by_id.get(pid)
+                    oa_pct = float(p.assisted_ops_allocation_pct or 0) if p else 0.0
+                    tk_pct = max(0.0, 100.0 - float(p.project_allocation_pct or 0) - oa_pct) if p else 0.0
+                    full = full_for(pid, d)
+                    oa_worked = sum(h for _t, _o, h in worked.get((pid, d), []))
+                    if not (oa_pct or tk_pct or oa_worked):
+                        continue
+                    out.append(CapacityReserveCell(
+                        user_id=pid, date=d,
+                        oa_capacity_hours=round(full * oa_pct / 100.0, 2),
+                        oa_worked_hours=round(oa_worked, 2),
+                        tickets_capacity_hours=round(full * tk_pct / 100.0, 2),
+                    ))
+            d += timedelta(days=1)
+        return out
 
     @staticmethod
     async def _attach_breakdown(db, cells, tasks, calendar, date_from: date, date_to: date, assignee_of=None) -> None:
@@ -6428,6 +6489,11 @@ class CapacityService:
                 position_slug=(p.position.slug if p.position else None),
                 position_label=(p.position.name if p.position else None),
                 area_ids=[a.id for a in p.areas],
+                projects_pct=float(p.project_allocation_pct) if p.project_allocation_pct is not None else None,
+                assisted_ops_pct=float(p.assisted_ops_allocation_pct or 0),
+                tickets_pct=max(
+                    0.0, 100.0 - float(p.project_allocation_pct or 0) - float(p.assisted_ops_allocation_pct or 0)
+                ),
             ))
         persons_meta.sort(key=lambda m: m.full_name.lower())
         summary = CapacitySummary(
@@ -6521,7 +6587,29 @@ class CapacityService:
         ]
 
         person = (await db.execute(select(Person).where(Person.id == person_id))).scalar_one_or_none()
+
+        # Fatias Operação Assistida / Chamados do dia + ocorrências trabalhadas.
+        from app.modules.projetos.assisted_ops import AssistedOpsService, code_label
+
+        full_for = await CapacityService._capacity_resolver(
+            db, {person_id}, calendar,
+            hours_fn=lambda p, cal: float(p.daily_hours) if p.daily_hours else cal.hours_per_day(),
+        )
+        full = full_for(person_id, day) if person else 0.0
+        oa_pct = float(person.assisted_ops_allocation_pct or 0) if person else 0.0
+        tk_pct = max(0.0, 100.0 - float(person.project_allocation_pct or 0) - oa_pct) if person else 0.0
+        worked = (await AssistedOpsService.worked_by_day(db, {person_id}, day, day)).get((person_id, day), [])
+        oa_items = [
+            {"task_id": str(t.id), "project_id": str(t.project_id), "code_label": code_label(o.code),
+             "title": t.title, "hours": h}
+            for t, o, h in sorted(worked, key=lambda x: x[2], reverse=True)
+        ]
+
         return CapacityDayDetailResponse(
+            oa_capacity_hours=round(full * oa_pct / 100.0, 2),
+            oa_worked_hours=round(sum(h for _t, _o, h in worked), 2),
+            tickets_capacity_hours=round(full * tk_pct / 100.0, 2),
+            oa_items=oa_items,
             person_id=person_id,
             person_name=(person.full_name if person else None),
             date=day,

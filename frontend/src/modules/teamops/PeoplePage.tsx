@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
+import { AllocationSplitBar, allocationSplit } from "@/modules/teamops/AllocationSplit"
 import { Link } from "react-router-dom"
 import { Search, Trash2, UserPlus } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -150,6 +151,7 @@ export default function PeoplePage() {
                     <th className="px-4 py-2 text-left">Cargo</th>
                     <th className="px-4 py-2 text-left">Área</th>
                     <th className="px-4 py-2 text-left">PO</th>
+                    <th className="px-4 py-2 text-left" title="Projetos / Operação Assistida / Chamados">Jornada</th>
                     <th className="px-4 py-2 text-left">Acesso</th>
                     <th className="px-4 py-2 text-left">Status</th>
                     <th className="px-4 py-2"></th>
@@ -167,6 +169,12 @@ export default function PeoplePage() {
                       <td className="px-4 py-2">{p.position?.name ?? "—"}</td>
                       <td className="px-4 py-2">{personAreasLabel(p)}</td>
                       <td className="px-4 py-2">{personPosLabel(p)}</td>
+                      <td className="px-4 py-2">
+                        <AllocationSplitBar
+                          compact
+                          split={allocationSplit(p.daily_hours, p.project_allocation_pct, p.assisted_ops_allocation_pct)}
+                        />
+                      </td>
                       <td className="px-4 py-2">
                         {p.access_level === "none" ? (
                           <span className="text-xs text-muted-foreground">Sem acesso</span>

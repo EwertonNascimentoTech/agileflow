@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { teamopsApi, type DashboardKpis, type AlertsResponse } from "@/api/teamops"
+import { AllocationSplitBar } from "@/modules/teamops/AllocationSplit"
 
 const MONTH_LABEL = new Date().toLocaleDateString("pt-BR", { month: "long" })
 
@@ -77,6 +78,52 @@ export default function TeamopsDashboardPage() {
           </>
         )}
       </div>
+
+      {kpis?.capacity_split && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Capacidade diária do time</CardTitle>
+            <CardDescription>
+              Soma da jornada das pessoas ativas pela divisão cadastrada em Pessoas (Chamados = o que sobra).
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {(() => {
+              const c = kpis.capacity_split
+              const total = c.projects_hours + c.assisted_ops_hours + c.tickets_hours
+              const pct = (h: number) => (total > 0 ? Math.round((h / total) * 1000) / 10 : 0)
+              return (
+                <>
+                  <div className="grid grid-cols-3 gap-3 text-sm">
+                    <div>
+                      <div className="text-xs text-muted-foreground">Projetos</div>
+                      <div className="text-lg font-semibold tabular-nums">{c.projects_hours}h</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">Operação Assistida</div>
+                      <div className="text-lg font-semibold tabular-nums">{c.assisted_ops_hours}h</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">Chamados</div>
+                      <div className="text-lg font-semibold tabular-nums">{c.tickets_hours}h</div>
+                    </div>
+                  </div>
+                  <AllocationSplitBar
+                    split={{
+                      projectsPct: pct(c.projects_hours),
+                      assistedOpsPct: pct(c.assisted_ops_hours),
+                      ticketsPct: pct(c.tickets_hours),
+                      projectsHours: c.projects_hours,
+                      assistedOpsHours: c.assisted_ops_hours,
+                      ticketsHours: c.tickets_hours,
+                    }}
+                  />
+                </>
+              )
+            })()}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>

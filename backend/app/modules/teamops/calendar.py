@@ -179,6 +179,22 @@ def project_hours_per_day(person: "Person | None", calendar: WorkingCalendar) ->
     return max(0.01, base * pct / 100.0)
 
 
+def allocation_split(person: "Person | None", calendar: WorkingCalendar) -> dict[str, float]:
+    """Divisão da jornada em Projetos / Operação Assistida / Chamados (% e h/dia).
+    Chamados = o que sobra (100 − projetos − operação assistida)."""
+    base = float(person.daily_hours) if person is not None and person.daily_hours else calendar.hours_per_day()
+    proj = float(person.project_allocation_pct) if person is not None and person.project_allocation_pct is not None else 100.0
+    oa = float(getattr(person, "assisted_ops_allocation_pct", 0) or 0) if person is not None else 0.0
+    tickets = max(0.0, 100.0 - proj - oa)
+    return {
+        "daily_hours": base,
+        "projects_pct": proj, "assisted_ops_pct": oa, "tickets_pct": tickets,
+        "projects_hours": round(base * proj / 100.0, 2),
+        "assisted_ops_hours": round(base * oa / 100.0, 2),
+        "tickets_hours": round(base * tickets / 100.0, 2),
+    }
+
+
 async def load_calendar(db: "AsyncSession") -> WorkingCalendar:
     """Lê o calendário singleton + feriados do schema do tenant e devolve um WorkingCalendar.
     Se não houver configuração, usa o padrão (08–12 / 13–17, seg–sex, sem feriados)."""

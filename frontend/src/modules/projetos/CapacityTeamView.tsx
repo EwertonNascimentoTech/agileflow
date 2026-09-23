@@ -181,6 +181,7 @@ export function CapacityTeamView({ from, to }: { from: string; to: string }) {
             {heatmap && heatmap.cells.length > 0 ? (
               <WorkloadView
                 cells={heatmap.cells}
+                reserves={heatmap.reserves}
                 nameForUser={nameFor}
                 dateFrom={from}
                 dateTo={to}

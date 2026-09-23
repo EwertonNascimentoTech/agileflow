@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
+import { AllocationSplitBar, allocationSplit } from "@/modules/teamops/AllocationSplit"
 import { Trash2, UserMinus } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -160,6 +161,7 @@ export function PersonFormDialog({ person, areas, onClose, onSaved }: Props) {
   const [dailyHours, setDailyHours] = useState<string>(String(person?.daily_hours ?? 8))
   const [weeklyHours, setWeeklyHours] = useState<string>(String(person?.weekly_hours ?? 40))
   const [projectAllocationPct, setProjectAllocationPct] = useState<string>(String(person?.project_allocation_pct ?? 100))
+  const [assistedOpsPct, setAssistedOpsPct] = useState<string>(String(person?.assisted_ops_allocation_pct ?? 0))
   const [startDate, setStartDate] = useState<string>(person?.start_date ?? "")
   const [status, setStatus] = useState<PersonStatus>(person?.status ?? "ativo")
   const [notes, setNotes] = useState<string>(person?.notes ?? "")
@@ -222,6 +224,7 @@ export function PersonFormDialog({ person, areas, onClose, onSaved }: Props) {
       daily_hours: Number(dailyHours),
       weekly_hours: Number(weeklyHours),
       project_allocation_pct: Number(projectAllocationPct),
+      assisted_ops_allocation_pct: Number(assistedOpsPct) || 0,
       start_date: startDate || null,
       notes: notes || null,
       access_level: accessLevel,
@@ -302,10 +305,8 @@ export function PersonFormDialog({ person, areas, onClose, onSaved }: Props) {
   const absenceDriven = isAbsenceDrivenStatus(status)
   const dailyHoursNum = parseFloat(dailyHours)
   const allocationPctNum = parseFloat(projectAllocationPct)
-  const projectHoursPreview =
-    !isNaN(dailyHoursNum) && dailyHoursNum > 0 && !isNaN(allocationPctNum)
-      ? Math.round((dailyHoursNum * allocationPctNum / 100) * 10) / 10
-      : null
+  const split = allocationSplit(dailyHoursNum, allocationPctNum, parseFloat(assistedOpsPct) || 0)
+  const splitOverflow = (Number(projectAllocationPct) || 0) + (Number(assistedOpsPct) || 0) > 100
 
   if (offboardPreview && pendingPayload) {
     return (
@@ -512,20 +513,39 @@ export function PersonFormDialog({ person, areas, onClose, onSaved }: Props) {
             <Label>Horas/semana</Label>
             <Input type="number" min={0} max={168} step="0.5" value={weeklyHours} onChange={(e) => setWeeklyHours(e.target.value)} />
           </div>
-          <div>
-            <Label>Alocação para projetos (%)</Label>
-            <Input
-              type="number"
-              min={0}
-              max={100}
-              step="0.5"
-              value={projectAllocationPct}
-              onChange={(e) => setProjectAllocationPct(e.target.value)}
-            />
-            {projectHoursPreview != null && (
-              <p className="mt-1 text-xs text-muted-foreground">
-                Com {dailyHoursNum}h/dia e {allocationPctNum}%, ficam <strong>{projectHoursPreview}h/dia</strong> disponíveis para projetos.
-              </p>
+          <div className="space-y-2 rounded-md border p-3 md:col-span-2">
+            <Label>Divisão da jornada</Label>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div>
+                <span className="text-xs text-muted-foreground">Projetos (%)</span>
+                <Input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="0.5"
+                  value={projectAllocationPct}
+                  onChange={(e) => setProjectAllocationPct(e.target.value)}
+                />
+              </div>
+              <div>
+                <span className="text-xs text-muted-foreground">Operação Assistida (%)</span>
+                <Input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="0.5"
+                  value={assistedOpsPct}
+                  onChange={(e) => setAssistedOpsPct(e.target.value)}
+                />
+              </div>
+              <div>
+                <span className="text-xs text-muted-foreground">Chamados (%) — o que sobra</span>
+                <Input value={split.ticketsPct} disabled readOnly />
+              </div>
+            </div>
+            <AllocationSplitBar split={split} />
+            {splitOverflow && (
+              <p className="text-xs text-destructive">Projetos + Operação Assistida não pode passar de 100%.</p>
             )}
           </div>
           <div>

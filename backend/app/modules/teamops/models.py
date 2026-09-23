@@ -291,6 +291,9 @@ class Person(TenantBase):
     weekly_hours: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=40.0)
     # Percentual da jornada diária reservado para projetos (ex.: 62,5% de 8h = 5h/dia).
     project_allocation_pct: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=100.0)
+    # Divisão da jornada: Projetos (acima) + Operação Assistida (aqui); o que sobra é Chamados
+    # (100 − projetos − operação assistida). Soma nunca passa de 100.
+    assisted_ops_allocation_pct: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=0.0)
     start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     status: Mapped[PersonStatus] = mapped_column(
         SAEnum(PersonStatus, native_enum=False, values_callable=_enum_values),

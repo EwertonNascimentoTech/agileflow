@@ -264,6 +264,7 @@ class PersonCreate(BaseModel):
     daily_hours: float = Field(8.0, ge=0, le=24)
     weekly_hours: float = Field(40.0, ge=0, le=168)
     project_allocation_pct: float = Field(100.0, ge=0, le=100)
+    assisted_ops_allocation_pct: float = Field(0.0, ge=0, le=100)
     start_date: Optional[date] = None
     status: PersonStatus = PersonStatus.ATIVO
     visible_in_org_chart: bool = True
@@ -274,6 +275,8 @@ class PersonCreate(BaseModel):
 
     @model_validator(mode="after")
     def _normalize_singular_links(self):
+        if self.project_allocation_pct + self.assisted_ops_allocation_pct > 100:
+            raise ValueError("Projetos + Operação Assistida não pode passar de 100% (o restante é Chamados).")
         if self.area_id and self.area_id not in self.area_ids:
             self.area_ids = [*self.area_ids, self.area_id]
         if self.po_person_id and self.po_person_id not in self.po_person_ids:
@@ -298,6 +301,7 @@ class PersonUpdate(BaseModel):
     daily_hours: Optional[float] = Field(None, ge=0, le=24)
     weekly_hours: Optional[float] = Field(None, ge=0, le=168)
     project_allocation_pct: Optional[float] = Field(None, ge=0, le=100)
+    assisted_ops_allocation_pct: Optional[float] = Field(None, ge=0, le=100)
     start_date: Optional[date] = None
     status: Optional[PersonStatus] = None
     visible_in_org_chart: Optional[bool] = None
@@ -367,6 +371,9 @@ class PersonResponse(BaseModel):
     daily_hours: float
     weekly_hours: float
     project_allocation_pct: float
+    assisted_ops_allocation_pct: float = 0.0
+    # Derivado: 100 − projetos − operação assistida.
+    tickets_allocation_pct: float = 0.0
     start_date: Optional[date]
     status: PersonStatus
     visible_in_org_chart: bool = True
@@ -398,6 +405,9 @@ class PersonResponse(BaseModel):
             data.area_ids = [a.id for a in areas]
         if not data.po_person_ids and pos:
             data.po_person_ids = [p.id for p in pos]
+        data.tickets_allocation_pct = max(
+            0.0, round(100.0 - float(data.project_allocation_pct or 0) - float(data.assisted_ops_allocation_pct or 0), 2)
+        )
         return data
 
 
@@ -589,6 +599,9 @@ class DashboardKpis(BaseModel):
     persons_by_area: list[dict] = []
     persons_by_role: list[dict] = []
     birthdays_this_month: list[dict] = []
+    # Divisão da capacidade diária do time (pessoas ativas): h/dia em Projetos, Operação
+    # Assistida e Chamados (o que sobra).
+    capacity_split: dict = {}
 
 
 class AbsenceCalendarDay(BaseModel):

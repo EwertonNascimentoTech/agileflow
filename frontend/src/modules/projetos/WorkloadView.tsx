@@ -1,7 +1,7 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { AlertTriangle, Loader2, Users } from "lucide-react"
 
-import { projetosApi, type WorkloadCell } from "@/api/projetos"
+import { projetosApi, type CapacityReserveCell, type WorkloadCell } from "@/api/projetos"
 import { capacityCellStyle } from "./capacityColors"
 import type { User } from "@/types"
 import { EmptyState } from "@/components/EmptyState"
@@ -59,6 +59,7 @@ export function WorkloadView({
   dateFrom,
   dateTo,
   onCellClick,
+  reserves,
 }: {
   projectId?: string
   // Card-raiz de planejamento: sem ele a carga viria de todos os projetos do container.
@@ -71,6 +72,8 @@ export function WorkloadView({
   dateTo?: string
   // Abre o detalhamento do dia (pessoa × data). Sem handler, a célula não é clicável.
   onCellClick?: (userId: string, date: string) => void
+  /** Fatias Operação Assistida / Chamados (divisão da jornada) — viram sub-linhas da pessoa. */
+  reserves?: CapacityReserveCell[]
 }) {
   const controlled = cellsProp !== undefined
   const [fetched, setFetched] = useState<WorkloadCell[]>([])
@@ -138,8 +141,19 @@ export function WorkloadView({
       if (filled.length > 0) ds = filled
     }
     const uids = [...map.keys()]
+    for (const r of reserves ?? []) if (!map.has(r.user_id) && !uids.includes(r.user_id)) uids.push(r.user_id)
     return { dates: ds, byUser: map, userIds: uids, overCount: over }
-  }, [cells, dateFrom, dateTo])
+  }, [cells, dateFrom, dateTo, reserves])
+
+  const reservesByUser = useMemo(() => {
+    const m = new Map<string, Map<string, CapacityReserveCell>>()
+    for (const r of reserves ?? []) {
+      let row = m.get(r.user_id)
+      if (!row) { row = new Map(); m.set(r.user_id, row) }
+      row.set(r.date, r)
+    }
+    return m
+  }, [reserves])
 
   const todayIso = useMemo(() => {
     const t = new Date()
@@ -265,9 +279,14 @@ export function WorkloadView({
           </thead>
           <tbody>
             {userIds.map((uid) => {
-              const row = byUser.get(uid)!
+              const row = byUser.get(uid) ?? new Map<string, WorkloadCell>()
+              const res = reservesByUser.get(uid)
+              const resList = res ? [...res.values()] : []
+              const hasOa = resList.some((r) => r.oa_capacity_hours > 0 || r.oa_worked_hours > 0)
+              const hasTickets = resList.some((r) => r.tickets_capacity_hours > 0)
               return (
-                <tr key={uid} className="border-b last:border-b-0">
+                <Fragment key={uid}>
+                <tr className="border-b last:border-b-0">
                   <td className="sticky left-0 z-10 bg-card px-3 py-1.5">
                     <div className="flex items-center gap-2">
                       <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#6366f1] text-[9px] font-semibold text-white">
@@ -319,6 +338,44 @@ export function WorkloadView({
                     )
                   })}
                 </tr>
+                {hasOa && (
+                  <tr className="border-b bg-teal-50/40 text-[10px] last:border-b-0 dark:bg-teal-950/20">
+                    <td className="sticky left-0 z-10 bg-card px-3 py-1 pl-10 text-teal-700 dark:text-teal-400" title="Operação Assistida: horas trabalhadas em ocorrências / reserva do dia">
+                      Operação Assistida
+                    </td>
+                    {dates.map((d) => {
+                      const r = res?.get(d)
+                      const cap = r?.oa_capacity_hours ?? 0
+                      const worked = r?.oa_worked_hours ?? 0
+                      return (
+                        <td
+                          key={d}
+                          className="border-l px-1 py-1 text-center tabular-nums"
+                          style={cap > 0 || worked > 0 ? cellStyle(worked, cap || 0.01) : undefined}
+                          title={r ? `Operação Assistida: ${worked}h trabalhadas / ${cap}h reservadas` : undefined}
+                        >
+                          {cap > 0 || worked > 0 ? `${worked > 0 ? worked.toFixed(worked % 1 === 0 ? 0 : 1) : "0"}/${cap.toFixed(cap % 1 === 0 ? 0 : 1)}` : ""}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                )}
+                {hasTickets && (
+                  <tr className="border-b bg-amber-50/40 text-[10px] last:border-b-0 dark:bg-amber-950/20">
+                    <td className="sticky left-0 z-10 bg-card px-3 py-1 pl-10 text-amber-700 dark:text-amber-400" title="Chamados: reserva do dia (o que sobra da jornada)">
+                      Chamados
+                    </td>
+                    {dates.map((d) => {
+                      const cap = res?.get(d)?.tickets_capacity_hours ?? 0
+                      return (
+                        <td key={d} className="border-l px-1 py-1 text-center tabular-nums text-muted-foreground" title={cap ? `Chamados: ${cap}h reservadas` : undefined}>
+                          {cap > 0 ? cap.toFixed(cap % 1 === 0 ? 0 : 1) : ""}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                )}
+                </Fragment>
               )
             })}
           </tbody>

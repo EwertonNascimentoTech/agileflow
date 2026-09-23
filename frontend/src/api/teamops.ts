@@ -148,6 +148,10 @@ export interface Person {
   daily_hours: number
   weekly_hours: number
   project_allocation_pct: number
+  /** % da jornada para Operação Assistida; Chamados = 100 − projetos − este. */
+  assisted_ops_allocation_pct?: number
+  /** Derivado (somente leitura): 100 − projetos − operação assistida. */
+  tickets_allocation_pct?: number
   start_date: string | null
   status: PersonStatus
   notes: string | null
@@ -310,6 +314,7 @@ export interface DashboardKpis {
   persons_by_area: Array<{ area: string; count: number }>
   persons_by_role: Array<{ role: string; count: number }>
   birthdays_this_month: BirthdayPerson[]
+  capacity_split?: { projects_hours: number; assisted_ops_hours: number; tickets_hours: number }
 }
 
 export interface BirthdayPerson {

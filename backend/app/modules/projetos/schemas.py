@@ -667,6 +667,20 @@ class CapacityPersonMeta(BaseModel):
     position_slug: Optional[str] = None
     position_label: Optional[str] = None
     area_ids: list[uuid.UUID] = []
+    # Divisão da jornada (Pessoas): Projetos / Operação Assistida / Chamados (resto).
+    projects_pct: Optional[float] = None
+    assisted_ops_pct: Optional[float] = None
+    tickets_pct: Optional[float] = None
+
+
+class CapacityReserveCell(BaseModel):
+    """Fatias fora de Projetos no dia: reserva de Operação Assistida (+ horas de fato
+    trabalhadas em ocorrências) e reserva de Chamados. Não entram em `cells`/summary."""
+    user_id: uuid.UUID
+    date: date
+    oa_capacity_hours: float = 0.0
+    oa_worked_hours: float = 0.0
+    tickets_capacity_hours: float = 0.0
 
 
 class CapacitySummary(BaseModel):
@@ -684,6 +698,7 @@ class CapacityHeatmapResponse(BaseModel):
     cells: list[WorkloadCell]
     persons: list[CapacityPersonMeta]
     summary: CapacitySummary
+    reserves: list[CapacityReserveCell] = []
 
 
 class CapacityDayTask(BaseModel):
@@ -717,6 +732,11 @@ class CapacityDayDetailResponse(BaseModel):
     items: list[CapacityDayTask] = []
     overdue: list[CapacityDayTask] = []
     overdue_reference: date         # data-base do snapshot de atrasadas (hoje)
+    # Fatias fora de Projetos (divisão da jornada em Pessoas).
+    oa_capacity_hours: float = 0.0
+    oa_worked_hours: float = 0.0
+    tickets_capacity_hours: float = 0.0
+    oa_items: list[dict] = []       # ocorrências trabalhadas no dia: {task_id, project_id, code_label, title, hours}
 
 
 class CapacityProjectRow(BaseModel):
@@ -2150,3 +2170,209 @@ class OciosidadeResponse(BaseModel):
     generated_at: datetime
     summary: OciosidadeSummary
     people: list[OciosidadePerson] = Field(default_factory=list)
+
+
+# ── Operação Assistida: clientes ─────────────────────────────────────────────
+
+class ProjectClientProjectRef(BaseModel):
+    task_id: uuid.UUID
+    title: str
+    status_name: Optional[str] = None
+    planning_kind: Optional[str] = None
+
+
+class ProjectClientBase(BaseModel):
+    full_name: str = Field(..., min_length=2, max_length=200)
+    phone: Optional[str] = Field(None, max_length=30)
+    organization: Optional[str] = Field(None, max_length=200)
+    department: Optional[str] = Field(None, max_length=200)
+    notes: Optional[str] = None
+
+
+class ProjectClientCreate(ProjectClientBase):
+    email: str = Field(..., min_length=5, max_length=255)
+    project_task_ids: list[uuid.UUID] = Field(default_factory=list)
+
+    @field_validator("email")
+    @classmethod
+    def _normalize_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if "@" not in v or v.startswith("@") or v.endswith("@"):
+            raise ValueError("E-mail inválido.")
+        return v
+
+
+class ProjectClientUpdate(BaseModel):
+    full_name: Optional[str] = Field(None, min_length=2, max_length=200)
+    phone: Optional[str] = Field(None, max_length=30)
+    organization: Optional[str] = Field(None, max_length=200)
+    department: Optional[str] = Field(None, max_length=200)
+    notes: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class ProjectClientProjectsSet(BaseModel):
+    project_task_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class ProjectClientResponse(ProjectClientBase):
+    id: uuid.UUID
+    email: str
+    user_id: Optional[uuid.UUID] = None
+    is_active: bool
+    # interno = colaborador com login próprio que também é cliente (mantém a Função dele).
+    is_internal_user: bool = False
+    # Ainda não definiu a senha (primeiro acesso pendente).
+    first_access_pending: bool = False
+    projects: list[ProjectClientProjectRef] = Field(default_factory=list)
+    created_at: datetime
+
+
+class ProjectClientLookupResponse(BaseModel):
+    """Verificação de e-mail antes de cadastrar.
+
+    status: new = livre · client = já é cliente (reaproveitar) · internal_user = colaborador
+    do tenant (vira cliente mantendo o login) · other_tenant = e-mail de outra empresa.
+    """
+    status: Literal["new", "client", "internal_user", "other_tenant"]
+    client: Optional[ProjectClientResponse] = None
+    user_full_name: Optional[str] = None
+
+
+# ── Operação Assistida: Ocorrências ──────────────────────────────────────────
+
+OccurrenceTipo = Literal["erro", "duvida", "ajuste", "melhoria"]
+OccurrenceImpacto = Literal["impede", "contorno", "baixo"]
+OccurrenceAbrangencia = Literal["eu", "setor", "todos"]
+OccurrencePrioridade = Literal["P1", "P2", "P3", "P4"]
+OccurrenceClassificacao = Literal["erro_confirmado", "duvida", "ajuste", "melhoria", "nao_procede"]
+
+
+class OccurrenceCreate(BaseModel):
+    """Abertura pelo cliente no Portal."""
+    project_task_id: uuid.UUID
+    tipo: OccurrenceTipo
+    title: str = Field(..., min_length=3, max_length=160)
+    description: str = Field(..., min_length=3, max_length=20000)  # o que aconteceu
+    passos: Optional[str] = Field(None, max_length=20000)
+    esperado: Optional[str] = Field(None, max_length=20000)
+    funcionalidade: Optional[str] = Field(None, max_length=300)
+    impacto: OccurrenceImpacto
+    abrangencia: OccurrenceAbrangencia
+    anexos: Optional[list] = None
+
+
+class OccurrenceTeamUpdate(BaseModel):
+    """Campos do time (drawer do card)."""
+    prioridade: Optional[OccurrencePrioridade] = None
+    classificacao: Optional[OccurrenceClassificacao] = None
+    solucao: Optional[str] = Field(None, max_length=20000)
+    causa_raiz: Optional[str] = Field(None, max_length=20000)
+    funcionalidade: Optional[str] = Field(None, max_length=300)
+
+
+class OccurrenceCommentCreate(BaseModel):
+    """Resposta do cliente (texto simples + anexos)."""
+    content: str = Field(..., min_length=1, max_length=20000)
+    anexos: Optional[list] = None
+
+
+class OccurrenceComment(BaseModel):
+    id: uuid.UUID
+    author_name: Optional[str] = None
+    from_client: bool = False
+    content: str
+    anexos: Optional[list] = None
+    created_at: datetime
+
+
+class OccurrenceSummary(BaseModel):
+    task_id: uuid.UUID
+    project_id: uuid.UUID            # container (rotas /projects/{id}/tasks/{task_id})
+    code: int
+    code_label: str                  # OC-0001
+    title: str
+    tipo: str
+    prioridade: str
+    impacto: str
+    abrangencia: str
+    stage_key: Optional[str] = None
+    stage_name: Optional[str] = None
+    is_closed: bool = False
+    project_task_id: uuid.UUID
+    project_title: Optional[str] = None
+    opened_by_name: Optional[str] = None
+    opened_by_me: bool = False
+    can_interact: bool = False
+    assignee_name: Optional[str] = None
+    assumed_at: Optional[datetime] = None
+    # Horas úteis gastas até agora (pausa com o cliente); fixas depois de encerrada.
+    worked_hours: Optional[float] = None
+    nps_score: Optional[int] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+
+class OccurrenceDetail(OccurrenceSummary):
+    description: Optional[str] = None
+    passos: Optional[str] = None
+    esperado: Optional[str] = None
+    funcionalidade: Optional[str] = None
+    anexos: Optional[list] = None
+    solucao: Optional[str] = None
+    # Só na visão do time:
+    classificacao: Optional[str] = None
+    causa_raiz: Optional[str] = None
+    homologated_at: Optional[datetime] = None
+    nps_comment: Optional[str] = None
+    rejection_count: int = 0
+    finalized_by_team: bool = False
+    release_project_title: Optional[str] = None
+    release_item_title: Optional[str] = None
+    # Visão do time: o usuário logado pode assumir (dev fixo, PO do projeto ou admin).
+    can_assume: bool = False
+    comments: list[OccurrenceComment] = Field(default_factory=list)
+    history: list[dict] = Field(default_factory=list)
+
+
+class PortalProject(ProjectClientProjectRef):
+    accepts_occurrences: bool = False
+    open_occurrences: int = 0
+
+
+class AssistedOpsDevResponse(BaseModel):
+    person_id: uuid.UUID
+    full_name: str
+    position_name: Optional[str] = None
+    daily_hours: Optional[float] = None
+    project_allocation_pct: Optional[float] = None
+    assisted_ops_allocation_pct: float = 0.0
+    tickets_allocation_pct: float = 0.0
+
+
+class AssistedOpsDevAllocation(BaseModel):
+    person_id: uuid.UUID
+    project_allocation_pct: float = Field(..., ge=0, le=100)
+    assisted_ops_allocation_pct: float = Field(..., ge=0, le=100)
+
+
+class AssistedOpsDevsSet(BaseModel):
+    person_ids: list[uuid.UUID] = Field(default_factory=list)
+    # Divisão da jornada editada pelo PO ao escolher os devs (grava em Pessoas).
+    allocations: list[AssistedOpsDevAllocation] = Field(default_factory=list)
+
+
+class OccurrenceHomologation(BaseModel):
+    """Cliente aprova (com NPS 0–10) ou reprova (com motivo) na etapa Homologando."""
+    approve: bool
+    nps_score: Optional[int] = Field(None, ge=0, le=10)
+    comment: Optional[str] = Field(None, max_length=5000)
+
+
+class OccurrenceForwardRelease(BaseModel):
+    """PO encaminha a melhoria para um projeto de Release (existente ou novo)."""
+    release_task_id: Optional[uuid.UUID] = None
+    new_release_title: Optional[str] = Field(None, min_length=3, max_length=200)
+    item_kind: Literal["feature", "user_story"] = "feature"
+    # US precisa de Feature pai no projeto de Release.
+    parent_feature_id: Optional[uuid.UUID] = None

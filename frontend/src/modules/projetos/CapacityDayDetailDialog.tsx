@@ -195,6 +195,37 @@ export function CapacityDayDetailDialog({
               )}
             </div>
 
+            {((data.oa_capacity_hours ?? 0) > 0 || (data.oa_worked_hours ?? 0) > 0 || (data.tickets_capacity_hours ?? 0) > 0) && (
+              <div className="grid gap-2 rounded-md border p-2 text-xs sm:grid-cols-3">
+                <div>
+                  <div className="text-muted-foreground">Projetos</div>
+                  <div className="font-medium tabular-nums">
+                    {fmtHours(data.allocated_hours)} / {fmtHours(data.capacity_hours)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-teal-700 dark:text-teal-400">Operação Assistida</div>
+                  <div className="font-medium tabular-nums">
+                    {fmtHours(data.oa_worked_hours ?? 0)} / {fmtHours(data.oa_capacity_hours ?? 0)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-amber-700 dark:text-amber-400">Chamados (reserva)</div>
+                  <div className="font-medium tabular-nums">{fmtHours(data.tickets_capacity_hours ?? 0)}</div>
+                </div>
+                {!!data.oa_items?.length && (
+                  <ul className="space-y-1 border-t pt-1.5 sm:col-span-3">
+                    {data.oa_items.map((o) => (
+                      <li key={o.task_id} className="flex items-start justify-between gap-2">
+                        <span className="min-w-0 truncate">{o.title}</span>
+                        <span className="shrink-0 tabular-nums font-medium">{fmtHours(o.hours)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
             <section className="min-w-0">
               <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 <CalendarClock size={12} /> No dia ({data.items.length})

@@ -805,6 +805,16 @@ class PersonService:
         return list(rows.scalars().all())
 
     @staticmethod
+    def assert_allocation_split(person: Person) -> None:
+        """Projetos + Operação Assistida ≤ 100% da jornada; o restante é Chamados."""
+        total = float(person.project_allocation_pct or 0) + float(person.assisted_ops_allocation_pct or 0)
+        if total > 100.0001:
+            raise HTTPException(
+                status_code=400,
+                detail="Projetos + Operação Assistida não pode passar de 100% (o restante é Chamados).",
+            )
+
+    @staticmethod
     async def create(db: AsyncSession, data: PersonCreate, tenant_id: Optional[uuid.UUID] = None) -> Person:
         payload = data.model_dump()
         access_level = payload.pop("access_level", "none")
@@ -873,6 +883,7 @@ class PersonService:
 
         for key, value in payload.items():
             setattr(item, key, value)
+        PersonService.assert_allocation_split(item)
         item.updated_at = datetime.utcnow()
         if access_level is not None or reset_password:
             await PersonService._provision_user(db, item, access_level, password, reset_password, tenant_id)
@@ -1938,7 +1949,19 @@ class DashboardService:
             for row in bdays.all()
         ]
 
+        from app.modules.teamops.calendar import allocation_split, load_calendar
+
+        cal = await load_calendar(db)
+        split = {"projects_hours": 0.0, "assisted_ops_hours": 0.0, "tickets_hours": 0.0}
+        for p in (await db.execute(select(Person).where(Person.status == PersonStatus.ATIVO))).scalars().all():
+            sp = allocation_split(p, cal)
+            split["projects_hours"] += sp["projects_hours"]
+            split["assisted_ops_hours"] += sp["assisted_ops_hours"]
+            split["tickets_hours"] += sp["tickets_hours"]
+        split = {k: round(v, 1) for k, v in split.items()}
+
         return DashboardKpis(
+            capacity_split=split,
             active_persons=active.scalar() or 0,
             on_vacation_today=on_vac.scalar() or 0,
             pending_approvals=pending.scalar() or 0,

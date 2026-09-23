@@ -315,6 +315,7 @@ export function CapacityCockpitPage() {
                 </p>
                 <WorkloadView
                   cells={heatmap.cells}
+                  reserves={heatmap.reserves}
                   nameForUser={nameFor}
                   dateFrom={from}
                   dateTo={to}
