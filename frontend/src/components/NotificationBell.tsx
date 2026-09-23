@@ -8,6 +8,9 @@ import { cn } from "@/lib/utils"
 const ENTITY_PATHS: Record<string, (id: string) => string> = {
   project_task: (id) => `/app/modules/projetos/minhas?task=${id}`,
   task: (id) => `/app/modules/projetos/minhas?task=${id}`,
+  // Operação Assistida (cliente): ocorrência e projeto que passou a aceitar ocorrências.
+  occurrence: (id) => `/portal/ocorrencias/${id}`,
+  occurrence_project: () => `/portal`,
 }
 
 function fmtTime(iso: string): string {

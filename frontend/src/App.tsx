@@ -7,6 +7,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary"
 import ProtectedRoute from "@/components/ProtectedRoute"
 import ModuleConfigGuard from "@/components/ModuleConfigGuard"
 import ExternalPOGuard from "@/components/ExternalPOGuard"
+import { ClientPortalGuard, NotClientGuard } from "@/components/ClientGuards"
 import RtdLoadingScreen from "@/modules/rtd/RtdLoadingScreen"
 
 // Todas as páginas/layouts abaixo são carregadas sob demanda (code splitting por
@@ -91,6 +92,12 @@ const ProjetosLayout = lazy(() => import("@/modules/projetos/ProjetosLayout"))
 const ProjectBoardPage = lazy(() => import("@/modules/projetos/ProjectBoardPage"))
 const ProjectProgramsPage = lazy(() => import("@/modules/projetos/ProjectProgramsPage"))
 const ProjectConfigHomePage = lazy(() => import("@/modules/projetos/config/ProjectConfigHomePage"))
+const ProjectClientsPage = lazy(() => import("@/modules/projetos/ProjectClientsPage"))
+const ClientPortalLayout = lazy(() => import("@/modules/portal/ClientPortalLayout"))
+const ClientPortalHomePage = lazy(() => import("@/modules/portal/ClientPortalHomePage"))
+const ClientOccurrencesPage = lazy(() => import("@/modules/portal/ClientOccurrencesPage"))
+const ClientNewOccurrencePage = lazy(() => import("@/modules/portal/ClientNewOccurrencePage"))
+const ClientOccurrenceDetailPage = lazy(() => import("@/modules/portal/ClientOccurrenceDetailPage"))
 const ProjectDefaultFormConfigPage = lazy(() => import("@/modules/projetos/config/ProjectDefaultFormConfigPage"))
 const ProjectDemandTypesConfigPage = lazy(() => import("@/modules/projetos/config/ProjectDemandTypesConfigPage"))
 const ProjectDemandTypeFormEditorPage = lazy(() => import("@/modules/projetos/config/ProjectDemandTypeFormEditorPage"))
@@ -188,6 +195,19 @@ export default function App() {
 
               {/* Portal do Cliente (Operação Assistida) */}
               <Route element={<ProtectedRoute allowedRoles={["company_admin", "company_user"]} />}>
+                <Route element={<ClientPortalGuard />}>
+                  <Route path="/portal" element={<ClientPortalLayout />}>
+                    <Route index element={<ClientPortalHomePage />} />
+                    <Route path="ocorrencias" element={<ClientOccurrencesPage />} />
+                    <Route path="ocorrencias/nova" element={<ClientNewOccurrencePage />} />
+                    <Route path="ocorrencias/:id" element={<ClientOccurrenceDetailPage />} />
+                  </Route>
+                </Route>
+              </Route>
+
+              {/* Company — cliente externo é mandado para o Portal */}
+              <Route element={<ProtectedRoute allowedRoles={["company_admin", "company_user"]} />}>
+                <Route element={<NotClientGuard />}>
                 <Route path="/app" element={<CompanyLayout />}>
                   <Route index element={<Navigate to="/app/dashboard" replace />} />
                   <Route path="dashboard" element={<CompanyDashboardPage />} />

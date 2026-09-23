@@ -3174,6 +3174,9 @@ class ProjectTaskService:
                     SELECT t.id FROM project_tasks t JOIN scope s ON t.parent_task_id = s.id
                 )
                 SELECT id FROM scope
+                UNION
+                -- Ocorrências da Operação Assistida dos projetos dele.
+                SELECT o.task_id FROM project_occurrences o JOIN scope s ON o.project_task_id = s.id
             """),
             {"pid": person_id, "uid": user_id},
         )
@@ -4384,6 +4387,18 @@ class ProjectTaskService:
                 await ProjectTaskService._guard_feature_us_kanban_affinity(
                     db, task, target_status, source_status,
                 )
+                await ProjectTaskService._guard_assisted_op_skip(
+                    db, task, source_status, target_status, assisted_op_skip_reason, current_user,
+                )
+                # Operação Assistida: ocorrência encerrada não reabre; projeto com ocorrência
+                # aberta não conclui.
+                from app.modules.projetos.assisted_ops import AssistedOpsService
+
+                await AssistedOpsService.before_occurrence_move(
+                    db, task, source_status, target_status, current_user,
+                )
+                if task.parent_task_id is None and ProjectTaskService._is_concluded_planning_status(target_status):
+                    await AssistedOpsService.assert_project_can_conclude(db, task)
                 # Guard-rail: uma Feature só pode ser concluída manualmente quando todas as
                 # User Stories filhas estiverem concluídas. (O auto-move do reconcile não passa
                 # por aqui, então este guard vale apenas para o movimento manual/API.)
@@ -4635,6 +4650,16 @@ class ProjectTaskService:
                 and await ProjectTaskService._is_user_story_task(db, task)
             ):
                 task.left_backlog_at = datetime.utcnow()
+            # Operação Assistida: a 1ª entrada é a data de entrega (voltar de Concluído não a muda).
+            from app.modules.projetos.assisted_ops import AssistedOpsService
+
+            if ProjectTaskService._is_assisted_operation_status(status_obj) and task.parent_task_id is None:
+                if task.assisted_op_entered_at is None:
+                    task.assisted_op_entered_at = datetime.utcnow()
+                await AssistedOpsService.on_project_enters_assisted_operation(db, task)
+            await AssistedOpsService.after_occurrence_move(
+                db, task, source_status, status_obj, current_user.id if current_user else None,
+            )
             # Reinicia o relógio de SLA ao entrar numa nova etapa.
             task.status_entered_at = datetime.utcnow()
             task.sla_state = ProjectTaskService._sla_initial(status_obj)
@@ -7958,9 +7983,18 @@ class ProjectTaskCommentService:
         data: ProjectTaskCommentCreate,
         author_id: Optional[uuid.UUID] = None,
     ) -> ProjectTaskComment:
+        from app.modules.projetos.assisted_ops import AssistedOpsService
+
         await ProjectTaskService.get(db, project_id, task_id)
-        comment = ProjectTaskComment(task_id=task_id, author_id=author_id, content=data.content)
+        comment = ProjectTaskComment(
+            task_id=task_id,
+            author_id=author_id,
+            content=data.content,
+            visibility=data.visibility,
+            anexos=data.anexos or None,
+        )
         db.add(comment)
+        await AssistedOpsService.after_team_comment(db, task_id, data.visibility, author_id)
         await db.commit()
         await db.refresh(comment)
         await ProjectTaskCommentService._attach_author_names(db, [comment])

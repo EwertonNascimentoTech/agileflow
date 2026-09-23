@@ -26,7 +26,46 @@ celery_app.conf.beat_schedule = {
         "task": "scheduled.sync_repo_commits",
         "schedule": 1800.0,
     },
+    # Operação Assistida: ocorrência sem responsável há 1h útil → avisa o PO.
+    "check-unassigned-occurrences": {
+        "task": "scheduled.check_unassigned_occurrences",
+        "schedule": 300.0,
+    },
 }
+
+
+@celery_app.task(name="scheduled.check_unassigned_occurrences")
+def check_unassigned_occurrences_task():
+    _run(_check_unassigned_occurrences())
+
+
+async def _check_unassigned_occurrences() -> None:
+    from sqlalchemy import select, text
+    from app.core.database import AsyncSessionLocal
+    from app.modules.super_admin.models import Tenant
+    from app.modules.projetos.assisted_ops import AssistedOpsService
+
+    async with AsyncSessionLocal() as db:
+        await db.execute(text("SET search_path TO public"))
+        tenants = list(
+            (
+                await db.execute(
+                    select(Tenant.schema_name).where(Tenant.is_active == True)  # noqa: E712
+                )
+            ).scalars()
+        )
+
+    for schema in tenants:
+        try:
+            async with AsyncSessionLocal() as db:
+                await db.execute(text(f"SET search_path TO {schema}, public"))
+                if (await db.execute(text("SELECT to_regclass('project_occurrences')"))).scalar() is None:
+                    continue
+                alerted = await AssistedOpsService.scan_unassigned(db)
+                if alerted:
+                    logger.info("[check_unassigned_occurrences] %s: %s alerta(s)", schema, alerted)
+        except Exception as e:  # noqa: BLE001
+            logger.error("[check_unassigned_occurrences] %s: %s", schema, e)
 
 
 @celery_app.task(name="scheduled.check_project_slas")

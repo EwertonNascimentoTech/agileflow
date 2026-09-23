@@ -32,6 +32,10 @@ import { useAuth } from "@/contexts/AuthContext"
 import { toast } from "@/lib/toast"
 import { UsChecklistSection } from "@/modules/projetos/UsChecklistSection"
 import { UsCommitsSection } from "@/modules/projetos/UsCommitsSection"
+import { AssistedOpSkipDialog, isAssistedOpSkipRequired } from "@/modules/projetos/AssistedOpSkipDialog"
+import { OccurrenceTeamPanel } from "@/modules/projetos/OccurrenceTeamPanel"
+import { AssistedOpsDevsSection } from "@/modules/projetos/AssistedOpsDevsSection"
+import { AttachmentField, type Attachment } from "@/components/AttachmentField"
 import { fmtEstimatedHours, isFeatureOrUsKanbanFunnel, isPlanningRootTask, isProjectOrProgramKanbanFunnel, isUserStoryDemandType, isUserStoryKanbanFunnel } from "@/modules/projetos/kanbanDisplay"
 
 const NO_ASSIGNEE = "__none__"
@@ -178,6 +182,9 @@ export function ProjectTaskDrawer({
   const [linkSelectedId, setLinkSelectedId] = useState("")
   const [savingLink, setSavingLink] = useState(false)
   const [newComment, setNewComment] = useState("")
+  // Ocorrência (Operação Assistida): comentário visível ao cliente por padrão + anexos.
+  const [commentPublic, setCommentPublic] = useState(true)
+  const [commentFiles, setCommentFiles] = useState<Attachment[]>([])
   const [saving, setSaving] = useState(false)
   const [removing, setRemoving] = useState(false)
   const [sendingComment, setSendingComment] = useState(false)
@@ -424,6 +431,8 @@ export function ProjectTaskDrawer({
   const demandTypeName = (id: string | null | undefined) =>
     id ? (demandTypes.find((t) => t.id === id)?.name ?? null) : null
   const currentDemandType = demandTypes.find((d) => d.id === task?.demand_type_id) ?? null
+  // Card do kanban de Ocorrências (Operação Assistida): etapa com chave do sistema.
+  const isOccurrence = !!(task && allStatuses.find((s) => s.id === task.status_id)?.assisted_stage_key)
   const taskFunnelName = (() => {
     if (!task) return kanbanFunnelName
     const st = allStatuses.find((s) => s.id === task.status_id)
@@ -867,9 +876,17 @@ export function ProjectTaskDrawer({
     if (!task || !commentHasContent(newComment)) return
     setSendingComment(true)
     try {
-      const created = await projetosApi.createTaskComment(projectId, task.id, newComment.trim())
+      const created = await projetosApi.createTaskComment(
+        projectId,
+        task.id,
+        newComment.trim(),
+        isOccurrence
+          ? { visibility: commentPublic ? "public" : "internal", anexos: commentFiles.length ? commentFiles : null }
+          : undefined,
+      )
       setComments((prev) => [...prev, created])
       setNewComment("")
+      setCommentFiles([])
     } finally {
       setSendingComment(false)
     }
@@ -1193,6 +1210,21 @@ export function ProjectTaskDrawer({
                 <span>{comments.length} comentário{comments.length === 1 ? "" : "s"}</span>
               </div>
             </div>
+
+            {isOccurrence && task && (
+              <OccurrenceTeamPanel
+                taskId={task.id}
+                readOnly={readOnly}
+                onChanged={() => {
+                  projetosApi.getTask(projectId, task.id).then((t) => {
+                    setStatusId(t.status_id)
+                    onSaved(t)
+                  }).catch(() => null)
+                  projetosApi.listTaskComments(projectId, task.id).then(setComments).catch(() => null)
+                  projetosApi.listTaskStatusHistory(projectId, task.id).then(setStatusHistory).catch(() => null)
+                }}
+              />
+            )}
 
             {isUserStoryCard && task && (
               <UsChecklistSection
@@ -1539,6 +1571,10 @@ export function ProjectTaskDrawer({
               </div>
             </div>
 
+            {task && isPlanningRootTask(task.planning_kind) && isProjectOrProgramKanbanFunnel(taskFunnelName) && (
+              <AssistedOpsDevsSection projectTaskId={task.id} readOnly={readOnly} />
+            )}
+
             {!readOnly && task && isPlanningRootTask(task.planning_kind) && canImportScheduleInStatus(statusLabel) && (
               <div className="rounded-md border border-primary/20 bg-primary/5 p-3">
                 <ScheduleImportPanel
@@ -1629,15 +1665,41 @@ export function ProjectTaskDrawer({
                     </span>
                     <div className="min-w-0 flex-1">
                       <CommentBody content={c.content} />
+                      {!!c.anexos?.length && (
+                        <div className="mt-1">
+                          <AttachmentField value={c.anexos} onChange={() => {}} disabled />
+                        </div>
+                      )}
                       <p className="text-[11px] text-muted-foreground mt-1">
                         <span className="font-medium text-foreground">{c.author_name ?? "Sistema"}</span>
                         {" · "}
                         {formatApiDateTime(c.created_at)}
+                        {isOccurrence && (
+                          <span className={`ml-1.5 rounded px-1 py-0.5 text-[10px] font-medium ${c.visibility === "public" ? "bg-teal-100 text-teal-700" : "bg-muted text-muted-foreground"}`}>
+                            {c.visibility === "public" ? "visível ao cliente" : "interno"}
+                          </span>
+                        )}
                       </p>
                     </div>
                   </div>
                 ))}
               </div>
+              {isOccurrence && (
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-xs">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-input accent-primary"
+                      checked={commentPublic}
+                      onChange={(e) => setCommentPublic(e.target.checked)}
+                    />
+                    <span className={commentPublic ? "font-medium text-teal-700" : "text-muted-foreground"}>
+                      {commentPublic ? "Visível ao cliente (ele é notificado)" : "Nota interna (só o time vê)"}
+                    </span>
+                  </label>
+                  <AttachmentField value={commentFiles} onChange={setCommentFiles} />
+                </div>
+              )}
               <CommentComposer
                 value={newComment}
                 onChange={setNewComment}

@@ -157,6 +157,13 @@ class ProjectStatusConfig(TenantBase):
     is_procurement_lost: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # Slug estável da etapa no funil Contratar (backlog|prospectar|aderencia|proposta|negociacao|concluido|cancelado).
     procurement_stage_key: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    # Raia "Operação Assistida" (Projetos e Programas): pós-entrega, antes de Concluído.
+    # Não é is_final — o card segue no quadro —, mas nos relatórios o projeto já conta como
+    # entregue. Enquanto o projeto estiver nela, os clientes abrem Ocorrências.
+    is_assisted_operation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Etapa do kanban de Ocorrências (backlog, aguardando_cliente, ajustando, homologando,
+    # finalizado, melhoria_analise, encaminhada_release) — as regras leem a chave, não o nome.
+    assisted_stage_key: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -381,6 +388,10 @@ class ProjectTaskComment(TenantBase):
     )
     author_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    # public = o cliente da Operação Assistida vê no Portal; internal = só o time.
+    visibility: Mapped[str] = mapped_column(String(10), nullable=False, default="internal")
+    # [{object_name, filename, content_type, size}] — mesmo formato de ProjectTask.anexos.
+    anexos: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     task: Mapped["ProjectTask"] = relationship(back_populates="comments")
@@ -487,6 +498,8 @@ class ProjectFunnel(TenantBase):
     classification_enforcement_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False,
     )
+    # Kanban de Ocorrências da Operação Assistida (criado por AssistedOpsService.ensure).
+    is_assisted_ops: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # Funil dedicado ao fluxo de contratação (Backlog → … → Concluído/Cancelado).
     is_procurement: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -1032,3 +1045,123 @@ class ProjectProgram(TenantBase):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ProjectClient(TenantBase):
+    """Cliente da Operação Assistida — quem abre Ocorrências dos projetos a que tem acesso.
+
+    Não é Pessoa do TeamOps (não entra em Capacidade, organograma nem seletores de
+    responsável). O login é um `public.users`: cliente externo ganha um usuário novo com a
+    Função de sistema "Cliente (Operação Assistida)", que só enxerga o Portal; colaborador
+    interno que também é cliente mantém o próprio login e só ganha o Portal.
+    E-mail único no tenant — o PO reaproveita o cadastro em vez de duplicar.
+    """
+
+    __tablename__ = "project_clients"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True, unique=True)
+    full_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    phone: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    organization: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    department: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    access: Mapped[list["ProjectClientAccess"]] = relationship(
+        back_populates="client", cascade="all, delete-orphan"
+    )
+
+
+class ProjectClientAccess(TenantBase):
+    """Vínculo explícito cliente ↔ projeto (card-raiz do kanban Projetos e Programas)."""
+
+    __tablename__ = "project_client_access"
+    __table_args__ = (UniqueConstraint("client_id", "task_id", name="uq_project_client_access"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("project_clients.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("project_tasks.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    client: Mapped["ProjectClient"] = relationship(back_populates="access")
+
+
+class ProjectOccurrence(TenantBase):
+    """Ocorrência da Operação Assistida (OC-0001): dados próprios do card no kanban de
+    Ocorrências. O card em si é um ProjectTask (título, descrição = "o que aconteceu",
+    anexos, etapa, responsável) com `origin_task_id` = projeto."""
+
+    __tablename__ = "project_occurrences"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("project_tasks.id", ondelete="CASCADE"), nullable=False, unique=True,
+    )
+    # Card-raiz do projeto/programa em Operação Assistida.
+    project_task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("project_tasks.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    code: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
+    opened_by_client_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("project_clients.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    opened_by_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # Aberto pelo cliente: erro | duvida | ajuste | melhoria
+    tipo: Mapped[str] = mapped_column(String(20), nullable=False)
+    passos: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    esperado: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    funcionalidade: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    # impede | contorno | baixo  ×  eu | setor | todos  →  prioridade P1..P4 (PO ajusta)
+    impacto: Mapped[str] = mapped_column(String(20), nullable=False)
+    abrangencia: Mapped[str] = mapped_column(String(20), nullable=False)
+    prioridade: Mapped[str] = mapped_column(String(2), nullable=False)
+    # Preenchido pelo time: erro_confirmado | duvida | ajuste | melhoria | nao_procede
+    classificacao: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    solucao: Mapped[Optional[str]] = mapped_column(Text, nullable=True)      # cliente vê
+    causa_raiz: Mapped[Optional[str]] = mapped_column(Text, nullable=True)   # interna
+    # Atendimento: 1º "Assumir" (início da contagem de horas úteis) e alerta de 1h útil sem
+    # ninguém assumir (grava para não repetir).
+    assumed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    unassigned_alert_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Horas úteis gastas (pausa em Aguardando Cliente/Homologando) — gravadas ao encerrar.
+    worked_hours: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2), nullable=True)
+    # Homologação pelo cliente.
+    homologated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    nps_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    nps_comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    rejection_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Finalizada pelo PO sem homologação do cliente (ex.: cliente não respondeu).
+    finalized_by_team: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Melhoria encaminhada: projeto de Release e Feature/US criada nele.
+    release_project_task_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    release_item_task_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ProjectAssistedOpsDev(TenantBase):
+    """Desenvolvedor fixo de atendimento da Operação Assistida de um projeto (definido pelo PO).
+    Todos veem as ocorrências do projeto; quem assumir primeiro fica responsável."""
+
+    __tablename__ = "project_assisted_ops_devs"
+    __table_args__ = (UniqueConstraint("project_task_id", "person_id", name="uq_project_assisted_ops_devs"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("project_tasks.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    person_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("team_persons.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

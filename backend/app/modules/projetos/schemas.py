@@ -77,6 +77,7 @@ class ProjectFunnelResponse(BaseModel):
     allowed_demand_type_ids: Optional[list[uuid.UUID]] = None
     access_control: Optional[dict[str, str]] = None
     classification_enforcement_enabled: bool = False
+    is_assisted_ops: bool = False
     is_procurement: bool = False
     created_at: datetime
     updated_at: datetime
@@ -309,6 +310,8 @@ class ProjectStatusCreate(BaseModel):
     is_procurement_won: bool = False
     is_procurement_lost: bool = False
     procurement_stage_key: Optional[str] = None
+    is_assisted_operation: bool = False
+    assisted_stage_key: Optional[str] = None
 
 
 class ProjectStatusUpdate(BaseModel):
@@ -373,6 +376,8 @@ class ProjectStatusResponse(BaseModel):
     is_procurement_won: bool = False
     is_procurement_lost: bool = False
     procurement_stage_key: Optional[str] = None
+    is_assisted_operation: bool = False
+    assisted_stage_key: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -1163,6 +1168,9 @@ class UsCommitEvidenceState(BaseModel):
 
 class ProjectTaskCommentCreate(BaseModel):
     content: str = Field(..., min_length=1)
+    # Só faz diferença em Ocorrência: public = o cliente vê no Portal.
+    visibility: Literal["public", "internal"] = "internal"
+    anexos: Optional[list] = None
 
 
 class ProjectTaskCommentResponse(BaseModel):
@@ -1171,6 +1179,8 @@ class ProjectTaskCommentResponse(BaseModel):
     author_id: Optional[uuid.UUID]
     author_name: Optional[str] = None
     content: str
+    visibility: str = "internal"
+    anexos: Optional[list] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

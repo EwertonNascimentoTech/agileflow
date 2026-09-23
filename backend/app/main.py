@@ -15,6 +15,7 @@ from app.modules.super_admin.api.routes import auth_router
 from app.modules.company.api.routes import router as company_admin_router
 from app.modules.projetos.api.routes import router as projetos_router
 from app.modules.projetos.api.public_routes import router as projetos_public_router
+from app.modules.projetos.api.client_routes import router as projetos_clients_router
 from app.modules.teamops.api.routes import router as teamops_router
 from app.modules.produtos.api.routes import router as produtos_router
 from app.modules.produtos.api.webhooks import router as produtos_webhooks_router
@@ -192,6 +193,7 @@ app.include_router(auth_router, prefix="/api/v1")
 app.include_router(super_admin_router, prefix="/api/v1")
 app.include_router(company_admin_router, prefix="/api/v1")
 app.include_router(projetos_router, prefix="/api/v1")
+app.include_router(projetos_clients_router, prefix="/api/v1")
 app.include_router(teamops_router, prefix="/api/v1")
 app.include_router(produtos_router, prefix="/api/v1")
 # Fora de require_module: o Azure DevOps não manda JWT (autenticação por Basic no hook).

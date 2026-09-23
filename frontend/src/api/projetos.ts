@@ -28,6 +28,8 @@ export interface ProjectFunnel {
   allowed_demand_type_ids: string[] | null
   access_control: Record<string, FunnelAccessLevel> | null
   classification_enforcement_enabled: boolean
+  /** Kanban de Ocorrências da Operação Assistida. */
+  is_assisted_ops?: boolean
   is_procurement?: boolean
   created_at: string
   updated_at: string
@@ -64,6 +66,10 @@ export interface ProjectStatus {
   is_procurement_won?: boolean
   is_procurement_lost?: boolean
   procurement_stage_key?: string | null
+  /** Raia Operação Assistida (pós-entrega) do kanban Projetos e Programas. */
+  is_assisted_operation?: boolean
+  /** Etapa do kanban de Ocorrências (backlog, aguardando_cliente, ajustando, ...). */
+  assisted_stage_key?: string | null
   created_at: string
   updated_at: string
 }
@@ -212,6 +218,9 @@ export interface ProjectTaskComment {
   author_id: string | null
   author_name: string | null
   content: string
+  /** public = visível ao cliente no Portal (só Ocorrências). */
+  visibility?: "public" | "internal"
+  anexos?: ProjectUpload[] | null
   created_at: string
 }
 
@@ -2154,8 +2163,15 @@ export const projetosApi = {
     api.get<ProjectTaskComment[]>(`/projetos/projects/${projectId}/tasks/${taskId}/comments`).then((r) => r.data),
   listTaskStatusHistory: (projectId: string, taskId: string) =>
     api.get<ProjectTaskStatusHistory[]>(`/projetos/projects/${projectId}/tasks/${taskId}/status-history`).then((r) => r.data),
-  createTaskComment: (projectId: string, taskId: string, content: string) =>
-    api.post<ProjectTaskComment>(`/projetos/projects/${projectId}/tasks/${taskId}/comments`, { content }).then((r) => r.data),
+  createTaskComment: (
+    projectId: string,
+    taskId: string,
+    content: string,
+    opts?: { visibility?: "public" | "internal"; anexos?: ProjectUpload[] | null },
+  ) =>
+    api
+      .post<ProjectTaskComment>(`/projetos/projects/${projectId}/tasks/${taskId}/comments`, { content, ...opts })
+      .then((r) => r.data),
 
   getReports: (params?: { po?: string | null; diretoria?: string | null; area?: string | null }) =>
     api.get<ProjectReports>(`/projetos/reports`, {
