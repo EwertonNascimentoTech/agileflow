@@ -172,6 +172,9 @@ export interface OccurrenceDetail extends OccurrenceSummary {
   finalized_by_team: boolean
   release_project_title: string | null
   release_item_title: string | null
+  /** Visão do time: PO responsável e produto do projeto (card da ocorrência). */
+  project_po_name?: string | null
+  product_name?: string | null
   can_assume: boolean
   comments: OccurrenceComment[]
   history: Array<{ stage_name: string | null; moved_at: string | null }>

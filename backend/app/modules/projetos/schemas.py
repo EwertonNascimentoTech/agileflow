@@ -2335,6 +2335,9 @@ class OccurrenceDetail(OccurrenceSummary):
     finalized_by_team: bool = False
     release_project_title: Optional[str] = None
     release_item_title: Optional[str] = None
+    # Visão do time: do projeto só o PO responsável e o produto vinculado (card da ocorrência).
+    project_po_name: Optional[str] = None
+    product_name: Optional[str] = None
     # Visão do time: o usuário logado pode assumir (dev fixo, PO do projeto ou admin).
     can_assume: bool = False
     comments: list[OccurrenceComment] = Field(default_factory=list)

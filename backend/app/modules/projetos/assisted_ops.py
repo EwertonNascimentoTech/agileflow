@@ -592,6 +592,25 @@ class AssistedOpsService:
             .order_by(ProjectTaskStatusHistory.moved_at.asc())
         )).scalars().all())
 
+        # Card da ocorrência (time): do projeto, só o PO responsável e o produto vinculado.
+        po_name = product_name = None
+        if not for_client:
+            from app.modules.teamops.models import Person
+            root = await db.get(ProjectTask, occ.project_task_id)
+            if root is not None and root.assigned_to:
+                po_name = (await db.execute(
+                    select(Person.full_name).where(Person.id == root.assigned_to)
+                )).scalar_one_or_none()
+            if root is not None and root.linked_product_id:
+                try:
+                    from app.modules.produtos.models import Product
+                    async with db.begin_nested():  # savepoint: falha aqui não derruba a transação
+                        product_name = (await db.execute(
+                            select(Product.name).where(Product.id == root.linked_product_id)
+                        )).scalar_one_or_none()
+                except Exception:  # noqa: BLE001 — módulo Produtos ausente no tenant
+                    product_name = None
+
         return OccurrenceDetail(
             **summary.model_dump(),
             description=task.description,
@@ -608,6 +627,8 @@ class AssistedOpsService:
             finalized_by_team=bool(occ.finalized_by_team),
             release_project_title=release_titles.get(occ.release_project_task_id),
             release_item_title=None if for_client else release_titles.get(occ.release_item_task_id),
+            project_po_name=po_name,
+            product_name=product_name,
             can_assume=can_assume,
             comments=[
                 OccurrenceComment(

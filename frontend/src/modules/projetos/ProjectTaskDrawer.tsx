@@ -1273,6 +1273,9 @@ export function ProjectTaskDrawer({
             )}
 
             {(() => {
+              // Ocorrência: descrição e anexos do cliente aparecem no painel da ocorrência;
+              // os campos genéricos do card (diretoria, área, datas…) não se aplicam.
+              if (isOccurrence) return null
               const planningFields = defaultFormPlanningFields(defaultFormFields, defaultFormLinks)
               const descriptionField = defaultFieldsByKey.get("description")
               const showDescription = descriptionField && isDefaultFieldShown(descriptionField, defaultFormLinks)
@@ -1424,7 +1427,7 @@ export function ProjectTaskDrawer({
               )
             })()}
 
-            {formSections.map((section) => {
+            {!isOccurrence && formSections.map((section) => {
               const secMode = sectionMode(section.id)
               const visibleFields = (fieldsBySection[section.id] ?? [])
                 .filter((f) => f.is_active)
@@ -1495,6 +1498,7 @@ export function ProjectTaskDrawer({
               )
             })}
 
+            {!isOccurrence && (
             <div className="space-y-3 border-t border-border pt-4">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
@@ -1591,6 +1595,7 @@ export function ProjectTaskDrawer({
                 )}
               </div>
             </div>
+            )}
 
             {task && isPlanningRootTask(task.planning_kind) && isProjectOrProgramKanbanFunnel(taskFunnelName) && (
               <AssistedOpsDevsSection projectTaskId={task.id} readOnly={readOnly} refreshKey={oaDevsRefresh} />
@@ -1613,7 +1618,7 @@ export function ProjectTaskDrawer({
               </div>
             )}
 
-            {!readOnly && task && (
+            {!readOnly && task && !isOccurrence && (
               <ProjectPriorityWidget taskId={task.id} mode={currentStatus?.priority_mode ?? "edit"} />
             )}
 

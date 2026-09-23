@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-23 — Card da ocorrência: dados da ocorrência, projeto/PO/produto e anexos da abertura
+
+- **Pedido:** No detalhe do card da ocorrência (kanban), mostrar os dados da ocorrência e, do projeto, só nome, PO responsável e produto vinculado; o anexo enviado na abertura não aparecia.
+- **Feito:** `OccurrenceDetail` ganha `project_po_name` e `product_name` (visão do time; produto via `linked_product_id` do card-raiz, consulta em savepoint). `OccurrenceTeamPanel` mostra Projeto · PO · Produto, "O que aconteceu" (descrição do cliente), passos/esperado/tela e "Anexos enviados na abertura" (download). No drawer, para ocorrência, somem os campos genéricos do card (diretoria, área, datas, formulário do tipo), a matriz de priorização e "Trabalho relacionado"; ficam painel, timeline e conversa. Os anexos estavam em `task.anexos`, mas o drawer só os mostrava pelo campo padrão da etapa.
+- **Não mexer:** descrição e anexos da ocorrência aparecem no painel, não no bloco de campos padrão (`if (isOccurrence) return null`).
+- **Arquivos:** `projetos/assisted_ops.py`, `projetos/schemas.py`, `frontend/src/api/clientes.ts`, `OccurrenceTeamPanel.tsx`, `ProjectTaskDrawer.tsx`
+
 ## 2026-09-23 — Portal: tipo "Ajuste (diferente do combinado)" retirado
 
 - **Pedido:** Tirar o tipo "Ajuste (diferente do combinado)" da nova ocorrência no Portal do Cliente.

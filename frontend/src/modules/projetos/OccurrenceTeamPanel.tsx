@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { toast } from "@/lib/toast"
+import { AttachmentField, type Attachment } from "@/components/AttachmentField"
 
 const NONE = "__none__"
 
@@ -152,10 +153,14 @@ export function OccurrenceTeamPanel({
           Ocorrência {occ.code_label} · Operação Assistida
         </p>
       </div>
+      {/* Do projeto, só o essencial para quem atende: nome, PO e produto. */}
+      <div className="grid gap-x-4 gap-y-1 rounded-md bg-background/70 px-2 py-1.5 text-xs sm:grid-cols-3">
+        <span>Projeto: <span className="font-medium">{occ.project_title ?? "—"}</span></span>
+        <span>PO: <span className="font-medium">{occ.project_po_name ?? "—"}</span></span>
+        <span>Produto: <span className="font-medium">{occ.product_name ?? "—"}</span></span>
+      </div>
       <p className="text-xs text-muted-foreground">
-        Projeto <span className="font-medium text-foreground">{occ.project_title ?? "—"}</span>
-        {occ.opened_by_name && <> · aberta por <span className="font-medium text-foreground">{occ.opened_by_name}</span></>}
-        {" · "}
+        {occ.opened_by_name && <>Aberta por <span className="font-medium text-foreground">{occ.opened_by_name}</span> · </>}
         {OCCURRENCE_TIPO_LABEL[occ.tipo]} · {OCCURRENCE_IMPACTO_LABEL[occ.impacto]} · {OCCURRENCE_ABRANGENCIA_LABEL[occ.abrangencia]}
       </p>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md bg-background/70 px-2 py-1.5 text-xs">
@@ -186,9 +191,18 @@ export function OccurrenceTeamPanel({
           {occ.release_item_title && <> como “{occ.release_item_title}”</>}.
         </p>
       )}
+      <Info label="O que aconteceu" value={occ.description} />
       <Info label="Passos para reproduzir" value={occ.passos} />
       <Info label="Resultado esperado" value={occ.esperado} />
       <Info label="Tela / funcionalidade" value={occ.funcionalidade} />
+      {(occ.anexos?.length ?? 0) > 0 && (
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Anexos enviados na abertura
+          </div>
+          <AttachmentField value={occ.anexos as Attachment[]} onChange={() => {}} disabled />
+        </div>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1">
