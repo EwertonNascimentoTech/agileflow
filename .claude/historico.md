@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-23 — Cadastro de cliente lista só projetos em Operação Assistida
+
+- **Pedido:** No cadastro/edição de cliente, "Projetos vinculados" deve listar apenas os projetos em Operação Assistida.
+- **Feito:** `list_linkable_projects` (GET /projetos/clients/linkable-projects) devolve só cards-raiz na raia Operação Assistida (`_is_assisted_operation_status`). Na tela, vínculos que o cliente já tem com projetos fora da raia continuam aparecendo marcados (para o PO ver e desfazer; salvar não os apaga sem querer), com o aviso "Só aparecem os projetos em Operação Assistida". Hoje: 2 de 124 projetos na raia.
+- **Não mexer:** o backend não recusa vínculo com projeto fora da raia (a tela é que limita) — o cadastro via API do E2E vincula antes da OA.
+- **Arquivos:** `projetos/clients.py`, `ProjectClientsPage.tsx`
+
 ## 2026-09-23 — Coordenação define o atendimento da OA no próprio modal
 
 - **Pedido:** O modal da Operação Assistida não é só aviso: quem move (o coordenador) faz a ação ali.

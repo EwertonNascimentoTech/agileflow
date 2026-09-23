@@ -103,10 +103,16 @@ export default function ProjectClientsPage() {
     )
   }, [clients, search])
 
+  // Só projetos em Operação Assistida (o backend já filtra). Vínculos que o cliente já tem
+  // com projetos fora da raia continuam listados (marcados) para o PO poder ver e desfazer —
+  // senão sumiriam da tela, embora continuassem gravados.
   const visibleProjects = useMemo(() => {
+    const oaIds = new Set(projects.map((p) => p.task_id))
+    const linkedOutside = (editing?.projects ?? []).filter((p) => !oaIds.has(p.task_id))
+    const all = [...projects, ...linkedOutside]
     const q = projectFilter.trim().toLowerCase()
-    return q ? projects.filter((p) => p.title.toLowerCase().includes(q)) : projects
-  }, [projects, projectFilter])
+    return q ? all.filter((p) => p.title.toLowerCase().includes(q)) : all
+  }, [projects, projectFilter, editing])
 
   function openCreate() {
     setEditing(null)
@@ -429,6 +435,7 @@ export default function ProjectClientsPage() {
 
                 <div className="space-y-1.5">
                   <Label>Projetos vinculados ({form.projectIds.length})</Label>
+                  <p className="text-xs text-muted-foreground">Só aparecem os projetos em Operação Assistida.</p>
                   <Input
                     placeholder="Filtrar projetos"
                     value={projectFilter}
@@ -436,7 +443,9 @@ export default function ProjectClientsPage() {
                   />
                   <div className="max-h-56 overflow-y-auto rounded-md border">
                     {visibleProjects.length === 0 ? (
-                      <p className="p-3 text-sm text-muted-foreground">Nenhum projeto encontrado.</p>
+                      <p className="p-3 text-sm text-muted-foreground">
+                        {projectFilter.trim() ? "Nenhum projeto encontrado." : "Nenhum projeto em Operação Assistida no momento."}
+                      </p>
                     ) : (
                       visibleProjects.map((p) => (
                         <label

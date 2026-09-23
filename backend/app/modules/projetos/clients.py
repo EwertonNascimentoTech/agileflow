@@ -338,19 +338,24 @@ class ProjectClientService:
     async def list_linkable_projects(
         db: AsyncSession, scope: Optional[set[uuid.UUID]] = None
     ) -> list[ProjectClientProjectRef]:
-        """Cards-raiz do kanban Projetos e Programas (candidatos a vínculo)."""
+        """Candidatos a vínculo: cards-raiz do kanban Projetos e Programas que estão na raia
+        Operação Assistida — só eles recebem ocorrências de cliente. (Vínculos já feitos com
+        projetos que saíram da raia continuam no cadastro; a tela os mostra à parte.)"""
+        from app.modules.projetos.service import ProjectTaskService
         rows = await db.execute(
             select(ProjectTask.id, ProjectTask.title, ProjectTask.planning_kind,
-                   ProjectStatusConfig.name, ProjectFunnel.name)
+                   ProjectStatusConfig, ProjectFunnel.name)
             .join(ProjectStatusConfig, ProjectStatusConfig.id == ProjectTask.status_id)
             .join(ProjectFunnel, ProjectFunnel.id == ProjectStatusConfig.funnel_id)
             .where(ProjectTask.parent_task_id.is_(None))
             .order_by(ProjectTask.title)
         )
         return [
-            ProjectClientProjectRef(task_id=r[0], title=r[1], planning_kind=r[2], status_name=r[3])
+            ProjectClientProjectRef(task_id=r[0], title=r[1], planning_kind=r[2], status_name=r[3].name)
             for r in rows.all()
-            if _is_planning_funnel_name(r[4]) and (scope is None or r[0] in scope)
+            if _is_planning_funnel_name(r[4])
+            and ProjectTaskService._is_assisted_operation_status(r[3])
+            and (scope is None or r[0] in scope)
         ]
 
     @staticmethod
