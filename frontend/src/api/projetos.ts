@@ -2376,6 +2376,9 @@ export const projetosApi = {
     api.get<PriorityQuadrant[]>(`/projetos/config/priority/quadrants`).then((r) => r.data),
   savePriorityQuadrants: (quadrants: Array<Omit<PriorityQuadrant, "id">>) =>
     api.put<PriorityQuadrant[]>(`/projetos/config/priority/quadrants`, { quadrants }).then((r) => r.data),
+  /** {task_id: quadrante} — só o necessário para o selo do card no board. */
+  priorityQuadrantsByTask: () =>
+    api.get<Record<string, QuadrantCode>>("/projetos/priority/quadrants-by-task").then((r) => r.data),
   priorityMatrix: (params?: { funnel_id?: string; quadrant?: string; pillar_id?: string }) =>
     api.get<PriorityMatrixItem[]>(`/projetos/priority/matrix`, { params }).then((r) => r.data),
   getTaskPriority: (taskId: string) =>

@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-23 — Auditoria · bloco 3 (desempenho do dia a dia)
+
+- **Pedido:** Terceiro bloco da auditoria: Painel PO vazio/lento, Gantt travando a aba, agentes de IA atrasando a criação, EPA na RTD e board lento.
+- **Feito:** Painel PO: CPM uma vez por projeto (`_cpm_context` + `cache` em `critical_path`) e Gestão numa passada só agrupada por PO (`_aggregate`), de 22–38 s para cerca de 3 s. Agentes de etapa no Celery (`agents.run_stage_agent` via `dispatch_on_enter`, com fallback inline): criar/mover card não espera a IA (~15 s). EPA: planos + acompanhamentos em cache Redis por 10 min e acompanhamentos em paralelo (5 por vez), de 7–9 s para 0,02 s no cache. Board: lista serializada por TypeAdapter (7× mais rápida), GZip nível 6 e selo de quadrante por `GET /priority/quadrants-by-task`; após salvar, só recarrega o board se a mudança repercute em outros cards. Drawer: efeito principal chaveado por `task.id` (não refaz ~14 requisições a cada save); produto/release em efeito próprio; mudança de etapa/pai recarrega trava e filhos. Gantt: skeleton até o `?root` chegar (React Router 7 troca a URL em startTransition) e grade da visão completa como fundo CSS em vez de um div por dia (~4 milhões de nós), de 60 s para 3 s.
+- **Não mexer:** `dispatch_on_enter` (não chamar `run_on_enter` no request); listener `after_begin` em `_run_stage_agent`; `cache` do `critical_path`; `autoSelectPending` e `trackBg` no `GanttPage`; deps `[open, task?.id, ...]` do drawer.
+- **Arquivos:** `projetos/service.py`, `projetos/api/routes.py`, `tasks/scheduled.py`, `rtd/epa_client.py`, `main.py`, `GanttPage.tsx`, `ProjectBoardPage.tsx`, `ProjectTaskDrawer.tsx`, `api/projetos.ts`
+
 ## 2026-09-23 — Auditoria · bloco 2 (escopo, permissões de leitura, desligamento, primeiro acesso)
 
 - **Pedido:** Segundo bloco da auditoria geral.

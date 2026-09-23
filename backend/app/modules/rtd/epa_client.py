@@ -15,7 +15,9 @@ O grid devolve o dataset INTEIRO (~15k itens) — cacheado em memória por 10 mi
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import hashlib
 import html
 import json
 import time
@@ -37,6 +39,10 @@ _FALLBACK_TTL = 13 * 3600  # doc: 13h quando o JWT não traz exp
 
 _GRID_CACHE: dict = {"data": None, "ts": 0.0}
 _GRID_TTL = 600.0  # o grid traz o dataset inteiro — não rebuscar a cada navegação
+# Resultado de buscar_planos no Redis (compartilhado pelos workers): a reunião em rascunho e o
+# link público consultavam o EPA ao vivo a cada abertura (5–16 s).
+_RESULT_TTL = 600
+_ACOMP_CONCURRENCY = 5
 
 
 def epa_configured() -> bool:
@@ -228,6 +234,14 @@ async def buscar_planos(codigos: list[int], periodo_fim: date) -> list[dict]:
     Erros por plano não derrubam o conjunto (campo `erro` no item)."""
     if not epa_configured():
         raise EpaError("Integração EPA não configurada — defina EPA_LOGIN/EPA_SENHA no .env.")
+    from app.core.cache import cache_get, cache_set
+
+    cache_key = "epa:planos:" + hashlib.sha1(
+        json.dumps([sorted(codigos), periodo_fim.isoformat(), date.today().isoformat()]).encode()
+    ).hexdigest()
+    cached = await cache_get(cache_key)
+    if isinstance(cached, list):
+        return cached
     out: list[dict] = []
     async with httpx.AsyncClient(timeout=90.0) as client:
         tok = await _token(client)
@@ -245,6 +259,19 @@ async def buscar_planos(codigos: list[int], periodo_fim: date) -> list[dict]:
             origem = item.get("codigoorigem")
             if origem is not None:
                 filhos_idx.setdefault(origem, []).append(item)
+
+        # Acompanhamentos: uma chamada por plano, em paralelo (antes em série, ~1 s cada).
+        sem = asyncio.Semaphore(_ACOMP_CONCURRENCY)
+
+        async def _acomp(codigo: int):
+            async with sem:
+                try:
+                    return await _acompanhamentos_por_acao(client, headers, codigo)
+                except Exception:  # noqa: BLE001 — acompanhamentos são complemento
+                    return None
+
+        validos = [c for c in codigos if c in by_codigo]
+        acomp_by_plano = dict(zip(validos, await asyncio.gather(*[_acomp(c) for c in validos])))
 
         for codigo in codigos:
             raiz = by_codigo.get(codigo)
@@ -265,13 +292,11 @@ async def buscar_planos(codigos: list[int], periodo_fim: date) -> list[dict]:
                 a["status"] != "concluido",
                 a["prazo"] or "9999-12-31",
             ))
-            try:
-                acomp_map = await _acompanhamentos_por_acao(client, headers, codigo)
+            acomp_map = acomp_by_plano.get(codigo)
+            if acomp_map:
                 for a in acoes:
                     if a["codigo"] is not None:
                         a["acompanhamentos"] = acomp_map.get(int(a["codigo"]), [])
-            except Exception:  # noqa: BLE001 — acompanhamentos são complemento
-                pass
 
             # Regra da RTD: ação NÃO concluída com prazo < data atual → ATRASADA
             # (independente do status nominal no EPA: Planejado / Em andamento / etc.).
@@ -303,4 +328,5 @@ async def buscar_planos(codigos: list[int], periodo_fim: date) -> list[dict]:
                 "acoes": acoes,
                 "erro": None,
             })
+    await cache_set(cache_key, out, _RESULT_TTL)
     return out

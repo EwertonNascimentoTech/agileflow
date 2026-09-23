@@ -82,3 +82,10 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 - Primeiro acesso: token só no link gerado por quem cadastra (72 h, uso único). `/auth/first-access/check` nunca devolve token.
 - Desligar/excluir Pessoa desativa o login vinculado.
 - Tarefas Celery: `_run` descarta o pool (engine.dispose) e o Redis ao fim de cada execução.
+
+## Desempenho (auditoria 2026-09-23 · bloco 3)
+
+- Agente de etapa roda no Celery (`dispatch_on_enter` enfileira `agents.run_stage_agent`); criar/mover card não espera a IA. Não voltar a chamar `run_on_enter` dentro do request.
+- Painel PO: CPM calculado uma vez por projeto (`critical_path(..., cache=)`); visão de Gestão = uma chamada de `build` agrupada por `po_id`, nunca uma por PO.
+- Gantt: nada de um elemento por dia por linha (grade = fundo CSS); a visão completa só aparece sem `?root` e depois da auto-seleção resolvida.
+- Drawer do card: efeito principal chaveado por `task.id`; cada ação que muda etapa/pai/produto recarrega só a parte afetada.

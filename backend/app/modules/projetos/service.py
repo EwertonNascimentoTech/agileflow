@@ -3991,7 +3991,7 @@ class ProjectTaskService:
         await db.commit()
         await db.refresh(task)
         if status_obj:
-            await ProjectAgentRunner.run_on_enter(db, project_id, task, status_obj)
+            await ProjectAgentRunner.dispatch_on_enter(db, project_id, task, status_obj)
         # Card novo com pai/origem herda a priorização da família, se houver.
         if task.parent_task_id or task.origin_task_id:
             await PriorityScoreService.sync_family(db, task.id)
@@ -4762,7 +4762,7 @@ class ProjectTaskService:
         if status_changed:
             final_status = await db.get(ProjectStatusConfig, task.status_id)
             if final_status:
-                await ProjectAgentRunner.run_on_enter(db, project_id, task, final_status)
+                await ProjectAgentRunner.dispatch_on_enter(db, project_id, task, final_status)
         # Propaga/herdar a priorização para a família — cobre vínculo de pai, conversão
         # (novo Projeto com origin_task_id) e subtarefas criadas por automação.
         await PriorityScoreService.sync_family(db, task.id)
@@ -5442,30 +5442,15 @@ class ProjectTaskService:
         await db.commit()
 
     @staticmethod
-    async def critical_path(db: AsyncSession, project_id: uuid.UUID, root_id: uuid.UUID) -> list[dict]:
-        """CPM (caminho crítico) da subárvore de `root_id`: backward pass + folgas sobre as datas
-        JÁ persistidas (early schedule do motor). Sem escrever no banco. Retorna por tarefa:
-        is_critical, total_float_hours, free_float_hours, late_start, late_finish."""
-        root = await db.get(ProjectTask, root_id)
-        if root is None:
-            return []
+    async def _cpm_context(db: AsyncSession, project_id: uuid.UUID) -> tuple:
+        """Calendário, tarefas, filhos, nós e arestas do container — a parte cara do CPM."""
         calendar = await load_calendar(db)
         rows = await db.execute(select(ProjectTask).where(ProjectTask.project_id == project_id))
         by_id: dict[uuid.UUID, ProjectTask] = {t.id: t for t in rows.scalars().all()}
-
         children: dict[uuid.UUID, list[uuid.UUID]] = {}
         for t in by_id.values():
             if t.parent_task_id:
                 children.setdefault(t.parent_task_id, []).append(t.id)
-        subtree: set[uuid.UUID] = set()
-        stack = [root_id]
-        while stack:
-            cur = stack.pop()
-            if cur in subtree:
-                continue
-            subtree.add(cur)
-            stack.extend(children.get(cur, []))
-
         nodes = [
             EngineNode(
                 id=t.id, parent_id=t.parent_task_id, order=t.order, duration_hours=None,
@@ -5486,6 +5471,39 @@ class ProjectTaskService:
             EngineEdge(predecessor=p, successor=s, dep_type=(dt or "FS"), lag_hours=float(lag or 0))
             for p, s, dt, lag in dep_rows.all()
         ]
+        return calendar, by_id, children, nodes, edges
+
+    @staticmethod
+    async def critical_path(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        root_id: uuid.UUID,
+        cache: Optional[dict] = None,
+    ) -> list[dict]:
+        """CPM (caminho crítico) da subárvore de `root_id`: backward pass + folgas sobre as datas
+        JÁ persistidas (early schedule do motor). Sem escrever no banco. Retorna por tarefa:
+        is_critical, total_float_hours, free_float_hours, late_start, late_finish.
+
+        `cache` (dict da requisição): quem calcula o CPM de muitas raízes (Painel PO) passa o
+        mesmo dict e o container é carregado UMA vez — antes eram ~120 cargas completas."""
+        if cache is not None and project_id in cache:
+            calendar, by_id, children, nodes, edges = cache[project_id]
+        else:
+            ctx = await ProjectTaskService._cpm_context(db, project_id)
+            if cache is not None:
+                cache[project_id] = ctx
+            calendar, by_id, children, nodes, edges = ctx
+        if root_id not in by_id:
+            return []
+        subtree: set[uuid.UUID] = set()
+        stack = [root_id]
+        while stack:
+            cur = stack.pop()
+            if cur in subtree:
+                continue
+            subtree.add(cur)
+            stack.extend(children.get(cur, []))
+
         # Early schedule = datas persistidas, restritas à subárvore e com início+fim.
         sched = {
             t.id: (t.start_date, t.due_date)
@@ -5494,7 +5512,8 @@ class ProjectTaskService:
         }
         if root_id not in sched:
             return []
-        cpm = compute_cpm(nodes, edges, root_id, sched, calendar)
+        # Só os nós da subárvore entram no motor (o resto do container não muda o resultado).
+        cpm = compute_cpm([n for n in nodes if n.id in subtree], edges, root_id, sched, calendar)
         return [
             {
                 "task_id": tid,
@@ -9993,6 +10012,37 @@ class ProjectAgentRunner:
     _AZURE_TOKEN_CACHE: dict = {}
 
     @staticmethod
+    async def dispatch_on_enter(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        task: ProjectTask,
+        status_obj: Optional[ProjectStatusConfig],
+    ) -> None:
+        """Agente de IA da etapa (5–15 s) em segundo plano: o worker Celery executa e a
+        requisição volta na hora. Sem broker, cai para a execução inline (comportamento antigo)."""
+        if not status_obj:
+            return
+        has_agent = (await db.execute(
+            select(ProjectStageAgentBinding.id).where(
+                ProjectStageAgentBinding.status_id == status_obj.id,
+                ProjectStageAgentBinding.is_active == True,  # noqa: E712
+            ).limit(1)
+        )).scalar_one_or_none()
+        if has_agent is None:
+            return
+        schema = (await db.execute(_sa_text("SELECT current_schema()"))).scalar()
+        try:
+            from app.core.celery_app import celery_app
+
+            celery_app.send_task(
+                "agents.run_stage_agent",
+                args=[schema, str(project_id), str(task.id), str(status_obj.id)],
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("agente da etapa: broker indisponível, executando inline")
+            await ProjectAgentRunner.run_on_enter(db, project_id, task, status_obj)
+
+    @staticmethod
     async def run_on_enter(
         db: AsyncSession,
         project_id: uuid.UUID,
@@ -11816,6 +11866,7 @@ class PoPortfolioService:
             return "aprovada" if "aprovada" in sts else "pendente"
 
         items: list = []
+        cpm_cache: dict = {}
         for root in roots:
             subtree_ids = PoPortfolioService._subtree(root.id, children)
             sub = [by_id[i] for i in subtree_ids]
@@ -11849,7 +11900,7 @@ class PoPortfolioService:
             absence_conflict = bool(absence_statuses)
             no_due_date = root.due_date is None
 
-            cpm = await ProjectTaskService.critical_path(db, root.project_id, root.id)
+            cpm = await ProjectTaskService.critical_path(db, root.project_id, root.id, cache=cpm_cache)
             critical_ids = {c["task_id"] for c in cpm if c["is_critical"]}
             critical_count = sum(1 for i in subtree_ids if i in critical_ids)
 
@@ -11930,6 +11981,7 @@ class PoPortfolioService:
 
             items.append({
                 "task_id": root.id, "title": root.title, "project_id": root.project_id,
+                "po_id": root.assigned_to,
                 "planning_kind": root.planning_kind or "projeto",
                 "description": root.description, "demand_type_id": root.demand_type_id,
                 "start_date": root.start_date, "due_date": root.due_date, "next_due_date": next_due_date,
@@ -11962,25 +12014,29 @@ class PoPortfolioService:
             )
         )
 
+        aggregates = PoPortfolioService._aggregate(items, {
+            "allocated_hours": round(cap["allocated_hours"], 1),
+            "capacity_hours": round(cap["capacity_hours"], 1),
+            "overallocated_user_days": cap["overallocated_user_days"],
+        })
+        return {"po_id": po_id, "items": items, "aggregates": aggregates,
+                "available_diretorias": available_diretorias, "available_areas": available_areas}
+
+    @staticmethod
+    def _aggregate(items: list, capacity_vs_demand: dict) -> dict:
         rag = {"verde": 0, "amarelo": 0, "vermelho": 0}
         for it in items:
             rag[it["health"]] += 1
         on_time_total = sum(it["on_time_completed"] for it in items)
         completed_total = sum(it["completed_count"] for it in items)
-        aggregates = {
+        return {
             "rag": rag,
             "total_projetos": sum(1 for it in items if it["planning_kind"] == "projeto"),
             "total_programas": sum(1 for it in items if it["planning_kind"] == "programa"),
             "on_time_pct": round(100 * on_time_total / completed_total, 1) if completed_total else None,
             "avg_progress_pct": round(sum(it["progress_pct"] for it in items) / len(items), 1) if items else None,
-            "capacity_vs_demand": {
-                "allocated_hours": round(cap["allocated_hours"], 1),
-                "capacity_hours": round(cap["capacity_hours"], 1),
-                "overallocated_user_days": cap["overallocated_user_days"],
-            },
+            "capacity_vs_demand": dict(capacity_vs_demand),
         }
-        return {"po_id": po_id, "items": items, "aggregates": aggregates,
-                "available_diretorias": available_diretorias, "available_areas": available_areas}
 
     @staticmethod
     async def list_pos(db: AsyncSession) -> list[dict]:
@@ -12015,15 +12071,18 @@ class PoPortfolioService:
         Opcionalmente recorta por diretoria/área (aplicado a cada portfólio)."""
         pos = await cls.list_pos(db)
         out = []
-        available_diretorias: list[str] = []
-        available_areas: list[str] = []
+        # Um único build do portfólio inteiro, agrupado por PO. Antes era um build completo por
+        # PO (14×), cada um recarregando tudo. Itens não dependem de quem pediu, e capacidade/
+        # sobrecarga já eram do container inteiro — o resultado é o mesmo.
+        full = await cls.build(db, None, diretoria=diretoria, area=area)
+        available_diretorias = full.get("available_diretorias", [])
+        available_areas = full.get("available_areas", [])
+        items_by_po: dict = {}
+        for it in full["items"]:
+            items_by_po.setdefault(it.get("po_id"), []).append(it)
+        cap = full["aggregates"]["capacity_vs_demand"]
         for po in pos:
-            res = await cls.build(db, po["person_id"], diretoria=diretoria, area=area)
-            # As opções de filtro são tenant-wide (iguais em qualquer build) — basta o 1º.
-            if not available_diretorias and not available_areas:
-                available_diretorias = res.get("available_diretorias", [])
-                available_areas = res.get("available_areas", [])
-            agg = res["aggregates"]
+            agg = cls._aggregate(items_by_po.get(po["person_id"], []), cap)
             if agg["total_projetos"] + agg["total_programas"] == 0:
                 continue
             out.append({

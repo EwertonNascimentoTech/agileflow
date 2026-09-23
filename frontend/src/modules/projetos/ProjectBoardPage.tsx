@@ -1268,8 +1268,8 @@ export default function ProjectBoardPage() {
 
   useEffect(() => {
     if (!projectId) return
-    projetosApi.priorityMatrix()
-      .then((mx) => setQuadrantByTask(Object.fromEntries(mx.map((m) => [m.task_id, m.quadrant_code]))))
+    projetosApi.priorityQuadrantsByTask()
+      .then(setQuadrantByTask)
       .catch(() => setQuadrantByTask({}))
     // Mapa status→funil de TODOS os funis (para agrupar filhos pelo funil do pai).
     projetosApi.listStatuses(projectId)
@@ -2408,9 +2408,22 @@ export default function ProjectBoardPage() {
           }).catch(() => toast.error("Não foi possível abrir o card de contratação."))
         }}
         onSaved={(updated) => {
+          const before = tasks.find((t) => t.id === updated.id)
           setTasks((prev) => prev.map((t) => t.id === updated.id ? updated : t))
           setSelectedTask((prev) => (prev?.id === updated.id ? updated : prev))
-          void reloadTasks()
+          // Recarrega o board inteiro (~3 MB) só quando a mudança repercute em outros cards:
+          // etapa (cascata), pai, datas/horas/progresso (rollup) ou responsável. Título,
+          // descrição, anexos etc. só mudam o próprio card.
+          const ripple =
+            !before ||
+            before.status_id !== updated.status_id ||
+            before.parent_task_id !== updated.parent_task_id ||
+            before.start_date !== updated.start_date ||
+            before.due_date !== updated.due_date ||
+            String(before.estimated_hours ?? "") !== String(updated.estimated_hours ?? "") ||
+            before.percent_complete !== updated.percent_complete ||
+            before.assigned_to !== updated.assigned_to
+          if (ripple) void reloadTasks()
         }}
         onDeleted={(taskId) => {
           setTasks((prev) => prev.filter((t) => t.id !== taskId))

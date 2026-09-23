@@ -226,25 +226,6 @@ export function ProjectTaskDrawer({
       setStatusId(task.status_id)
     }, 0)
 
-    // Vínculo com o portfólio de Produtos — resolução tolerante (módulo pode estar inativo).
-    setLinkedProductName(null)
-    setLinkedReleaseVersao(null)
-    if (task.linked_product_id) {
-      const productId = task.linked_product_id
-      const releaseId = task.linked_release_id
-      produtosApi.getProduct(productId)
-        .then((p) => setLinkedProductName(p.name))
-        .catch(() => setLinkedProductName(`Produto #${productId.slice(0, 8)}`))
-      if (releaseId) {
-        produtosApi.listReleases(productId)
-          .then((rs) => {
-            const r = rs.find((x) => x.id === releaseId)
-            setLinkedReleaseVersao(r ? (r.nome ? `${r.versao} · ${r.nome}` : r.versao) : `Release #${releaseId.slice(0, 8)}`)
-          })
-          .catch(() => setLinkedReleaseVersao(`Release #${releaseId.slice(0, 8)}`))
-      }
-    }
-
     // Responsável = Pessoa do teamops (todas, inclusive sem login).
     teamopsApi.listPersons()
       .then((ps) => setUsers(ps.map((p) => ({ id: p.id, full_name: p.full_name, email: p.email })) as unknown as User[]))
@@ -283,7 +264,33 @@ export function ProjectTaskDrawer({
       cancelled = true
       clearTimeout(timer)
     }
-  }, [open, task, projectId, defaultFormFields])
+    // Chave pelo id: o board troca o objeto `task` a cada salvamento/recarga, e isso refazia as
+    // ~14 requisições do card e apagava o que o usuário ainda não tinha salvo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, task?.id, projectId, defaultFormFields])
+
+  // Vínculo com o portfólio de Produtos — resolução tolerante (módulo pode estar inativo).
+  // Efeito próprio: a classificação tardia troca o produto sem trocar o card.
+  const linkedProductId = task?.linked_product_id ?? null
+  const linkedReleaseId = task?.linked_release_id ?? null
+  useEffect(() => {
+    setLinkedProductName(null)
+    setLinkedReleaseVersao(null)
+    if (!open || !linkedProductId) return
+    const productId = linkedProductId
+    const releaseId = linkedReleaseId
+    produtosApi.getProduct(productId)
+      .then((p) => setLinkedProductName(p.name))
+      .catch(() => setLinkedProductName(`Produto #${productId.slice(0, 8)}`))
+    if (releaseId) {
+      produtosApi.listReleases(productId)
+        .then((rs) => {
+          const r = rs.find((x) => x.id === releaseId)
+          setLinkedReleaseVersao(r ? (r.nome ? `${r.versao} · ${r.nome}` : r.versao) : `Release #${releaseId.slice(0, 8)}`)
+        })
+        .catch(() => setLinkedReleaseVersao(`Release #${releaseId.slice(0, 8)}`))
+    }
+  }, [open, linkedProductId, linkedReleaseId])
 
   async function reloadScheduleLock() {
     if (!task) return
@@ -607,6 +614,7 @@ export function ProjectTaskDrawer({
         } else {
           const updated = await projetosApi.updateTask(projectId, task.id, { parent_task_id: linkSelectedId })
           setParentTaskId(updated.parent_task_id ?? NO_ASSIGNEE)
+          void reloadScheduleLock()  // outro pai = outra raiz de cronograma
         }
         toast.success("Vínculo adicionado.")
       }
@@ -635,6 +643,7 @@ export function ProjectTaskDrawer({
     try {
       await projetosApi.updateTask(projectId, task.id, { parent_task_id: null })
       setParentTaskId(NO_ASSIGNEE)
+      void reloadScheduleLock()
       onSaved(task)
     } catch {
       toast.error("Não foi possível remover o vínculo.")
@@ -687,6 +696,9 @@ export function ProjectTaskDrawer({
       setStatusId(updated.status_id)
       onSaved(updated)
       projetosApi.listTaskStatusHistory(projectId, task.id).then(setStatusHistory).catch(() => null)
+      // A etapa nova pode travar o cronograma e a cascata de funil move os filhos.
+      void reloadScheduleLock()
+      void refreshChildren()
       const after = allStatuses.find((s) => s.id === updated.status_id)
       toast.success(after && before && after.funnel_id !== before.funnel_id ? "Card movido para outro kanban." : "Etapa atualizada.")
     } catch (err) {

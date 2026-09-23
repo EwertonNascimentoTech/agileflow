@@ -496,15 +496,22 @@ export default function GanttPage() {
   // Abre direto na visão hierárquica: na primeira carga, se não há root no URL e existem
   // programas/projetos, seleciona o primeiro. Só uma vez — não impede "Ver cronograma completo".
   const autoSelectedRef = useRef(false)
+  // O React Router 7 aplica a troca de URL dentro de startTransition: entre o selectCard e a
+  // chegada do ?root há um render urgente ainda sem root. Este estado segura o skeleton até lá.
+  const [autoSelectPending, setAutoSelectPending] = useState(false)
   useEffect(() => {
     if (autoSelectedRef.current) return
     if (rootParam) { autoSelectedRef.current = true; return }
     if (planningCards.length > 0) {
       autoSelectedRef.current = true
+      setAutoSelectPending(true)
       selectCard(planningCards[0].id)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [planningCards, rootParam])
+  useEffect(() => {
+    if (rootParam) setAutoSelectPending(false)
+  }, [rootParam])
 
   // Progresso: folha usa percent_complete (ou 100 se concluída); pai é a média ponderada pelas
   // horas estimadas das folhas descendentes (peso 1 quando sem horas).
@@ -666,20 +673,42 @@ export default function GanttPage() {
     return out
   }, [days])
 
-  const swimlanes = useMemo(() => funnels.map((f) => {
-    const statusIds = new Set(statuses.filter((s) => s.funnel_id === f.id).map((s) => s.id))
-    const rows = visible
-      .filter((t) => statusIds.has(t.status_id))
-      .map((t) => {
-        const s = dayOnly(t.start_date!); const e = dayOnly(t.due_date!)
-        let sIdx = days.findIndex((d) => d.toDateString() === s.toDateString())
-        let eIdx = days.findIndex((d) => d.toDateString() === e.toDateString())
-        if (sIdx === -1) sIdx = s < days[0] ? 0 : days.length - 1
-        if (eIdx === -1) eIdx = e > days[days.length - 1] ? days.length - 1 : 0
-        return { task: t, sIdx, eIdx }
-      })
-    return { funnel: f, rows }
-  }), [funnels, statuses, visible, days])
+  // Só a visão completa (sem root) usa as raias; no modo escopado não vale o custo.
+  const swimlanes = useMemo(() => {
+    if (rootParam) return []
+    const dayIdx = new Map(days.map((d, i) => [d.toDateString(), i]))
+    return funnels.map((f) => {
+      const statusIds = new Set(statuses.filter((s) => s.funnel_id === f.id).map((s) => s.id))
+      const rows = visible
+        .filter((t) => statusIds.has(t.status_id))
+        .map((t) => {
+          const s = dayOnly(t.start_date!); const e = dayOnly(t.due_date!)
+          let sIdx = dayIdx.get(s.toDateString()) ?? -1
+          let eIdx = dayIdx.get(e.toDateString()) ?? -1
+          if (sIdx === -1) sIdx = s < days[0] ? 0 : days.length - 1
+          if (eIdx === -1) eIdx = e > days[days.length - 1] ? days.length - 1 : 0
+          return { task: t, sIdx, eIdx }
+        })
+      return { funnel: f, rows }
+    })
+  }, [rootParam, funnels, statuses, visible, days])
+
+  // Grade da faixa de tempo como fundo CSS (linha por dia + fins de semana a cada 7 dias).
+  // Antes era um <div> por dia em cada linha: ~1,7 mil demandas × ~2,3 mil dias = 4 milhões de
+  // nós, e o layout travava a aba.
+  const trackBg = useMemo(() => {
+    const n = days.length || 1
+    const p = 100 / n
+    const lines = `repeating-linear-gradient(to right, var(--af-border) 0 1px, transparent 1px ${p}%)`
+    const stops: string[] = []
+    for (let i = 0; i < 7; i++) {
+      const wd = days[i]?.getDay()
+      const color = wd === 0 || wd === 6 ? "var(--af-muted)" : "transparent"
+      stops.push(`${color} ${i * p}% ${(i + 1) * p}%`)
+    }
+    return `${lines}, repeating-linear-gradient(to right, ${stops.join(", ")})`
+  }, [days])
+  const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users])
 
   function barColor(t: ProjectTask): string {
     if (t.completed_at) return "var(--af-success)"
@@ -689,6 +718,11 @@ export default function GanttPage() {
   }
 
   if (loading) return <div className="p-1"><Skeleton className="h-96 rounded-lg" /></div>
+  // Sem root no URL, o efeito acima escolhe o 1º projeto logo após o render. Sem esta espera,
+  // o 1º render desenhava o cronograma COMPLETO (~2,4 mil tarefas) e travava a aba por 40–85 s.
+  if (!rootParam && (autoSelectPending || (!autoSelectedRef.current && planningCards.length > 0))) {
+    return <div className="p-1"><Skeleton className="h-96 rounded-lg" /></div>
+  }
 
   // Modo escopado: cronograma de UM projeto (root) — o PO escreve as etapas (atividades-filhas).
   if (rootParam) {
@@ -962,7 +996,7 @@ export default function GanttPage() {
                 const left = bar.sIdx * dayPct
                 const width = Math.max(dayPct * 0.9, (bar.eIdx - bar.sIdx + 1) * dayPct)
                 const color = barColor(bar.task)
-                const assignee = users.find((u) => u.id === bar.task.assigned_to) ?? null
+                const assignee = (bar.task.assigned_to && userById.get(bar.task.assigned_to)) || null
                 return (
                   <div key={bar.task.id} className="gantt-task-row">
                     <div className="label">
@@ -974,11 +1008,7 @@ export default function GanttPage() {
                         {assignee ? initials(assignee.full_name) : "?"}
                       </span>
                     </div>
-                    <div className="gantt-track" style={{ minHeight: 44 }}>
-                      {days.map((d, i) => {
-                        const weekend = d.getDay() === 0 || d.getDay() === 6
-                        return <div key={i} className={`cell ${weekend ? "weekend" : ""}`} />
-                      })}
+                    <div className="gantt-track" style={{ minHeight: 44, minWidth: days.length * 38, backgroundImage: trackBg }}>
                       {todayLeft >= 0 && <div className="gantt-today-line" style={{ left: todayLeft + "%" }} />}
                       <div className="gantt-bar" style={{ left: left + "%", width: width + "%", background: color }} onClick={() => setEditing(bar.task)}>
                         <span className="bar-title">{bar.task.title}</span>

@@ -160,3 +160,48 @@ async def _check_project_slas() -> None:
                 await ProjectSlaService.scan_schema(db)
         except Exception as e:  # noqa: BLE001
             logger.error("[check_project_slas] %s: %s", schema, e)
+
+
+@celery_app.task(name="agents.run_stage_agent")
+def run_stage_agent_task(schema: str, project_id: str, task_id: str, status_id: str):
+    _run(_run_stage_agent(schema, project_id, task_id, status_id))
+
+
+async def _run_stage_agent(schema: str, project_id: str, task_id: str, status_id: str) -> None:
+    """Executa o agente de IA da etapa fora da requisição (disparado por
+    ProjectAgentRunner.dispatch_on_enter). Se o card já saiu da etapa, não faz nada."""
+    import re
+    import uuid
+
+    from sqlalchemy import event, text
+
+    from app.core.database import AsyncSessionLocal
+    from app.modules.projetos.models import ProjectStatusConfig, ProjectTask
+    from app.modules.projetos.service import ProjectAgentRunner
+
+    if not re.fullmatch(r"tenant_[a-z0-9_]+", schema or ""):
+        logger.error("[agents] schema inválido: %r", schema)
+        return
+    search_path = f"{schema}, public"
+    async with AsyncSessionLocal() as db:
+        # O agente faz vários commits; com asyncpg o SET se perde entre transações — reaplica
+        # a cada BEGIN (mesmo gancho do require_module).
+        def _reapply(session, transaction, connection):
+            connection.exec_driver_sql(f"SET search_path TO {search_path}")
+
+        event.listen(db.sync_session, "after_begin", _reapply)
+        try:
+            await db.execute(text(f"SET search_path TO {search_path}"))
+            task = await db.get(ProjectTask, uuid.UUID(task_id))
+            if task is None or str(task.status_id) != status_id:
+                logger.info("[agents] card %s saiu da etapa antes do agente — ignorado", task_id)
+                return
+            status = await db.get(ProjectStatusConfig, uuid.UUID(status_id))
+            await ProjectAgentRunner.run_on_enter(db, uuid.UUID(project_id), task, status)
+        except Exception as e:  # noqa: BLE001
+            logger.error("[agents] %s/%s: %s", schema, task_id, e)
+        finally:
+            try:
+                event.remove(db.sync_session, "after_begin", _reapply)
+            except Exception:  # noqa: BLE001
+                pass
