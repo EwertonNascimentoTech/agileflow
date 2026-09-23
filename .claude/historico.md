@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-23 — Ocorrência: "Assumir" visível e coordenação também assume
+
+- **Pedido:** Na ocorrência gerada não ficava claro como o dev assume e vira responsável.
+- **Feito:** Painel da ocorrência mostra, enquanto ninguém assumiu, o aviso "Ninguém assumiu esta ocorrência" com o botão Assumir (explica: vira responsável, vai para Ajustando, horas úteis começam, cliente avisado); para quem não pode, lista quem pode (devs de atendimento, PO e coordenação — `assisted_ops_dev_names` no detalhe). Assumir aceita também a coordenação (`_is_coordination`). No drawer da ocorrência o responsável do cabeçalho é só leitura (o responsável vem do Assumir, que marca `assumed_at`); após assumir o cabeçalho atualiza. Verificado: dev de atendimento e coordenador assumem, dev de fora vê quem pode (9/9); E2E da OA 72/72 + 18/18.
+- **Não mexer:** responsável da ocorrência só pelo Assumir (não pelo seletor genérico do card).
+- **Arquivos:** `projetos/assisted_ops.py`, `projetos/schemas.py`, `frontend/src/api/clientes.ts`, `OccurrenceTeamPanel.tsx`, `ProjectTaskDrawer.tsx`
+
 ## 2026-09-23 — Card da ocorrência: dados da ocorrência, projeto/PO/produto e anexos da abertura
 
 - **Pedido:** No detalhe do card da ocorrência (kanban), mostrar os dados da ocorrência e, do projeto, só nome, PO responsável e produto vinculado; o anexo enviado na abertura não aparecia.

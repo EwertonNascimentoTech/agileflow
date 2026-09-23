@@ -178,13 +178,40 @@ export function OccurrenceTeamPanel({
         )}
         {occ.rejection_count > 0 && <span className="text-amber-700">Reprovada {occ.rejection_count}x</span>}
         {occ.finalized_by_team && <span className="text-muted-foreground">Finalizada pelo PO</span>}
-        {occ.can_assume && !readOnly && (
+        {occ.can_assume && !readOnly && occ.assignee_name && (
           <Button size="sm" variant="outline" className="ml-auto h-7 gap-1 text-xs" onClick={() => void assume()} disabled={assuming}>
             {assuming ? <Loader2 className="h-3 w-3 animate-spin" /> : <Hand size={12} />}
-            {occ.assignee_name ? "Assumir no lugar" : "Assumir"}
+            Assumir no lugar
           </Button>
         )}
       </div>
+      {/* Ninguém assumiu: chamada clara para quem pode (dev de atendimento, PO, coordenação) e,
+          para os demais, quem pode assumir. Assumir define o responsável e inicia as horas úteis. */}
+      {!occ.assignee_name && !occ.is_closed && (
+        occ.can_assume && !readOnly ? (
+          <div className="flex flex-wrap items-center gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 dark:border-amber-700 dark:bg-amber-950/30">
+            <p className="flex-1 text-xs text-amber-900 dark:text-amber-200">
+              <span className="font-semibold">Ninguém assumiu esta ocorrência.</span> Ao assumir, você vira o responsável,
+              ela vai para <span className="font-medium">Ajustando</span>, as horas úteis começam a contar e o cliente é avisado.
+            </p>
+            <Button size="sm" className="gap-1.5" onClick={() => void assume()} disabled={assuming}>
+              {assuming ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Hand size={14} />}
+              Assumir
+            </Button>
+          </div>
+        ) : (
+          <p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+            Ninguém assumiu ainda. Podem assumir:{" "}
+            <span className="font-medium text-foreground">
+              {[
+                ...(occ.assisted_ops_dev_names ?? []),
+                ...(occ.project_po_name ? [`${occ.project_po_name} (PO)`] : []),
+              ].join(", ") || "os desenvolvedores de atendimento do projeto e o PO"}
+            </span>{" "}
+            — e a coordenação.
+          </p>
+        )
+      )}
       {occ.release_project_title && (
         <p className="text-xs">
           Encaminhada para <span className="font-medium">{occ.release_project_title}</span>

@@ -70,6 +70,7 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 - Só abre ocorrência cliente vinculado a projeto que está na raia Operação Assistida. Projeto não vai a Concluído com ocorrência aberta. Ocorrência encerrada (etapa final) não reabre.
 - Portal: cliente vê todas as ocorrências dos projetos dele, só interage nas que abriu, só vê comentários `visibility = public`.
 - Ocorrência: Finalizado vem da homologação do cliente no Portal (NPS); o time só finaliza sendo PO do projeto/admin. "Encaminhada p/ Release" só via `forward-release`.
+- Ocorrência: responsável só pelo "Assumir" (dev de atendimento, PO do projeto, coordenação ou admin); no drawer o responsável do cabeçalho é só leitura.
 - Horas úteis da ocorrência começam no 1º "Assumir" e pausam em Aguardando Cliente/Homologando; calendário do TeamOps no fuso do tenant.
 - Capacidade de Projetos conta só User Story; Operação Assistida e Chamados são fatias separadas (`reserves`), pela divisão da jornada em Pessoas.
 - Divisão da jornada (Pessoas): Projetos % + Operação Assistida % <= 100; Chamados = o resto. `project_hours_per_day` continua só a fatia de Projetos.

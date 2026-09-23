@@ -175,6 +175,8 @@ export interface OccurrenceDetail extends OccurrenceSummary {
   /** Visão do time: PO responsável e produto do projeto (card da ocorrência). */
   project_po_name?: string | null
   product_name?: string | null
+  /** Visão do time: devs de atendimento do projeto (quem pode assumir, além do PO e da coordenação). */
+  assisted_ops_dev_names?: string[]
   can_assume: boolean
   comments: OccurrenceComment[]
   history: Array<{ stage_name: string | null; moved_at: string | null }>

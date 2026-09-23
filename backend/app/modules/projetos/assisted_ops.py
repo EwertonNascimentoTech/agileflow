@@ -558,10 +558,12 @@ class AssistedOpsService:
         if not for_client and viewer_user is not None and not summary.is_closed:
             pid = await AssistedOpsService._person_id_for_user(db, viewer_user.id)
             if pid is not None and pid != task.assigned_to:
+                from app.modules.projetos.service import ProjectTaskService
                 can_assume = (
                     pid in await AssistedOpsService._dev_person_ids(db, occ.project_task_id)
                     or await AssistedOpsService._is_project_po(db, viewer_user, occ.project_task_id)
                     or _is_admin(viewer_user)
+                    or await ProjectTaskService._is_coordination(db, viewer_user)
                 )
         release_titles = {}
         rel_ids = [i for i in (occ.release_project_task_id, occ.release_item_task_id) if i]
@@ -594,8 +596,14 @@ class AssistedOpsService:
 
         # Card da ocorrência (time): do projeto, só o PO responsável e o produto vinculado.
         po_name = product_name = None
+        dev_names: list[str] = []
         if not for_client:
             from app.modules.teamops.models import Person
+            dev_ids = await AssistedOpsService._dev_person_ids(db, occ.project_task_id)
+            if dev_ids:
+                dev_names = sorted((await db.execute(
+                    select(Person.full_name).where(Person.id.in_(dev_ids))
+                )).scalars().all())
             root = await db.get(ProjectTask, occ.project_task_id)
             if root is not None and root.assigned_to:
                 po_name = (await db.execute(
@@ -629,6 +637,7 @@ class AssistedOpsService:
             release_item_title=None if for_client else release_titles.get(occ.release_item_task_id),
             project_po_name=po_name,
             product_name=product_name,
+            assisted_ops_dev_names=dev_names,
             can_assume=can_assume,
             comments=[
                 OccurrenceComment(
@@ -989,7 +998,7 @@ class AssistedOpsService:
     # ── Atendimento: assumir ─────────────────────────────────────────────────
     @staticmethod
     async def assume(db: AsyncSession, task_id: uuid.UUID, user: User) -> OccurrenceDetail:
-        """Dev fixo (ou PO do projeto/admin) assume. Pode tomar uma já assumida por outro.
+        """Dev fixo, PO do projeto, coordenação ou admin assume. Pode tomar uma já assumida por outro.
         O 1º assumir inicia a contagem de horas úteis; no Backlog, já vai para Ajustando."""
         from app.modules.teamops.models import Person
 
@@ -1003,13 +1012,18 @@ class AssistedOpsService:
         pid = await AssistedOpsService._person_id_for_user(db, user.id)
         if pid is None:
             raise HTTPException(status_code=400, detail="Seu login não está vinculado a uma Pessoa (TeamOps).")
+        from app.modules.projetos.service import ProjectTaskService
         allowed = (
             pid in await AssistedOpsService._dev_person_ids(db, occ.project_task_id)
             or await AssistedOpsService._is_project_po(db, user, occ.project_task_id)
             or _is_admin(user)
+            or await ProjectTaskService._is_coordination(db, user)
         )
         if not allowed:
-            raise HTTPException(status_code=403, detail="Só os desenvolvedores de atendimento do projeto assumem ocorrências.")
+            raise HTTPException(
+                status_code=403,
+                detail="Só os desenvolvedores de atendimento do projeto, o PO ou a coordenação assumem ocorrências.",
+            )
         if task.assigned_to == pid:
             return await AssistedOpsService.team_detail(db, task_id, user)
 

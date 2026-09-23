@@ -2338,6 +2338,8 @@ class OccurrenceDetail(OccurrenceSummary):
     # Visão do time: do projeto só o PO responsável e o produto vinculado (card da ocorrência).
     project_po_name: Optional[str] = None
     product_name: Optional[str] = None
+    # Visão do time: devs de atendimento do projeto (quem pode assumir, além do PO e da coordenação).
+    assisted_ops_dev_names: list[str] = Field(default_factory=list)
     # Visão do time: o usuário logado pode assumir (dev fixo, PO do projeto ou admin).
     can_assume: bool = False
     comments: list[OccurrenceComment] = Field(default_factory=list)

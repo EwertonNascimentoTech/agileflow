@@ -1094,7 +1094,9 @@ export function ProjectTaskDrawer({
                 )
               )}
               <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                {defaultFieldsByKey.get("assigned_to") && isDefaultFieldShown(defaultFieldsByKey.get("assigned_to")!, defaultFormLinks) && (readOnly ? (
+                {/* Ocorrência: o responsável vem do "Assumir" (inicia as horas úteis e avisa o
+                    cliente) — no cabeçalho ele só é exibido. */}
+                {defaultFieldsByKey.get("assigned_to") && isDefaultFieldShown(defaultFieldsByKey.get("assigned_to")!, defaultFormLinks) && ((readOnly || isOccurrence) ? (
                   <span className="inline-flex items-center gap-1.5">
                     <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
                       {assignedUser ? initials(assignedUser.full_name) : "?"}
@@ -1239,6 +1241,7 @@ export function ProjectTaskDrawer({
                 onChanged={() => {
                   projetosApi.getTask(projectId, task.id).then((t) => {
                     setStatusId(t.status_id)
+                    setAssignedTo(t.assigned_to ?? NO_ASSIGNEE)
                     onSaved(t)
                   }).catch(() => null)
                   projetosApi.listTaskComments(projectId, task.id).then(setComments).catch(() => null)
