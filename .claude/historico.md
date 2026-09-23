@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-23 — Gantt: visão completa rolável, com zoom e travas resumidas
+
+- **Pedido:** Visão completa do Gantt ("Ver cronograma completo") não rolava para os lados — só apareciam as ~5 primeiras semanas de uma janela de 2025 a 2032.
+- **Feito:** Área de rolagem nos dois eixos com a coluna "Demanda" e o cabeçalho de datas fixos; abre posicionada em hoje. Zoom da barra (afastar/aproximar/ajustar) e Ctrl + roda passam a valer na visão completa; o cabeçalho troca dias, semanas e meses (em semanas, meses em cima; em meses, anos em cima e só a inicial quando estreito); "ajustar" pode ir abaixo do zoom mínimo do projeto (portfólio cobre anos). Grade por zoom (dia, linha semanal, nenhuma). Linhas com `minmax(0, 1fr)` (com `1fr` o cabeçalho impedia o ajuste). As travas de todos os projetos (53 travados + 20 em revisão) viraram um resumo com "Ver", e o gráfico aparece sem rolar a página.
+- **Não mexer:** `FULL_LABEL_W` = coluna do CSS; `skipZoomAnchor` (roda e ajustar não re-centralizam); `minmax(0, 1fr)` das linhas da visão completa; resumo das travas.
+- **Arquivos:** `GanttPage.tsx`, `styles/agileflow.css`
+
 ## 2026-09-23 — Auditoria · bloco 6 (itens menores P3)
 
 - **Pedido:** Corrigir os itens menores (P3) da auditoria geral.

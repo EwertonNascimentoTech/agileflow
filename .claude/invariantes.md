@@ -115,3 +115,9 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 - Mesma pessoa não tem duas ausências pendentes/aprovadas sobrepostas; calendário mostra só pendentes e aprovadas.
 - /health (API e domínio público) checa o banco (503 se cair) e o Redis (degraded).
 - docs/ é lido pelo módulo Documentação e aparece para todos: prompt, rascunho ou material interno vai para provisorio/.
+
+## Gantt — visão completa
+
+- Visão completa rola nos dois eixos com coluna "Demanda" e cabeçalho fixos, abre em hoje e respeita o zoom da barra; grade = fundo CSS (nunca um elemento por dia por linha).
+- Linhas da visão completa usam `grid-template-columns: 320px minmax(0, 1fr)`; `FULL_LABEL_W` acompanha os 320px.
+- Travas de cronograma na visão completa ficam num resumo que abre a lista; o cronograma do projeto (com root) continua com o banner próprio.
