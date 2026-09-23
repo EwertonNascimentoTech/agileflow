@@ -182,6 +182,8 @@ export function CapacityTeamView({ from, to }: { from: string; to: string }) {
               <WorkloadView
                 cells={heatmap.cells}
                 nameForUser={nameFor}
+                dateFrom={from}
+                dateTo={to}
                 onCellClick={(personId, date) => setDayDetail({ personId, date })}
               />
             ) : (

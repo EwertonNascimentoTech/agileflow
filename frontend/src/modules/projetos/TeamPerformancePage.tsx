@@ -81,14 +81,13 @@ function windowRange(preset: WindowPreset): { from: string; to: string } {
   return { from: iso(start), to }
 }
 
-/** Janela da grade de carga: mantém o passado do período e projeta o futuro (planejamento). */
+/** Janela da grade de carga: a partir de hoje (planejamento), projetando o futuro. */
 function capacityWindow(preset: WindowPreset): { from: string; to: string } {
-  const hist = windowRange(preset)
   const today = new Date()
   const forwardDays = preset === "30d" ? 30 : preset === "60d" ? 60 : preset === "90d" ? 90 : 56
   const end = new Date(today)
   end.setDate(end.getDate() + forwardDays)
-  return { from: hist.from, to: iso(end) }
+  return { from: iso(today), to: iso(end) }
 }
 
 function fmt(n: number | null | undefined, digits = 1): string {

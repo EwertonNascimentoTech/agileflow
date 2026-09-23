@@ -1871,6 +1871,17 @@ class ProjectTaskService:
             or "historia" in n
         )
 
+    _US_TITLE_RE = re.compile(r"^us[\s\-–—._]*\d", re.IGNORECASE)
+    _FEAT_TITLE_RE = re.compile(r"^feat(?:ure)?[\s\-–—._]*\d", re.IGNORECASE)
+
+    @staticmethod
+    def _title_looks_like_us(title: Optional[str]) -> bool:
+        return bool(title and ProjectTaskService._US_TITLE_RE.match(str(title).strip()))
+
+    @staticmethod
+    def _title_looks_like_feature(title: Optional[str]) -> bool:
+        return bool(title and ProjectTaskService._FEAT_TITLE_RE.match(str(title).strip()))
+
     @staticmethod
     def _normalize_us_checklist(raw) -> list[dict]:
         if not raw:
@@ -1903,6 +1914,8 @@ class ProjectTaskService:
 
     @staticmethod
     async def _is_user_story_task(db: AsyncSession, task: ProjectTask) -> bool:
+        if ProjectTaskService._title_looks_like_us(task.title):
+            return True
         if task.demand_type_id:
             row = await db.execute(
                 select(ProjectDemandType.slug, ProjectDemandType.name).where(
@@ -1963,6 +1976,8 @@ class ProjectTaskService:
             }
 
         def _is_us(task: ProjectTask) -> bool:
+            if ProjectTaskService._title_looks_like_us(task.title):
+                return True
             if task.demand_type_id and task.demand_type_id in us_type_ids:
                 return True
             return task.status_id in us_status_ids
@@ -2051,6 +2066,13 @@ class ProjectTaskService:
             return status_id
         if await ProjectTaskService._status_in_funnel(db, status_id, funnel.id):
             return status_id
+        from_st = await db.get(ProjectStatusConfig, status_id)
+        if from_st:
+            counterpart = await ProjectTaskService._status_named_in_funnel(
+                db, funnel.id, from_st.name,
+            )
+            if counterpart:
+                return counterpart.id
         init = await ProjectTaskService._initial_status_of_funnel(db, funnel.id)
         return init.id
 
@@ -2554,10 +2576,27 @@ class ProjectTaskService:
         )
 
     @staticmethod
+    async def _status_named_in_funnel(
+        db: AsyncSession, funnel_id: uuid.UUID, name: Optional[str]
+    ) -> Optional[ProjectStatusConfig]:
+        """Etapa ativa do funil com o mesmo nome (ex.: Em Desenvolvimento em Features e US)."""
+        needle = ProjectTaskService._norm_col(name)
+        if not needle:
+            return None
+        for st in await ProjectTaskService._funnel_statuses(db, funnel_id):
+            if ProjectTaskService._norm_col(st.name) == needle:
+                return st
+        return None
+
+    @staticmethod
     async def _is_feature_task(
         db: AsyncSession, task: ProjectTask, funnel_name: Optional[str] = None
     ) -> bool:
         """Reconhece um card 'Feature' por tipo de demanda ou pelo nome do funil."""
+        if ProjectTaskService._title_looks_like_us(task.title):
+            return False
+        if ProjectTaskService._title_looks_like_feature(task.title):
+            return True
         if task.demand_type_id:
             row = await db.execute(
                 select(ProjectDemandType.slug, ProjectDemandType.name).where(
@@ -2825,6 +2864,11 @@ class ProjectTaskService:
         frontier: list[uuid.UUID] = [root_id]
         now = datetime.utcnow()
         sla = ProjectTaskService._sla_initial(init_status)
+        init_funnel_name = None
+        if init_status.funnel_id:
+            init_funnel_name = (await db.execute(
+                select(ProjectFunnel.name).where(ProjectFunnel.id == init_status.funnel_id)
+            )).scalar_one_or_none()
         while frontier:
             res = await db.execute(
                 select(ProjectTask).where(ProjectTask.parent_task_id.in_(frontier))
@@ -2839,6 +2883,8 @@ class ProjectTaskService:
                 if child.status_id != init_status.id:
                     from_st = await db.get(ProjectStatusConfig, child.status_id)
                     if ProjectTaskService._skip_funnel_cascade(from_st, init_status):
+                        continue
+                    if ProjectTaskService._skip_cross_kind_funnel(child, init_funnel_name):
                         continue
                     child.status_id = init_status.id
                     child.completed_at = None
@@ -2865,9 +2911,17 @@ class ProjectTaskService:
         frontier: list[uuid.UUID] = [root_id]
         depth = 0
         now = datetime.utcnow()
+        funnel_ids = {s.funnel_id for s in (level1_status, deeper_status) if s.funnel_id}
+        funnel_names: dict[uuid.UUID, Optional[str]] = {}
+        if funnel_ids:
+            rows = (await db.execute(
+                select(ProjectFunnel.id, ProjectFunnel.name).where(ProjectFunnel.id.in_(funnel_ids))
+            )).all()
+            funnel_names = {fid: name for fid, name in rows}
         while frontier:
             depth += 1
             target = level1_status if depth == 1 else deeper_status
+            target_funnel_name = funnel_names.get(target.funnel_id) if target.funnel_id else None
             sla = ProjectTaskService._sla_initial(target)
             res = await db.execute(
                 select(ProjectTask).where(ProjectTask.parent_task_id.in_(frontier))
@@ -2881,6 +2935,8 @@ class ProjectTaskService:
                 if child.status_id != target.id:
                     from_st = await db.get(ProjectStatusConfig, child.status_id)
                     if ProjectTaskService._skip_funnel_cascade(from_st, target):
+                        continue
+                    if ProjectTaskService._skip_cross_kind_funnel(child, target_funnel_name):
                         continue
                     child.status_id = target.id
                     child.completed_at = None
@@ -2912,6 +2968,19 @@ class ProjectTaskService:
             return True
         n = ProjectTaskService._norm_col(getattr(from_status, "name", None))
         return "conclu" in n
+
+    @staticmethod
+    def _skip_cross_kind_funnel(
+        child: ProjectTask,
+        target_funnel_name: Optional[str],
+    ) -> bool:
+        """US não vai para o kanban Features (e Feature não vai para User Story) na cascata."""
+        dest = target_funnel_name or ""
+        if ProjectTaskService._title_looks_like_us(child.title) and ProjectTaskService._is_feature_funnel_name(dest):
+            return True
+        if ProjectTaskService._title_looks_like_feature(child.title) and ProjectTaskService._is_user_story_funnel_name(dest):
+            return True
+        return False
 
     @staticmethod
     async def _initial_status_of_funnel(
@@ -4659,6 +4728,18 @@ class ProjectTaskService:
         # nível — uma US criada pelo cronograma sumiria do kanban User Story.
         status_id = parent.status_id
         child_type_id = await ProjectTaskService._schedule_child_type_id(db, parent)
+        if child_type_id is None and await ProjectTaskService._is_feature_task(db, parent):
+            us_row = (await db.execute(
+                select(ProjectDemandType).where(ProjectDemandType.slug == "user_story")
+            )).scalar_one_or_none()
+            if us_row is None:
+                types = (await db.execute(select(ProjectDemandType))).scalars().all()
+                us_row = next(
+                    (dt for dt in types if ProjectTaskService._is_user_story_type(dt.slug, dt.name)),
+                    None,
+                )
+            if us_row:
+                child_type_id = us_row.id
         if child_type_id is not None:
             status_id = await ProjectTaskService._coerce_status_for_demand_type(
                 db, project_id, child_type_id, status_id,
@@ -4669,7 +4750,7 @@ class ProjectTaskService:
             project_id=project_id,
             status_id=status_id,
             parent_task_id=parent.id,
-            demand_type_id=None,
+            demand_type_id=child_type_id,
             title=data.title.strip()[:200],
             start_date=None,
             due_date=None,
@@ -6234,11 +6315,13 @@ class CapacityService:
         persons_by_id: dict[uuid.UUID, Person],
         unmapped: list[str],
         virtual_meta: Optional[dict[uuid.UUID, CapacityPersonMeta]] = None,
+        extra_person_ids: Optional[set[uuid.UUID]] = None,
     ) -> CapacityHeatmapResponse:
         """Monta CapacityHeatmapResponse (meta de pessoas + summary) a partir das células.
-        `virtual_meta` injeta pessoas sintéticas (freelancers do simulador)."""
+        `virtual_meta` injeta pessoas sintéticas (freelancers do simulador).
+        `extra_person_ids` = pessoas sem US mas com reserva de Operação Assistida/Chamados."""
         virtual_meta = virtual_meta or {}
-        present_ids = {c.user_id for c in cells}
+        present_ids = {c.user_id for c in cells} | (extra_person_ids or set())
         persons_meta: list[CapacityPersonMeta] = []
         for uid in present_ids:
             if uid in virtual_meta:

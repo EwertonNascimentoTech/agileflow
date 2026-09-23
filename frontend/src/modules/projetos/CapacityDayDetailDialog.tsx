@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { AlertTriangle, CalendarClock, Clock, Loader2 } from "lucide-react"
 
 import { projetosApi, type CapacityDayDetail, type CapacityDayTask } from "@/api/projetos"
@@ -104,6 +104,18 @@ export function CapacityDayDetailDialog({
   const [data, setData] = useState<CapacityDayDetail | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // O clique que abre o modal ainda “vaza” como interact-outside no mesmo tick
+  // e o Radix chama onOpenChange(false) antes do overlay existir — ignora isso.
+  const ignoreCloseRef = useRef(false)
+
+  useEffect(() => {
+    if (!open) return
+    ignoreCloseRef.current = true
+    const t = window.setTimeout(() => {
+      ignoreCloseRef.current = false
+    }, 400)
+    return () => window.clearTimeout(t)
+  }, [open, personId, date])
 
   useEffect(() => {
     if (!personId || !date) {
@@ -130,11 +142,18 @@ export function CapacityDayDetailDialog({
   const title = data?.person_name ?? personName ?? "Responsável"
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v && ignoreCloseRef.current) return
+        if (!v) onClose()
+      }}
+    >
       {/* DialogContent é grid: os filhos precisam de min-w-0, senão nomes longos de
           projeto/feature esticam a coluna e o painel corta as horas na direita. */}
       <DialogContent
-        className="w-[calc(100vw-2rem)] max-w-3xl overflow-x-hidden"
+        className="z-[200] w-[calc(100vw-2rem)] max-w-3xl overflow-x-hidden"
+        overlayClassName="z-[200]"
         description="Demandas do dia e atrasadas do responsável"
       >
         <DialogHeader className="min-w-0">

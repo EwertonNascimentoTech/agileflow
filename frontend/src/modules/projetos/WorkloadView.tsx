@@ -154,17 +154,48 @@ export function WorkloadView({
     return next ?? dates[dates.length - 1]
   }, [dates, todayIso])
 
-  // Ao abrir / recarregar dados, rola a grade para a data de hoje — com passado à
-  // esquerda e futuro à direita (hoje ~30% da viewport, não colado no fim).
-  useLayoutEffect(() => {
+  // Ao abrir / recarregar dados, rola a grade para hoje. Re-tenta quando a tabela
+  // ganha largura real (aba Radix recém-visível começa com clientWidth=0 e
+  // ficava presa no passado).
+  const autoScrollKeyRef = useRef<string | null>(null)
+
+  const scrollToFocusDate = () => {
     const scroller = scrollRef.current
     const col = todayColRef.current
-    if (!scroller || !col || !focusDate) return
+    if (!scroller || !col || !focusDate) return false
+    if (scroller.clientWidth < 32) return false
     const sticky = scroller.querySelector<HTMLElement>("th.sticky")
     const stickyW = sticky?.offsetWidth ?? 180
     const viewW = scroller.clientWidth - stickyW
     const target = col.offsetLeft - stickyW - Math.max(0, viewW * 0.3)
     scroller.scrollLeft = Math.max(0, Math.min(target, scroller.scrollWidth - scroller.clientWidth))
+    // Layout ainda não mediu as colunas (offsetLeft=0 no meio da janela).
+    return col.offsetLeft > 0 || focusDate === dates[0]
+  }
+
+  useLayoutEffect(() => {
+    const key = `${focusDate}|${dates.length}|${userIds.length}`
+    const scroller = scrollRef.current
+    if (!scroller || !focusDate) return
+
+    const tryScroll = () => {
+      if (autoScrollKeyRef.current === key && scroller.clientWidth >= 32) return
+      if (scrollToFocusDate()) autoScrollKeyRef.current = key
+    }
+
+    tryScroll()
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => tryScroll()) : null
+    ro?.observe(scroller)
+    const io = typeof IntersectionObserver !== "undefined"
+      ? new IntersectionObserver((entries) => {
+        if (entries.some((e) => e.isIntersecting)) tryScroll()
+      }, { threshold: 0.05 })
+      : null
+    io?.observe(scroller)
+    return () => {
+      ro?.disconnect()
+      io?.disconnect()
+    }
   }, [focusDate, dates.length, userIds.length])
 
   const userName = (id: string) =>
@@ -185,12 +216,24 @@ export function WorkloadView({
 
   return (
     <div className="afx w-full">
-      <div className="flex items-center gap-2 px-1 py-2 text-sm text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-2 px-1 py-2 text-sm text-muted-foreground">
         <AlertTriangle size={14} className="text-destructive" />
         {overCount > 0
           ? <span><strong className="text-destructive">{overCount}</strong> dia(s)/pessoa em superlotação (carga acima da capacidade da jornada).</span>
           : <span>Nenhuma superlotação — capacidade pela jornada de cada pessoa, descontando ausências e feriados.</span>}
         {onCellClick && <span className="text-xs">· clique numa célula para ver as demandas e os atrasos do dia.</span>}
+        {focusDate && (
+          <button
+            type="button"
+            className="ml-auto rounded-md border bg-background px-2 py-0.5 text-xs font-medium text-foreground hover:bg-muted"
+            onClick={() => {
+              autoScrollKeyRef.current = null
+              scrollToFocusDate()
+            }}
+          >
+            Ir para hoje
+          </button>
+        )}
       </div>
       <div ref={scrollRef} className="overflow-x-auto rounded-md border bg-card">
         <table className="border-collapse text-[11px]">
@@ -249,9 +292,15 @@ export function WorkloadView({
                         onMouseEnter={c ? (e) => setHover({ c, name: userName(uid), date: d, x: e.clientX, y: e.clientY }) : undefined}
                         onMouseMove={c ? (e) => setHover((h) => (h ? { ...h, x: e.clientX, y: e.clientY } : h)) : undefined}
                         onMouseLeave={() => setHover(null)}
-                        onClick={clickable ? () => {
+                        onPointerDown={clickable ? (e) => e.stopPropagation() : undefined}
+                        onClick={clickable ? (e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
                           setHover(null)
-                          onCellClick?.(uid, d)
+                          const personId = uid
+                          const day = d
+                          // Adia para o clique não ser tratado como dismiss do Dialog.
+                          window.setTimeout(() => onCellClick?.(personId, day), 0)
                         } : undefined}
                         role={clickable ? "button" : undefined}
                         tabIndex={clickable ? 0 : undefined}
@@ -259,7 +308,9 @@ export function WorkloadView({
                           if (e.key !== "Enter" && e.key !== " ") return
                           e.preventDefault()
                           setHover(null)
-                          onCellClick?.(uid, d)
+                          const personId = uid
+                          const day = d
+                          window.setTimeout(() => onCellClick?.(personId, day), 0)
                         } : undefined}
                         aria-label={clickable ? `${userName(uid)} — ${d}: ver detalhamento do dia` : undefined}
                       >
@@ -277,7 +328,7 @@ export function WorkloadView({
       {hover && (
         <div
           ref={tipRef}
-          className="pointer-events-none fixed z-50 w-64 max-h-[min(320px,calc(100vh-16px))] overflow-y-auto rounded-md border bg-popover px-3 py-2 text-[11px] text-popover-foreground shadow-lg"
+          className="pointer-events-none fixed z-40 w-64 max-h-[min(320px,calc(100vh-16px))] overflow-y-auto rounded-md border bg-popover px-3 py-2 text-[11px] text-popover-foreground shadow-lg"
           style={{
             left: tipPos.left,
             top: tipPos.top,

@@ -22,8 +22,11 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { description?: React.ReactNode }
->(({ className, children, description, "aria-describedby": ariaDescribedBy, onPointerDownOutside, onInteractOutside, onEscapeKeyDown, ...props }, ref) => {
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
+    description?: React.ReactNode
+    overlayClassName?: string
+  }
+>(({ className, children, description, overlayClassName, "aria-describedby": ariaDescribedBy, onPointerDownOutside, onInteractOutside, onEscapeKeyDown, ...props }, ref) => {
   // Radix avisa quando não há `Description` nem `aria-describedby`. Aqui passamos
   // `aria-describedby` explícito (default undefined → silencia o aviso) e oferecemos
   // a prop `description` para descrição acessível (visually hidden) quando útil.
@@ -31,7 +34,7 @@ const DialogContent = React.forwardRef<
   const describedBy = ariaDescribedBy ?? (description != null ? autoId : undefined)
   return (
     <DialogPortal>
-      <DialogOverlay />
+      <DialogOverlay className={overlayClassName} />
       <DialogPrimitive.Content
         ref={ref}
         aria-describedby={describedBy}

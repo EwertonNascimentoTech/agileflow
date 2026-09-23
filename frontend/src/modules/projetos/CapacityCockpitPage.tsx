@@ -316,6 +316,8 @@ export function CapacityCockpitPage() {
                 <WorkloadView
                   cells={heatmap.cells}
                   nameForUser={nameFor}
+                  dateFrom={from}
+                  dateTo={to}
                   onCellClick={(personId, date) => setDayDetail({ personId, date })}
                 />
               </div>

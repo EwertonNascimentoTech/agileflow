@@ -2007,9 +2007,15 @@ export const projetosApi = {
   getWorkload: (projectId: string, params?: { unit?: "day" | "week"; from?: string; to?: string; root?: string }) =>
     api.get<WorkloadResponse>(`/projetos/projects/${projectId}/workload`, { params }).then((r) => r.data),
   getCapacityHeatmap: (params: { from: string; to: string; unit?: "day" | "week"; area?: string; position?: string }) =>
-    api.get<CapacityHeatmapResponse>(`/projetos/capacity/heatmap`, { params }).then((r) => r.data),
+    api.get<CapacityHeatmapResponse>(`/projetos/capacity/heatmap`, {
+      params,
+      headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+    }).then((r) => r.data),
   getCapacityDayDetail: (params: { person: string; date: string }) =>
-    api.get<CapacityDayDetail>(`/projetos/capacity/day-detail`, { params }).then((r) => r.data),
+    api.get<CapacityDayDetail>(`/projetos/capacity/day-detail`, {
+      params,
+      headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+    }).then((r) => r.data),
   getCapacityByProject: (params: { from: string; to: string; area?: string }) =>
     api.get<CapacityByProjectResponse>(`/projetos/capacity/by-project`, { params }).then((r) => r.data),
   getCapacityGaps: (params: { from: string; to: string; group_by?: "position" | "area" }) =>
