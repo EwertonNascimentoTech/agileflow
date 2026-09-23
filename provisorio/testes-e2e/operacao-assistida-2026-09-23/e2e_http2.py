@@ -63,6 +63,13 @@ if "final" not in sys.argv:
     s, d1 = req("GET", f"/projetos/occurrences/{OCC['occ1']}", PO)
     check(5, "horas da ocorrência finalizada gravadas nas horas realizadas", s == 200 and d1["worked_hours"] is not None)
 else:
+    # ── resposta do cliente pela tela (e2e_ui.py): linha da lista → detalhe → Responder ──
+    s, d = req("GET", f"/projetos/occurrences/{OCC['occ4']}", DEV)
+    check(4, "resposta enviada pela tela devolve para Ajustando", s == 200 and d["stage_key"] == "ajustando"
+          and any("Chrome" in c["content"] and c["from_client"] for c in d["comments"]), f"{s} {d.get('stage_key') if isinstance(d, dict) else d}")
+    check(4, "dev é notificado da resposta dada pela tela",
+          any("resposta do cliente" in n["title"] and n.get("entity_id") == OCC["occ4"] for n in notifs(DEV)))
+    patch_status(PO, OCC["occ4"], K["finalizado"])
     # ── encerramento: PO finaliza a dúvida sem homologação e conclui o projeto ──
     s, _ = patch_status(PO, OCC["occ3"], K["finalizado"])
     s2, d = req("GET", f"/projetos/occurrences/{OCC['occ3']}", PO)

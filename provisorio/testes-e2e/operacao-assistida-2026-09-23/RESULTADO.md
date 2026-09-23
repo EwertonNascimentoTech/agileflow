@@ -4,7 +4,7 @@ Executado contra o sistema no ar (`tenant_ss`, `agileflow` via nginx `:18082`), 
 PO / Dev / Coordenador / Cliente de teste (`e2e.*@e2e-agileflow.com.br`) e projetos `[E2E] …`.
 Tudo foi removido ao final (`run.sh cleanup-only` refaz a limpeza se preciso).
 
-**Resultado: 72/72 verificações de API + 18/18 verificações de tela** (reexecutado após a auditoria de segurança: primeiro acesso agora é por link gerado por quem cadastra).
+**Resultado: 76/76 verificações de API + 23/23 verificações de tela** (reexecutado após a auditoria de segurança: primeiro acesso agora é por link gerado por quem cadastra; e em 23/09 com a resposta do cliente pela tela).
 
 ## API (HTTP real, com login)
 
@@ -30,6 +30,8 @@ Tudo foi removido ao final (`run.sh cleanup-only` refaz a limpeza se preciso).
 | 4 | Só o PO define devs fixos (dev → 403); divisão 50/30/20 gravada em Pessoas | OK |
 | 4 | Dev assume (Ajustando + início das horas); PO assume no lugar; dev retoma | OK |
 | 4 | Aguardando Cliente notifica o cliente; resposta volta para Ajustando e notifica o dev | OK |
+| 4 | Pergunta pública pelo drawer do card chega ao Portal (cliente avisado e pode responder) | OK |
+| 4 | Resposta enviada pela tela do Portal devolve para Ajustando e notifica o dev | OK |
 | 4 | Dev não finaliza direto (403) | OK |
 | 4 | Reprovar sem motivo → 400; reprovar com motivo → Ajustando (1 reprovação) | OK |
 | 4 | Aprovar com NPS 9 → Finalizado, horas congeladas; não reabre; não aceita mensagem | OK |
@@ -48,7 +50,9 @@ Tudo foi removido ao final (`run.sh cleanup-only` refaz a limpeza se preciso).
 
 Cliente: login cai no Portal; Meus projetos; Ocorrências (com filtro e encerradas); ocorrência
 homologada (NPS, conversa pública, anexo, andamento); melhoria encaminhada; dúvida em aberto;
-nova ocorrência; tentativa de abrir `/app/...` volta ao Portal. PO: Clientes; verificação de
+nova ocorrência; ocorrência aguardando resposta (linha destacada + "Responder"; clique na linha
+abre o detalhe; "Responder" foca a caixa; enviar devolve ao time); tentativa de abrir `/app/...`
+volta ao Portal. PO: Clientes; verificação de
 e-mail já cadastrado; Capacidade (sub-linhas Operação Assistida / Chamados). Coordenador: lista de
 Pessoas (coluna Jornada), detalhe da pessoa (barra 40/40/20), dashboard (Capacidade diária do time).
 

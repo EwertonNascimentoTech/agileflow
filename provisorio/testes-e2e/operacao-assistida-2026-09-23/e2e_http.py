@@ -221,6 +221,18 @@ s, occ3 = req("POST", "/projetos/portal/occurrences", CLIENT, {"project_task_id"
 state["occ"]["occ3"] = occ3["task_id"]
 check(4, "dúvida aberta e deixada sem responsável (para o alerta de 1h útil)", s == 201 and occ3["prioridade"] == "P3", f"{s}")
 
+# Aguardando Cliente pelo drawer do card (comentário público no endpoint genérico) — o cliente responde pela tela (e2e_ui.py)
+s, occ4 = req("POST", "/projetos/portal/occurrences", CLIENT, {"project_task_id": ROOT_OA, "tipo": "erro", "title": "Botão Salvar não responde",
+                                                              "description": "Clico em Salvar e nada acontece.", "impacto": "contorno", "abrangencia": "eu"})
+OCC4 = occ4["task_id"]; state["occ"]["occ4"] = OCC4
+req("POST", f"/projetos/occurrences/{OCC4}/assume", DEV)
+s, _ = req("POST", f"/projetos/projects/{CONTAINER}/tasks/{OCC4}/comments", DEV, {"content": "Qual navegador você usa?", "visibility": "public"})
+s2, _ = patch_status(DEV, OCC4, K["aguardando_cliente"])
+s3, d = req("GET", f"/projetos/portal/occurrences/{OCC4}", CLIENT)
+check(4, "pergunta pública do drawer chega ao cliente e ele pode responder", s == 201 and s2 == 200 and d["stage_key"] == "aguardando_cliente"
+      and d["can_interact"] and any("Qual navegador" in c["content"] for c in d["comments"]), f"{s} {s2} {s3}")
+check(4, "cliente é avisado da mensagem do time", any("nova mensagem do time" in n["title"] for n in notifs(CLIENT)))
+
 json.dump({"state": state, "tokens": {"PO": PO, "DEV": DEV, "COORD": COORD, "CLIENT": CLIENT}, "K": K,
            "results": results}, open(f"{SP}/e2e_state.json", "w"))
 print("\n=== parte 1 concluída:", sum(r[2] for r in results), "/", len(results), "OK")

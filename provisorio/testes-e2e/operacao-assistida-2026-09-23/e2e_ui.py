@@ -60,6 +60,25 @@ with sync_playwright() as p:
             shot(page, "05-portal-ocorrencia-melhoria", f"/portal/ocorrencias/{OCC['occ2']}", wait_text="classificada como melhoria")
             shot(page, "06-portal-dúvida-em-aberto", f"/portal/ocorrencias/{OCC['occ3']}", wait_text="Como filtro por data")
             shot(page, "07-portal-nova-ocorrencia", "/portal/ocorrencias/nova", wait_text="Nova ocorrência")
+            # Aguardando Cliente: clicar na linha (fora do título) abre o detalhe; "Responder" leva à caixa de mensagem.
+            page.goto(f"{URL}/portal/ocorrencias?minhas=1"); page.wait_for_load_state("networkidle")
+            row = page.locator("tr", has_text="Botão Salvar não responde")
+            shot(page, "08-portal-lista-aguardando-resposta", wait_text="Aguardando sua resposta")
+            row.locator("td").nth(1).click()
+            try:
+                page.wait_for_url(f"**/portal/ocorrencias/{OCC['occ4']}", timeout=10000); nav = True
+            except Exception:
+                nav = False
+            report.append({"tela": "clique-na-linha-abre-detalhe", "url": page.url.replace(URL, ""), "ok": nav})
+            page.get_by_text("Qual navegador você usa?").first.wait_for(timeout=15000)
+            page.get_by_role("button", name="Responder").click()
+            page.wait_for_timeout(600)
+            focused = page.evaluate("document.activeElement && document.activeElement.tagName === 'TEXTAREA'")
+            report.append({"tela": "responder-foca-a-caixa", "ok": bool(focused)})
+            page.get_by_placeholder("Escreva sua mensagem").fill("Uso o Chrome 128.")
+            page.get_by_role("button", name="Enviar").click()
+            shot(page, "09-portal-resposta-enviada", wait_text="voltou para o time")
+            report.append({"tela": "resposta-sai-de-aguardando", "ok": page.get_by_text("Aguardando sua resposta").count() == 0})
             page.goto(f"{URL}/app/modules/projetos/board"); page.wait_for_load_state("networkidle")
             report.append({"tela": "cliente-barrado-no-app", "url": page.url.replace(URL, ""), "ok": "/portal" in page.url})
         elif who == "po":

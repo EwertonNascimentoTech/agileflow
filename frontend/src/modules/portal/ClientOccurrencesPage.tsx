@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
-import { Link, useSearchParams } from "react-router-dom"
-import { LifeBuoy, Plus } from "lucide-react"
+import { Link, useNavigate, useSearchParams } from "react-router-dom"
+import { LifeBuoy, MessageSquareReply, Plus } from "lucide-react"
 
 import {
   OCCURRENCE_TIPO_LABEL,
@@ -18,6 +18,7 @@ const ALL = "__all__"
 
 /** Lista de ocorrências dos projetos do cliente (todas; filtro "abertas por mim"). */
 export default function ClientOccurrencesPage() {
+  const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const projectFilter = params.get("projeto") ?? ALL
   const mine = params.get("minhas") === "1"
@@ -127,33 +128,59 @@ export default function ClientOccurrencesPage() {
               </tr>
             </thead>
             <tbody>
-              {visible.map((o) => (
-                <tr key={o.task_id} className="border-t align-top hover:bg-muted/30">
-                  <td className="px-3 py-2">
-                    <Link to={`/portal/ocorrencias/${o.task_id}`} className="font-medium hover:underline">
-                      {o.title}
-                    </Link>
-                    <div className="text-xs text-muted-foreground">
-                      {OCCURRENCE_TIPO_LABEL[o.tipo]}
-                      {o.opened_by_name && <> · {o.opened_by_me ? "aberta por você" : `por ${o.opened_by_name}`}</>}
-                    </div>
-                  </td>
-                  <td className="px-3 py-2 text-muted-foreground">{o.project_title ?? "—"}</td>
-                  <td className="px-3 py-2">
-                    <PriorityBadge value={o.prioridade} />
-                  </td>
-                  <td className="px-3 py-2">
-                    <StageBadge stageKey={o.stage_key} name={o.stage_name} mine={o.opened_by_me} />
-                  </td>
-                  {/* Quem assumiu no time (antes disso, aguardando alguém assumir). */}
-                  <td className="px-3 py-2">
-                    {o.assignee_name
-                      ? <span className="font-medium">{o.assignee_name}</span>
-                      : <span className="text-xs text-muted-foreground">{o.is_closed ? "—" : "Aguardando atendimento"}</span>}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">{fmtDateTime(o.created_at)}</td>
-                </tr>
-              ))}
+              {visible.map((o) => {
+                const href = `/portal/ocorrencias/${o.task_id}`
+                const waitingMe = o.opened_by_me && o.stage_key === "aguardando_cliente"
+                // A linha inteira abre o detalhe (é lá que o cliente responde ao time).
+                return (
+                  <tr
+                    key={o.task_id}
+                    tabIndex={0}
+                    onClick={(e) => {
+                      if ((e.target as HTMLElement).closest("a, button")) return
+                      if (window.getSelection()?.toString()) return
+                      navigate(href)
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && e.target === e.currentTarget) navigate(href)
+                    }}
+                    className={`cursor-pointer border-t align-top hover:bg-muted/30 focus-visible:bg-muted/40 focus-visible:outline-none ${
+                      waitingMe ? "bg-amber-50/70 dark:bg-amber-950/20" : ""
+                    }`}
+                  >
+                    <td className="px-3 py-2">
+                      <Link to={href} className="font-medium hover:underline">
+                        {o.title}
+                      </Link>
+                      <div className="text-xs text-muted-foreground">
+                        {OCCURRENCE_TIPO_LABEL[o.tipo]}
+                        {o.opened_by_name && <> · {o.opened_by_me ? "aberta por você" : `por ${o.opened_by_name}`}</>}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-muted-foreground">{o.project_title ?? "—"}</td>
+                    <td className="px-3 py-2">
+                      <PriorityBadge value={o.prioridade} />
+                    </td>
+                    <td className="px-3 py-2">
+                      <StageBadge stageKey={o.stage_key} name={o.stage_name} mine={o.opened_by_me} />
+                      {waitingMe && (
+                        <Button asChild size="sm" className="mt-1.5 h-7 gap-1 px-2 text-xs">
+                          <Link to={href}>
+                            <MessageSquareReply size={13} /> Responder
+                          </Link>
+                        </Button>
+                      )}
+                    </td>
+                    {/* Quem assumiu no time (antes disso, aguardando alguém assumir). */}
+                    <td className="px-3 py-2">
+                      {o.assignee_name
+                        ? <span className="font-medium">{o.assignee_name}</span>
+                        : <span className="text-xs text-muted-foreground">{o.is_closed ? "—" : "Aguardando atendimento"}</span>}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">{fmtDateTime(o.created_at)}</td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>

@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Link, useParams } from "react-router-dom"
-import { ArrowLeft, CheckCircle2, Loader2, Send, XCircle } from "lucide-react"
+import { ArrowLeft, CheckCircle2, Loader2, MessageSquareReply, Send, XCircle } from "lucide-react"
 
 import {
   OCCURRENCE_ABRANGENCIA_LABEL,
@@ -37,6 +37,7 @@ export default function ClientOccurrenceDetailPage() {
   const [reply, setReply] = useState("")
   const [replyFiles, setReplyFiles] = useState<Upload[]>([])
   const [sending, setSending] = useState(false)
+  const replyRef = useRef<HTMLTextAreaElement>(null)
   // Homologação
   const [homologMode, setHomologMode] = useState<"approve" | "reject" | null>(null)
   const [nps, setNps] = useState<number | null>(null)
@@ -61,10 +62,11 @@ export default function ClientOccurrenceDetailPage() {
         content: reply.trim(),
         anexos: replyFiles.length ? replyFiles : null,
       })
+      const wasWaiting = occ.stage_key === "aguardando_cliente"
       setOcc(updated)
       setReply("")
       setReplyFiles([])
-      toast.success("Mensagem enviada.")
+      toast.success(wasWaiting ? "Resposta enviada — a ocorrência voltou para o time." : "Mensagem enviada.")
     } catch (err) {
       toast.error(apiErrorDetail(err, "Não foi possível enviar a mensagem."))
     } finally {
@@ -131,7 +133,21 @@ export default function ClientOccurrenceDetailPage() {
 
       {waitingMe && (
         <Alert>
-          <AlertDescription>O time precisa de uma informação sua. Responda abaixo para a ocorrência voltar ao atendimento.</AlertDescription>
+          <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
+            <span>O time precisa de uma informação sua. Responda na conversa para a ocorrência voltar ao atendimento.</span>
+            {occ.can_interact && (
+              <Button
+                size="sm"
+                className="gap-1.5"
+                onClick={() => {
+                  replyRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })
+                  replyRef.current?.focus({ preventScroll: true })
+                }}
+              >
+                <MessageSquareReply size={14} /> Responder
+              </Button>
+            )}
+          </AlertDescription>
         </Alert>
       )}
       {occ.opened_by_me && occ.stage_key === "homologando" && (
@@ -250,7 +266,7 @@ export default function ClientOccurrenceDetailPage() {
 
             {occ.can_interact ? (
               <div className="space-y-2 border-t pt-3">
-                <Textarea rows={3} placeholder="Escreva sua mensagem" value={reply} onChange={(e) => setReply(e.target.value)} />
+                <Textarea ref={replyRef} rows={3} placeholder="Escreva sua mensagem" value={reply} onChange={(e) => setReply(e.target.value)} />
                 <AttachmentField
                   value={replyFiles}
                   onChange={(files) => setReplyFiles(files)}

@@ -14,6 +14,14 @@ Modelo:
 
 ---
 
+## 2026-09-23 — Portal: linha da ocorrência abre o detalhe e "Responder" em destaque
+
+- **Pedido:** O dev mandou para Aguardando Cliente, mas clicar na linha da lista não abria o detalhe e o requisitante não conseguiu responder ao dev.
+- **Causa:** Na lista do Portal só o título era link. O backend estava certo (comentário público do dev chegou e o cliente foi notificado), mas o cliente nunca abriu o detalhe, que é onde fica a caixa de resposta (os logs só mostravam a lista).
+- **Feito:** `ClientOccurrencesPage`: a linha inteira navega (clique fora de link/botão, sem seleção de texto; Enter pelo teclado); linha "Aguardando sua resposta" destacada, com botão "Responder". `ClientOccurrenceDetailPage`: o aviso de Aguardando Cliente tem botão "Responder", que rola e foca a caixa de mensagem; o toast diz que a ocorrência voltou para o time. E2E da OA com o cenário novo (pergunta pública pelo drawer, clique na linha, Responder, enviar, volta para Ajustando e dev notificado): 76/76 + 23/23, prints 08/09.
+- **Não mexer:** resposta do cliente em Aguardando Cliente move para Ajustando (`portal_comment`); só quem abriu interage (`can_interact`).
+- **Arquivos:** `frontend/src/modules/portal/ClientOccurrencesPage.tsx`, `frontend/src/modules/portal/ClientOccurrenceDetailPage.tsx`, `provisorio/testes-e2e/operacao-assistida-2026-09-23/*`
+
 ## 2026-09-23 — Portal: coluna Responsável na lista de ocorrências
 
 - **Pedido:** Trazer o nome do dev que assumiu na lista de ocorrências do Portal do Cliente.
