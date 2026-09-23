@@ -131,6 +131,9 @@ s, up = upload(CLIENT, "print-erro.txt", b"print do erro (E2E)")
 check(3, "cliente envia anexo pelo Portal", s == 200 and up.get("object_name", "").startswith("projetos/tenant_ss/ocorrencias/"), f"{s} {up}")
 if s == 200:
     state["uploads"].append(up["object_name"])
+s, b = req("POST", "/projetos/portal/occurrences", CLIENT, {"project_task_id": ROOT_OA, "tipo": "ajuste", "title": "Tipo retirado",
+                                                           "description": "não deveria abrir", "impacto": "baixo", "abrangencia": "eu"})
+check(3, "tipo 'Ajuste (diferente do combinado)' não é mais aceito na abertura (422)", s == 422, f"{s}")
 s, occ1 = req("POST", "/projetos/portal/occurrences", CLIENT, {
     "project_task_id": ROOT_OA, "tipo": "erro", "title": "Relatório não gera PDF",
     "description": "Ao clicar em exportar, nada acontece.", "passos": "1. Abrir relatório\n2. Exportar",

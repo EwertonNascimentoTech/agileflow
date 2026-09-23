@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-23 — Portal: tipo "Ajuste (diferente do combinado)" retirado
+
+- **Pedido:** Tirar o tipo "Ajuste (diferente do combinado)" da nova ocorrência no Portal do Cliente.
+- **Feito:** Portal oferece só Erro / Falha, Dúvida de uso e Sugestão de melhoria (`OCCURRENCE_TIPO_ABERTURA`); a abertura no backend usa `OccurrenceTipoAbertura` e recusa "ajuste" (422). O rótulo e o valor continuam em `OccurrenceTipo`/`OCCURRENCE_TIPO_LABEL` para exibir ocorrências antigas (hoje não há nenhuma). A classificação do time "Ajuste" não mudou. E2E da OA: 72/72 + 18/18.
+- **Não mexer:** "ajuste" segue válido na resposta e na classificação do time; só a abertura pelo cliente não aceita.
+- **Arquivos:** `projetos/schemas.py`, `frontend/src/api/clientes.ts`, `ClientNewOccurrencePage.tsx`, E2E `e2e_http.py`
+
 ## 2026-09-23 — Cadastro de cliente lista só projetos em Operação Assistida
 
 - **Pedido:** No cadastro/edição de cliente, "Projetos vinculados" deve listar apenas os projetos em Operação Assistida.

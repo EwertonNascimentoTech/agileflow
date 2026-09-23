@@ -2245,6 +2245,9 @@ class ProjectClientLookupResponse(BaseModel):
 # ── Operação Assistida: Ocorrências ──────────────────────────────────────────
 
 OccurrenceTipo = Literal["erro", "duvida", "ajuste", "melhoria"]
+# Tipos que o cliente pode escolher ao abrir. "ajuste" (diferente do combinado) saiu do Portal
+# a pedido (2026-09-23); segue no OccurrenceTipo para exibir ocorrências antigas.
+OccurrenceTipoAbertura = Literal["erro", "duvida", "melhoria"]
 OccurrenceImpacto = Literal["impede", "contorno", "baixo"]
 OccurrenceAbrangencia = Literal["eu", "setor", "todos"]
 OccurrencePrioridade = Literal["P1", "P2", "P3", "P4"]
@@ -2254,7 +2257,7 @@ OccurrenceClassificacao = Literal["erro_confirmado", "duvida", "ajuste", "melhor
 class OccurrenceCreate(BaseModel):
     """Abertura pelo cliente no Portal."""
     project_task_id: uuid.UUID
-    tipo: OccurrenceTipo
+    tipo: OccurrenceTipoAbertura
     title: str = Field(..., min_length=3, max_length=160)
     description: str = Field(..., min_length=3, max_length=20000)  # o que aconteceu
     passos: Optional[str] = Field(None, max_length=20000)

@@ -5,11 +5,11 @@ import { ArrowLeft, Loader2 } from "lucide-react"
 import {
   OCCURRENCE_ABRANGENCIA_LABEL,
   OCCURRENCE_IMPACTO_LABEL,
-  OCCURRENCE_TIPO_LABEL,
+  OCCURRENCE_TIPO_ABERTURA,
   portalOccurrencesApi,
   type OccurrenceAbrangencia,
   type OccurrenceImpacto,
-  type OccurrenceTipo,
+  type OccurrenceTipoAbertura,
   type PortalProject,
   type Upload,
 } from "@/api/clientes"
@@ -59,7 +59,7 @@ export default function ClientNewOccurrencePage() {
   const [params] = useSearchParams()
   const [projects, setProjects] = useState<PortalProject[]>([])
   const [projectId, setProjectId] = useState<string>(params.get("projeto") ?? NONE)
-  const [tipo, setTipo] = useState<OccurrenceTipo | null>(null)
+  const [tipo, setTipo] = useState<OccurrenceTipoAbertura | null>(null)
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
   const [passos, setPassos] = useState("")
@@ -148,7 +148,7 @@ export default function ClientNewOccurrencePage() {
 
         <div className="space-y-1.5">
           <Label>Tipo</Label>
-          <RadioGroup name="tipo" value={tipo} options={OCCURRENCE_TIPO_LABEL} onChange={setTipo} />
+          <RadioGroup name="tipo" value={tipo} options={OCCURRENCE_TIPO_ABERTURA} onChange={setTipo} />
           {tipo === "melhoria" && (
             <p className="text-xs text-muted-foreground">
               Melhorias são analisadas pelo PO e podem seguir para um projeto de Release, fora da Operação Assistida.

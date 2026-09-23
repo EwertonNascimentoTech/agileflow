@@ -83,6 +83,14 @@ export const OCCURRENCE_TIPO_LABEL: Record<OccurrenceTipo, string> = {
   ajuste: "Ajuste (diferente do combinado)",
   melhoria: "Sugestão de melhoria",
 }
+/** Tipos oferecidos ao cliente na abertura (Portal). "Ajuste (diferente do combinado)" saiu
+ *  a pedido; o rótulo segue em OCCURRENCE_TIPO_LABEL para exibir ocorrências antigas. */
+export type OccurrenceTipoAbertura = Exclude<OccurrenceTipo, "ajuste">
+export const OCCURRENCE_TIPO_ABERTURA: Record<OccurrenceTipoAbertura, string> = {
+  erro: OCCURRENCE_TIPO_LABEL.erro,
+  duvida: OCCURRENCE_TIPO_LABEL.duvida,
+  melhoria: OCCURRENCE_TIPO_LABEL.melhoria,
+}
 export const OCCURRENCE_IMPACTO_LABEL: Record<OccurrenceImpacto, string> = {
   impede: "Impede o trabalho",
   contorno: "Tem contorno",

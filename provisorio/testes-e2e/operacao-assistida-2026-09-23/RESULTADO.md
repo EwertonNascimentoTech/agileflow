@@ -4,7 +4,7 @@ Executado contra o sistema no ar (`tenant_ss`, `agileflow` via nginx `:18082`), 
 PO / Dev / Coordenador / Cliente de teste (`e2e.*@e2e-agileflow.com.br`) e projetos `[E2E] …`.
 Tudo foi removido ao final (`run.sh cleanup-only` refaz a limpeza se preciso).
 
-**Resultado: 71/71 verificações de API + 18/18 verificações de tela** (reexecutado após a auditoria de segurança: primeiro acesso agora é por link gerado por quem cadastra).
+**Resultado: 72/72 verificações de API + 18/18 verificações de tela** (reexecutado após a auditoria de segurança: primeiro acesso agora é por link gerado por quem cadastra).
 
 ## API (HTTP real, com login)
 
@@ -21,6 +21,7 @@ Tudo foi removido ao final (`run.sh cleanup-only` refaz a limpeza se preciso).
 | 2 | PO move projeto para Operação Assistida; cliente notificado; Portal passa a aceitar ocorrência | OK |
 | 2 | Concluir sem passar pela OA → 428; com justificativa → conclui e grava o motivo | OK |
 | 2 | PO Sync mostra o projeto como entregue com selo `em_operacao_assistida` | OK |
+| 3 | Tipo "Ajuste (diferente do combinado)" não é mais aceito na abertura (422) | OK |
 | 3 | Cliente envia anexo; abre ocorrência (Impede × Todos → P1, Backlog, `OC-0001`) | OK |
 | 3 | PO notificado; time vê os dados do cliente | OK |
 | 3 | Nota interna + mensagem pública: cliente vê só a pública e é notificado | OK |
