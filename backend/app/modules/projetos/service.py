@@ -8129,17 +8129,16 @@ class ProjectAutomationRunner:
             ))
 
         elif rule.action == ProjectAutomationAction.NOTIFY:
+            from app.core.notifications import notify_users, user_ids_for_persons
+
             target = cfg.get("target", "assignee")
-            target_user = task.assigned_to if target == "assignee" else cfg.get("user_id")
-            if target_user:
-                msg = cfg.get("message") or f"O card '{task.title}' entrou em uma nova etapa."
-                await db.execute(
-                    _sa_text(
-                        "INSERT INTO notifications (id, user_id, title, body, entity_type, entity_id, is_read, created_at) "
-                        "VALUES (gen_random_uuid(), :uid, :title, :body, 'project_task', :eid, FALSE, now())"
-                    ),
-                    {"uid": str(target_user), "title": "Automação de projetos", "body": msg, "eid": str(task.id)},
-                )
+            # assigned_to é Person.id — o sino é por users.id, então resolve o login da Pessoa.
+            if target == "assignee":
+                target_users = await user_ids_for_persons(db, [task.assigned_to])
+            else:
+                target_users = [cfg.get("user_id")]
+            msg = cfg.get("message") or f"O card '{task.title}' entrou em uma nova etapa."
+            await notify_users(db, target_users, "Automação de projetos", msg, "project_task", task.id)
 
         elif rule.action == ProjectAutomationAction.ADD_COMMENT:
             content = cfg.get("content") or f"[automação] {rule.name}"
@@ -8220,20 +8219,10 @@ class ProjectSlaService:
                 else:
                     warning += 1
                     msg = f"Alerta de SLA: o card '{task.title}' está próximo do limite na etapa '{status.name}'."
-                if task.assigned_to:
-                    # assigned_to é person_id; notifica o usuário vinculado à Pessoa (se tiver login).
-                    notify_uid = (await db.execute(
-                        _sa_text("SELECT user_id FROM team_persons WHERE id = :pid"),
-                        {"pid": str(task.assigned_to)},
-                    )).scalar()
-                    if notify_uid:
-                        await db.execute(
-                            _sa_text(
-                                "INSERT INTO notifications (id, user_id, title, body, entity_type, entity_id, is_read, created_at) "
-                                "VALUES (gen_random_uuid(), :uid, :t, :b, 'project_task', :eid, FALSE, now())"
-                            ),
-                            {"uid": str(notify_uid), "t": "SLA de projetos", "b": msg, "eid": str(task.id)},
-                        )
+                from app.core.notifications import notify_persons
+
+                # assigned_to é person_id; notifica o usuário vinculado à Pessoa (se tiver login).
+                await notify_persons(db, [task.assigned_to], "SLA de projetos", msg, "project_task", task.id)
                 db.add(ProjectTaskComment(task_id=task.id, author_id=None, content=f"[SLA] {msg}"))
         await db.commit()
         return {"changed": changed, "warning": warning, "breached": breached}

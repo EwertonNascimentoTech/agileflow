@@ -358,6 +358,17 @@ export default function AppLayout() {
           <Button variant="ghost" size="icon" className="h-9 w-9" onClick={toggleTheme} aria-label="Alternar tema">
             {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
           </Button>
+          {user?.has_client_portal && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-xs text-muted-foreground"
+              onClick={() => navigate("/portal")}
+              title="Portal do Cliente (Operação Assistida)"
+            >
+              Portal do Cliente
+            </Button>
+          )}
           <NotificationBell />
         </header>
         {searchOpen && <GlobalSearch onClose={() => setSearchOpen(false)} />}

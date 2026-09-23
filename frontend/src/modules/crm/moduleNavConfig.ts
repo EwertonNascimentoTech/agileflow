@@ -10,7 +10,7 @@ import {
   ShoppingCart, Wallet, ReceiptText,
   Network, Code2, CalendarOff,
   CirclePlus, ClipboardList, Gauge, TrendingUp, ListChecks, PackageCheck,
-  Gavel, BookOpen, GitBranch, Wrench,
+  Gavel, BookOpen, GitBranch, Wrench, Contact,
 } from "lucide-react"
 import type { ElementType } from "react"
 
@@ -60,6 +60,7 @@ export const moduleNavConfig: Record<string, ModuleNavItem[]> = {
     { to: "/app/modules/projetos/relatorios", icon: BarChart3, label: "Relatórios", hiddenForExternalPO: true },
     { to: "/app/modules/projetos/entregas-us", icon: PackageCheck, label: "Entregas", hiddenForExternalPO: true },
     { to: "/app/modules/projetos/status-reports", icon: FileText, label: "Status Reports", hiddenForExternalPO: true },
+    { to: "/app/modules/projetos/clientes", icon: Contact, label: "Clientes", requiredAnyPermission: ["projetos.client.manage"] },
     { to: "/app/modules/projetos/config", icon: Settings2, label: "Configurações" },
   ],
   produtos: [

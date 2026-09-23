@@ -48,6 +48,8 @@ export interface User {
   role_name: string | null
   permissions: string[]  // permissões efetivas; ["*"] = acesso total (super/company admin)
   position_slug: string | null  // slug do cargo no TeamOps (ex: "coordenador")
+  is_client?: boolean  // cliente externo da Operação Assistida (só o Portal do Cliente)
+  has_client_portal?: boolean  // tem acesso ao Portal do Cliente (externo ou colaborador interno)
   tenant_id: string | null
   is_active: boolean
   last_login: string | null

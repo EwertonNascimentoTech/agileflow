@@ -4125,6 +4125,12 @@ _INDEX_SPECS: list[tuple[str, str, str, tuple[str, ...], str | None]] = [
     ("products_status", "products", "status_produto", ("status_produto",), None),
     ("product_processos_product", "product_processos", "product_id", ("product_id",), None),
     ("product_processos_parent", "product_processos", "parent_id", ("parent_id",), None),
+    # ── operação assistida: clientes ────────────────────────────────────
+    ("project_client_access_task", "project_client_access", "task_id", ("task_id",), None),
+    ("project_client_access_client", "project_client_access", "client_id", ("client_id",), None),
+    ("project_occurrences_project", "project_occurrences", "project_task_id", ("project_task_id",), None),
+    ("project_occurrences_client", "project_occurrences", "opened_by_client_id", ("opened_by_client_id",), None),
+    ("project_assisted_ops_devs_person", "project_assisted_ops_devs", "person_id", ("person_id",), None),
     # ── notificações ────────────────────────────────────────────────────
     ("notif_user", "notifications", "user_id, is_read, created_at DESC", ("user_id", "is_read", "created_at"), None),
     # ── commits por ambiente (PROD/HML/DEV) ─────────────────────────────
@@ -4243,6 +4249,201 @@ async def _step_128_gestores_teamops(conn: AsyncConnection, schema: str) -> None
            AND permission.permission_code = 'teamops.person.manage'
            AND position.slug NOT IN ({manager_slugs})
     """))
+
+
+async def _step_130_projetos_clientes(conn: AsyncConnection, schema: str) -> None:
+    """Operação Assistida — cadastro de clientes e vínculo cliente ↔ projeto.
+
+    Também concede `projetos.client.manage` aos cargos de PO (interno e externo) e de
+    gestão: quem cadastra cliente é o PO, que não tem permissões de configuração.
+    """
+    if not await _table_exists(conn, schema, "project_tasks"):
+        return
+    if not await _table_exists(conn, schema, "project_clients"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_clients (
+                id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                user_id       UUID UNIQUE,
+                full_name     VARCHAR(200) NOT NULL,
+                email         VARCHAR(255) NOT NULL UNIQUE,
+                phone         VARCHAR(30),
+                organization  VARCHAR(200),
+                department    VARCHAR(200),
+                notes         TEXT,
+                is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+                created_by    UUID,
+                created_at    TIMESTAMP DEFAULT now(),
+                updated_at    TIMESTAMP DEFAULT now()
+            )
+        """))
+    if not await _table_exists(conn, schema, "project_client_access"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_client_access (
+                id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                client_id   UUID NOT NULL REFERENCES {schema}.project_clients(id) ON DELETE CASCADE,
+                task_id     UUID NOT NULL REFERENCES {schema}.project_tasks(id) ON DELETE CASCADE,
+                created_by  UUID,
+                created_at  TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_project_client_access UNIQUE (client_id, task_id)
+            )
+        """))
+    if await _table_exists(conn, schema, "team_positions"):
+        await conn.execute(text(f"""
+            INSERT INTO public.role_permissions (id, role_id, permission_code)
+            SELECT gen_random_uuid(), po.role_id, 'projetos.client.manage'
+              FROM {schema}.team_positions po
+             WHERE po.role_id IS NOT NULL
+               AND po.slug IN ('po', 'product_owner', 'po_externo', 'product_owner_externo',
+                               'gerente_executivo', 'coord_de_arq_dev_e_sustenta_o',
+                               'coordenador', 'administrativo')
+               AND EXISTS (SELECT 1 FROM public.module_permissions mp
+                            WHERE mp.code = 'projetos.client.manage')
+            ON CONFLICT (role_id, permission_code) DO NOTHING
+        """))
+
+
+async def _step_131_projetos_operacao_assistida(conn: AsyncConnection, schema: str) -> None:
+    """Raia 'Operação Assistida' no kanban Projetos e Programas — logo antes de Concluído.
+
+    Não é final (o card continua no quadro); trava o cronograma como as raias de entrega.
+    Colunas: flag na etapa, data da 1ª entrada e justificativa de quem pula a raia.
+    """
+    if not await _table_exists(conn, schema, "project_status_configs"):
+        return
+    await _add_columns(conn, schema, "project_status_configs", {
+        "is_assisted_operation": "BOOLEAN NOT NULL DEFAULT FALSE",
+    })
+    await _add_columns(conn, schema, "project_tasks", {
+        "assisted_op_entered_at": "TIMESTAMP",
+        "assisted_op_skip_reason": "TEXT",
+    })
+
+    funnels = await conn.execute(text(f"""
+        SELECT id, project_id FROM {schema}.project_funnels
+        WHERE lower(trim(name)) = 'projetos e programas'
+    """))
+    for row in funnels.mappings().all():
+        funnel_id = row["id"]
+        existing = (await conn.execute(text(f"""
+            SELECT id FROM {schema}.project_status_configs
+            WHERE funnel_id = :fid
+              AND (is_assisted_operation
+                   OR translate(lower(name), 'çã', 'ca') LIKE '%operacao assistida%')
+            LIMIT 1
+        """), {"fid": funnel_id})).scalar()
+        if existing is not None:
+            await conn.execute(text(f"""
+                UPDATE {schema}.project_status_configs
+                SET is_assisted_operation = TRUE, updated_at = now()
+                WHERE id = :sid AND NOT is_assisted_operation
+            """), {"sid": existing})
+            continue
+
+        concl = (await conn.execute(text(f"""
+            SELECT "order" FROM {schema}.project_status_configs
+            WHERE funnel_id = :fid AND lower(name) LIKE '%conclu%'
+            ORDER BY "order" ASC LIMIT 1
+        """), {"fid": funnel_id})).scalar()
+        if concl is None:
+            continue  # funil sem Concluído: não há onde encaixar
+        insert_at = int(concl)
+
+        await conn.execute(text(f"""
+            UPDATE {schema}.project_status_configs
+            SET "order" = "order" + 1, updated_at = now()
+            WHERE funnel_id = :fid AND "order" >= :ord
+        """), {"fid": funnel_id, "ord": insert_at})
+        await conn.execute(text(f"""
+            INSERT INTO {schema}.project_status_configs
+                (id, project_id, funnel_id, name, color, "order",
+                 is_initial, is_final, is_active, sla_warning_pct,
+                 priority_mode, locks_schedule, is_assisted_operation, created_at, updated_at)
+            VALUES
+                (gen_random_uuid(), :pid, :fid, 'Operação Assistida', '#0D9488', :ord,
+                 FALSE, FALSE, TRUE, 80,
+                 'edit', TRUE, TRUE, now(), now())
+        """), {"pid": row["project_id"], "fid": funnel_id, "ord": insert_at})
+
+
+async def _step_132_projetos_ocorrencias(conn: AsyncConnection, schema: str) -> None:
+    """Ocorrências da Operação Assistida: dados do card, chave de etapa, visibilidade e
+    anexos de comentário, numeração OC-0001 (sequence). Funil/etapas nascem no
+    AssistedOpsService.ensure quando um projeto entra em Operação Assistida."""
+    if not await _table_exists(conn, schema, "project_tasks"):
+        return
+    await _add_columns(conn, schema, "project_funnels", {
+        "is_assisted_ops": "BOOLEAN NOT NULL DEFAULT FALSE",
+    })
+    await _add_columns(conn, schema, "project_status_configs", {
+        "assisted_stage_key": "VARCHAR(40)",
+    })
+    await _add_columns(conn, schema, "project_task_comments", {
+        "visibility": "VARCHAR(10) NOT NULL DEFAULT 'internal'",
+        "anexos": "JSONB",
+    })
+    await conn.execute(text(f"CREATE SEQUENCE IF NOT EXISTS {schema}.project_occurrence_code_seq"))
+    if not await _table_exists(conn, schema, "project_occurrences"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_occurrences (
+                id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                task_id              UUID NOT NULL UNIQUE REFERENCES {schema}.project_tasks(id) ON DELETE CASCADE,
+                project_task_id      UUID NOT NULL REFERENCES {schema}.project_tasks(id) ON DELETE CASCADE,
+                code                 INTEGER NOT NULL UNIQUE,
+                opened_by_client_id  UUID REFERENCES {schema}.project_clients(id) ON DELETE SET NULL,
+                opened_by_user_id    UUID,
+                tipo                 VARCHAR(20) NOT NULL,
+                passos               TEXT,
+                esperado             TEXT,
+                funcionalidade       VARCHAR(300),
+                impacto              VARCHAR(20) NOT NULL,
+                abrangencia          VARCHAR(20) NOT NULL,
+                prioridade           VARCHAR(2) NOT NULL,
+                classificacao        VARCHAR(30),
+                solucao              TEXT,
+                causa_raiz           TEXT,
+                created_at           TIMESTAMP DEFAULT now(),
+                updated_at           TIMESTAMP DEFAULT now()
+            )
+        """))
+
+
+async def _step_133_projetos_ocorrencias_atendimento(conn: AsyncConnection, schema: str) -> None:
+    """Operação Assistida — devs fixos por projeto, assumir, horas úteis, homologação + NPS e
+    encaminhamento de melhoria para Release."""
+    if not await _table_exists(conn, schema, "project_occurrences"):
+        return
+    await _add_columns(conn, schema, "project_occurrences", {
+        "assumed_at": "TIMESTAMP",
+        "unassigned_alert_at": "TIMESTAMP",
+        "worked_hours": "NUMERIC(8,2)",
+        "homologated_at": "TIMESTAMP",
+        "nps_score": "INTEGER",
+        "nps_comment": "TEXT",
+        "rejection_count": "INTEGER NOT NULL DEFAULT 0",
+        "finalized_by_team": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "release_project_task_id": "UUID",
+        "release_item_task_id": "UUID",
+    })
+    if not await _table_exists(conn, schema, "team_persons"):
+        return
+    if not await _table_exists(conn, schema, "project_assisted_ops_devs"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_assisted_ops_devs (
+                id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                project_task_id  UUID NOT NULL REFERENCES {schema}.project_tasks(id) ON DELETE CASCADE,
+                person_id        UUID NOT NULL REFERENCES {schema}.team_persons(id) ON DELETE CASCADE,
+                created_by       UUID,
+                created_at       TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_project_assisted_ops_devs UNIQUE (project_task_id, person_id)
+            )
+        """))
+
+
+async def _step_134_team_person_assisted_ops_pct(conn: AsyncConnection, schema: str) -> None:
+    """Divisão da jornada: % Operação Assistida (Chamados = 100 − projetos − OA)."""
+    await _add_columns(conn, schema, "team_persons", {
+        "assisted_ops_allocation_pct": "NUMERIC(5,2) NOT NULL DEFAULT 0",
+    })
 
 
 async def _step_129_projetos_agent_fail_to(conn: AsyncConnection, schema: str) -> None:
@@ -4472,6 +4673,11 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("127_administrativo_como_coordenador", _step_127_administrativo_como_coordenador),
     ("128_gestores_teamops", _step_128_gestores_teamops),
     ("129_projetos_agent_fail_to", _step_129_projetos_agent_fail_to),
+    ("130_projetos_clientes", _step_130_projetos_clientes),
+    ("131_projetos_operacao_assistida", _step_131_projetos_operacao_assistida),
+    ("132_projetos_ocorrencias", _step_132_projetos_ocorrencias),
+    ("133_projetos_ocorrencias_atendimento", _step_133_projetos_ocorrencias_atendimento),
+    ("134_team_person_assisted_ops_pct", _step_134_team_person_assisted_ops_pct),
     ("123_reconcile_indexes", _step_123_reconcile_indexes),
 ]
 

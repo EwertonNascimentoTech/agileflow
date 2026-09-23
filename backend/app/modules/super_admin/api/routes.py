@@ -6,6 +6,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.dependencies import is_client_only
 from app.modules.super_admin.models import Role, RolePermission, Tenant, UserRole
 from app.core.security import require_super_admin, get_current_user
 from app.modules.super_admin.schemas import (
@@ -54,6 +55,30 @@ async def _attach_role_name(db: AsyncSession, user) -> None:
     user.role_name = name
     user.permissions = perms
     user.position_slug = await _resolve_position_slug(db, user)
+    user.is_client = await is_client_only(user)
+    user.has_client_portal = await _has_client_portal(db, user)
+
+
+async def _has_client_portal(db: AsyncSession, user) -> bool:
+    """Tem cadastro ativo de cliente da Operação Assistida no tenant."""
+    if not user.tenant_id:
+        return False
+    schema = (
+        await db.execute(select(Tenant.schema_name).where(Tenant.id == user.tenant_id))
+    ).scalar_one_or_none()
+    if not schema:
+        return False
+    exists = (
+        await db.execute(text("SELECT to_regclass(:t)"), {"t": f'"{schema}".project_clients'})
+    ).scalar_one_or_none()
+    if exists is None:
+        return False
+    return bool((
+        await db.execute(
+            text(f'SELECT 1 FROM "{schema}".project_clients WHERE user_id = :uid AND is_active LIMIT 1'),
+            {"uid": str(user.id)},
+        )
+    ).scalar_one_or_none())
 
 
 async def _resolve_position_slug(db: AsyncSession, user) -> str | None:

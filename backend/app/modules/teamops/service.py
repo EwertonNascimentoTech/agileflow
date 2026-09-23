@@ -82,6 +82,8 @@ PO_PERMISSIONS = [
     "projetos.task.view",
     "projetos.task.manage",
     "projetos.comment.manage",
+    # Operação Assistida: o PO cadastra os clientes e vincula aos projetos.
+    "projetos.client.manage",
     # Pessoas: apenas as próprias ausências.
     "teamops.absence.view_own",
     "teamops.absence.request",

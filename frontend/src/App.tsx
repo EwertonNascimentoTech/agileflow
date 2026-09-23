@@ -186,7 +186,7 @@ export default function App() {
                 </Route>
               </Route>
 
-              {/* Company */}
+              {/* Portal do Cliente (Operação Assistida) */}
               <Route element={<ProtectedRoute allowedRoles={["company_admin", "company_user"]} />}>
                 <Route path="/app" element={<CompanyLayout />}>
                   <Route index element={<Navigate to="/app/dashboard" replace />} />
@@ -278,6 +278,7 @@ export default function App() {
                     </Route>
                     <Route path="solicitacoes" element={<BasicNewRequestPage />} />
                     <Route path="minhas" element={<BasicMyRequestsPage />} />
+                    <Route path="clientes" element={<ProjectClientsPage />} />
                     <Route path=":projectId/board" element={<ProjectBoardPage />} />
                     <Route path=":projectId/lista" element={<ProjectBoardPage />} />
                     <Route path=":projectId/calendario" element={<ProjectBoardPage />} />
@@ -386,6 +387,7 @@ export default function App() {
                     </Route>
                   </Route>
                 </Route>
+                </Route>
               </Route>
 
               {/* Fallback */}
@@ -407,6 +409,7 @@ function RoleRedirect() {
     if (raw) {
       const user = JSON.parse(raw)
       if (user.role === "super_admin") return <Navigate to="/admin/dashboard" replace />
+      if (user.is_client) return <Navigate to="/portal" replace />
       if (user.role === "company_admin" || user.role === "company_user")
         return <Navigate to="/app/dashboard" replace />
     }

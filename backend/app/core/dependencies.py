@@ -87,6 +87,39 @@ async def _is_po_external(user: User, schema: str) -> bool:
     return result
 
 
+# Função de sistema do cliente da Operação Assistida (por tenant). Quem a tem é um
+# cliente externo: só o Portal do Cliente responde; todo o resto do sistema é 403.
+# Colaborador interno que também é cliente mantém a própria Função e não cai aqui.
+CLIENT_ROLE_NAME = "Cliente (Operação Assistida)"
+
+
+async def is_client_only(user: User) -> bool:
+    """True se o login é de um cliente externo (Função "Cliente (Operação Assistida)")."""
+    if user.role != UserRole.COMPANY_USER or not user.role_id:
+        return False
+
+    from app.core.cache import cache_get, cache_set, client_role_key
+    from app.core.config import settings
+
+    if settings.AUTH_CACHE_TTL > 0:
+        cached = await cache_get(client_role_key(user.role_id))
+        if cached is not None:
+            return bool(cached)
+
+    from app.modules.super_admin.models import Role
+
+    async with AsyncSessionLocal() as probe:
+        await probe.execute(text("SET search_path TO public"))
+        name = (await probe.execute(
+            select(Role.name).where(Role.id == user.role_id)
+        )).scalar_one_or_none()
+    result = (name or "").strip() == CLIENT_ROLE_NAME
+
+    if settings.AUTH_CACHE_TTL > 0:
+        await cache_set(client_role_key(user.role_id), result, settings.AUTH_CACHE_TTL)
+    return result
+
+
 async def has_permission_cached(user: User, code: str) -> bool:
     """Versão booleana e cacheada de `require_permission`, para ramificar em rota.
 
@@ -173,13 +206,15 @@ def require_permission(code: str):
     return dependency
 
 
-def require_module(module_slug: str):
+def require_module(module_slug: str, allow_client: bool = False):
     """
     Factory que retorna uma dependency FastAPI.
     Valida que:
       - o slug está cadastrado e ativo na tabela `modules` (registry global);
       - o usuário pertence a um tenant ativo;
-      - o módulo está habilitado para esse tenant.
+      - o módulo está habilitado para esse tenant;
+      - cliente externo (Operação Assistida) só passa com `allow_client=True`
+        (rotas do Portal do Cliente).
     Retorna um ModuleContext com sessão já apontando para o schema do tenant.
     """
     async def dependency(
@@ -257,6 +292,12 @@ def require_module(module_slug: str):
             )
 
         schema_name = facts["schema_name"]
+
+        if not allow_client and await is_client_only(current_user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Acesso de cliente restrito ao Portal do Cliente.",
+            )
 
         if module_slug in PO_EXTERNAL_BLOCKED_MODULES and await _is_po_external(current_user, schema_name):
             raise HTTPException(

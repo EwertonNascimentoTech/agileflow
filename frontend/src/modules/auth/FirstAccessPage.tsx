@@ -63,7 +63,8 @@ export default function FirstAccessPage() {
     try {
       const data = await authApi.completeFirstAccess(token, password)
       establishSession(data)
-      const destination = data.user.role === "super_admin" ? "/admin/dashboard" : "/dashboard"
+      const destination =
+        data.user.role === "super_admin" ? "/admin/dashboard" : data.user.is_client ? "/portal" : "/dashboard"
       navigate(destination, { replace: true })
     } catch (err) {
       setError(getErrorMessage(err))

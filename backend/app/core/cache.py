@@ -123,6 +123,12 @@ def po_external_person_key(user_id: Any) -> str:
     return f"auth:po_person:{user_id}"
 
 
+def client_role_key(role_id: Any) -> str:
+    """Se a Função é a de sistema "Cliente (Operação Assistida)". O nome da Função de
+    sistema não muda, então o cache é por role_id e dispensa invalidação."""
+    return f"auth:client_role:{role_id}"
+
+
 async def invalidate_po_external(user_id: Any) -> None:
     """Chamar após mudar o Cargo de uma Pessoa (ou seu vínculo com um login)."""
     await cache_delete(

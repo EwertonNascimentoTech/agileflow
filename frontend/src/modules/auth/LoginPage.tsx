@@ -44,7 +44,8 @@ export default function LoginPage() {
       await login(data.email, data.password)
       const stored = localStorage.getItem("user")
       const user = stored ? JSON.parse(stored) : null
-      const destination = user?.role === "super_admin" ? "/admin/dashboard" : "/dashboard"
+      const destination =
+        user?.role === "super_admin" ? "/admin/dashboard" : user?.is_client ? "/portal" : "/dashboard"
       navigate(destination, { replace: true })
     } catch (err) {
       setServerError(getErrorMessage(err))
