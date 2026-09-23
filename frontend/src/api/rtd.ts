@@ -61,6 +61,8 @@ export interface PlanoEpa {
 
 export interface PlanosEpaResponse {
   configurado: boolean
+  /** padrao = códigos do .env; reuniao = escolhidos na reunião; desligado = EPA fora desta reunião. */
+  origem?: "padrao" | "reuniao" | "desligado"
   codigos: number[]
   snapshot_at: string | null
   planos: PlanoEpa[] | null
@@ -248,8 +250,9 @@ export const rtdApi = {
   createReuniao: (data: ReuniaoCreate) => api.post<Reuniao>("/rtd/reunioes", data).then((r) => r.data),
   updateReuniao: (id: string, data: Partial<ReuniaoCreate> & {
     status?: ReuniaoStatus
-    epa_planos?: number[]
-    epa_planos_taticos?: number[]
+    /** [] desliga o EPA nesta reunião; null volta para os planos padrão. */
+    epa_planos?: number[] | null
+    epa_planos_taticos?: number[] | null
   }) =>
     api.patch<Reuniao>(`/rtd/reunioes/${id}`, data).then((r) => r.data),
   getPlanosEpa: (id: string, categoria: "estrategico" | "tatico" = "estrategico") =>

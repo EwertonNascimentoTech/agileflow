@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-23 — RTD: EPA desligável por reunião (B8 da auditoria)
+
+- **Pedido:** Poder desligar o EPA numa reunião (último item da auditoria).
+- **Feito:** Códigos da reunião: null = padrão do .env; lista = esses planos; [] = EPA desligado nesta reunião (antes [] caía no padrão). PATCH aceita null explícito para voltar ao padrão (`model_fields_set`), e editar outro campo não mexe nos planos. Resposta de planos-epa ganha `origem` (padrao/reuniao/desligado). Tela: "Desligar nesta reunião" e "Usar os planos padrão" na configuração dos códigos, aviso "EPA desligado nesta reunião". Desligado: 11 ms em vez de ~7 s de consulta ao EPA, inclusive no relatório e no link público. As 3 reuniões existentes seguem no padrão.
+- **Não mexer:** `salvos is not None` em `_codigos_epa`; `model_fields_set` no update dos planos.
+- **Arquivos:** `rtd/service.py`, `frontend/src/api/rtd.ts`, `RtdPlanosEpaSection.tsx`
+
 ## 2026-09-23 — Produção sem modo debug
 
 - **Pedido:** Deixar DEBUG=false em produção (achado ao revisar os workers).

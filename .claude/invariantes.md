@@ -123,3 +123,7 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 - Visão completa rola nos dois eixos com coluna "Demanda" e cabeçalho fixos, abre em hoje e respeita o zoom da barra; grade = fundo CSS (nunca um elemento por dia por linha).
 - Linhas da visão completa usam `grid-template-columns: 320px minmax(0, 1fr)`; `FULL_LABEL_W` acompanha os 320px.
 - Travas de cronograma na visão completa ficam num resumo que abre a lista; o cronograma do projeto (com root) continua com o banner próprio.
+
+## RTD — planos do EPA
+
+- Códigos do EPA na reunião: null = padrão do .env; lista = esses planos; [] = EPA desligado nesta reunião (não consulta o EPA nos slides, relatório nem link público).

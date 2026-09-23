@@ -144,9 +144,10 @@ class RtdService:
             r.observacoes = data.observacoes
         if data.data_realizacao is not None:
             r.data_realizacao = data.data_realizacao
-        if data.epa_planos is not None:
+        # null explícito volta para o padrão do .env; [] desliga o EPA nesta reunião.
+        if "epa_planos" in data.model_fields_set:
             r.epa_planos = data.epa_planos
-        if data.epa_planos_taticos is not None:
+        if "epa_planos_taticos" in data.model_fields_set:
             r.epa_planos_taticos = data.epa_planos_taticos
         if fechando:
             # _indicadores_detalhe é read-only e engole exceções (→ None): um problema
@@ -887,11 +888,12 @@ class RtdService:
     # ── Slides de Planos do EPA (Estratégicos e Táticos — mesmo conceito) ──
     @staticmethod
     def _codigos_epa(reuniao: models.RtdReuniao, categoria: str = "estrategico") -> list[int]:
-        """Códigos da reunião; sem configuração na reunião, usa o padrão do .env
-        (EPA_PLANOS_ESTRATEGICO / EPA_PLANOS_TATICOS)."""
+        """Códigos da reunião. Nunca configurado (null) = padrão do .env
+        (EPA_PLANOS_ESTRATEGICO / EPA_PLANOS_TATICOS); lista vazia = EPA desligado nesta
+        reunião (antes [] também caía no padrão e não havia como desligar)."""
         from app.core.config import settings
         salvos = reuniao.epa_planos_taticos if categoria == "tatico" else reuniao.epa_planos
-        if salvos:
+        if salvos is not None:
             return [int(c) for c in salvos]
         padrao = settings.EPA_PLANOS_TATICOS if categoria == "tatico" else settings.EPA_PLANOS_ESTRATEGICO
         out: list[int] = []
@@ -919,9 +921,12 @@ class RtdService:
         from app.modules.rtd import epa_client
 
         snap_key = "planos_epa_taticos" if categoria == "tatico" else "planos_epa"
+        salvos = reuniao.epa_planos_taticos if categoria == "tatico" else reuniao.epa_planos
         base = {
             "configurado": epa_client.epa_configured(),
             "categoria": categoria,
+            # "padrao": códigos do .env; "reuniao": escolhidos aqui; "desligado": [] salvo.
+            "origem": "padrao" if salvos is None else ("desligado" if not salvos else "reuniao"),
             "codigos": cls._codigos_epa(reuniao, categoria),
             "snapshot_at": None,
             "planos": None,

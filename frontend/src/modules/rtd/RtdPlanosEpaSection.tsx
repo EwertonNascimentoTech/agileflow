@@ -246,24 +246,30 @@ export function RtdPlanosEpaSection({
   }
   useEffect(() => { carregar() }, [reuniaoId, categoria, initialData])
 
-  async function salvarCodigos() {
-    const codigos = codigosInput
-      .split(/[,;\s]+/)
-      .map((s) => parseInt(s, 10))
-      .filter((n) => Number.isFinite(n) && n > 0)
+  /** Salva os códigos da reunião: lista = esses planos; [] = EPA desligado; null = padrão. */
+  async function gravar(codigos: number[] | null, sucesso: string) {
     setSalvando(true)
     try {
       await rtdApi.updateReuniao(
         reuniaoId,
         categoria === "tatico" ? { epa_planos_taticos: codigos } : { epa_planos: codigos },
       )
-      toast.success("Códigos salvos — consultando o EPA…")
+      toast.success(sucesso)
+      if (codigos === null) setCodigosInput("")  // recarga preenche com o padrão
       await carregar()
     } catch {
-      toast.error("Falha ao salvar os códigos")
+      toast.error("Falha ao salvar a configuração do EPA")
     } finally {
       setSalvando(false)
     }
+  }
+
+  async function salvarCodigos() {
+    const codigos = codigosInput
+      .split(/[,;\s]+/)
+      .map((s) => parseInt(s, 10))
+      .filter((n) => Number.isFinite(n) && n > 0)
+    await gravar(codigos, codigos.length ? "Códigos salvos — consultando o EPA…" : "EPA desligado nesta reunião.")
   }
 
   return (
@@ -300,6 +306,19 @@ export function RtdPlanosEpaSection({
             className="bg-blue-800 hover:bg-blue-900">
             {salvando ? "Salvando…" : "Salvar e buscar"}
           </Button>
+          {data?.origem !== "desligado" && (
+            <Button size="sm" variant="outline" disabled={salvando || loading}
+              onClick={() => { setCodigosInput(""); void gravar([], "EPA desligado nesta reunião.") }}
+              title="Não consulta o EPA nesta reunião (slides, relatório e link público)">
+              Desligar nesta reunião
+            </Button>
+          )}
+          {data?.origem && data.origem !== "padrao" && (
+            <Button size="sm" variant="ghost" disabled={salvando || loading}
+              onClick={() => void gravar(null, "Planos padrão restaurados — consultando o EPA…")}>
+              Usar os planos padrão
+            </Button>
+          )}
         </div>
       )}
 
@@ -309,10 +328,16 @@ export function RtdPlanosEpaSection({
         hideEmpty ? null : (
           <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{data.erro}</div>
         )
+      ) : data?.origem === "desligado" ? (
+        hideEmpty ? null : (
+          <p className="text-sm text-muted-foreground">
+            EPA desligado nesta reunião — os planos não são consultados.
+          </p>
+        )
       ) : !data?.codigos?.length ? (
         hideEmpty ? null : (
           <p className="text-sm text-muted-foreground">
-            Nenhum plano configurado — informe os códigos dos Planos Estratégicos do EPA acima.
+            Nenhum plano configurado — informe os códigos dos Planos {categoria === "tatico" ? "Táticos" : "Estratégicos"} do EPA acima.
           </p>
         )
       ) : !data?.planos?.length ? (
