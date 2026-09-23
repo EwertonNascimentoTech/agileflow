@@ -1245,7 +1245,10 @@ export default function ProjectBoardPage() {
         setQuadrants(qd)
         setDefaultFormFields(df)
         if (!projectId && ps[0]) {
-          navigate(`/app/modules/projetos/${ps[0].id}/board`, { replace: true })
+          // Link sem o processo (ex.: /projetos/lista?funnel=…): completa o processo sem perder
+          // a visão nem o kanban/filtros da query.
+          const suffix = { list: "lista", cal: "calendario", board: "board" }[resolveViewFromPath(location.pathname)]
+          navigate(`/app/modules/projetos/${ps[0].id}/${suffix}${location.search}`, { replace: true })
         }
         if (!projectId && ps.length === 0) {
           setBootError("Nenhum processo ativo encontrado para o seu usuário.")
@@ -2386,6 +2389,10 @@ export default function ProjectBoardPage() {
             const targetFunnelId = statusFunnel[t.status_id]
             if (targetFunnelId && targetFunnelId !== selectedFunnelId) {
               setSelectedFunnelId(targetFunnelId)
+              // URL acompanha o kanban em tela (recarregar/compartilhar abre o mesmo).
+              const params = new URLSearchParams(searchParams)
+              params.set("funnel", targetFunnelId)
+              setSearchParams(params, { replace: true })
             }
           }
           const found = tasks.find((t) => t.id === taskId)

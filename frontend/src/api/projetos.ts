@@ -244,7 +244,7 @@ export const STATUS_HISTORY_SOURCE_LABELS: Record<string, string> = {
   system: "Sistema",
   automation: "Automação",
   agent: "Agente",
-  reconcile: "Reconcile",
+  reconcile: "Rollup das User Stories",
   procurement: "Contratação",
   cascade: "Cascata",
   funnel_transition: "Troca de kanban",

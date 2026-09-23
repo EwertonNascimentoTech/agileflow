@@ -485,7 +485,7 @@ export default function StatusReportsPage() {
     )
   }
 
-  if (!data || data.capa.total_projetos === 0) {
+  if (!data) {
     return (
       <EmptyState
         icon={Users}
@@ -497,38 +497,61 @@ export default function StatusReportsPage() {
 
   const hasFilter = diretoria !== ALL || area !== ALL
 
+  const filters = (
+    <div className="flex flex-wrap items-center gap-2">
+      <Filter className="h-4 w-4 text-muted-foreground" />
+      <Select value={diretoria} onValueChange={setDiretoria}>
+        <SelectTrigger className="h-8 w-[260px] text-sm"><SelectValue placeholder="Diretoria" /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value={ALL}>Todas as diretorias</SelectItem>
+          {data.available_diretorias.map((o) => (
+            <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select value={area} onValueChange={setArea}>
+        <SelectTrigger className="h-8 w-[220px] text-sm"><SelectValue placeholder="Área" /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value={ALL}>Todas as áreas</SelectItem>
+          {data.available_areas.map((o) => (
+            <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {hasFilter && (
+        <button
+          className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+          onClick={() => { setDiretoria(ALL); setArea(ALL) }}
+        >
+          <X className="h-3 w-3" /> limpar
+        </button>
+      )}
+    </div>
+  )
+
+  // Recorte sem projetos: os filtros continuam na tela — sem eles não havia como desfazer.
+  if (data.capa.total_projetos === 0) {
+    return (
+      <div className="space-y-6">
+        {filters}
+        <EmptyState
+          icon={Users}
+          title="Sem projetos para o Status Report"
+          description={
+            hasFilter
+              ? "Nenhum projeto/programa neste recorte de diretoria/área."
+              : "Nenhum projeto/programa atribuído a um PO. Cadastre o portfólio."
+          }
+          {...(hasFilter ? { action: { label: "Limpar filtros", onClick: () => { setDiretoria(ALL); setArea(ALL) } } } : {})}
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       {/* Filtros */}
-      <div className="flex flex-wrap items-center gap-2">
-        <Filter className="h-4 w-4 text-muted-foreground" />
-        <Select value={diretoria} onValueChange={setDiretoria}>
-          <SelectTrigger className="h-8 w-[260px] text-sm"><SelectValue placeholder="Diretoria" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>Todas as diretorias</SelectItem>
-            {data.available_diretorias.map((o) => (
-              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={area} onValueChange={setArea}>
-          <SelectTrigger className="h-8 w-[220px] text-sm"><SelectValue placeholder="Área" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>Todas as áreas</SelectItem>
-            {data.available_areas.map((o) => (
-              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {hasFilter && (
-          <button
-            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-            onClick={() => { setDiretoria(ALL); setArea(ALL) }}
-          >
-            <X className="h-3 w-3" /> limpar
-          </button>
-        )}
-      </div>
+      {filters}
 
       <div>
         <h3 className="text-base font-semibold">Status Report — Portfólio</h3>

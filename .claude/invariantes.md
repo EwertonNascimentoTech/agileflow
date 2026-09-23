@@ -89,3 +89,12 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 - Painel PO: CPM calculado uma vez por projeto (`critical_path(..., cache=)`); visão de Gestão = uma chamada de `build` agrupada por `po_id`, nunca uma por PO.
 - Gantt: nada de um elemento por dia por linha (grade = fundo CSS); a visão completa só aparece sem `?root` e depois da auto-seleção resolvida.
 - Drawer do card: efeito principal chaveado por `task.id`; cada ação que muda etapa/pai/produto recarrega só a parte afetada.
+
+## Fluxos corrigidos (auditoria 2026-09-23 · bloco 4)
+
+- Contratação ganha: a origem retoma a etapa para onde ia quando a Contratação a desviou (`procurement_resume_status_id`); sem destino guardado, a próxima etapa depois da Contratação. Ganho e perda gravam histórico.
+- Trava de cronograma (`assert_editable`) vale também para criar item com pai, excluir item com pai e importar Excel no projeto travado.
+- Kanban US: coordenação = admin ou Cargo de coordenação/gestão (`_is_coordination`). Sair de Homologação (PO) continua só do PO do card-raiz.
+- Rollup Feature: todas as US concluídas levam a Feature para Homologação (PO); quem conclui a Feature é o PO. Todo movimento automático grava histórico.
+- Agente de triagem (review_and_route): contexto e lacunas seguem a visibilidade da etapa (`_stage_field_modes`, mesma regra da tela). Campo oculto ou opcional não é lacuna; Descrição é cobrada sempre que visível. Classificação recebe o contexto completo.
+- Link do board sem o processo mantém a visão (/lista, /calendario) e a query (?funnel=).

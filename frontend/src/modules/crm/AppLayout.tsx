@@ -307,9 +307,11 @@ export default function AppLayout() {
           sections={sections}
           kanbanItems={activeModuleSlug === "projetos" ? kanbanItems : undefined}
           activeKanbanId={activeKanban?.id}
-          onKanbanSelect={(kanban) =>
-            navigate(`/app/modules/projetos/${kanban.projectId}/board?funnel=${kanban.id}`)
-          }
+          onKanbanSelect={(kanban) => {
+            // Mantém a visão atual (Lista/Calendário) ao trocar de kanban.
+            const view = /\/(lista|calendario)$/.exec(location.pathname)?.[1] ?? "board"
+            navigate(`/app/modules/projetos/${kanban.projectId}/${view}?funnel=${kanban.id}`)
+          }}
           user={{ name: user?.full_name ?? "", email: user?.email ?? "", initials }}
           onLogout={handleLogout}
           onNavigate={closeSidebar}

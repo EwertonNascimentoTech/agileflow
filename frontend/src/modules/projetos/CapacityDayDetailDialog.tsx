@@ -155,6 +155,9 @@ export function CapacityDayDetailDialog({
         className="z-[200] w-[calc(100vw-2rem)] max-w-3xl overflow-x-hidden"
         overlayClassName="z-[200]"
         description="Demandas do dia e atrasadas do responsável"
+        // Só leitura: Esc fecha (o DialogContent padrão bloqueia Esc para não perder
+        // edição). Clique fora segue bloqueado — é ele que vaza do clique que abre.
+        onEscapeKeyDown={() => onClose()}
       >
         <DialogHeader className="min-w-0">
           <DialogTitle className="flex flex-wrap items-baseline gap-x-2 gap-y-1 pr-8">

@@ -15,7 +15,9 @@ import { toast } from "@/lib/toast"
 
 function fmt(iso: string | null | undefined): string {
   if (!iso) return "—"
-  const d = new Date(iso)
+  // Data pura (YYYY-MM-DD) vira meia-noite UTC no `new Date` — no fuso de Brasília cai no dia
+  // anterior (Agosto aparecia 31/07–30/08). Meio-dia local não troca de dia.
+  const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${iso}T12:00:00` : iso)
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" })
 }
 

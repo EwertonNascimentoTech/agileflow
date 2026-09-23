@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-23 — Auditoria · bloco 4 (funções quebradas F7–F15)
+
+- **Pedido:** Corrigir F7 a F15 da auditoria geral.
+- **Feito:** F7 — Contratação ganha devolve a origem para a etapa para onde ela ia quando foi desviada (coluna `procurement_resume_status_id`, step 136), não mais para Impedimento; ganho/perda gravam histórico (fonte Contratação). F8 — trava de cronograma também em criar item com pai, excluir item com pai e importar Excel no projeto travado (423). F9 — no kanban US, coordenação = admin ou Cargo de coordenação/gestão (`_is_coordination`: coord, administrativ, gerente, gestor, diretor). F10 — todas as US concluídas levam a Feature para Homologação (PO), não para Concluído; US em homologação + concluídas também; rollup grava histórico (fonte reconcile). F11 — datas puras da RTD em meio-dia local (não caem no dia anterior). F12 — triagem (review_and_route) vê e cobra só o que a etapa mostra (mesma regra da tela: `_stage_field_modes`); lacuna = campo obrigatório vazio (Descrição sempre que visível); risco = Não dispensa a descrição dos riscos; classificação segue com o contexto completo. F13 — link sem o processo mantém visão (/lista, /calendario) e ?funnel=; barra lateral troca de kanban sem sair da visão; abrir card de outro kanban atualiza ?funnel=. F14 — PO Sync e Status Reports mantêm os filtros quando o recorte fica vazio. F15 — Esc fecha o detalhe do dia da Capacidade.
+- **Não mexer:** `resume_status_after_win`; `assert_editable` em create/delete/import; `_is_coordination` no `_check_us_move_authorship` (sair de Homologação (PO) continua só do PO); regra 1 do `_feature_target_status`; `for_review` no contexto do agente; clique fora do modal da Capacidade continua bloqueado.
+- **Arquivos:** `projetos/service.py`, `projetos/procurement.py`, `projetos/models.py`, `core/tenant_migrations.py`, `RtdReuniaoPage.tsx`, `RtdReunioesPage.tsx`, `ProjectBoardPage.tsx`, `crm/AppLayout.tsx`, `PoSyncPage.tsx`, `StatusReportsPage.tsx`, `CapacityDayDetailDialog.tsx`, `api/projetos.ts`
+
 ## 2026-09-23 — Auditoria · bloco 3 (desempenho do dia a dia)
 
 - **Pedido:** Terceiro bloco da auditoria: Painel PO vazio/lento, Gantt travando a aba, agentes de IA atrasando a criação, EPA na RTD e board lento.

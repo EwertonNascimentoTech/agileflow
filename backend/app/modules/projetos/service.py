@@ -1749,6 +1749,28 @@ class ProjectTaskService:
         res = await db.execute(select(Person.id).where(Person.user_id == user_id))
         return res.scalar_one_or_none()
 
+    # Cargos de coordenação/gestão (mesmo nível operacional do Coordenador, inclui o
+    # Administrativo). Por palavra-chave no slug/nome — cobre cargos customizados.
+    _COORDINATION_CARGO_TOKENS = ("coord", "administrativ", "gerente", "gestor", "diretor")
+
+    @staticmethod
+    async def _is_coordination(db: AsyncSession, current_user: Optional[User]) -> bool:
+        """Admin da empresa ou Pessoa com Cargo de coordenação/gestão (Pessoa ativa)."""
+        if not current_user:
+            return False
+        if current_user.role in (UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN):
+            return True
+        row = (await db.execute(
+            select(Position.slug, Position.name)
+            .join(Person, Person.position_id == Position.id)
+            .where(Person.user_id == current_user.id, Person.status != PersonStatus.DESLIGADO)
+            .limit(1)
+        )).first()
+        if not row:
+            return False
+        cargo = f"{row[0] or ''} {row[1] or ''}".lower()
+        return any(t in cargo for t in ProjectTaskService._COORDINATION_CARGO_TOKENS)
+
     @staticmethod
     async def _is_task_assignee(
         db: AsyncSession,
@@ -2564,8 +2586,9 @@ class ProjectTaskService:
         antes do bypass de responsável e barrariam o próprio dono do card. Aqui a ordem é a
         correta — responsável passa, coordenação passa, o resto para.
 
-        Coordenação = admin da empresa. Ações internas (sem usuário) não são afetadas, senão
-        o reconcile e os agentes automáticos quebrariam.
+        Coordenação = admin da empresa ou Cargo de coordenação/gestão (Coordenador,
+        Administrativo, Gerente — `_is_coordination`). Ações internas (sem usuário) não são
+        afetadas, senão o reconcile e os agentes automáticos quebrariam.
         """
         if current_user is None:
             return
@@ -2597,6 +2620,8 @@ class ProjectTaskService:
             return
 
         if await ProjectTaskService._is_task_assignee(db, current_user, task):
+            return
+        if await ProjectTaskService._is_coordination(db, current_user):
             return
         raise HTTPException(
             status_code=403,
@@ -2722,6 +2747,7 @@ class ProjectTaskService:
     def _feature_target_status(
         feature_cols: list[ProjectStatusConfig],
         us_statuses: list[ProjectStatusConfig],
+        current: Optional[ProjectStatusConfig] = None,
     ) -> Optional[ProjectStatusConfig]:
         """Decide a coluna-alvo da Feature a partir do agregado das US (precedência).
         Retorna None quando nenhuma regra casa ou a coluna correspondente não existe."""
@@ -2752,17 +2778,20 @@ class ProjectTaskService:
         # a regra robusta a funis onde o nome e a flag is_final não estão perfeitamente alinhados.
         is_done = lambda s: is_final(s) or has_concluido(s)
 
-        # 1. todas as US Concluídas → Feature Concluída.
-        # Alvo por NOME primeiro ("Concluído"); só então cai para is_final. Usa-se a ÚLTIMA
-        # coluna is_final (maior order) para não casar por engano uma etapa intermediária
-        # marcada is_final indevidamente (ex.: "Em Desenvolvimento" com is_final=true).
+        # 1. todas as US Concluídas → Feature vai para Homologação (PO): quem conclui a Feature
+        # é o PO (docs/processo/03). Feature já concluída fica onde está. Sem coluna de
+        # homologação no funil, conclui direto — alvo por NOME ("Concluído") e só então a
+        # ÚLTIMA coluna is_final (maior order), para não casar uma etapa intermediária
+        # marcada is_final indevidamente.
         if all(is_done(s) for s in us_statuses):
-            return col(has_concluido) or col_last(is_final)
+            if current is not None and is_done(current):
+                return None
+            return col(has_homolog) or col(has_concluido) or col_last(is_final)
         # 2. alguma US em Ajustar (retrabalho) → Feature em Ajustar
         if any(has_ajustar(s) for s in us_statuses):
             return col(has_ajustar)
-        # 3. todas as US em Homologação → Feature em Homologação
-        if all(has_homolog(s) for s in us_statuses):
+        # 3. todas as US em Homologação ou já concluídas → Feature em Homologação
+        if all(has_homolog(s) or is_done(s) for s in us_statuses):
             return col(has_homolog)
         # 4. alguma US fora do backlog → Feature em Desenvolvimento
         if any(not is_initial(s) for s in us_statuses):
@@ -2825,17 +2854,23 @@ class ProjectTaskService:
 
         # (b) movimento da Feature.
         feature_cols = await ProjectTaskService._funnel_statuses(db, feature_funnel_id)
-        target = ProjectTaskService._feature_target_status(feature_cols, us_statuses)
+        current = next((c for c in feature_cols if c.id == feature.status_id), None)
+        target = ProjectTaskService._feature_target_status(feature_cols, us_statuses, current)
         if target is None or target.id == feature.status_id:
             return
 
         # Sincronização automática Feature ← US: a US já foi movida com sucesso;
         # não reaplicar travas de permissão/assignee/formulário no card-pai.
+        from_status = current or await db.get(ProjectStatusConfig, feature.status_id)
         feature.status_id = target.id
         feature.completed_at = datetime.utcnow() if target.is_final else None
         feature.status_entered_at = datetime.utcnow()
         feature.sla_state = ProjectTaskService._sla_initial(target)
         feature.updated_at = datetime.utcnow()
+        await ProjectTaskService._record_status_move(
+            db, feature, from_status=from_status, to_status=target,
+            moved_by=current_user.id if current_user else None, source="reconcile",
+        )
         logger.info(
             "reconcile Feature %s: movida para '%s' (agregado de %d US filha(s))",
             feature.id,
@@ -3944,6 +3979,9 @@ class ProjectTaskService:
             parent_task_id=payload.get("parent_task_id"),
             self_id=None,
         )
+        # Item novo dentro de um projeto travado muda o escopo comprometido: exige revisão.
+        if payload.get("parent_task_id"):
+            await ScheduleBaselineService.assert_editable(db, project_id, payload["parent_task_id"])
         await ProjectTaskService._validate_form_values_for_status(
             db,
             demand_type_id=demand_type_id,
@@ -4496,6 +4534,17 @@ class ProjectTaskService:
             from app.modules.projetos.procurement import ProcurementFlowService
             await ProcurementFlowService.ensure(db, project_id)
             hold = await ProcurementFlowService.hold_status_for_task(db, project_id, task)
+            # Guarda para onde o card ia (ex.: Backlog → Classificação): ganhou, ele retoma aqui.
+            # Sem movimento (classificação tardia), retoma a etapa em que estava — exceto a
+            # inicial, que segue para a próxima etapa depois da Contratação.
+            intended = payload.get("status_id")
+            if intended and intended != task.status_id and intended != hold.id:
+                task.procurement_resume_status_id = intended
+            else:
+                cur_st = await db.get(ProjectStatusConfig, task.status_id)
+                task.procurement_resume_status_id = (
+                    task.status_id if cur_st and not cur_st.is_initial and cur_st.id != hold.id else None
+                )
             payload["status_id"] = hold.id
             target_status = hold
             if source_status is None and task.status_id != hold.id:
@@ -5550,6 +5599,9 @@ class ProjectTaskService:
                 detail="Não é possível excluir um item que tem itens filhos. Exclua os filhos primeiro.",
             )
         parent_id = task.parent_task_id
+        # Tirar item de um projeto travado também mexe no cronograma comprometido.
+        if parent_id is not None:
+            await ScheduleBaselineService.assert_editable(db, project_id, parent_id)
         await db.delete(task)
         await db.flush()
         # Saiu da árvore: o pai reconsolida datas/horas/progresso sem o item removido.
@@ -10338,16 +10390,79 @@ class ProjectAgentRunner:
             return "(vazio)" if not text else f"(insuficiente: {text!r})", True
         return text, False
 
+    # Campos que a triagem nunca cobra: preenchimento automático ou opcional por natureza.
+    _REVIEW_SKIP_EMPTY = {"requisitante", "desenvolvida_com_ia"}
+
+    @staticmethod
+    async def _stage_field_modes(
+        db: AsyncSession, task: ProjectTask,
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        """Modo (hidden/visible/editable/required) de cada campo NA ETAPA ATUAL do card — a mesma
+        regra da tela (defaultFormVisibility.ts / sectionMode + getFieldVisibility no drawer):
+        - campo padrão: vínculo da etapa → modo; sem vínculo, is_visible/is_required globais;
+        - campo do formulário: override em validation.visibility → modo; senão o da seção;
+          seção sem vínculo com a etapa = oculta.
+        Devolve (modos dos campos padrão por field_key, modos dos campos do formulário)."""
+        default_links = {
+            l.field_key: l.mode for l in (await db.execute(
+                select(ProjectStatusDefaultFormLink).where(ProjectStatusDefaultFormLink.status_id == task.status_id)
+            )).scalars().all()
+        }
+        default_modes: dict[str, str] = {}
+        for cfg in (await db.execute(select(ProjectDefaultFormField))).scalars().all():
+            mode = default_links.get(cfg.field_key)
+            if mode is None:
+                mode = "hidden" if not cfg.is_visible else ("required" if cfg.is_required else "editable")
+            default_modes[cfg.field_key] = mode
+
+        form_modes: dict[str, str] = {}
+        if task.demand_type_id:
+            section_links = {
+                l.section_id: l.mode for l in (await db.execute(
+                    select(ProjectStatusSectionLink).where(ProjectStatusSectionLink.status_id == task.status_id)
+                )).scalars().all()
+            }
+            fields = (await db.execute(
+                select(ProjectDemandFormField)
+                .join(ProjectDemandFormSection, ProjectDemandFormSection.id == ProjectDemandFormField.section_id)
+                .where(
+                    ProjectDemandFormSection.demand_type_id == task.demand_type_id,
+                    ProjectDemandFormField.is_active == True,  # noqa: E712
+                )
+            )).scalars().all()
+            sid = str(task.status_id)
+            for field in fields:
+                mode = section_links.get(field.section_id, "hidden")
+                vis = (field.validation or {}).get("visibility") if isinstance(field.validation, dict) else None
+                for item in vis if isinstance(vis, list) else []:
+                    if isinstance(item, dict) and str(item.get("status_id") or "") == sid:
+                        raw = str(item.get("mode") or "")
+                        mode = raw if raw in ("visible", "required", "hidden") else "editable"
+                        break
+                form_modes[field.field_key] = mode
+        return default_modes, form_modes
+
+    @staticmethod
+    def _risk_description_applies(form_values: dict) -> bool:
+        risco = str(form_values.get("risco_regulatorio") or "").strip().lower()
+        return risco in {"sim", "true", "1", "yes"}
+
     @staticmethod
     async def _collect_form_gaps(db: AsyncSession, task: ProjectTask) -> list[str]:
-        """Campos do card/formulário vazios ou só placeholder ('.' etc.)."""
+        """Campos vazios ou só placeholder ('.' etc.) que a etapa atual EXIGE. Segue a
+        configuração da etapa: oculto, só leitura ou opcional não é lacuna — a triagem devolvia
+        a solicitação pedindo Início/Prazo que o Backlog nem mostra. A Descrição, núcleo da
+        solicitação, é cobrada sempre que a etapa a mostra."""
+        default_modes, form_modes = await ProjectAgentRunner._stage_field_modes(db, task)
         gaps: list[str] = []
-        if not (task.diretoria or "").strip():
+        if default_modes.get("diretoria") == "required" and not (task.diretoria or "").strip():
             gaps.append("Diretoria")
-        if not (task.area or "").strip():
+        if default_modes.get("area") == "required" and not (task.area or "").strip():
             gaps.append("Área")
         desc = (task.description or "").strip()
-        if not desc or desc.lower() in ProjectAgentRunner._EMPTY_PLACEHOLDERS:
+        if default_modes.get("description", "editable") in ("editable", "required") and (
+            not desc or desc.lower() in ProjectAgentRunner._EMPTY_PLACEHOLDERS
+        ):
             gaps.append("Descrição")
 
         sub_res = await db.execute(
@@ -10358,9 +10473,8 @@ class ProjectAgentRunner:
         if not task.demand_type_id:
             return gaps
 
-        risco = str(form_values.get("risco_regulatorio") or "").strip().lower()
-        skip_empty = {"requisitante", "desenvolvida_com_ia"}
-        if risco not in {"sim", "true", "1", "yes"}:
+        skip_empty = set(ProjectAgentRunner._REVIEW_SKIP_EMPTY)
+        if not ProjectAgentRunner._risk_description_applies(form_values):
             skip_empty.add("descricao_dos_riscos_regulatorios")
 
         fields_res = await db.execute(
@@ -10375,6 +10489,8 @@ class ProjectAgentRunner:
         for field in fields_res.scalars().all():
             if field.field_key in skip_empty:
                 continue
+            if form_modes.get(field.field_key, "hidden") != "required":
+                continue
             _, insufficient = ProjectAgentRunner._display_form_value(form_values.get(field.field_key))
             if insufficient:
                 gaps.append(field.label)
@@ -10385,7 +10501,15 @@ class ProjectAgentRunner:
         db: AsyncSession,
         project_id: uuid.UUID,
         task: ProjectTask,
+        for_review: bool = False,
     ) -> str:
+        """Contexto do card para o agente. `for_review` (triagem que devolve a solicitação):
+        só o que a etapa mostra ao requisitante, com obrigatório/opcional marcado e LACUNA só
+        onde `_collect_form_gaps` também cobra. Na classificação vai tudo o que foi preenchido."""
+        default_modes: dict[str, str] = {}
+        form_modes: dict[str, str] = {}
+        if for_review:
+            default_modes, form_modes = await ProjectAgentRunner._stage_field_modes(db, task)
         lines: list[str] = []
         project = await db.get(Project, project_id)
         if project:
@@ -10407,16 +10531,51 @@ class ProjectAgentRunner:
             ", ".join(str(a.get("filename") or a.get("object_name") or "arquivo") for a in anexos if isinstance(a, dict))
             if anexos else "(nenhum)"
         )
-        lines.extend([
-            f"Título: {task.title or ''}",
-            f"Descrição: {task.description or '(vazia)'}",
-            f"Diretoria: {task.diretoria or '(vazia)'}",
-            f"Área: {task.area or '(vazia)'}",
-            f"Anexos: {anexo_txt}",
-            f"Início: {task.start_date.isoformat() if task.start_date else '(vazio)'}",
-            f"Prazo: {task.due_date.isoformat() if task.due_date else '(vazio)'}",
-            f"Horas estimadas: {task.estimated_hours if task.estimated_hours is not None else '(vazio)'}",
-        ])
+        if not for_review:
+            lines.extend([
+                f"Título: {task.title or ''}",
+                f"Descrição: {task.description or '(vazia)'}",
+                f"Diretoria: {task.diretoria or '(vazia)'}",
+                f"Área: {task.area or '(vazia)'}",
+                f"Anexos: {anexo_txt}",
+                f"Início: {task.start_date.isoformat() if task.start_date else '(vazio)'}",
+                f"Prazo: {task.due_date.isoformat() if task.due_date else '(vazio)'}",
+                f"Horas estimadas: {task.estimated_hours if task.estimated_hours is not None else '(vazio)'}",
+            ])
+        else:
+            lines.append(
+                "Regra desta etapa: só entram abaixo os campos que o requisitante vê aqui. "
+                "Campos marcados (opcional) podem ficar vazios; lacuna é o que está marcado LACUNA."
+            )
+            lines.append(f"Título: {task.title or ''}")
+
+            def _std(key: str, label: str, value: Optional[str], empty: str = "(vazio)",
+                     gap: bool = False, always_required: bool = False) -> None:
+                mode = default_modes.get(key, "editable")
+                if mode == "hidden":
+                    return
+                if always_required and mode == "editable":
+                    mode = "required"
+                tag = " (obrigatório)" if mode == "required" else (" (opcional)" if mode == "editable" else "")
+                mark = "  ← LACUNA (vazio ou placeholder)" if gap else ""
+                lines.append(f"{label}{tag}: {value if value else empty}{mark}")
+
+            desc_txt = (task.description or "").strip()
+            _std("description", "Descrição", desc_txt or None, "(vazia)", always_required=True,
+                 gap=default_modes.get("description", "editable") in ("editable", "required")
+                 and (not desc_txt or desc_txt.lower() in ProjectAgentRunner._EMPTY_PLACEHOLDERS))
+            _std("diretoria", "Diretoria", task.diretoria, "(vazia)",
+                 gap=default_modes.get("diretoria") == "required" and not (task.diretoria or "").strip())
+            _std("area", "Área", task.area, "(vazia)",
+                 gap=default_modes.get("area") == "required" and not (task.area or "").strip())
+            _std("anexos", "Anexos", anexo_txt if anexos else None, "(nenhum)")
+            # Datas/horas de planejamento: só se a etapa mostra o campo ou já há valor.
+            if task.start_date or default_modes.get("start_date", "editable") != "hidden":
+                _std("start_date", "Início", task.start_date.isoformat() if task.start_date else None)
+            if task.due_date or default_modes.get("due_date", "editable") != "hidden":
+                _std("due_date", "Prazo", task.due_date.isoformat() if task.due_date else None)
+            if task.estimated_hours is not None:
+                lines.append(f"Horas estimadas: {task.estimated_hours}")
 
         sub_res = await db.execute(
             select(ProjectDemandFormSubmission).where(ProjectDemandFormSubmission.task_id == task.id)
@@ -10435,6 +10594,9 @@ class ProjectAgentRunner:
                 .order_by(ProjectDemandFormSection.order.asc(), ProjectDemandFormField.order.asc())
             )
             rows = fields_res.all()
+            risk_applies = ProjectAgentRunner._risk_description_applies(form_values)
+            if for_review:
+                rows = [(f, sec) for f, sec in rows if form_modes.get(f.field_key, "hidden") != "hidden"]
             if rows:
                 lines.append("\nFormulário da demanda (avalie TODOS os campos abaixo):")
                 current_section = None
@@ -10447,9 +10609,23 @@ class ProjectAgentRunner:
                     display, insufficient = ProjectAgentRunner._display_form_value(
                         form_values.get(field.field_key),
                     )
-                    mark = "  ← LACUNA (vazio ou placeholder)" if insufficient else ""
-                    lines.append(f"    - {field.label}: {display}{mark}")
-                extras = [k for k in form_values if k not in seen_keys]
+                    if not for_review:
+                        mark = "  ← LACUNA (vazio ou placeholder)" if insufficient else ""
+                        lines.append(f"    - {field.label}: {display}{mark}")
+                        continue
+                    mode = form_modes.get(field.field_key, "hidden")
+                    tag = " (obrigatório)" if mode == "required" else (" (opcional)" if mode == "editable" else "")
+                    if field.field_key == "descricao_dos_riscos_regulatorios" and not risk_applies:
+                        lines.append(f"    - {field.label}: {display} (não se aplica: risco regulatório = Não)")
+                        continue
+                    cobra = (
+                        insufficient
+                        and mode == "required"
+                        and field.field_key not in ProjectAgentRunner._REVIEW_SKIP_EMPTY
+                    )
+                    mark = "  ← LACUNA (vazio ou placeholder)" if cobra else ""
+                    lines.append(f"    - {field.label}{tag}: {display}{mark}")
+                extras = [] if for_review else [k for k in form_values if k not in seen_keys]
                 if extras:
                     lines.append("  [Outros]")
                     for key in extras:
@@ -10575,7 +10751,7 @@ class ProjectAgentRunner:
         template: str,
         funnel_id: uuid.UUID,
     ) -> str:
-        task_context = await ProjectAgentRunner._build_rich_task_context(db, project_id, task)
+        task_context = await ProjectAgentRunner._build_rich_task_context(db, project_id, task, for_review=True)
         peer_cards = await ProjectAgentRunner._build_peer_cards_context(db, task, funnel_id)
         tpl = template.strip() or DEFAULT_REVIEW_PROMPT
         return (
@@ -12365,6 +12541,7 @@ class ProjectImportService:
             )).scalar_one_or_none()
             if not parent_ok:
                 raise HTTPException(status_code=400, detail="Projeto/Programa de destino inválido para este projeto.")
+            await ScheduleBaselineService.assert_editable(db, project_id, parent_task_id)
 
         try:
             wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)

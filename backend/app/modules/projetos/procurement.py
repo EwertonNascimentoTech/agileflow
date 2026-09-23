@@ -428,6 +428,27 @@ class ProcurementFlowService:
         return res.scalar_one_or_none()
 
     @staticmethod
+    async def resume_status_after_win(
+        db: AsyncSession, project_id: uuid.UUID, origin: ProjectTask, hold: ProjectStatusConfig
+    ) -> Optional[ProjectStatusConfig]:
+        """Ganhou: o card volta para onde ia quando a Contratação o desviou (ex.: Prospectar →
+        Classificação). A "próxima por ordem" vale só para cards sem destino guardado — em
+        Prospectar ela é Impedimento, não a continuação do fluxo."""
+        rid = getattr(origin, "procurement_resume_status_id", None)
+        if rid:
+            st = await db.get(ProjectStatusConfig, rid)
+            if (
+                st is not None
+                and st.project_id == project_id
+                and st.funnel_id == hold.funnel_id
+                and st.is_active
+                and not st.is_procurement_hold
+                and not st.is_procurement_cancel
+            ):
+                return st
+        return await ProcurementFlowService.next_status_after_hold(db, project_id, hold)
+
+    @staticmethod
     async def next_status_after_hold(
         db: AsyncSession, project_id: uuid.UUID, hold: ProjectStatusConfig
     ) -> Optional[ProjectStatusConfig]:
@@ -625,12 +646,15 @@ class ProcurementFlowService:
             hold = cur if (cur and cur.is_procurement_hold) else (
                 await ProcurementFlowService.hold_status_for_task(db, project_id, origin)
             )
-            nxt = await ProcurementFlowService.next_status_after_hold(db, project_id, hold)
+            nxt = await ProcurementFlowService.resume_status_after_win(db, project_id, origin, hold)
             origin.procurement_locked = False
+            origin.procurement_resume_status_id = None
             if nxt:
+                prev = await db.get(ProjectStatusConfig, origin.status_id)
                 origin.status_id = nxt.id
                 origin.status_entered_at = datetime.utcnow()
                 origin.completed_at = None
+                await ProcurementFlowService._record_origin_move(db, origin, prev, nxt, user_id)
             origin.updated_at = datetime.utcnow()
             return
 
@@ -642,11 +666,27 @@ class ProcurementFlowService:
         origin.procurement_locked = False
         cancel = await ProcurementFlowService.cancel_status_for_origin(db, project_id, origin)
         if cancel:
+            prev = await db.get(ProjectStatusConfig, origin.status_id)
             origin.status_id = cancel.id
             origin.status_entered_at = datetime.utcnow()
             if cancel.is_final:
                 origin.completed_at = datetime.utcnow()
+            await ProcurementFlowService._record_origin_move(db, origin, prev, cancel, user_id)
         origin.updated_at = datetime.utcnow()
+
+    @staticmethod
+    async def _record_origin_move(
+        db: AsyncSession,
+        origin: ProjectTask,
+        prev: Optional[ProjectStatusConfig],
+        nxt: ProjectStatusConfig,
+        user_id: Optional[uuid.UUID],
+    ) -> None:
+        """Linha na timeline da origem (o desfecho do Contratar a move sem arraste)."""
+        from app.modules.projetos.service import ProjectTaskService
+        await ProjectTaskService._record_status_move(
+            db, origin, from_status=prev, to_status=nxt, moved_by=user_id, source="procurement",
+        )
 
     @staticmethod
     async def _attach_contrato(

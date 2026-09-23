@@ -231,6 +231,9 @@ class ProjectTask(TenantBase):
     procurement_task_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     procurement_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     procurement_cancel_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Etapa para onde o card ia quando a Contratação o desviou para a raia travada. Ganhou a
+    # contratação → retoma aqui (senão, a próxima etapa depois da Contratação).
+    procurement_resume_status_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     # Evidência de código na conclusão da US: ou existe commit vinculado
     # (project_task_commits), ou o dev justifica por que não há. Autor e data ficam
     # registrados para o apontamento ser auditável.
