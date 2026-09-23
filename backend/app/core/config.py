@@ -32,8 +32,9 @@ class Settings(BaseSettings):
     POSTGRES_PORT: int = 5432
     # Pool por PROCESSO. Com N workers uvicorn, o total de conexões é
     # N × (DB_POOL_SIZE + DB_MAX_OVERFLOW) e precisa caber no max_connections do
-    # Postgres (default 100), reservando espaço para Celery e psql. Ex.: 4 workers
-    # × (5 + 10) = 60.
+    # Postgres (150 no compose), reservando espaço para Celery e psql. A API roda
+    # 6 workers com DB_MAX_OVERFLOW=7 (definido no docker-compose): 6 × 12 = 72;
+    # Celery 4 × 15 = 60.
     DB_POOL_SIZE: int = 5
     DB_MAX_OVERFLOW: int = 10
 

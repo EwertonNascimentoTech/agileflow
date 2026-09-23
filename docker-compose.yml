@@ -25,6 +25,9 @@ services:
     env_file: .env
     environment:
       DOCS_ROOT: /docs
+      # 6 workers × (5 + 7) = 72 conexões + Celery 4 × (5 + 10) = 60 → 132, dentro das 147
+      # do max_connections=150 (3 reservadas). Assim não precisa reiniciar o Postgres.
+      DB_MAX_OVERFLOW: ${API_DB_MAX_OVERFLOW:-7}
     volumes:
       - ./docs:/docs:ro
     ports:
@@ -38,7 +41,9 @@ services:
         condition: service_healthy
       minio:
         condition: service_started
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${API_WORKERS:-4}
+    # 6 workers: com 4, dois relatórios pesados ao mesmo tempo já atrasavam as requisições
+    # leves do mesmo processo (sino p95 0,5 s com 4 pesados). Host com 8 núcleos.
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${API_WORKERS:-6}
 
   # ── CELERY WORKER ────────────────────────────────────────────────────
   celery_worker:
@@ -78,7 +83,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     # Tuning básico OLTP (valores conservadores, seguros p/ hosts pequenos):
-    # - max_connections folgado p/ os 4 workers × pool + Celery
+    # - max_connections folgado p/ os 6 workers da API × pool (5+7) + Celery (4 × 15)
     # - jit=off ajuda cargas de muitas queries curtas
     command:
       - postgres

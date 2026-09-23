@@ -53,6 +53,7 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 - Frontend ? **build est?tico nginx** (`saas_frontend` :18082). Mudan?a de UI exige `docker compose up -d --build frontend`.
 - API **n?o monta o c?digo-fonte**. Mudan?a Python exige `docker compose up -d --build api`.
 - P?blico: `agileflow.tdsistemafiea.com.br` ? 18082. Tenant operacional: `tenant_ss`.
+- API roda 6 workers com DB_MAX_OVERFLOW=7 (compose): 6 × (5+7) + Celery 4 × (5+10) = 132 <= 147 conexões. Mudar workers/pool exige refazer essa conta.
 
 ## Operação Assistida (clientes)
 

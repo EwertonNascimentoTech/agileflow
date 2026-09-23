@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-23 — API com 6 workers (D8 da auditoria)
+
+- **Pedido:** Subir os processos da API (D8): relatório pesado atrasava requisições leves do mesmo worker.
+- **Feito:** `--workers ${API_WORKERS:-6}` e `DB_MAX_OVERFLOW=7` só na API (docker-compose). Conexões: API 6 × (5+7) = 72 + Celery 4 × (5+10) = 60 = 132, dentro das 147 do max_connections=150 — sem reiniciar o Postgres. Medido (sino com relatórios pesados simultâneos): 4 pesados p95 482 para 22–35 ms; 8 pesados p50 158 para 14 ms, p95 681 para 94–171 ms, máx 1,45 para 0,35–0,58 s. Pico de conexões 13–17. Memória da API 1,1 para 1,4 GB.
+- **Não mexer:** subir workers ou pool exige refazer a conta N × (pool + overflow) + Celery <= 147 (ou aumentar max_connections, que reinicia o Postgres).
+- **Arquivos:** `docker-compose.yml`, `backend/app/core/config.py` (comentário)
+
 ## 2026-09-23 — Sobrecarga do cronograma e lentes de capacidade mais rápidas
 
 - **Pedido:** Sobrecarga do cronograma lenta (pendente da auditoria: ~0,9 s sem raiz; ~0,84 s com raiz).
