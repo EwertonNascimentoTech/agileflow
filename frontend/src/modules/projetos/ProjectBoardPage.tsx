@@ -71,6 +71,7 @@ import {
 import { UsCardProgressBar } from "@/modules/projetos/UsChecklistSection"
 import { canEditTaskOnBoard, canMoveTaskOnBoard } from "@/modules/projetos/taskMovePermissions"
 import { AssistedOpSkipDialog, isAssistedOpSkipRequired } from "@/modules/projetos/AssistedOpSkipDialog"
+import { AssistedOpsDevsDialog, isAssistedOpsDevsRequired } from "@/modules/projetos/AssistedOpsDevsDialog"
 
 function personToUser(p: Person): User {
   return { id: p.id, full_name: p.full_name, email: p.email } as unknown as User
@@ -880,6 +881,9 @@ export default function ProjectBoardPage() {
   const [createFieldErrors, setCreateFieldErrors] = useState<Record<string, string>>({})
   // Concluir projeto sem passar pela Operação Assistida: backend pede justificativa (428).
   const [oaSkipPrompt, setOaSkipPrompt] = useState<{ task: ProjectTask; toStatusId: string } | null>(null)
+  // Mover para a Operação Assistida sem devs de atendimento: o PO define no modal e o
+  // movimento é reenviado ao salvar (o backend só aceita com os devs definidos).
+  const [oaDevsPrompt, setOaDevsPrompt] = useState<{ task: ProjectTask; toStatusId: string } | null>(null)
   const [conversionPrompt, setConversionPrompt] = useState<{
     task: ProjectTask
     toStatusId: string
@@ -1770,6 +1774,10 @@ export default function ProjectBoardPage() {
         setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
       }
     } catch (err) {
+      if (isAssistedOpsDevsRequired(err)) {
+        setOaDevsPrompt({ task, toStatusId })
+        return
+      }
       if (isAssistedOpSkipRequired(err)) {
         setOaSkipPrompt({ task, toStatusId })
         return
@@ -2493,6 +2501,24 @@ export default function ProjectBoardPage() {
         onConfirm={confirmClassification}
       />
 
+      <AssistedOpsDevsDialog
+        open={!!oaDevsPrompt}
+        projectTaskId={oaDevsPrompt?.task.id ?? null}
+        projectTitle={oaDevsPrompt?.task.title}
+        canEdit={
+          user?.role === "super_admin" || user?.role === "company_admin" ||
+          (!!oaDevsPrompt?.task.assigned_to &&
+            oaDevsPrompt.task.assigned_to === persons.find((p) => p.user_id === user?.id)?.id)
+        }
+        poName={persons.find((p) => p.id === oaDevsPrompt?.task.assigned_to)?.full_name}
+        onCancel={() => setOaDevsPrompt(null)}
+        onSaved={async () => {
+          if (!oaDevsPrompt) return
+          const { task, toStatusId } = oaDevsPrompt
+          setOaDevsPrompt(null)
+          await performMove(task, toStatusId)
+        }}
+      />
       <AssistedOpSkipDialog
         open={!!oaSkipPrompt}
         projectTitle={oaSkipPrompt?.task.title}

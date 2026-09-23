@@ -14,8 +14,23 @@ function apiError(err: unknown, fallback: string): string {
 }
 
 /** Desenvolvedores fixos que atendem as Ocorrências da Operação Assistida do projeto.
- * Todos são avisados de ocorrência nova; quem assumir primeiro fica responsável. */
-export function AssistedOpsDevsSection({ projectTaskId, readOnly }: { projectTaskId: string; readOnly: boolean }) {
+ * Todos são avisados de ocorrência nova; quem assumir primeiro fica responsável.
+ * Modo modal (`autoEdit`): abre já editando, exige ao menos um dev (`requireOne`) e avisa
+ * quem chamou ao salvar/cancelar — usado ao mover o projeto para a Operação Assistida. */
+export function AssistedOpsDevsSection({
+  projectTaskId, readOnly, autoEdit = false, requireOne = false, bare = false, refreshKey = 0, onSaved, onCancel,
+}: {
+  projectTaskId: string
+  readOnly: boolean
+  autoEdit?: boolean
+  requireOne?: boolean
+  /** Sem a moldura/título (o modal já tem). */
+  bare?: boolean
+  /** Muda quando os devs foram salvos em outro lugar (ex.: no modal) — recarrega. */
+  refreshKey?: number
+  onSaved?: (devs: AssistedOpsDev[]) => void
+  onCancel?: () => void
+}) {
   const [devs, setDevs] = useState<AssistedOpsDev[]>([])
   const [editing, setEditing] = useState(false)
   const [persons, setPersons] = useState<Person[]>([])
@@ -26,16 +41,19 @@ export function AssistedOpsDevsSection({ projectTaskId, readOnly }: { projectTas
   const [alloc, setAlloc] = useState<Record<string, { p: string; oa: string }>>({})
 
   useEffect(() => {
-    teamOccurrencesApi.listDevs(projectTaskId).then(setDevs).catch(() => setDevs([]))
-  }, [projectTaskId])
+    teamOccurrencesApi.listDevs(projectTaskId)
+      .then((d) => { setDevs(d); if (autoEdit) startEdit(d) })
+      .catch(() => { setDevs([]); if (autoEdit) startEdit([]) })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectTaskId, refreshKey])
 
-  function startEdit() {
-    setSelected(devs.map((d) => d.person_id))
+  function startEdit(current: AssistedOpsDev[] = devs) {
+    setSelected(current.map((d) => d.person_id))
     setFilter("")
     setEditing(true)
     setAlloc(
       Object.fromEntries(
-        devs.map((d) => [d.person_id, { p: String(d.project_allocation_pct ?? 100), oa: String(d.assisted_ops_allocation_pct ?? 0) }]),
+        current.map((d) => [d.person_id, { p: String(d.project_allocation_pct ?? 100), oa: String(d.assisted_ops_allocation_pct ?? 0) }]),
       ),
     )
     if (persons.length === 0) {
@@ -69,9 +87,11 @@ export function AssistedOpsDevsSection({ projectTaskId, readOnly }: { projectTas
         toast.error("Projetos + Operação Assistida não pode passar de 100%.")
         return
       }
-      setDevs(await teamOccurrencesApi.setDevs(projectTaskId, selected, allocations))
+      const saved = await teamOccurrencesApi.setDevs(projectTaskId, selected, allocations)
+      setDevs(saved)
       setEditing(false)
       toast.success("Desenvolvedores de atendimento atualizados.")
+      onSaved?.(saved)
     } catch (err) {
       toast.error(apiError(err, "Não foi possível salvar."))
     } finally {
@@ -80,8 +100,8 @@ export function AssistedOpsDevsSection({ projectTaskId, readOnly }: { projectTas
   }
 
   return (
-    <div className="space-y-2 rounded-md border border-teal-500/30 bg-teal-50/40 p-3 dark:bg-teal-950/20">
-      <div className="flex items-center justify-between gap-2">
+    <div className={bare ? "space-y-2" : "space-y-2 rounded-md border border-teal-500/30 bg-teal-50/40 p-3 dark:bg-teal-950/20"}>
+      {!bare && <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Headset size={14} className="text-teal-600" />
           <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-teal-700 dark:text-teal-400">
@@ -89,11 +109,11 @@ export function AssistedOpsDevsSection({ projectTaskId, readOnly }: { projectTas
           </p>
         </div>
         {!readOnly && !editing && (
-          <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={startEdit}>
+          <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={() => startEdit()}>
             <Pencil size={12} /> Definir
           </Button>
         )}
-      </div>
+      </div>}
 
       {!editing ? (
         devs.length === 0 ? (
@@ -164,10 +184,15 @@ export function AssistedOpsDevsSection({ projectTaskId, readOnly }: { projectTas
             </div>
           )}
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setEditing(false)} disabled={saving}>
+            <Button variant="ghost" size="sm" onClick={() => { setEditing(false); onCancel?.() }} disabled={saving}>
               Cancelar
             </Button>
-            <Button size="sm" onClick={() => void save()} disabled={saving}>
+            <Button
+              size="sm"
+              onClick={() => void save()}
+              disabled={saving || (requireOne && selected.length === 0)}
+              title={requireOne && selected.length === 0 ? "Escolha ao menos um desenvolvedor" : undefined}
+            >
               {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Salvar
             </Button>

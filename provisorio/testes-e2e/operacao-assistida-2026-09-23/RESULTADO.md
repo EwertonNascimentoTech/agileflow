@@ -4,7 +4,7 @@ Executado contra o sistema no ar (`tenant_ss`, `agileflow` via nginx `:18082`), 
 PO / Dev / Coordenador / Cliente de teste (`e2e.*@e2e-agileflow.com.br`) e projetos `[E2E] …`.
 Tudo foi removido ao final (`run.sh cleanup-only` refaz a limpeza se preciso).
 
-**Resultado: 69/69 verificações de API + 18/18 verificações de tela** (reexecutado após a auditoria de segurança: primeiro acesso agora é por link gerado por quem cadastra).
+**Resultado: 71/71 verificações de API + 18/18 verificações de tela** (reexecutado após a auditoria de segurança: primeiro acesso agora é por link gerado por quem cadastra).
 
 ## API (HTTP real, com login)
 
@@ -17,6 +17,7 @@ Tudo foi removido ao final (`run.sh cleanup-only` refaz a limpeza se preciso).
 | 1 | Cliente cria senha no 1º acesso e faz login; `/auth/me` = `is_client` | OK |
 | 1 | Cliente barrado em Processos e Pessoas (403); Portal lista os 2 projetos | OK |
 | 1 | Abrir ocorrência fora da Operação Assistida → 400 | OK |
+| 2 | Sem devs de atendimento o projeto não entra na OA (428 → modal do PO); PO define e move | OK |
 | 2 | PO move projeto para Operação Assistida; cliente notificado; Portal passa a aceitar ocorrência | OK |
 | 2 | Concluir sem passar pela OA → 428; com justificativa → conclui e grava o motivo | OK |
 | 2 | PO Sync mostra o projeto como entregue com selo `em_operacao_assistida` | OK |

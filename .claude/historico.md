@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-23 — Operação Assistida só com devs de atendimento definidos
+
+- **Pedido:** Ao mover o projeto para Operação Assistida, abrir o modal para o PO definir o atendimento; o card só entra na raia depois de salvar.
+- **Feito:** Backend `_guard_assisted_op_devs`: Projeto/Programa (card-raiz do kanban de planejamento) só entra na raia com ao menos um dev em `project_assisted_ops_devs`; senão 428 com `detail.code = assisted_ops_devs_required` (o 428 de texto continua sendo a justificativa de pular a OA). Front: `AssistedOpsDevsDialog` (board e drawer) abre a seção de atendimento já em edição, exige ao menos um dev e, ao salvar, reenvia o movimento; cancelar deixa o card onde estava. Quem não é o PO do projeto (nem admin) vê o aviso de que só o PO define. `isAssistedOpSkipRequired` ignora o 428 com código. E2E da OA ajustado: 71/71 API + 18/18 telas.
+- **Não mexer:** código `assisted_ops_devs_required` no 428; o modal reenvia o mesmo movimento (performMove / persistStatus); definir devs segue só do PO/admin.
+- **Arquivos:** `projetos/service.py`, `AssistedOpsDevsDialog.tsx`, `AssistedOpsDevsSection.tsx`, `AssistedOpSkipDialog.tsx`, `ProjectBoardPage.tsx`, `ProjectTaskDrawer.tsx`, E2E `e2e_http.py`
+
 ## 2026-09-23 — Coordenação conclui a Homologação (PO) da Feature
 
 - **Pedido:** No kanban Features o coordenador também deve conseguir mover.

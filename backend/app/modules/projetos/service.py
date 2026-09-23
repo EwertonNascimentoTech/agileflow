@@ -2221,6 +2221,35 @@ class ProjectTaskService:
         """Data de entrega: 1ª entrada na Operação Assistida; sem ela, a conclusão."""
         return task.assisted_op_entered_at or task.completed_at or task.status_entered_at
 
+    # Código do 428 quando faltam os devs de atendimento (o 428 sem código é a justificativa).
+    ASSISTED_OPS_DEVS_REQUIRED = "assisted_ops_devs_required"
+
+    @staticmethod
+    async def _guard_assisted_op_devs(db: AsyncSession, task: ProjectTask, target_status) -> None:
+        """Projeto/Programa só entra na Operação Assistida com os desenvolvedores de atendimento
+        definidos (são eles que recebem as ocorrências dos clientes). 428 com código → o front
+        abre o modal para o PO definir e reenvia o movimento."""
+        if task.parent_task_id is not None or target_status is None:
+            return
+        if not ProjectTaskService._is_assisted_operation_status(target_status):
+            return
+        funnel = await db.get(ProjectFunnel, target_status.funnel_id)
+        if funnel is None or not ProjectTaskService._is_planning_funnel_name(funnel.name):
+            return
+        from app.modules.projetos.models import ProjectAssistedOpsDev
+        has_dev = (await db.execute(
+            select(ProjectAssistedOpsDev.id).where(ProjectAssistedOpsDev.project_task_id == task.id).limit(1)
+        )).scalar_one_or_none()
+        if has_dev is None:
+            raise HTTPException(
+                status_code=428,
+                detail={
+                    "code": ProjectTaskService.ASSISTED_OPS_DEVS_REQUIRED,
+                    "message": "Defina os desenvolvedores de atendimento da Operação Assistida antes de "
+                               "mover o projeto para essa raia.",
+                },
+            )
+
     @staticmethod
     async def _guard_assisted_op_skip(
         db: AsyncSession,
@@ -4514,6 +4543,7 @@ class ProjectTaskService:
                 await ProjectTaskService._guard_assisted_op_skip(
                     db, task, source_status, target_status, assisted_op_skip_reason, current_user,
                 )
+                await ProjectTaskService._guard_assisted_op_devs(db, task, target_status)
                 # Operação Assistida: ocorrência encerrada não reabre; projeto com ocorrência
                 # aberta não conclui.
                 from app.modules.projetos.assisted_ops import AssistedOpsService

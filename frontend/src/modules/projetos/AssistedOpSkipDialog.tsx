@@ -9,7 +9,9 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 /** O backend responde 428 quando o projeto vai a Concluído sem passar pela Operação
  * Assistida — a tela pede a justificativa e reenvia o movimento com ela. */
 export function isAssistedOpSkipRequired(err: unknown): boolean {
-  return (err as { response?: { status?: number } })?.response?.status === 428
+  const r = (err as { response?: { status?: number; data?: { detail?: unknown } } })?.response
+  // O 428 com código (objeto) é outro caso — devs de atendimento (AssistedOpsDevsDialog).
+  return r?.status === 428 && typeof r?.data?.detail !== "object"
 }
 
 const MIN_CHARS = 10

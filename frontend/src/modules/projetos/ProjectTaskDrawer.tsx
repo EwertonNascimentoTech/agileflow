@@ -33,6 +33,7 @@ import { toast } from "@/lib/toast"
 import { UsChecklistSection } from "@/modules/projetos/UsChecklistSection"
 import { UsCommitsSection } from "@/modules/projetos/UsCommitsSection"
 import { AssistedOpSkipDialog, isAssistedOpSkipRequired } from "@/modules/projetos/AssistedOpSkipDialog"
+import { AssistedOpsDevsDialog, isAssistedOpsDevsRequired } from "@/modules/projetos/AssistedOpsDevsDialog"
 import { OccurrenceTeamPanel } from "@/modules/projetos/OccurrenceTeamPanel"
 import { AssistedOpsDevsSection } from "@/modules/projetos/AssistedOpsDevsSection"
 import { AttachmentField, type Attachment } from "@/components/AttachmentField"
@@ -168,6 +169,9 @@ export function ProjectTaskDrawer({
   const [changingStatus, setChangingStatus] = useState(false)
   // Etapa pedida quando o backend exige justificativa de pular a Operação Assistida (428).
   const [oaSkipStatusId, setOaSkipStatusId] = useState<string | null>(null)
+  // Operação Assistida sem devs de atendimento: modal do PO; ao salvar reenvia a etapa.
+  const [oaDevsStatusId, setOaDevsStatusId] = useState<string | null>(null)
+  const [oaDevsRefresh, setOaDevsRefresh] = useState(0)
   const [classifyOpen, setClassifyOpen] = useState(false)
   const [statusConvPrompt, setStatusConvPrompt] = useState<{ newStatusId: string; typeName: string; name: string } | null>(null)
   const [assigneeMenuOpen, setAssigneeMenuOpen] = useState(false)
@@ -228,7 +232,7 @@ export function ProjectTaskDrawer({
 
     // Responsável = Pessoa do teamops (todas, inclusive sem login).
     teamopsApi.listPersons()
-      .then((ps) => setUsers(ps.map((p) => ({ id: p.id, full_name: p.full_name, email: p.email })) as unknown as User[]))
+      .then((ps) => setUsers(ps.map((p) => ({ id: p.id, full_name: p.full_name, email: p.email, user_id: p.user_id })) as unknown as User[]))
       .catch(() => setUsers([]))
     projetosApi.listTaskComments(projectId, task.id).then(setComments).catch(() => setComments([]))
     projetosApi.listTaskStatusHistory(projectId, task.id).then(setStatusHistory).catch(() => setStatusHistory([]))
@@ -703,6 +707,10 @@ export function ProjectTaskDrawer({
       toast.success(after && before && after.funnel_id !== before.funnel_id ? "Card movido para outro kanban." : "Etapa atualizada.")
     } catch (err) {
       setStatusId(task.status_id)  // reverte o seletor
+      if (isAssistedOpsDevsRequired(err)) {
+        setOaDevsStatusId(newStatusId)
+        return
+      }
       if (isAssistedOpSkipRequired(err)) {
         setOaSkipStatusId(newStatusId)
         return
@@ -1584,7 +1592,7 @@ export function ProjectTaskDrawer({
             </div>
 
             {task && isPlanningRootTask(task.planning_kind) && isProjectOrProgramKanbanFunnel(taskFunnelName) && (
-              <AssistedOpsDevsSection projectTaskId={task.id} readOnly={readOnly} />
+              <AssistedOpsDevsSection projectTaskId={task.id} readOnly={readOnly} refreshKey={oaDevsRefresh} />
             )}
 
             {!readOnly && task && isPlanningRootTask(task.planning_kind) && canImportScheduleInStatus(statusLabel) && (
@@ -1856,6 +1864,23 @@ export function ProjectTaskDrawer({
     </Dialog>
 
     {/* Diálogo: nomear o card criado pela conversão ao mudar de etapa */}
+    <AssistedOpsDevsDialog
+      open={!!oaDevsStatusId}
+      projectTaskId={task?.id ?? null}
+      projectTitle={task?.title}
+      canEdit={
+        authUser?.role === "super_admin" || authUser?.role === "company_admin" ||
+        (!!task?.assigned_to && task.assigned_to === users.find((u) => (u as unknown as { user_id?: string | null }).user_id === authUser?.id)?.id)
+      }
+      poName={users.find((u) => u.id === task?.assigned_to)?.full_name}
+      onCancel={() => setOaDevsStatusId(null)}
+      onSaved={async () => {
+        const target = oaDevsStatusId
+        setOaDevsStatusId(null)
+        setOaDevsRefresh((n) => n + 1)
+        if (target) await persistStatus(target)
+      }}
+    />
     <AssistedOpSkipDialog
       open={!!oaSkipStatusId}
       projectTitle={task?.title}

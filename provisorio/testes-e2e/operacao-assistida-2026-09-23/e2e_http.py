@@ -107,6 +107,12 @@ check(1, "abrir ocorrência fora da Operação Assistida é recusado (400)", s =
 
 # ═════════════ FASE 2 — raia Operação Assistida ═════════════
 s, b = patch_status(PO, ROOT_OA, ST["Operação Assistida"])
+detail = b.get("detail") if isinstance(b, dict) else None
+check(2, "sem devs de atendimento o projeto não entra na OA (428 → modal do PO)",
+      s == 428 and isinstance(detail, dict) and detail.get("code") == "assisted_ops_devs_required", f"{s} {b}")
+s, _ = req("PUT", f"/projetos/tasks/{ROOT_OA}/assisted-ops-devs", PO, {"person_ids": [IDS["people"]["dev"]]})
+check(2, "PO define os devs de atendimento (modal)", s == 200, f"{s}")
+s, b = patch_status(PO, ROOT_OA, ST["Operação Assistida"])
 check(2, "PO move o projeto para Operação Assistida", s == 200 and b.get("assisted_op_entered_at"), f"{s} {b if s != 200 else ''}")
 titles = [n["title"] for n in notifs(CLIENT)]
 check(2, "cliente é notificado de que o projeto aceita ocorrências", "Projeto em Operação Assistida" in titles, f"{titles}")
