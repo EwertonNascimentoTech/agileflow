@@ -472,7 +472,8 @@ class UserService:
     async def create_company_user(
         db: AsyncSession, data: UserCreate, tenant_id: uuid.UUID
     ) -> User:
-        """Cria um usuário comum dentro de um tenant."""
+        """Cria um usuário comum dentro de um tenant, já com a Função escolhida (role_id).
+        A rota valida que a Função pertence ao tenant."""
         if await UserService.get_by_email(db, data.email):
             raise HTTPException(status_code=400, detail="E-mail já cadastrado.")
 
@@ -481,6 +482,7 @@ class UserService:
             full_name=data.full_name,
             hashed_password=get_password_hash(data.password),
             role=UserRole.COMPANY_USER,
+            role_id=data.role_id,
             tenant_id=tenant_id,
         )
         db.add(user)

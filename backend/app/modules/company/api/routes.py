@@ -24,6 +24,24 @@ from app.modules.super_admin.service import UserService, RoleService, Permission
 
 router = APIRouter(prefix="/company/admin", tags=["Company Admin"])
 
+# Papéis que o admin da empresa pode atribuir. super_admin é da plataforma: só o próprio
+# super admin concede (rotas /super-admin).
+_TENANT_ASSIGNABLE_ROLES = {UserRole.COMPANY_ADMIN, UserRole.COMPANY_USER}
+
+
+async def _assert_tenant_role_assignment(
+    db: AsyncSession, tenant_id: uuid.UUID, role: Optional[UserRole], role_id: Optional[uuid.UUID]
+) -> None:
+    """Barra escalada de privilégio: papel fora do tenant e Função de outra empresa."""
+    if role is not None and role not in _TENANT_ASSIGNABLE_ROLES:
+        raise HTTPException(status_code=403, detail="Papel não permitido para usuários da empresa.")
+    if role_id is not None:
+        from app.modules.super_admin.models import Role
+
+        owner = (await db.execute(select(Role.tenant_id).where(Role.id == role_id))).scalar_one_or_none()
+        if owner != tenant_id:
+            raise HTTPException(status_code=400, detail="Função não encontrada nesta empresa.")
+
 
 # ─────────────────────────────────────────────
 # PERFIL DA EMPRESA
@@ -138,6 +156,8 @@ async def create_user(
     """Cria um usuário no tenant do admin logado. Respeita o limite max_users do plano."""
     from fastapi import HTTPException
     from sqlalchemy import func
+
+    await _assert_tenant_role_assignment(db, current_user.tenant_id, data.role, data.role_id)
     from app.modules.super_admin.models import Plan
 
     # Verifica limite de usuários do plano
@@ -192,6 +212,7 @@ async def update_user(
     if user.tenant_id != current_user.tenant_id:
         from fastapi import HTTPException
         raise HTTPException(403, "Acesso negado.")
+    await _assert_tenant_role_assignment(db, current_user.tenant_id, data.role, data.role_id)
     return await UserService.update_user(db, user_id, data)
 
 

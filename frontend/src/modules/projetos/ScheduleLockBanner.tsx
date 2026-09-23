@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { toast } from "@/lib/toast"
+import { useAuth } from "@/contexts/AuthContext"
+import { hasPermission } from "@/lib/permissions"
 
 function errDetail(err: unknown, fallback: string): string {
   const e = err as { response?: { data?: { detail?: unknown } } }
@@ -37,6 +39,9 @@ export function ScheduleLockBanner({
   onCompareBaseline?: (b: ScheduleBaseline) => void
 }) {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  // Liberar/concluir revisão é do PO/coordenação (o backend também barra).
+  const canManageSchedule = hasPermission(user?.permissions, "projetos.schedule.manage")
   const [dialogOpen, setDialogOpen] = useState(false)
   const [justification, setJustification] = useState("")
   const [saving, setSaving] = useState(false)
@@ -108,7 +113,7 @@ export function ScheduleLockBanner({
           </span>
         )}
       </div>
-      {locked ? (
+      {!canManageSchedule ? null : locked ? (
         <Button size="sm" variant="destructive" onClick={() => { setJustification(""); setDialogOpen(true) }}>
           <Unlock size={14} /> Liberar alteração
         </Button>

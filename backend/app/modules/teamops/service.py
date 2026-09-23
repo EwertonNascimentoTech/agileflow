@@ -84,6 +84,9 @@ PO_PERMISSIONS = [
     "projetos.comment.manage",
     # Operação Assistida: o PO cadastra os clientes e vincula aos projetos.
     "projetos.client.manage",
+    # Cronograma (baseline/revisão) e catálogo de Programas são do PO.
+    "projetos.schedule.manage",
+    "projetos.program.manage",
     # Pessoas: apenas as próprias ausências.
     "teamops.absence.view_own",
     "teamops.absence.request",
@@ -100,6 +103,8 @@ PO_EXTERNAL_BLOCKED_MODULE_PREFIXES = ("teamops.", "indicadores.", "rtd.")
 PO_EXTERNAL_PERMISSIONS = [
     c for c in PO_PERMISSIONS
     if not c.startswith(PO_EXTERNAL_BLOCKED_MODULE_PREFIXES)
+    # Catálogo de Programas é do portfólio inteiro — fora do alcance do PO Externo.
+    and c != "projetos.program.manage"
 ]
 
 # Permissões que liberam telas/APIs de configuração — PO nunca pode receber.
@@ -1730,7 +1735,8 @@ class CompetencyMapService:
                             person={
                                 "id": l.person.id,
                                 "full_name": l.person.full_name,
-                                "team_role": l.person.team_role,
+                                # team_role saiu na unificação de cargos: o cargo vem de Position.
+                                "position": l.person.position,
                             },
                             level=l.level,
                             years_experience=l.years_experience,

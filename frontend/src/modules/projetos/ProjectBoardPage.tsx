@@ -53,7 +53,7 @@ import { FormFieldRenderer, applyAutoFillCurrentFields } from "@/modules/projeto
 import { formatMissingFieldsMessage, resolveFieldMode, resolveSectionMode, validateRequiredFields } from "@/modules/projetos/validation"
 import { getRowBreak, groupIntoRows } from "@/modules/projetos/layout"
 import { toast } from "@/lib/toast"
-import { funnelAccessLevel } from "@/lib/permissions"
+import { funnelAccessLevel, hasPermission } from "@/lib/permissions"
 import {
   buildPlanningProgressBars,
   buildTaskProgressById,
@@ -2517,6 +2517,7 @@ export default function ProjectBoardPage() {
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <Label>Programa</Label>
+                {hasPermission(user?.permissions, "projetos.program.manage") && (
                 <button
                   type="button"
                   onClick={() => setConversionPrompt((p) => (p ? { ...p, programMode: p.programMode === "new" ? "select" : "new" } : p))}
@@ -2524,6 +2525,7 @@ export default function ProjectBoardPage() {
                 >
                   {conversionPrompt?.programMode === "new" ? (<><X size={13} /> Usar existente</>) : (<><Plus size={13} /> Novo programa</>)}
                 </button>
+                )}
               </div>
 
               {conversionPrompt?.programMode === "select" ? (

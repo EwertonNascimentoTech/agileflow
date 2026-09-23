@@ -4446,6 +4446,30 @@ async def _step_134_team_person_assisted_ops_pct(conn: AsyncConnection, schema: 
     })
 
 
+async def _step_135_projetos_program_schedule_perms(conn: AsyncConnection, schema: str) -> None:
+    """Permissões novas: catálogo de Programas e baseline do cronograma saem do `task.manage`
+    (que o Dev também tem). Concede aos cargos de PO, coordenação e gestão; o PO Externo
+    recebe só o cronograma (as rotas recortam pelos projetos dele)."""
+    if not await _table_exists(conn, schema, "team_positions"):
+        return
+    grants = {
+        "projetos.program.manage": ("po", "product_owner", "coordenador", "coord_de_arq_dev_e_sustenta_o",
+                                    "administrativo", "gerente", "gerente_executivo"),
+        "projetos.schedule.manage": ("po", "product_owner", "po_externo", "product_owner_externo", "coordenador",
+                                     "coord_de_arq_dev_e_sustenta_o", "administrativo", "gerente", "gerente_executivo"),
+    }
+    for code, slugs in grants.items():
+        await conn.execute(text(f"""
+            INSERT INTO public.role_permissions (id, role_id, permission_code)
+            SELECT gen_random_uuid(), po.role_id, CAST(:code AS varchar)
+              FROM {schema}.team_positions po
+             WHERE po.role_id IS NOT NULL
+               AND po.slug = ANY(CAST(:slugs AS varchar[]))
+               AND EXISTS (SELECT 1 FROM public.module_permissions mp WHERE mp.code = CAST(:code AS varchar))
+            ON CONFLICT (role_id, permission_code) DO NOTHING
+        """), {"code": code, "slugs": list(slugs)})
+
+
 async def _step_129_projetos_agent_fail_to(conn: AsyncConnection, schema: str) -> None:
     """Raia de destino quando a triagem do backlog (review_and_route) não aprova."""
     await _add_columns(conn, schema, "project_stage_agent_bindings", {
@@ -4678,6 +4702,7 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("132_projetos_ocorrencias", _step_132_projetos_ocorrencias),
     ("133_projetos_ocorrencias_atendimento", _step_133_projetos_ocorrencias_atendimento),
     ("134_team_person_assisted_ops_pct", _step_134_team_person_assisted_ops_pct),
+    ("135_projetos_program_schedule_perms", _step_135_projetos_program_schedule_perms),
     ("123_reconcile_indexes", _step_123_reconcile_indexes),
 ]
 

@@ -71,3 +71,9 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 - Horas úteis da ocorrência começam no 1º "Assumir" e pausam em Aguardando Cliente/Homologando; calendário do TeamOps no fuso do tenant.
 - Capacidade de Projetos conta só User Story; Operação Assistida e Chamados são fatias separadas (`reserves`), pela divisão da jornada em Pessoas.
 - Divisão da jornada (Pessoas): Projetos % + Operação Assistida % <= 100; Chamados = o resto. `project_hours_per_day` continua só a fatia de Projetos.
+
+## Permissões sensíveis (auditoria 2026-09-23)
+
+- Admin da empresa só atribui `company_admin`/`company_user` e Funções do próprio tenant; `super_admin` só via /super-admin.
+- Catálogo de Programas = `projetos.program.manage`; baseline/revisão do cronograma = `projetos.schedule.manage` (+ escopo do PO Externo). `task.manage` sozinho (Dev) não basta.
+- PATCH do card com `form_values` grava o merge com o formulário salvo — nunca substitui pelo parcial.

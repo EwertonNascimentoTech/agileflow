@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-23 — Correções rápidas da auditoria (segurança + quebras)
+
+- **Pedido:** Primeiro bloco da auditoria geral (`provisorio/testes-e2e/auditoria-geral-2026-09-23/RELATORIO.md`).
+- **Feito:** S1 — admin da empresa não atribui papel `super_admin` nem Função de outro tenant (`company/api/routes.py`, `_assert_tenant_role_assignment`). F5 — criar usuário grava a Função escolhida (`create_company_user`). S4 — catálogo de Programas exige `projetos.program.manage`. S7 — baseline/revisão do cronograma exige `projetos.schedule.manage` + escopo do PO Externo. Step 135 concede as duas permissões aos cargos de PO/coordenação/gestão (PO Externo só `schedule.manage`). F3 — mapa de competências usava `Person.team_role` (coluna removida) e derrubava Dashboard/Alertas do TeamOps. F6 — PATCH com `form_values` parcial grava o merge, não apaga o formulário. Front esconde os botões sem permissão.
+- **Não mexer:** Dev não gerencia Programas nem baseline; o papel `super_admin` só é concedido pelas rotas /super-admin.
+- **Arquivos:** `company/api/routes.py`, `super_admin/service.py`, `projetos/permissions.py`, `projetos/api/routes.py`, `projetos/service.py`, `teamops/service.py`, `core/tenant_migrations.py` (step 135); front `ScheduleLockBanner.tsx`, `ProjectProgramsPage.tsx`, `ProjectBoardPage.tsx`.
+
 ## 2026-09-23 — E2E Operação Assistida + organização da raiz
 
 - **Pedido:** Teste de ponta a ponta das Fases 1–5; mover para uma pasta provisória o que não é usado para rodar o sistema.

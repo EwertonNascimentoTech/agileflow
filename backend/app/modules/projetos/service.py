@@ -4720,7 +4720,12 @@ class ProjectTaskService:
             )
 
         task.updated_at = datetime.utcnow()
-        await ProjectTaskService._upsert_form_submission(db, task.id, form_values, None)
+        # Grava o MERGE (salvo + enviado): um PATCH com parte dos campos — ex.: o drawer
+        # movendo o card antes de o formulário carregar — não pode apagar o resto.
+        await ProjectTaskService._upsert_form_submission(
+            db, task.id, merged_values if form_values is not None else None,
+            current_user.id if current_user else None,
+        )
         # Cronograma manual: nenhuma edição reagenda outras tarefas. A data informada é a que
         # vale. O único efeito colateral é o rollup — o card-pai continua sendo o resumo dos
         # filhos (span de datas, soma de horas, progresso ponderado).

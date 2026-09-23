@@ -12,6 +12,8 @@ import { EmptyState } from "@/components/EmptyState"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { toast } from "@/lib/toast"
+import { useAuth } from "@/contexts/AuthContext"
+import { hasPermission } from "@/lib/permissions"
 
 const NONE = "__none__"
 
@@ -19,6 +21,9 @@ type Form = { name: string; description: string; responsavelId: string; isActive
 const emptyForm = (): Form => ({ name: "", description: "", responsavelId: NONE, isActive: true })
 
 export default function ProjectProgramsPage() {
+  const { user } = useAuth()
+  // Catálogo de Programas: só PO/coordenação/gestão (`projetos.program.manage`).
+  const canManage = hasPermission(user?.permissions, "projetos.program.manage")
   const [programs, setPrograms] = useState<ProjectProgram[]>([])
   const [persons, setPersons] = useState<Person[]>([])
   const [loading, setLoading] = useState(true)
@@ -107,7 +112,7 @@ export default function ProjectProgramsPage() {
             Cadastro de programas (nome, descrição e responsável). Cards podem ser vinculados a um programa na conversão.
           </p>
         </div>
-        <Button className="gap-1.5" onClick={openCreate}><Plus size={15} /> Novo programa</Button>
+        {canManage && <Button className="gap-1.5" onClick={openCreate}><Plus size={15} /> Novo programa</Button>}
       </div>
 
       {loading ? (
@@ -115,7 +120,7 @@ export default function ProjectProgramsPage() {
       ) : programs.length === 0 ? (
         <EmptyState icon={Layers} title="Nenhum programa cadastrado"
           description="Cadastre um programa para vincular cards na conversão."
-          action={{ label: "Novo programa", onClick: openCreate }} />
+          action={canManage ? { label: "Novo programa", onClick: openCreate } : undefined} />
       ) : (
         <div className="overflow-hidden rounded-lg border">
           <table className="w-full text-sm">
@@ -140,14 +145,14 @@ export default function ProjectProgramsPage() {
                     </span>
                   </td>
                   <td className="px-3 py-2 text-right">
-                    <div className="flex items-center justify-end gap-0.5">
+                    {canManage && <div className="flex items-center justify-end gap-0.5">
                       <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-primary" onClick={() => openEdit(p)}>
                         <Pencil size={14} />
                       </Button>
                       <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" onClick={() => void remove(p)}>
                         <Trash2 size={14} />
                       </Button>
-                    </div>
+                    </div>}
                   </td>
                 </tr>
               ))}

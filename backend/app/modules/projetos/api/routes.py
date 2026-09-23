@@ -179,6 +179,8 @@ _can_automation_manage = require_permission("projetos.automation.manage")
 _can_priority_manage = require_permission("projetos.priority.manage")
 _can_priority_score = require_permission("projetos.priority.score")
 _can_view_performance = require_permission("projetos.performance.view")
+_can_program_manage = require_permission("projetos.program.manage")
+_can_schedule_manage = require_permission("projetos.schedule.manage")
 
 
 async def _has_permission(ctx: ModuleContext, code: str) -> bool:
@@ -1079,17 +1081,24 @@ async def list_program_catalog(active_only: bool = Query(False), ctx: ModuleCont
 
 
 @router.post("/programs", response_model=ProjectProgramResponse, status_code=201)
-async def create_program(data: ProjectProgramCreate, ctx: ModuleContext = Depends(_ctx)):
+async def create_program(
+    data: ProjectProgramCreate, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_program_manage),
+):
     return await ProjectProgramService.create(ctx.db, data, user_id=ctx.user.id)
 
 
 @router.patch("/programs/{program_id}", response_model=ProjectProgramResponse)
-async def update_program(program_id: uuid.UUID, data: ProjectProgramUpdate, ctx: ModuleContext = Depends(_ctx)):
+async def update_program(
+    program_id: uuid.UUID, data: ProjectProgramUpdate, ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_program_manage),
+):
     return await ProjectProgramService.update(ctx.db, program_id, data, user_id=ctx.user.id)
 
 
 @router.delete("/programs/{program_id}", status_code=204)
-async def delete_program(program_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+async def delete_program(
+    program_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_program_manage),
+):
     await ProjectProgramService.delete(ctx.db, program_id)
 
 
@@ -1692,9 +1701,11 @@ async def save_baseline(
     ctx: ModuleContext = Depends(_ctx),
 ):
     """Salva o baseline (snapshot atual + justificativa) e ABRE a janela de revisão,
-    liberando a edição do cronograma travado."""
-    if not await _has_permission(ctx, "projetos.task.manage"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sem permissão para editar o cronograma.")
+    liberando a edição do cronograma travado. Só PO/coordenação (`projetos.schedule.manage`);
+    PO Externo apenas nos projetos dele."""
+    if not await _has_permission(ctx, "projetos.schedule.manage"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Só o PO ou a coordenação liberam o cronograma.")
+    await _assert_task_in_scope(ctx, data.root_task_id)
     return await ScheduleBaselineService.save_baseline(
         ctx.db, project_id, data.root_task_id, data.justification, ctx.user.id
     )
@@ -1707,8 +1718,9 @@ async def close_schedule_revision(
     ctx: ModuleContext = Depends(_ctx),
 ):
     """Conclui a revisão e RE-TRAVA o cronograma. Próxima alteração exige novo baseline."""
-    if not await _has_permission(ctx, "projetos.task.manage"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sem permissão para editar o cronograma.")
+    if not await _has_permission(ctx, "projetos.schedule.manage"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Só o PO ou a coordenação concluem a revisão do cronograma.")
+    await _assert_task_in_scope(ctx, data.root_task_id)
     await ScheduleBaselineService.close_revision(ctx.db, project_id, data.root_task_id)
     return await ScheduleBaselineService.lock_state(ctx.db, project_id, data.root_task_id)
 
