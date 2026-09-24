@@ -14,6 +14,29 @@ Modelo:
 
 ---
 
+## 2026-09-24 — Cargo Administrativo (Coordenação) (Filipe) e Administrativo comum
+
+- **Pedido:** Filipe ligado só ao Ewerton, um nível abaixo — no acesso e no organograma. Só ele; Fernando e Myrian seguem Administrativo.
+- **Feito:** cargo `administrativo_coordenacao` (dados, tenant_ss) com a base de permissões do Administrativo + configurações de Projetos (`project/status/demand_type/form/automation/priority.manage`) + Indicadores/RTD; liberado nas mesmas 6 raias que o Administrativo. Filipe movido para o cargo (gestor = Ewerton) e visível no organograma. `_cargo_rank`: Administrativo (Coordenação) = 2, logo abaixo da Coordenação. Step 127 não copia mais as permissões do Coordenador para o Administrativo; step 128 e listas de gestor de pessoas (back e front) incluem o Administrativo (Coordenação); step 137 troca Administrativo por Administrativo (Coordenação); Indicadores/RTD retirados do Administrativo.
+- **Não mexer:** Usuários/Funções seguem só do admin da empresa. Administrativo continua contando como coordenação nas regras do kanban (token `administrativ`).
+- **Arquivos:** `core/tenant_migrations.py` (127, 128, 137), `teamops/service.py` (`_cargo_rank`), `teamops/api/routes.py`, front `lib/permissions.ts`.
+
+## 2026-09-24 — Salvar Pessoa rebaixava o admin da empresa
+
+- **Pedido:** Coordenador não via mais criar quadro/raias.
+- **Causa:** o formulário de Pessoa sempre manda `access_level`, e `_provision_user` gravava `role = company_user` em todo salvamento. Em 14/09 a Pessoa do Ewerton (único `company_admin` do tenant) foi salva e o login caiu para `company_user` — perdeu quadro/raias (`projetos.status.manage`), Configurações e tudo que dependia do `*`. Nenhum cargo tem `projetos.status.manage`; o acesso vinha do papel de admin, não do cargo.
+- **Feito:** `_provision_user` não rebaixa `company_admin`/`super_admin` (só atualiza a role do cargo). Ewerton restaurado a `company_admin` no banco.
+- **Não mexer:** Pessoas/SSO/1º acesso nunca promovem a admin nem rebaixam admin.
+- **Arquivos:** `teamops/service.py` (`_provision_user`).
+
+## 2026-09-24 — Indicadores e RTD em 403 para todos
+
+- **Pedido:** Indicadores e RTD dando erro.
+- **Causa:** a auditoria de 23/09 (S5) passou a exigir `indicadores.view` / `rtd.view` no backend, mas nenhum cargo tinha essas permissões e o tenant não tem `company_admin` — o módulo respondia 403 para todo mundo.
+- **Feito:** step 137 concede `indicadores.view|manage|config.manage` (Configurações do módulo) e `rtd.view|manage` aos cargos Coordenador, Coord. de Arq., Dev e Sustentação e Administrativo (mesmo nível do Coordenador; o step 127 já copiaria). Demais cargos seguem sem acesso; PO Externo continua vedado.
+- **Não mexer:** permissão `.view` nova no backend exige step concedendo a algum cargo no mesmo commit.
+- **Arquivos:** `core/tenant_migrations.py` (step 137).
+
 ## 2026-09-23 — SSO: quem não está em Pessoas vira cliente do Portal
 
 - **Pedido:** Quem tem IDigital mas não tem cadastro no módulo de Times deve sempre ser vinculado como cliente; e o que dá para preencher com dados do SSO.

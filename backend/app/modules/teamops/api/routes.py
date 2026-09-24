@@ -84,6 +84,7 @@ _can_person_view = require_any_permission("teamops.person.view", "teamops.person
 _can_stack_view = require_any_permission("teamops.stack.view", "teamops.stack.manage", "teamops.person_stack.manage")
 _PEOPLE_MANAGER_POSITION_SLUGS = {
     "coordenador",
+    "administrativo_coordenacao",
     "coord_de_arq_dev_e_sustenta_o",
     "administrativo",
 }

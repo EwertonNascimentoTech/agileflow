@@ -540,15 +540,17 @@ def _cargo_rank(slug: Optional[str], name: Optional[str] = None) -> int:
     s = f"{slug or ''} {name or ''}".lower()
     if "gerente" in s or "diretor" in s or "diretoria" in s or "gestor" in s:
         return 0  # Gerência / Diretoria
+    if "administrativ" in s and "coord" in s:
+        return 2  # Administrativo (Coordenação): um nível abaixo da Coordenação
     if "coord" in s:
         return 1  # Coordenação
     if "product owner" in s or "product_owner" in s or "scrum" in s or re.search(r"\bpo\b", s):
-        return 2  # Product Owner
+        return 3  # Product Owner
     if ("refer" in s and "cnic" in s) or "arquiteto" in s or "architect" in s or "tech" in s:
-        return 3  # Referência Técnica / Arquitetura
+        return 4  # Referência Técnica / Arquitetura
     if "estagi" in s or "intern" in s or "trainee" in s:
-        return 5  # Estágio
-    return 4  # Equipe / operacional
+        return 6  # Estágio
+    return 5  # Equipe / operacional
 
 
 class AreaService:
@@ -1107,7 +1109,8 @@ class PersonService:
         """Cria/vincula/ajusta o login (public.users) conforme o nível de acesso.
         - none: desativa e desvincula o login (não apaga o User, preserva históricos).
         - com_acesso: company_user com a role do CARGO
-          (matriz de permissões por cargo). Ninguém vira company_admin por aqui.
+          (matriz de permissões por cargo). Ninguém vira company_admin por aqui — e quem já
+          é admin não é rebaixado (só a role do cargo é atualizada).
         access_level None = não muda o acesso (usado só para reset de senha)."""
         user: Optional[User] = None
         if person.user_id:
@@ -1166,7 +1169,10 @@ class PersonService:
         if not user.is_active:
             await PersonService._assert_plan_limit(db, tenant_id)
         user.is_active = True
-        user.role = target_role
+        # O formulário de Pessoa sempre manda access_level: sem esta guarda, salvar a Pessoa
+        # de um admin da empresa o rebaixava a company_user em silêncio.
+        if user.role not in (UserRole.COMPANY_ADMIN, UserRole.SUPER_ADMIN):
+            user.role = target_role
         user.role_id = target_role_id
         user.full_name = person.full_name
         if password:

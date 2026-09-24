@@ -15,7 +15,8 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 
 - `assigned_to` nas tarefas de Processos ? **Person.id** (TeamOps), n?o `users.id`.
 - PO Externo: s? projetos em que ? respons?vel; sem Pessoas, Indicadores, RTD, Capacidade, Relat?rios, Status Reports.
-- Coordenador e Administrativo: mesmo n?vel operacional.
+- Salvar Pessoa (TeamOps), SSO e 1º acesso nunca mudam o papel de `company_admin`/`super_admin` — só a role do cargo. Criar quadro/raia (`projetos.status.manage`) e demais configurações de Projetos: admin da empresa (Ewerton) e o cargo Administrativo (Coordenação).
+- Hierarquia de coordenação: Coordenador (admin da empresa) > Administrativo (Coordenação) (Filipe, gestor = Ewerton; configura Projetos/Indicadores/RTD, sem Usuários/Funções) > Administrativo (cargo comum; não espelha mais as permissões do Coordenador — step 127 só cuida das raias). No organograma o Administrativo (Coordenação) fica logo abaixo da Coordenação (`_cargo_rank`).
 - S? o respons?vel da US (ou coordena??o/admin) move card no kanban User Story, exceto Homologa??o (PO) — a? ? o PO do card-raiz.
 
 ## Kanban Feature ? User Story
@@ -83,6 +84,7 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 - PATCH do card com `form_values` grava o merge com o formulário salvo — nunca substitui pelo parcial.
 - PO Externo: toda rota por card/projeto/raiz aplica `_assert_task_in_scope`/`_po_external_scope` (leitura e escrita); lista de travas, matriz etc. filtradas pelo escopo.
 - Permissão `.view` é checada no backend (`require_any_permission`), não só no menu. Exceções deliberadas: detalhe do produto/versões e lista de Pessoas (diretório sem contato pessoal).
+- Indicadores/RTD: `.view`/`.manage` (e `indicadores.config.manage`) só para Coordenador, Coord. de Arq./Dev e Administrativo (Coordenação) (step 137). Toda permissão `.view` nova no backend precisa de step concedendo a algum cargo — o tenant não tem `company_admin` e o módulo nasce em 403 para todos.
 - Primeiro acesso: token só no link gerado por quem cadastra (72 h, uso único). `/auth/first-access/check` nunca devolve token.
 - Desligar/excluir Pessoa desativa o login vinculado.
 - Tarefas Celery: `_run` descarta o pool (engine.dispose) e o Redis ao fim de cada execução.

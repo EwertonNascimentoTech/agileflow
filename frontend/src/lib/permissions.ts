@@ -75,6 +75,7 @@ export function isCoordination(
 
 export const TEAMOPS_PEOPLE_MANAGER_SLUGS: readonly string[] = [
   "coordenador",
+  "administrativo_coordenacao",
   "coord_de_arq_dev_e_sustenta_o",
   "administrativo",
 ]

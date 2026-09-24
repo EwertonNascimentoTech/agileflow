@@ -4152,27 +4152,15 @@ _INDEX_SPECS: list[tuple[str, str, str, tuple[str, ...], str | None]] = [
 
 
 async def _step_127_administrativo_como_coordenador(conn: AsyncConnection, schema: str) -> None:
-    """Alinha o cargo Administrativo ao mesmo acesso operacional do Coordenador.
+    """Alinha o cargo Administrativo ao acesso operacional do Coordenador nos kanbans.
 
-    Copia permissões de `coordenador` / `coord_de_arq_dev_e_sustenta_o`, remove o
-    bloqueio `none` nos kanbans e inclui o role nas etapas onde o coordenador já
-    pode mover cards. Permissões extras de TeamOps do Administrativo são mantidas.
+    Remove o bloqueio `none` nos kanbans e inclui o role nas etapas onde o coordenador
+    já pode mover cards. Até 2026-09-24 também copiava as permissões do Coordenador a
+    cada boot; deixou de copiar quando o Administrativo passou a ser cargo comum e o
+    nível logo abaixo do Coordenador virou o cargo Administrativo (Coordenação).
     """
     if not await _table_exists(conn, schema, "team_positions"):
         return
-
-    await conn.execute(text(f"""
-        INSERT INTO public.role_permissions (id, role_id, permission_code)
-        SELECT gen_random_uuid(), admin.role_id, src_perm.permission_code
-          FROM {schema}.team_positions admin
-          JOIN {schema}.team_positions src
-            ON src.slug IN ('coordenador', 'coord_de_arq_dev_e_sustenta_o')
-           AND src.role_id IS NOT NULL
-          JOIN public.role_permissions src_perm ON src_perm.role_id = src.role_id
-         WHERE admin.slug = 'administrativo'
-           AND admin.role_id IS NOT NULL
-        ON CONFLICT (role_id, permission_code) DO NOTHING
-    """))
 
     if await _table_exists(conn, schema, "project_funnels") and await _column_exists(
         conn, schema, "project_funnels", "access_control"
@@ -4219,7 +4207,7 @@ async def _step_128_gestores_teamops(conn: AsyncConnection, schema: str) -> None
         return
 
     manager_slugs = (
-        "'coordenador', 'coord_de_arq_dev_e_sustenta_o', 'administrativo'"
+        "'coordenador', 'administrativo_coordenacao', 'coord_de_arq_dev_e_sustenta_o', 'administrativo'"
     )
     manager_permissions = (
         "'teamops.person.manage', "
@@ -4477,6 +4465,29 @@ async def _step_136_projetos_procurement_resume(conn: AsyncConnection, schema: s
     })
 
 
+async def _step_137_indicadores_rtd_coordenacao(conn: AsyncConnection, schema: str) -> None:
+    """Indicadores e RTD para a coordenação, incluindo a área de Configurações de Indicadores.
+
+    Desde a auditoria de 23/09 as leituras dos dois módulos exigem `.view` no backend, mas
+    nenhum cargo tinha a permissão — o módulo respondia 403 para todo mundo. Administrativo
+    (Coordenação) entra junto (um nível abaixo do Coordenador); Administrativo comum fica
+    de fora. PO Externo segue de fora (step 120 / require_module).
+    """
+    if not await _table_exists(conn, schema, "team_positions"):
+        return
+    await conn.execute(text(f"""
+        INSERT INTO public.role_permissions (id, role_id, permission_code)
+        SELECT gen_random_uuid(), po.role_id, mp.code
+          FROM {schema}.team_positions po
+          JOIN public.module_permissions mp
+            ON mp.code IN ('indicadores.view', 'indicadores.manage', 'indicadores.config.manage',
+                           'rtd.view', 'rtd.manage')
+         WHERE po.role_id IS NOT NULL
+           AND po.slug IN ('coordenador', 'coord_de_arq_dev_e_sustenta_o', 'administrativo_coordenacao')
+        ON CONFLICT (role_id, permission_code) DO NOTHING
+    """))
+
+
 async def _step_129_projetos_agent_fail_to(conn: AsyncConnection, schema: str) -> None:
     """Raia de destino quando a triagem do backlog (review_and_route) não aprova."""
     await _add_columns(conn, schema, "project_stage_agent_bindings", {
@@ -4711,6 +4722,7 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("134_team_person_assisted_ops_pct", _step_134_team_person_assisted_ops_pct),
     ("135_projetos_program_schedule_perms", _step_135_projetos_program_schedule_perms),
     ("136_projetos_procurement_resume", _step_136_projetos_procurement_resume),
+    ("137_indicadores_rtd_coordenacao", _step_137_indicadores_rtd_coordenacao),
     ("123_reconcile_indexes", _step_123_reconcile_indexes),
 ]
 
