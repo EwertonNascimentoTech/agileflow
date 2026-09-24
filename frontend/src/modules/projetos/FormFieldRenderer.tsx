@@ -6,6 +6,7 @@ import { Switch } from "@/components/ui/switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Label } from "@/components/ui/label"
 import { AttachmentField } from "@/components/AttachmentField"
+import { ClientsFieldInput } from "@/modules/projetos/ClientsFieldInput"
 
 const LEGACY_TYPE_MAP: Record<string, string> = {
   textarea: "text_long",
@@ -291,6 +292,10 @@ export function FormFieldRenderer({
 
   if (type === "file") {
     return <AttachmentField value={value} onChange={onChange} disabled={disabled} />
+  }
+
+  if (type === "clients") {
+    return <ClientsFieldInput value={value} onChange={onChange} disabled={disabled} />
   }
 
   return (

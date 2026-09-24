@@ -1706,6 +1706,16 @@ class ProjectTaskService:
                     values=dict(origin_values),
                     updated_by=task.created_by,
                 ))
+            # Clientes escolhidos na solicitação viram clientes do projeto (Portal).
+            from app.modules.projetos.clients import ProjectClientService, client_entries
+            if client_entries(origin_values):
+                try:
+                    async with db.begin_nested():
+                        await ProjectClientService.import_request_clients(
+                            db, main, origin_values, task.created_by,
+                        )
+                except Exception:  # noqa: BLE001 — cliente não pode travar a conversão
+                    logger.exception("conversão: não foi possível importar os clientes da solicitação %s", task.id)
 
     @staticmethod
     def _sla_initial(status_obj: Optional[ProjectStatusConfig]) -> str:
@@ -9954,7 +9964,7 @@ Avalie a solicitação abaixo ANTES de ela seguir para classificação. Faça tr
 1) Informações preenchidas: os dados do card e de CADA campo do formulário são consistentes e têm conteúdo real (não placeholder)?
 2) Lacunas: percorra TODOS os campos do card e do formulário abaixo (não só um subconjunto). Em especial, não deixe de avaliar:
    Dados do projeto: diretoria, área, descrição, anexos.
-   Identificação: requisitante, solicitante, cargo, e-mail, sponsor.
+   Identificação: requisitante e clientes (precisa haver ao menos um Solicitante e um Sponsor).
    Problema e valor: descrição do problema ou oportunidade, hipótese de solução, quem é afetado, métrica de sucesso, valor esperado.
    Escopo conhecido: áreas envolvidas, sistemas envolvidos, documentação existente, ferramenta atual.
    Urgência e risco: risco regulatório, descrição dos riscos regulatórios, impacto da inação.
@@ -10497,6 +10507,17 @@ class ProjectAgentRunner:
             return "(vazio)", True
         if isinstance(val, bool):
             return ("Sim" if val else "Não"), False
+        from app.modules.projetos.clients import (
+            is_client_entries, missing_request_roles, project_role_label,
+        )
+        if is_client_entries(val):
+            # Campo Clientes: só as funções vão para o agente — nome e e-mail ficam de fora (PII).
+            roles = [project_role_label(e.get("project_role"), e.get("project_role_other")) for e in val]
+            text = f"{len(val)} cliente(s): " + ", ".join(r for r in roles if r)
+            faltam = missing_request_roles(val)
+            if faltam:
+                return f"{text} — falta {' e '.join(faltam)}", True
+            return text, False
         if isinstance(val, (list, tuple)):
             if not val:
                 return "(vazio)", True
@@ -12877,6 +12898,14 @@ class StatusReportService:
                 return person_name.get(uuid.UUID(str(raw)), str(raw))
             except (ValueError, AttributeError, TypeError):
                 return str(raw)
+        if ftype == "clients":
+            from app.modules.projetos.clients import is_client_entries, project_role_label
+            if not is_client_entries(raw):
+                return None
+            return ", ".join(
+                f"{e.get('full_name') or e.get('email')} ({project_role_label(e.get('project_role'), e.get('project_role_other'))})"
+                for e in raw
+            )
         if ftype in ("checkbox",):
             return "Sim" if raw in (True, "true", "1", 1) else "Não"
         if ftype in ("date", "current_date"):

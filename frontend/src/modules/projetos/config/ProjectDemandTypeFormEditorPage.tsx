@@ -60,6 +60,7 @@ const FIELD_TYPES: FieldTypeMeta[] = [
   { value: "url",              label: "URL",             description: "Texto validado como link." },
   { value: "user",             label: "Usuário",         description: "Referência a um usuário do sistema." },
   { value: "file",             label: "Anexo",           description: "Upload de arquivo (PDF, imagem, documento…), até 20 MB." },
+  { value: "clients",          label: "Clientes",        description: "Pessoas + função no projeto (Solicitante, Sponsor…). Obrigatório = ter Solicitante e Sponsor. Viram clientes do projeto na conversão." },
 ]
 
 const LEGACY_TYPE_MAP: Record<string, string> = {

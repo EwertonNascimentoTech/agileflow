@@ -47,7 +47,7 @@ from app.modules.projetos.schemas import (
     ProjectClientResponse,
     ProjectClientUpdate,
 )
-from app.modules.super_admin.models import Role, User, UserRole
+from app.modules.super_admin.models import Role, Tenant, User, UserRole
 
 # Função do cliente no projeto (vínculo). "outro" usa o texto livre.
 PROJECT_CLIENT_ROLES: dict[str, str] = {
@@ -64,6 +64,31 @@ def project_role_label(role: Optional[str], other: Optional[str]) -> str:
     if role == "outro":
         return (other or "").strip() or "Outro"
     return PROJECT_CLIENT_ROLES.get(role or "", "")
+
+
+# Campo "Clientes" da solicitação (field_type = clients): lista de
+# {client_id, email, full_name, department, organization, job_title, project_role, project_role_other}.
+REQUIRED_REQUEST_ROLES = ("solicitante", "sponsor")
+
+
+def is_client_entries(value) -> bool:
+    return isinstance(value, list) and bool(value) and all(
+        isinstance(v, dict) and "project_role" in v for v in value
+    )
+
+
+def client_entries(form_values: Optional[dict]) -> list[dict]:
+    """Todas as entradas de campos Clientes do formulário (em qualquer chave)."""
+    out: list[dict] = []
+    for value in (form_values or {}).values():
+        if is_client_entries(value):
+            out.extend(value)
+    return out
+
+
+def missing_request_roles(entries: list[dict]) -> list[str]:
+    roles = {e.get("project_role") for e in entries}
+    return [PROJECT_CLIENT_ROLES[r] for r in REQUIRED_REQUEST_ROLES if r not in roles]
 
 
 def _is_planning_funnel_name(name: Optional[str]) -> bool:
@@ -528,7 +553,7 @@ class ProjectClientService:
 
     @staticmethod
     async def search_candidates(
-        db: AsyncSession, task_id: uuid.UUID, q: str, tenant_id: uuid.UUID,
+        db: AsyncSession, task_id: Optional[uuid.UUID], q: str, tenant_id: uuid.UUID,
     ) -> ProjectClientCandidates:
         """Sugestões ao digitar nome ou e-mail: clientes já cadastrados, Pessoas (TeamOps) e
         usuários do tenant. Se a busca for um e-mail, consulta também a folha (Genus), que
@@ -540,7 +565,8 @@ class ProjectClientService:
         if len(term) < 2:
             return ProjectClientCandidates()
         like = f"%{term}%"
-        linked_client_ids = set((await db.execute(
+        # Sem card (campo Clientes da solicitação): ninguém está "já vinculado".
+        linked_client_ids = set() if task_id is None else set((await db.execute(
             select(ProjectClientAccess.client_id).where(ProjectClientAccess.task_id == task_id)
         )).scalars().all())
         found: dict[str, ProjectClientCandidate] = {}
@@ -702,6 +728,56 @@ class ProjectClientService:
         await db.commit()
         if reactivated_user:
             await invalidate_user(reactivated_user)
+
+    @staticmethod
+    async def import_request_clients(
+        db: AsyncSession, project_task: ProjectTask, form_values: Optional[dict], created_by: Optional[uuid.UUID],
+    ) -> int:
+        """Solicitação que vira projeto: os clientes do campo Clientes do formulário passam a
+        ser clientes do card-raiz novo (mesma regra do card: cadastro único por e-mail, Pessoa
+        sem login fica sem login). Não faz commit — roda dentro da conversão."""
+        entries = [e for e in client_entries(form_values) if e.get("email")]
+        if not entries:
+            return 0
+        await ProjectClientService._assert_linkable_projects(db, [project_task.id])
+        tenant_id = (await db.execute(
+            select(Tenant.id).where(Tenant.schema_name == func.current_schema())
+        )).scalar_one_or_none()
+        if tenant_id is None:
+            return 0
+        linked: set[uuid.UUID] = set()
+        for e in entries:
+            email = str(e["email"]).strip().lower()
+            role = e.get("project_role") if e.get("project_role") in PROJECT_CLIENT_ROLES else "outro"
+            client = (await db.execute(
+                select(ProjectClient).where(func.lower(ProjectClient.email) == email)
+            )).scalar_one_or_none()
+            if client is None:
+                name = str(e.get("full_name") or "").strip() or email.split("@")[0]
+                client = ProjectClient(
+                    user_id=await ProjectClientService._login_for_new_client(db, email, name, tenant_id),
+                    full_name=name[:200],
+                    email=email,
+                    department=(e.get("department") or None),
+                    organization=(e.get("organization") or None),
+                    job_title=(e.get("job_title") or None),
+                    notes=f"Cadastrado como cliente pela solicitação em {datetime.utcnow():%d/%m/%Y}.",
+                    created_by=created_by,
+                )
+                db.add(client)
+                await db.flush()
+            if client.id in linked:
+                continue
+            linked.add(client.id)
+            db.add(ProjectClientAccess(
+                client_id=client.id,
+                task_id=project_task.id,
+                project_role=role,
+                project_role_other=(e.get("project_role_other") or "Outro") if role == "outro" else None,
+                created_by=created_by,
+            ))
+        await db.flush()
+        return len(linked)
 
     @staticmethod
     async def _access(db: AsyncSession, task_id: uuid.UUID, client_id: uuid.UUID) -> ProjectClientAccess:

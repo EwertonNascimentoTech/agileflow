@@ -65,6 +65,9 @@ export const clientesApi = {
       .then((r) => r.data),
   firstAccessLink: (id: string) =>
     api.post<{ path: string; expires_hours: number }>(`/projetos/clients/${id}/first-access-link`).then((r) => r.data),
+  /** Sugestões para o campo Clientes da solicitação (sem card ainda). */
+  candidates: (q: string) =>
+    api.get<ProjectClientCandidates>("/projetos/clients/candidates", { params: { q } }).then((r) => r.data),
   listForProject: (taskId: string) =>
     api.get<ProjectClient[]>(`/projetos/tasks/${taskId}/clients`).then((r) => r.data),
 }

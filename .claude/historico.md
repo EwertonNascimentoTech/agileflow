@@ -14,6 +14,18 @@ Modelo:
 
 ---
 
+## 2026-09-24 — Tipo "Solicitações" renomeado para "Solicitar novo projeto"
+
+- **Pedido:** nome do card na tela de nova solicitação.
+- **Feito:** `project_demand_types.name` (tenant_ss) = "Solicitar novo projeto"; slug `nova_demanda` mantido (nenhum código usa o nome).
+
+## 2026-09-24 — Solicitação: Identificação vira seleção de clientes
+
+- **Pedido:** na solicitação, trocar Solicitante/Cargo/E-mail/Sponsor pela seleção de clientes (com função).
+- **Decisões do usuário:** obrigatório ter Solicitante e Sponsor (pessoas diferentes); só vale para as novas (dados antigos guardados, campos desativados; clientes dos projetos existentes o PO adiciona no card).
+- **Feito:** tipo de campo `clients` (editor de formulário, `FormFieldRenderer`, validação, card, Status Report); `ClientPicker` extraído e usado no card e no campo; busca `/projetos/clients/candidates`; triagem mostra só as funções e cobra Solicitante/Sponsor (`_display_form_value`); prompt padrão e do agente "Triagem Backlog" com "Identificação: requisitante e clientes"; conversão importa os clientes para o card-raiz. Dados (tenant_ss): campo `clientes` criado com a visibilidade do antigo Solicitante (obrigatório no Backlog, editável em Classificação/Ajustes); 4 campos antigos desativados. Retrato anterior no scratchpad.
+- **Arquivos:** `projetos/clients.py`, `projetos/service.py`, `projetos/api/client_routes.py`; front `ClientPicker.tsx`, `ClientsFieldInput.tsx`, `ProjectClientsSection.tsx`, `FormFieldRenderer.tsx`, `validation.ts`, `cardFieldDisplay.ts`, `ProjectDemandTypeFormEditorPage.tsx`, `ProjectAgentsConfigPage.tsx`, `api/clientes.ts`.
+
 ## 2026-09-24 — Clientes do projeto (vários, com função) e andamento no Portal
 
 - **Pedido:** mais de um cliente por projeto com a função de cada um; ao digitar, buscar na API da folha (Genus); clientes veem o reporte do projeto no Portal; PO e coordenador adicionam/retiram a qualquer momento.

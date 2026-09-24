@@ -62,6 +62,15 @@ async def list_clients(
     )
 
 
+@router.get("/clients/candidates", response_model=ProjectClientCandidates)
+async def search_request_client_candidates(
+    q: str = Query("", max_length=120),
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Sugestões para o campo Clientes da solicitação (quem abre a demanda escolhe)."""
+    return await ProjectClientService.search_candidates(ctx.db, None, q, ctx.user.tenant_id)
+
+
 @router.get("/clients/lookup", response_model=ProjectClientLookupResponse)
 async def lookup_client(
     email: str = Query(..., min_length=3),

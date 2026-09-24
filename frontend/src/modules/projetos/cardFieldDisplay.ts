@@ -1,6 +1,7 @@
 import type { ProjectDemandFormField, ProjectDefaultFormField } from "@/api/projetos"
 import { defaultSelectLabel } from "@/modules/projetos/defaultFormUtils"
 import { normalizeFieldType, parseFieldOptions } from "@/modules/projetos/FormFieldRenderer"
+import { formatClientEntries } from "@/modules/projetos/ClientsFieldInput"
 
 export function isEmptyCardValue(value: unknown): boolean {
   if (value === null || value === undefined) return true
@@ -50,6 +51,7 @@ export function formatCardCustomFieldValue(
     }
     return arr.join(", ")
   }
+  if (type === "clients") return formatClientEntries(value)
   if (type === "file") {
     const files = Array.isArray(value) ? value : []
     const names = files

@@ -39,6 +39,7 @@ No card do projeto/programa (kanban Projetos e Programas), o bloco **Clientes do
 - Quem mexe: o **PO do projeto** e a **coordenação**, em qualquer fase. Os demais só veem (e, sem clientes, o bloco não aparece).
 - **Adicionar:** digite nome ou e-mail — aparecem clientes já cadastrados, Pessoas e usuários. Digitando o e-mail, a folha (Genus) completa departamento e cargo quando está acessível. Não achou? "Cadastrar pelo e-mail" (nome + e-mail).
 - **Retirar:** a pessoa deixa de ver o projeto no Portal; o cadastro dela continua.
+- **Na solicitação** (seção Identificação), quem abre a demanda escolhe os clientes no campo **Clientes** — é obrigatório ter um **Solicitante** e um **Sponsor** (pessoas diferentes). Quando a solicitação vira projeto, essas pessoas viram os clientes do projeto.
 - O cliente entra pelo **IDigital** e vê, em **Ver andamento**, a fase, o % de execução, a previsão de entrega e as entregas (Features) do projeto. Ocorrências continuam só para projetos na raia Operação Assistida.
 
 ## Gestão de Times

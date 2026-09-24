@@ -66,7 +66,7 @@ Avalie a solicitação abaixo ANTES de ela seguir para classificação. Faça tr
 1) Informações preenchidas: os dados do card e de CADA campo do formulário são consistentes e têm conteúdo real (não placeholder)?
 2) Lacunas: percorra TODOS os campos do card e do formulário abaixo (não só um subconjunto). Em especial, não deixe de avaliar:
    Dados do projeto: diretoria, área, descrição, anexos.
-   Identificação: requisitante, solicitante, cargo, e-mail, sponsor.
+   Identificação: requisitante e clientes (precisa haver ao menos um Solicitante e um Sponsor).
    Problema e valor: descrição do problema ou oportunidade, hipótese de solução, quem é afetado, métrica de sucesso, valor esperado.
    Escopo conhecido: áreas envolvidas, sistemas envolvidos, documentação existente, ferramenta atual.
    Urgência e risco: risco regulatório, descrição dos riscos regulatórios, impacto da inação.

@@ -1,5 +1,6 @@
 import type { ProjectDemandFormField, ProjectDemandFormSection, ProjectStatusSectionLink } from "@/api/projetos"
 import { getFieldVisibility, normalizeFieldType, type FieldVisibilityMode } from "@/modules/projetos/FormFieldRenderer"
+import { missingClientRoles } from "@/modules/projetos/ClientsFieldInput"
 
 export function isValueEmpty(value: unknown, fieldType: string): boolean {
   const t = normalizeFieldType(fieldType)
@@ -53,6 +54,12 @@ export function validateRequiredFields(args: {
       if (isValueEmpty(args.formValues[field.field_key], field.field_type)) {
         errors[field.id] = "Campo obrigatório"
         missingLabels.push(field.label)
+      } else if (normalizeFieldType(field.field_type) === "clients") {
+        const faltam = missingClientRoles(args.formValues[field.field_key])
+        if (faltam.length) {
+          errors[field.id] = `Inclua ${faltam.join(" e ")}`
+          missingLabels.push(`${field.label} (${faltam.join(" e ")})`)
+        }
       }
     }
   }
