@@ -103,7 +103,7 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 - Trava de cronograma (`assert_editable`) vale também para criar item com pai, excluir item com pai e importar Excel no projeto travado.
 - Kanban US: coordenação = admin ou Cargo de coordenação/gestão (`_is_coordination` no backend, `isCoordination` no board — mesma regra nos dois). Sair de Homologação (PO): na User Story só o PO do card-raiz; na Feature o PO ou a coordenação.
 - Rollup Feature: todas as US concluídas levam a Feature para Homologação (PO); quem conclui a Feature é o PO. Todo movimento automático grava histórico.
-- Agente de triagem (review_and_route): contexto e lacunas seguem a visibilidade da etapa (`_stage_field_modes`, mesma regra da tela). Campo oculto ou opcional não é lacuna; Descrição é cobrada sempre que visível. Classificação recebe o contexto completo.
+- Agente de triagem (review_and_route): contexto e lacunas seguem a visibilidade da etapa (`_stage_field_modes`, mesma regra da tela). Campo oculto ou opcional não é lacuna; Descrição é cobrada sempre que visível. Classificação recebe o contexto completo. Prazo desejado e Justificativa do prazo ficam fora da triagem (`_REVIEW_IGNORED_FIELDS`): não vão ao agente nem viram lacuna.
 - Link do board sem o processo mantém a visão (/lista, /calendario) e a query (?funnel=).
 
 ## Desempenho (auditoria 2026-09-23 · bloco 5)

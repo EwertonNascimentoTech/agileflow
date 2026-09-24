@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-24 — Triagem não analisa Prazo desejado nem Justificativa do prazo
+
+- **Pedido:** o agente de triagem não deve analisar os campos "Prazo desejado" e "Justificativa do prazo".
+- **Feito:** `_REVIEW_IGNORED_FIELDS` (`prazo_desejado`, `justificativa_do_prazo`): fora do contexto enviado ao agente (`_build_rich_task_context` for_review) e da checagem determinística (`_collect_form_gaps`). Prompt padrão de triagem (back e front) sem os dois campos e com regra explícita de não avaliá-los; prompt do agente "Triagem Backlog" (tenant_ss) atualizado para o novo padrão. Item 2 do prompt citava `{{task_context}}` no meio da frase e o contexto do card ia duplicado; agora diz "campos do card e do formulário abaixo".
+- **Não mexer:** a Classificação continua recebendo todos os campos; o requisitante continua preenchendo o prazo no formulário.
+- **Arquivos:** `projetos/service.py`, front `ProjectAgentsConfigPage.tsx`.
+
 ## 2026-09-24 — Dados da folha (Genus) no 1º login pelo IDigital
 
 - **Pedido:** no 1º login pelo IDigital, pesquisar o e-mail na API da folha e cadastrar os dados retornados.

@@ -64,12 +64,12 @@ const DEFAULT_REVIEW_PROMPT = `Você é um analista de triagem do kanban Prospec
 Avalie a solicitação abaixo ANTES de ela seguir para classificação. Faça três análises:
 
 1) Informações preenchidas: os dados do card e de CADA campo do formulário são consistentes e têm conteúdo real (não placeholder)?
-2) Lacunas: percorra TODOS os campos listados em {{task_context}} (não só um subconjunto). Em especial, não deixe de avaliar:
+2) Lacunas: percorra TODOS os campos do card e do formulário abaixo (não só um subconjunto). Em especial, não deixe de avaliar:
    Dados do projeto: diretoria, área, descrição, anexos.
    Identificação: requisitante, solicitante, cargo, e-mail, sponsor.
    Problema e valor: descrição do problema ou oportunidade, hipótese de solução, quem é afetado, métrica de sucesso, valor esperado.
    Escopo conhecido: áreas envolvidas, sistemas envolvidos, documentação existente, ferramenta atual.
-   Urgência e risco: prazo desejado, justificativa do prazo, risco regulatório, descrição dos riscos regulatórios, impacto da inação.
+   Urgência e risco: risco regulatório, descrição dos riscos regulatórios, impacto da inação.
 3) Duplicidade: compare com os demais cards/projetos listados. Há redundância ou possível duplicata?
 
 {{task_context}}
@@ -89,7 +89,7 @@ Regras:
 - aprovado=true SOMENTE se as três análises passarem (dados suficientes em TODOS os campos relevantes, sem lacunas e sem duplicidade).
 - Trate como VAZIO / lacuna: campo em branco, só pontuação (".", "-", "—"), "n/a", "não informado" ou texto genérico sem conteúdo acionável.
 - Hipótese de solução, métrica de sucesso e valor esperado com "." ou equivalente = lacuna obrigatória.
-- Prazo desejado vazio = lacuna. Se houver prazo, justificativa do prazo também precisa estar preenchida.
+- Prazo desejado e justificativa do prazo NÃO são avaliados na triagem: não cobre nem comente esses campos.
 - Se risco regulatório = Sim, a descrição dos riscos é obrigatória. Se = Não, descrição vazia é aceitável.
 - Liste em campos_faltantes o rótulo de CADA campo insuficiente e descreva em ajustes o que o requisitante deve completar.
 - Se houver possível duplicata, aprovado=false, preencha duplicidade com o título/card semelhante e explique em ajustes.
