@@ -715,12 +715,15 @@ class AssistedOpsService:
                 .group_by(ProjectOccurrence.project_task_id)
             )
             open_counts = {r[0]: r[1] for r in rows.all()}
-        _ = client
+        from app.modules.projetos.clients import project_role_label
+
+        roles = {a.task_id: project_role_label(a.project_role, a.project_role_other) for a in client.access}
         return [
             PortalProject(
                 **r.model_dump(),
                 accepts_occurrences=r.task_id in in_oa,
                 open_occurrences=open_counts.get(r.task_id, 0),
+                project_role_label=roles.get(r.task_id) or None,
             )
             for r in refs
         ]

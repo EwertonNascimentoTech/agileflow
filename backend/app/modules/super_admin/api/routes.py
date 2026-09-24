@@ -73,10 +73,15 @@ async def _has_client_portal(db: AsyncSession, user) -> bool:
     ).scalar_one_or_none()
     if exists is None:
         return False
+    # Cadastro feito só pelo e-mail (Pessoa que ainda não tinha login) também vale: o Portal
+    # liga o cadastro ao login no 1º acesso (ProjectClientService.get_by_user).
     return bool((
         await db.execute(
-            text(f'SELECT 1 FROM "{schema}".project_clients WHERE user_id = :uid AND is_active LIMIT 1'),
-            {"uid": str(user.id)},
+            text(
+                f'SELECT 1 FROM "{schema}".project_clients WHERE is_active AND '
+                f'(user_id = :uid OR (user_id IS NULL AND lower(email) = lower(:email))) LIMIT 1'
+            ),
+            {"uid": str(user.id), "email": user.email or ""},
         )
     ).scalar_one_or_none())
 

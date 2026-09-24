@@ -16,6 +16,7 @@ export interface ProjectClient {
   phone: string | null
   organization: string | null
   department: string | null
+  job_title?: string | null
   notes: string | null
   user_id: string | null
   is_active: boolean
@@ -69,6 +70,114 @@ export const clientesApi = {
 }
 
 
+// ── Clientes do projeto (card do projeto) ───────────────────────────────────
+
+export type ProjectClientRole = "solicitante" | "sponsor" | "usuario_chave" | "homologador" | "gestor_area" | "outro"
+
+export const PROJECT_CLIENT_ROLE_LABEL: Record<ProjectClientRole, string> = {
+  solicitante: "Solicitante",
+  sponsor: "Sponsor",
+  usuario_chave: "Usuário-chave",
+  homologador: "Homologador",
+  gestor_area: "Gestor da área",
+  outro: "Outro",
+}
+
+export interface ProjectClientMember {
+  client_id: string
+  full_name: string
+  email: string
+  department: string | null
+  organization: string | null
+  job_title: string | null
+  project_role: ProjectClientRole | null
+  project_role_other: string | null
+  project_role_label: string
+  /** Já tem login; sem login, entra pelo IDigital (ou primeiro acesso). */
+  has_login: boolean
+  is_internal_user: boolean
+  is_active: boolean
+  added_at: string | null
+}
+
+export interface ProjectClientMembers {
+  can_manage: boolean
+  members: ProjectClientMember[]
+}
+
+export interface ProjectClientCandidate {
+  source: "client" | "person" | "user" | "genus"
+  email: string
+  full_name: string | null
+  department: string | null
+  organization: string | null
+  job_title: string | null
+  client_id: string | null
+  already_linked: boolean
+}
+
+export interface ProjectClientCandidates {
+  items: ProjectClientCandidate[]
+  /** Folha (Genus), só quando a busca é um e-mail. */
+  genus: "ok" | "not_found" | "unavailable" | "off" | "skipped"
+}
+
+export interface ProjectClientMemberAdd {
+  client_id?: string | null
+  email?: string | null
+  full_name?: string | null
+  department?: string | null
+  organization?: string | null
+  job_title?: string | null
+  project_role: ProjectClientRole
+  project_role_other?: string | null
+}
+
+export const projectClientsApi = {
+  list: (taskId: string) =>
+    api.get<ProjectClientMembers>(`/projetos/tasks/${taskId}/project-clients`).then((r) => r.data),
+  candidates: (taskId: string, q: string) =>
+    api.get<ProjectClientCandidates>(`/projetos/tasks/${taskId}/project-clients/candidates`, { params: { q } }).then((r) => r.data),
+  add: (taskId: string, data: ProjectClientMemberAdd) =>
+    api.post<ProjectClientMembers>(`/projetos/tasks/${taskId}/project-clients`, data).then((r) => r.data),
+  update: (taskId: string, clientId: string, data: { project_role: ProjectClientRole; project_role_other?: string | null }) =>
+    api.patch<ProjectClientMembers>(`/projetos/tasks/${taskId}/project-clients/${clientId}`, data).then((r) => r.data),
+  remove: (taskId: string, clientId: string) =>
+    api.delete<ProjectClientMembers>(`/projetos/tasks/${taskId}/project-clients/${clientId}`).then((r) => r.data),
+}
+
+// ── Portal: andamento do projeto ────────────────────────────────────────────
+
+export type ProjectPhase = "planejamento" | "desenvolvimento" | "homologacao" | "producao" | "concluido" | "impedimento"
+
+export interface ClientProjectFeature {
+  title: string
+  status_name: string | null
+  state: "a_iniciar" | "andamento" | "validacao" | "ajuste" | "concluida"
+  start_date: string | null
+  due_date: string | null
+  us_total: number
+  us_done: number
+}
+
+export interface ClientProjectReport {
+  task_id: string
+  title: string
+  planning_kind: string | null
+  my_role_label: string | null
+  po_name: string | null
+  stage_name: string | null
+  phase: ProjectPhase
+  in_assisted_operation: boolean
+  paused: boolean
+  exec_pct: number | null
+  start_date: string | null
+  due_date: string | null
+  completed_at: string | null
+  features: ClientProjectFeature[]
+  updated_at: string | null
+}
+
 // ── Operação Assistida: Ocorrências ─────────────────────────────────────────
 
 export type OccurrenceTipo = "erro" | "duvida" | "ajuste" | "melhoria"
@@ -119,6 +228,8 @@ export interface Upload {
 export interface PortalProject extends ClientProjectRef {
   accepts_occurrences: boolean
   open_occurrences: number
+  /** Função do cliente logado neste projeto. */
+  project_role_label?: string | null
 }
 
 export interface OccurrenceSummary {
@@ -211,6 +322,8 @@ export interface OccurrenceTeamUpdate {
 
 export const portalOccurrencesApi = {
   projects: () => api.get<PortalProject[]>("/projetos/portal/projects").then((r) => r.data),
+  projectReport: (taskId: string) =>
+    api.get<ClientProjectReport>(`/projetos/portal/projects/${taskId}/report`).then((r) => r.data),
   list: (params?: { project_task_id?: string; mine?: boolean }) =>
     api.get<OccurrenceSummary[]>("/projetos/portal/occurrences", { params }).then((r) => r.data),
   get: (taskId: string) => api.get<OccurrenceDetail>(`/projetos/portal/occurrences/${taskId}`).then((r) => r.data),

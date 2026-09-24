@@ -18,6 +18,11 @@ from app.modules.projetos.assisted_ops import AssistedOpsService
 from app.modules.projetos.clients import ProjectClientService
 from app.modules.projetos.schemas import (
     AssistedOpsDevResponse,
+    ClientProjectReport,
+    ProjectClientCandidates,
+    ProjectClientMemberAdd,
+    ProjectClientMembers,
+    ProjectClientMemberUpdate,
     AssistedOpsDevsSet,
     OccurrenceForwardRelease,
     OccurrenceHomologation,
@@ -148,7 +153,64 @@ async def list_project_clients(
     return await ProjectClientService.list_for_project(ctx.db, task_id)
 
 
+# ── Clientes do projeto (card do projeto): PO do projeto e coordenação ─────────
+
+@router.get("/tasks/{task_id}/project-clients", response_model=ProjectClientMembers)
+async def list_project_client_members(task_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+    """Clientes do projeto com a função de cada um; `can_manage` diz se quem vê pode mexer."""
+    await _assert_task_in_scope(ctx, task_id)
+    return await ProjectClientService.list_members(ctx.db, task_id, ctx.user)
+
+
+@router.get("/tasks/{task_id}/project-clients/candidates", response_model=ProjectClientCandidates)
+async def search_project_client_candidates(
+    task_id: uuid.UUID,
+    q: str = Query("", max_length=120),
+    ctx: ModuleContext = Depends(_ctx),
+):
+    await _assert_task_in_scope(ctx, task_id)
+    await ProjectClientService.assert_can_manage_project(ctx.db, ctx.user, task_id)
+    return await ProjectClientService.search_candidates(ctx.db, task_id, q, ctx.user.tenant_id)
+
+
+@router.post("/tasks/{task_id}/project-clients", response_model=ProjectClientMembers, status_code=201)
+async def add_project_client_member(
+    task_id: uuid.UUID, data: ProjectClientMemberAdd, ctx: ModuleContext = Depends(_ctx),
+):
+    await _assert_task_in_scope(ctx, task_id)
+    await ProjectClientService.assert_can_manage_project(ctx.db, ctx.user, task_id)
+    await ProjectClientService.add_member(ctx.db, task_id, data, ctx.user.tenant_id, ctx.user.id)
+    return await ProjectClientService.list_members(ctx.db, task_id, ctx.user)
+
+
+@router.patch("/tasks/{task_id}/project-clients/{client_id}", response_model=ProjectClientMembers)
+async def update_project_client_member(
+    task_id: uuid.UUID, client_id: uuid.UUID, data: ProjectClientMemberUpdate,
+    ctx: ModuleContext = Depends(_ctx),
+):
+    await _assert_task_in_scope(ctx, task_id)
+    await ProjectClientService.assert_can_manage_project(ctx.db, ctx.user, task_id)
+    await ProjectClientService.update_member(ctx.db, task_id, client_id, data)
+    return await ProjectClientService.list_members(ctx.db, task_id, ctx.user)
+
+
+@router.delete("/tasks/{task_id}/project-clients/{client_id}", response_model=ProjectClientMembers)
+async def remove_project_client_member(
+    task_id: uuid.UUID, client_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx),
+):
+    await _assert_task_in_scope(ctx, task_id)
+    await ProjectClientService.assert_can_manage_project(ctx.db, ctx.user, task_id)
+    await ProjectClientService.remove_member(ctx.db, task_id, client_id)
+    return await ProjectClientService.list_members(ctx.db, task_id, ctx.user)
+
+
 # ── Portal do Cliente ────────────────────────────────────────────────────────
+
+@router.get("/portal/projects/{task_id}/report", response_model=ClientProjectReport)
+async def portal_project_report(task_id: uuid.UUID, ctx: ModuleContext = Depends(_portal_ctx)):
+    """Andamento do projeto para o cliente vinculado (fase, execução, Features e prazos)."""
+    return await ProjectClientService.portal_project_report(ctx.db, ctx.user.id, task_id)
+
 
 @router.get("/portal/projects", response_model=list[PortalProject])
 async def portal_projects(ctx: ModuleContext = Depends(_portal_ctx)):

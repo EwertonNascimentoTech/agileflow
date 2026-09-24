@@ -37,6 +37,7 @@ import { isCoordination } from "@/lib/permissions"
 import { AssistedOpsDevsDialog, isAssistedOpsDevsRequired } from "@/modules/projetos/AssistedOpsDevsDialog"
 import { OccurrenceTeamPanel } from "@/modules/projetos/OccurrenceTeamPanel"
 import { AssistedOpsDevsSection } from "@/modules/projetos/AssistedOpsDevsSection"
+import { ProjectClientsSection } from "@/modules/projetos/ProjectClientsSection"
 import { AttachmentField, type Attachment } from "@/components/AttachmentField"
 import { fmtEstimatedHours, isFeatureOrUsKanbanFunnel, isPlanningRootTask, isProjectOrProgramKanbanFunnel, isUserStoryDemandType, isUserStoryKanbanFunnel } from "@/modules/projetos/kanbanDisplay"
 
@@ -1598,6 +1599,10 @@ export function ProjectTaskDrawer({
                 )}
               </div>
             </div>
+            )}
+
+            {task && isPlanningRootTask(task.planning_kind) && isProjectOrProgramKanbanFunnel(taskFunnelName) && (
+              <ProjectClientsSection projectTaskId={task.id} />
             )}
 
             {task && isPlanningRootTask(task.planning_kind) && isProjectOrProgramKanbanFunnel(taskFunnelName) && (

@@ -196,6 +196,7 @@ export default function ClientPortalHomePage() {
                     <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                       {p.planning_kind && <span className="capitalize">{p.planning_kind}</span>}
                       {p.status_name && <span className="rounded bg-muted px-1.5 py-0.5">{p.status_name}</span>}
+                      {p.project_role_label && <span>· você é {p.project_role_label}</span>}
                     </div>
                   </div>
                 </div>
@@ -216,6 +217,9 @@ export default function ClientPortalHomePage() {
                 </div>
 
                 <div className="mt-auto flex flex-wrap gap-2 border-t pt-4">
+                  <Button asChild size="sm" variant="outline" className="gap-1.5">
+                    <Link to={`/portal/projetos/${p.task_id}`}>Ver andamento</Link>
+                  </Button>
                   {p.accepts_occurrences && (
                     <Button asChild size="sm" className="gap-1.5">
                       <Link to={`/portal/ocorrencias/nova?projeto=${p.task_id}`}>

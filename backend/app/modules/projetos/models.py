@@ -1069,6 +1069,8 @@ class ProjectClient(TenantBase):
     phone: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
     organization: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     department: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    # Cargo funcional (da folha Genus ou informado pelo PO).
+    job_title: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
@@ -1093,6 +1095,9 @@ class ProjectClientAccess(TenantBase):
     task_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("project_tasks.id", ondelete="CASCADE"), nullable=False, index=True,
     )
+    # Função da pessoa no projeto (PROJECT_CLIENT_ROLES em clients.py); "outro" usa o texto.
+    project_role: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    project_role_other: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

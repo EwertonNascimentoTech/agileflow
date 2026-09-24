@@ -32,6 +32,15 @@ Detalhe passo a passo alinhado ao negócio: [05 — fluxo de processo](05-fluxo-
 | Cronograma | Em que etapas início/prazo são obrigatórios |
 | Layout do card | O que aparece visualmente no quadro |
 
+### Clientes do projeto
+
+No card do projeto/programa (kanban Projetos e Programas), o bloco **Clientes do projeto** lista quem acompanha o projeto pelo **Portal do Cliente**, com a função de cada um (Solicitante, Sponsor, Usuário-chave, Homologador, Gestor da área ou Outro).
+
+- Quem mexe: o **PO do projeto** e a **coordenação**, em qualquer fase. Os demais só veem (e, sem clientes, o bloco não aparece).
+- **Adicionar:** digite nome ou e-mail — aparecem clientes já cadastrados, Pessoas e usuários. Digitando o e-mail, a folha (Genus) completa departamento e cargo quando está acessível. Não achou? "Cadastrar pelo e-mail" (nome + e-mail).
+- **Retirar:** a pessoa deixa de ver o projeto no Portal; o cadastro dela continua.
+- O cliente entra pelo **IDigital** e vê, em **Ver andamento**, a fase, o % de execução, a previsão de entrega e as entregas (Features) do projeto. Ocorrências continuam só para projetos na raia Operação Assistida.
+
 ## Gestão de Times
 
 Menu típico:

@@ -99,6 +99,7 @@ const ClientPortalHomePage = lazy(() => import("@/modules/portal/ClientPortalHom
 const ClientOccurrencesPage = lazy(() => import("@/modules/portal/ClientOccurrencesPage"))
 const ClientNewOccurrencePage = lazy(() => import("@/modules/portal/ClientNewOccurrencePage"))
 const ClientOccurrenceDetailPage = lazy(() => import("@/modules/portal/ClientOccurrenceDetailPage"))
+const ClientProjectPage = lazy(() => import("@/modules/portal/ClientProjectPage"))
 const ProjectDefaultFormConfigPage = lazy(() => import("@/modules/projetos/config/ProjectDefaultFormConfigPage"))
 const ProjectDemandTypesConfigPage = lazy(() => import("@/modules/projetos/config/ProjectDemandTypesConfigPage"))
 const ProjectDemandTypeFormEditorPage = lazy(() => import("@/modules/projetos/config/ProjectDemandTypeFormEditorPage"))
@@ -203,6 +204,7 @@ export default function App() {
                     <Route path="ocorrencias" element={<ClientOccurrencesPage />} />
                     <Route path="ocorrencias/nova" element={<ClientNewOccurrencePage />} />
                     <Route path="ocorrencias/:id" element={<ClientOccurrenceDetailPage />} />
+                    <Route path="projetos/:id" element={<ClientProjectPage />} />
                   </Route>
                 </Route>
               </Route>

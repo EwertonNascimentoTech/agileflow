@@ -14,6 +14,14 @@ Modelo:
 
 ---
 
+## 2026-09-24 — Clientes do projeto (vários, com função) e andamento no Portal
+
+- **Pedido:** mais de um cliente por projeto com a função de cada um; ao digitar, buscar na API da folha (Genus); clientes veem o reporte do projeto no Portal; PO e coordenador adicionam/retiram a qualquer momento.
+- **Decisões do usuário:** reporte = andamento ao vivo; função = lista fixa + Outro; cadastro manual permitido (Genus bloqueado pelo Cloudflare e sem nome no retorno).
+- **Feito:** step 138 (`project_client_access.project_role/_other`, `project_clients.job_title`); `ProjectClientService` list/search/add/update/remove + `portal_project_report` (fase/execução do PO Sync, Features com datas e US); rotas em `client_routes.py`; `get_by_user` liga cadastro sem login pelo e-mail; `_has_client_portal` considera o e-mail; `create` da tela Clientes não cria login de cliente para quem está em Pessoas. Front: `ProjectClientsSection` no card, `ClientProjectPage` (`/portal/projetos/:id`), "Ver andamento" no Portal. Testes `tests/test_project_clients.py`.
+- **Não mexer:** ocorrências continuam só para projeto na raia Operação Assistida; a tela Clientes continua oferecendo só projetos nessa raia.
+- **Arquivos:** `core/tenant_migrations.py`, `projetos/models.py`, `projetos/schemas.py`, `projetos/clients.py`, `projetos/assisted_ops.py`, `projetos/api/client_routes.py`, `super_admin/api/routes.py`; front `api/clientes.ts`, `ProjectClientsSection.tsx`, `ProjectTaskDrawer.tsx`, `portal/ClientProjectPage.tsx`, `portal/ClientPortalHomePage.tsx`, `App.tsx`; `docs/usuario/03-operacional-processos.md`.
+
 ## 2026-09-24 — Bloco de atendimento da Operação Assistida só com devs definidos
 
 - **Pedido:** o bloco "Operação Assistida · atendimento" do card do projeto só deve aparecer quando os dados estiverem preenchidos.

@@ -2189,6 +2189,7 @@ class ProjectClientBase(BaseModel):
     phone: Optional[str] = Field(None, max_length=30)
     organization: Optional[str] = Field(None, max_length=200)
     department: Optional[str] = Field(None, max_length=200)
+    job_title: Optional[str] = Field(None, max_length=200)
     notes: Optional[str] = None
 
 
@@ -2210,6 +2211,7 @@ class ProjectClientUpdate(BaseModel):
     phone: Optional[str] = Field(None, max_length=30)
     organization: Optional[str] = Field(None, max_length=200)
     department: Optional[str] = Field(None, max_length=200)
+    job_title: Optional[str] = Field(None, max_length=200)
     notes: Optional[str] = None
     is_active: Optional[bool] = None
 
@@ -2240,6 +2242,135 @@ class ProjectClientLookupResponse(BaseModel):
     status: Literal["new", "client", "internal_user", "other_tenant"]
     client: Optional[ProjectClientResponse] = None
     user_full_name: Optional[str] = None
+
+
+# ── Clientes do projeto (card do projeto) ────────────────────────────────────
+
+# Rótulos em PROJECT_CLIENT_ROLES (clients.py). "outro" exige o texto da função.
+ProjectClientRole = Literal["solicitante", "sponsor", "usuario_chave", "homologador", "gestor_area", "outro"]
+
+
+def _normalize_optional_email(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    v = v.strip().lower()
+    if not v:
+        return None
+    if "@" not in v or v.startswith("@") or v.endswith("@"):
+        raise ValueError("E-mail inválido.")
+    return v
+
+
+class ProjectClientMember(BaseModel):
+    """Cliente vinculado ao projeto, com a função dele no projeto."""
+    client_id: uuid.UUID
+    full_name: str
+    email: str
+    department: Optional[str] = None
+    organization: Optional[str] = None
+    job_title: Optional[str] = None
+    project_role: Optional[str] = None
+    project_role_other: Optional[str] = None
+    project_role_label: str = ""
+    # Já tem login (externo com Portal ou colaborador); sem login, entra pelo IDigital.
+    has_login: bool = False
+    is_internal_user: bool = False
+    is_active: bool = True
+    added_at: Optional[datetime] = None
+
+
+class ProjectClientMembers(BaseModel):
+    can_manage: bool = False
+    members: list[ProjectClientMember] = Field(default_factory=list)
+
+
+class _ProjectClientRoleFields(BaseModel):
+    project_role: ProjectClientRole
+    project_role_other: Optional[str] = Field(None, max_length=120)
+
+    @model_validator(mode="after")
+    def _other_needs_text(self):
+        if self.project_role == "outro":
+            if not (self.project_role_other or "").strip():
+                raise ValueError("Descreva a função quando escolher Outro.")
+            self.project_role_other = self.project_role_other.strip()
+        else:
+            self.project_role_other = None
+        return self
+
+
+class ProjectClientMemberAdd(_ProjectClientRoleFields):
+    """Cliente já cadastrado (`client_id`) ou pessoa pelo e-mail (cria o cadastro se preciso)."""
+    client_id: Optional[uuid.UUID] = None
+    email: Optional[str] = Field(None, max_length=255)
+    full_name: Optional[str] = Field(None, max_length=200)
+    department: Optional[str] = Field(None, max_length=200)
+    organization: Optional[str] = Field(None, max_length=200)
+    job_title: Optional[str] = Field(None, max_length=200)
+
+    @field_validator("email")
+    @classmethod
+    def _normalize_email(cls, v: Optional[str]) -> Optional[str]:
+        return _normalize_optional_email(v)
+
+    @model_validator(mode="after")
+    def _needs_client_or_email(self):
+        if self.client_id is None and not self.email:
+            raise ValueError("Escolha uma pessoa ou informe o e-mail.")
+        return self
+
+
+class ProjectClientMemberUpdate(_ProjectClientRoleFields):
+    pass
+
+
+class ProjectClientCandidate(BaseModel):
+    """Sugestão ao digitar: cliente já cadastrado, Pessoa (TeamOps), usuário ou folha (Genus)."""
+    source: Literal["client", "person", "user", "genus"]
+    email: str
+    full_name: Optional[str] = None
+    department: Optional[str] = None
+    organization: Optional[str] = None
+    job_title: Optional[str] = None
+    client_id: Optional[uuid.UUID] = None
+    already_linked: bool = False
+
+
+class ProjectClientCandidates(BaseModel):
+    items: list[ProjectClientCandidate] = Field(default_factory=list)
+    # Folha (Genus), só quando a busca é um e-mail: ok · not_found · unavailable (fora do ar ou
+    # bloqueado) · off (sem token) · skipped (busca por nome — a folha não devolve nome).
+    genus: Literal["ok", "not_found", "unavailable", "off", "skipped"] = "skipped"
+
+
+class ClientProjectFeature(BaseModel):
+    title: str
+    status_name: Optional[str] = None
+    state: Literal["a_iniciar", "andamento", "validacao", "ajuste", "concluida"]
+    start_date: Optional[date] = None
+    due_date: Optional[date] = None
+    us_total: int = 0
+    us_done: int = 0
+
+
+class ClientProjectReport(BaseModel):
+    """Andamento do projeto para o Portal do Cliente (só leitura, calculado na hora)."""
+    task_id: uuid.UUID
+    title: str
+    planning_kind: Optional[str] = None
+    my_role_label: Optional[str] = None
+    po_name: Optional[str] = None
+    stage_name: Optional[str] = None
+    # planejamento · desenvolvimento · homologacao · producao · concluido · impedimento
+    phase: str = "planejamento"
+    in_assisted_operation: bool = False
+    paused: bool = False
+    exec_pct: Optional[float] = None
+    start_date: Optional[date] = None
+    due_date: Optional[date] = None
+    completed_at: Optional[datetime] = None
+    features: list[ClientProjectFeature] = Field(default_factory=list)
+    updated_at: Optional[datetime] = None
 
 
 # ── Operação Assistida: Ocorrências ──────────────────────────────────────────
@@ -2349,6 +2480,8 @@ class OccurrenceDetail(OccurrenceSummary):
 class PortalProject(ProjectClientProjectRef):
     accepts_occurrences: bool = False
     open_occurrences: int = 0
+    # Função do cliente logado neste projeto.
+    project_role_label: Optional[str] = None
 
 
 class AssistedOpsDevResponse(BaseModel):

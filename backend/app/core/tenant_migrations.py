@@ -4488,6 +4488,17 @@ async def _step_137_indicadores_rtd_coordenacao(conn: AsyncConnection, schema: s
     """))
 
 
+async def _step_138_projetos_clientes_funcao(conn: AsyncConnection, schema: str) -> None:
+    """Clientes do projeto: função da pessoa no projeto (vínculo) e cargo funcional no cadastro."""
+    await _add_columns(conn, schema, "project_client_access", {
+        "project_role": "VARCHAR(40)",
+        "project_role_other": "VARCHAR(120)",
+    })
+    await _add_columns(conn, schema, "project_clients", {
+        "job_title": "VARCHAR(200)",
+    })
+
+
 async def _step_129_projetos_agent_fail_to(conn: AsyncConnection, schema: str) -> None:
     """Raia de destino quando a triagem do backlog (review_and_route) não aprova."""
     await _add_columns(conn, schema, "project_stage_agent_bindings", {
@@ -4723,6 +4734,7 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("135_projetos_program_schedule_perms", _step_135_projetos_program_schedule_perms),
     ("136_projetos_procurement_resume", _step_136_projetos_procurement_resume),
     ("137_indicadores_rtd_coordenacao", _step_137_indicadores_rtd_coordenacao),
+    ("138_projetos_clientes_funcao", _step_138_projetos_clientes_funcao),
     ("123_reconcile_indexes", _step_123_reconcile_indexes),
 ]
 
