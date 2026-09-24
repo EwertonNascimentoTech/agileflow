@@ -205,3 +205,28 @@ async def _run_stage_agent(schema: str, project_id: str, task_id: str, status_id
                 event.remove(db.sync_session, "after_begin", _reapply)
             except Exception:  # noqa: BLE001
                 pass
+
+
+@celery_app.task(name="payroll.sync_user", bind=True, max_retries=6)
+def sync_payroll_user_task(self, user_id: str):
+    """Dados da folha (Genus) do 1º login pelo IDigital (disparado por SsoService.exchange).
+    Genus fora do ar ou bloqueado: tenta de novo em 1 min, 5 min, 25 min, ~2 h, 6 h e 6 h."""
+    from app.modules.super_admin.payroll import PayrollUnavailable
+
+    try:
+        result = _run(_sync_payroll_user(user_id))
+        logger.info("[payroll] %s: %s", user_id, result)
+    except PayrollUnavailable as exc:
+        countdown = min(60 * 5 ** self.request.retries, 6 * 3600)
+        logger.warning("[payroll] %s: %s; nova tentativa em %ss", user_id, exc, countdown)
+        raise self.retry(exc=exc, countdown=countdown)
+
+
+async def _sync_payroll_user(user_id: str) -> str:
+    import uuid
+
+    from app.core.database import AsyncSessionLocal
+    from app.modules.super_admin.payroll import PayrollService
+
+    async with AsyncSessionLocal() as db:
+        return await PayrollService.sync_user(db, uuid.UUID(user_id))

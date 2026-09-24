@@ -243,6 +243,26 @@ class UserSsoIdentity(Base):
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
+class UserPayrollProfile(Base):
+    """Dados funcionais da folha (Genus) buscados pelo e-mail no 1º login pelo IDigital.
+    O CPF (`document`) que a API devolve não é guardado."""
+    __tablename__ = "user_payroll_profiles"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    source: Mapped[str] = mapped_column(String(30), nullable=False, default="genus")
+    employee_number: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    organization: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    department: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    # `role` da folha: cargo funcional (ex.: ANALISTA DE SISTEMAS SENIOR) — não é o Cargo do TeamOps.
+    job_title: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    trust_role: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    source_updated_at: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class AuditLog(Base):
     """Log de auditoria no schema público."""
     __tablename__ = "audit_logs"

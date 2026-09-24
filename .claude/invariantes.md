@@ -16,6 +16,7 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 - `assigned_to` nas tarefas de Processos ? **Person.id** (TeamOps), n?o `users.id`.
 - PO Externo: s? projetos em que ? respons?vel; sem Pessoas, Indicadores, RTD, Capacidade, Relat?rios, Status Reports.
 - Salvar Pessoa (TeamOps), SSO e 1º acesso nunca mudam o papel de `company_admin`/`super_admin` — só a role do cargo. Criar quadro/raia (`projetos.status.manage`) e demais configurações de Projetos: admin da empresa (Ewerton) e o cargo Administrativo (Coordenação).
+- CPF nunca é guardado: nem o `document` do IdP nem o da folha (Genus). A consulta à folha roda em segundo plano e nunca atrasa nem derruba o login.
 - Hierarquia de coordenação: Coordenador (admin da empresa) > Administrativo (Coordenação) (Filipe, gestor = Ewerton; configura Projetos/Indicadores/RTD, sem Usuários/Funções) > Administrativo (cargo comum; não espelha mais as permissões do Coordenador — step 127 só cuida das raias). No organograma o Administrativo (Coordenação) fica logo abaixo da Coordenação (`_cargo_rank`).
 - S? o respons?vel da US (ou coordena??o/admin) move card no kanban User Story, exceto Homologa??o (PO) — a? ? o PO do card-raiz.
 

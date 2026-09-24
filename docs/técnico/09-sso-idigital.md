@@ -107,12 +107,56 @@ O CPF (`document`) que o IdP oferece **não** é pedido nem guardado.
 | :--- | :--- | :--- |
 | E-mail | `email` do IDigital | `email` (é o que casa com Pessoas) |
 | Nome | `name` → `displayName` → `given_name` + `family_name` → `firstName` + `lastName` → `preferred_username`/`nickname` → parte local do e-mail | o de Pessoas (fonte da verdade do colaborador) |
-| Telefone, organização, departamento | não existem no IdP; o PO completa em Clientes | seguem de Pessoas |
+| Telefone, organização, departamento | não existem no IdP; o departamento vem da folha (Genus) se estiver vazio; o resto o PO completa em Clientes | seguem de Pessoas; dados da folha na ficha (abaixo) |
 | Observação | "Cadastro criado no 1º login pelo IDigital em dd/mm/aaaa. Vincule os projetos em Clientes." | — |
 | Projetos | nenhum (o PO vincula) | os do cargo/permissões |
-| CPF (`document`) | não pedido nem guardado (LGPD) | idem |
+| CPF (`document`) | não pedido nem guardado (LGPD) — nem do IdP nem da folha | idem |
 
 Senha: quem nasce pelo SSO recebe uma senha aleatória que ninguém conhece (entra pelo IDigital). Colaborador pode ter senha redefinida pelo admin em Pessoas.
+
+### Dados da folha (Genus) no 1º login
+
+No 1º login pelo IDigital de cada usuário (quando nasce o vínculo em `user_sso_identities` — login novo, colaborador ou cliente), o backend agenda a tarefa Celery `payroll.sync_user`, que consulta a folha FIEA pelo e-mail:
+
+`GET {GENUS_API_URL}/api/payroll/users?email=<e-mail>` com `Authorization: Bearer {GENUS_API_TOKEN}`.
+
+| Campo da API | Onde fica | Observação |
+| :--- | :--- | :--- |
+| `employeeNumber` | `user_payroll_profiles.employee_number` | matrícula |
+| `organization` | `organization` | código da entidade, como vem (ex.: `2`) |
+| `department` | `department` | também preenche `project_clients.department` do cliente do Portal, se estiver vazio |
+| `role` | `job_title` | cargo funcional da folha — **não** é o Cargo do TeamOps |
+| `trustRole` | `trust_role` | função de confiança |
+| `updatedAt` | `source_updated_at` | texto, como vem |
+| `document` | — | CPF: **descartado** antes de gravar ou logar |
+
+- Só vale o item cujo `email` é exatamente o do usuário. Sem item: auditoria `payroll_lookup` com `found = false` e nada gravado.
+- Nunca atrasa nem derruba o login: roda fora da requisição (`send_task(..., retry=False)`); fila fora do ar só gera log.
+- Genus fora do ar, bloqueado ou sem JSON (`PayrollUnavailable`): nova tentativa em 1 min, 5 min, 25 min, ~2 h, 6 h e 6 h; depois desiste.
+- Auditoria `payroll_lookup` registra só quais campos vieram, nunca os valores.
+- Exibição: ficha da Pessoa → aba Organização → "Dados da folha" (só no detalhe, que exige `teamops.person.view`).
+- Sem `GENUS_API_TOKEN` a consulta fica desligada.
+
+`public.user_payroll_profiles` (Alembic `008`): `id`, `user_id` (FK `users.id` CASCADE, único), `source` (`genus`), `employee_number`, `organization`, `department`, `job_title`, `trust_role`, `source_updated_at`, `fetched_at`.
+
+**Pré-requisito de rede:** o `genusapi.sistemafiea.com.br` fica atrás do Cloudflare, que em 2026-09-24 recusava (403, página "Attention Required") o IP de saída do servidor do AgileFlow — `187.124.129.85` / `2a02:4780:c:62de::1`, datacenter na Lituânia. Enquanto o IP não for liberado no WAF, as tentativas falham e o log do worker mostra `Genus recusou pelo Cloudflare (HTTP 403)`.
+
+Para buscar os dados de quem já tinha entrado pelo IDigital antes (depois de liberar o IP):
+
+```bash
+docker exec saas_api python -c "
+from sqlalchemy import create_engine, text
+from app.core.config import settings
+from app.core.celery_app import celery_app
+eng = create_engine(settings.DATABASE_URL.replace('+asyncpg', ''))
+with eng.connect() as c:
+    ids = [str(r[0]) for r in c.execute(text('''SELECT DISTINCT s.user_id FROM public.user_sso_identities s
+        LEFT JOIN public.user_payroll_profiles p ON p.user_id = s.user_id WHERE p.id IS NULL'''))]
+for uid in ids:
+    celery_app.send_task('payroll.sync_user', args=[uid])
+print(len(ids), 'agendados')
+"
+```
 
 ## F. Fatos do IdP (discovery de produção)
 

@@ -14,6 +14,14 @@ Modelo:
 
 ---
 
+## 2026-09-24 — Dados da folha (Genus) no 1º login pelo IDigital
+
+- **Pedido:** no 1º login pelo IDigital, pesquisar o e-mail na API da folha e cadastrar os dados retornados.
+- **Feito:** tarefa Celery `payroll.sync_user` agendada quando nasce o vínculo IDigital (`SsoService.exchange`); `PayrollService` (`super_admin/payroll.py`) consulta `GET /api/payroll/users?email=` e grava em `public.user_payroll_profiles` (Alembic 008): matrícula, organização, departamento, cargo funcional, função de confiança. Cliente do Portal: departamento preenche `project_clients.department` vazio. Ficha da Pessoa mostra "Dados da folha". Novas tentativas até ~15 h se o Genus falhar. Testes `tests/test_payroll.py`.
+- **Decisões do usuário:** CPF (`document`) não é guardado; dados aparecem na Pessoa e no Departamento do Cliente.
+- **Pendente:** o Cloudflare do Genus bloqueia o IP do servidor (187.124.129.85 / 2a02:4780:c:62de::1) — pedir liberação; depois, carga dos que já entraram (comando no doc 09).
+- **Arquivos:** `core/config.py`, `.env.example`, `super_admin/models.py`, `super_admin/payroll.py`, `super_admin/sso.py`, `tasks/scheduled.py`, `alembic/versions/008_user_payroll_profiles.py`, `teamops/service.py`, `teamops/schemas.py`; front `api/teamops.ts`, `PersonDetailPage.tsx`; `docs/técnico/09-sso-idigital.md`.
+
 ## 2026-09-24 — Cargo Administrativo (Coordenação) (Filipe) e Administrativo comum
 
 - **Pedido:** Filipe ligado só ao Ewerton, um nível abaixo — no acesso e no organograma. Só ele; Fernando e Myrian seguem Administrativo.

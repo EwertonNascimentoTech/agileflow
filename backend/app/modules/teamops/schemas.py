@@ -354,6 +354,18 @@ class AreaMini(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PayrollProfileMini(BaseModel):
+    """Dados funcionais da folha (Genus), sem CPF."""
+    employee_number: Optional[str] = None
+    organization: Optional[str] = None
+    department: Optional[str] = None
+    job_title: Optional[str] = None
+    trust_role: Optional[str] = None
+    fetched_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
 class PersonResponse(BaseModel):
     id: uuid.UUID
     user_id: Optional[uuid.UUID]
@@ -389,6 +401,8 @@ class PersonResponse(BaseModel):
     access_level: AccessLevel = "none"
     user_active: Optional[bool] = None
     user_email: Optional[str] = None
+    # Folha (Genus), preenchida no 1º login pelo IDigital; só no detalhe.
+    payroll: Optional[PayrollProfileMini] = None
 
     model_config = {"from_attributes": True}
 

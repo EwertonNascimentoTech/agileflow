@@ -168,6 +168,19 @@ export interface Person {
   access_level: AccessLevel
   user_active: boolean | null
   user_email: string | null
+  /** Folha (Genus), buscada no 1º login pelo IDigital. Só vem no detalhe da Pessoa. */
+  payroll?: PayrollProfile | null
+}
+
+/** Dados funcionais da folha FIEA (Genus). O CPF não é guardado. */
+export interface PayrollProfile {
+  employee_number: string | null
+  organization: string | null
+  department: string | null
+  /** Cargo funcional da folha — não é o Cargo do TeamOps. */
+  job_title: string | null
+  trust_role: string | null
+  fetched_at: string | null
 }
 
 export interface OffboardingPeer {

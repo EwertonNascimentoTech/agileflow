@@ -185,6 +185,24 @@ export default function PersonDetailPage() {
               <Field label="Data de entrada" value={person.start_date ?? null} />
             </CardContent>
           </Card>
+          {person.payroll && (
+            <Card className="mt-4">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Dados da folha</CardTitle>
+                <CardDescription>
+                  Do Genus, no 1º login pelo IDigital
+                  {person.payroll.fetched_at && ` em ${person.payroll.fetched_at.slice(0, 10).split("-").reverse().join("/")}`}.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-4 md:grid-cols-2">
+                <Field label="Matrícula" value={person.payroll.employee_number} />
+                <Field label="Cargo funcional" value={person.payroll.job_title} />
+                <Field label="Departamento" value={person.payroll.department} />
+                <Field label="Função de confiança" value={person.payroll.trust_role} />
+                <Field label="Organização" value={person.payroll.organization} />
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
 
         <TabsContent value="stacks" className="mt-4">

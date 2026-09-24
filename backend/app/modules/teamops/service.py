@@ -21,6 +21,7 @@ from app.modules.super_admin.models import (
     Tenant,
     TenantModule,
     User,
+    UserPayrollProfile,
     UserRole,
 )
 
@@ -768,7 +769,17 @@ class PersonService:
         if await PersonStatusSync.sync_one(db, person_id, commit=True):
             await db.refresh(person, attribute_names=["status", "updated_at"])
         await PersonService._enrich_access(db, [person])
+        await PersonService._attach_payroll(db, person)
         return person
+
+    @staticmethod
+    async def _attach_payroll(db: AsyncSession, person: Person) -> None:
+        """Dados da folha (Genus) do login vinculado, só na ficha da Pessoa (não na lista)."""
+        person.payroll = None
+        if person.user_id:
+            person.payroll = (await db.execute(
+                select(UserPayrollProfile).where(UserPayrollProfile.user_id == person.user_id)
+            )).scalar_one_or_none()
 
     @staticmethod
     def _reject_manual_absence_status(payload: dict) -> None:

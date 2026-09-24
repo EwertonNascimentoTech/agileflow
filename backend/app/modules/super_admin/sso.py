@@ -8,6 +8,8 @@ sempre (mesmos tokens do login por senha).
 - está em Pessoas (TeamOps) → ganha o login de colaborador com a role do cargo (como no 1º acesso);
 - não está → vira cliente do Portal (Operação Assistida) sem projetos; o PO vincula depois.
 Do IDigital só vêm nome e e-mail (o IdP não tem telefone/organização); o CPF (`document`) não é pedido.
+No 1º login pelo IDigital (vínculo novo), os dados funcionais da folha (Genus) são buscados pelo e-mail
+em segundo plano — ver `payroll.py`.
 """
 import hashlib
 import logging
@@ -250,7 +252,23 @@ class SsoService:
             db, "sso_login", "user", user_id=user.id, tenant_id=user.tenant_id, entity_id=user.id,
             details={"provider": PROVIDER, "linked_now": linked_now, "provisioned": provisioned}, ip=ip,
         )
+        if linked_now:
+            SsoService._queue_payroll_sync(user.id)
         return user
+
+    @staticmethod
+    def _queue_payroll_sync(user_id: uuid.UUID) -> None:
+        """1º login pelo IDigital: dados da folha (Genus) em segundo plano; nunca atrasa nem derruba o login."""
+        from app.modules.super_admin.payroll import PayrollService
+
+        if not PayrollService.configured():
+            return
+        try:
+            from app.core.celery_app import celery_app
+
+            celery_app.send_task("payroll.sync_user", args=[str(user_id)], retry=False)
+        except Exception:  # noqa: BLE001
+            logger.exception("SSO: fila indisponível; dados da folha não foram agendados")
 
     # ── 1º login sem cadastro: colaborador (Pessoas) ou cliente (Portal) ─────
     @staticmethod

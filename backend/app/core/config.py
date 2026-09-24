@@ -152,6 +152,13 @@ class Settings(BaseSettings):
     # Quem entra pelo IDigital sem login e sem cadastro em Pessoas vira cliente (Portal) neste tenant (slug).
     SSO_CLIENT_TENANT: str = "ss"
 
+    # ── Genus (folha de pagamento FIEA) ──
+    # No 1º login pelo IDigital, busca o colaborador por e-mail em /api/payroll/users e guarda
+    # matrícula, organização, departamento, cargo funcional e função de confiança (CPF não).
+    # Sem token a consulta fica desligada. O Cloudflare do Genus precisa liberar o IP do servidor.
+    GENUS_API_URL: str = "https://genusapi.sistemafiea.com.br"
+    GENUS_API_TOKEN: str = ""
+
     # ── EPA (Sistema de Planos de Ação — sysepa) ──
     # Integração usada pelo RTD (slide de Planos Estratégicos). Login/senha únicos da
     # instituição, definidos no .env; token JWT obtido em /epa/api/api/login e cacheado.
