@@ -23,7 +23,7 @@ Visão das **etapas reais** dos cinco kanbans do processo TD, com bifurcações 
 5. **Contratar / Negociação**: Ganhou (contrato no Produto + libera origem) | Perdeu (origem → Cancelado)
 6. **Projetos**: Impedimento, escopo, homologação (loops de retorno); **Pausado** existe como raia operacional
 7. **Feature**: Homologação (PO) → Ajustar (volta a Em Dev) ou Concluído
-8. **US**: Impedimento; Homologação (PO) pode devolver a Em Desenvolvimento
+8. **US**: Impedimento; sem homologação própria — quando todas as US da Feature concluem, a Feature vai para Homologação (PO) (raia removida do kanban User Story em 2026-09-24)
 
 ## Etapas por kanban (ordem atual no tenant)
 
@@ -33,6 +33,6 @@ Visão das **etapas reais** dos cinco kanbans do processo TD, com bifurcações 
 
 **Features:** Backlog → Em Desenvolvimento → Homologação (PO) → Ajustar → Concluído
 
-**User Story:** Backlog → Impedimento → Em Desenvolvimento → Code Review → Homologação (PO) → Concluído
+**User Story:** Backlog → Impedimento → Em Desenvolvimento → Code Review → Concluído
 
 **Contratar:** Backlog → Prospectar → Análise de aderência → Proposta → Negociação → Concluído | Cancelado

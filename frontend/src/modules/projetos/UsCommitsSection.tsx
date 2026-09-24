@@ -66,7 +66,7 @@ function CommitRow({
 }
 
 /** Evidência de código da User Story: commits vinculados + justificativa quando não há commit.
- *  O servidor exige isso ao mover para Homologação (PO); a seção torna o requisito visível
+ *  O servidor exige isso ao concluir a US; a seção torna o requisito visível
  *  antes de o dev arrastar o card. */
 export function UsCommitsSection({
   projectId,
@@ -182,7 +182,7 @@ export function UsCommitsSection({
       {semProduto && (
         <p className="rounded-md border border-destructive/40 bg-destructive/5 px-2.5 py-2 text-xs text-destructive">
           Este card não está sob um projeto com produto vinculado. Vincule o produto ao card do
-          projeto para poder anexar commits e enviar a User Story para Homologação (PO).
+          projeto para poder anexar commits e concluir a User Story.
         </p>
       )}
 
@@ -277,8 +277,8 @@ export function UsCommitsSection({
             <div className="space-y-1.5">
               <p className="text-[11px] text-muted-foreground">
                 {semCommitsNoProduto
-                  ? "O produto deste projeto ainda não tem commits importados — justifique para enviar à Homologação (PO)."
-                  : "Sem commit para vincular? Justifique antes de mover para Homologação (PO)."}
+                  ? "O produto deste projeto ainda não tem commits importados — justifique para concluir a User Story."
+                  : "Sem commit para vincular? Justifique antes de concluir a User Story."}
               </p>
               <Textarea
                 value={rascunho}

@@ -4576,9 +4576,9 @@ class ProjectTaskService:
                                 ),
                             )
 
-                # Evidência de código: o dev informa commit ou justificativa ao enviar a US
-                # para Homologação (PO). O PO só conclui se essa evidência existir
-                # (também vale se a US pular a raia do PO e for direto a Concluído).
+                # Evidência de código: o dev informa commit ou justificativa ao concluir a US
+                # (o kanban User Story não tem mais Homologação (PO); se a raia voltar, a
+                # cobrança acontece na entrada dela).
                 to_concluido = bool(target_status.is_final) or (
                     ProjectTaskService._is_concluded_planning_status(target_status)
                 )
@@ -7985,11 +7985,12 @@ class CapacityService:
 
 
 class UsCommitEvidenceService:
-    """Evidência de código ao enviar a User Story para Homologação (PO).
+    """Evidência de código ao concluir a User Story.
 
     Regra: o dev responsável vincula ao menos um commit do produto do projeto. Se o
     produto não tiver commit, ele justifica. Projeto sem produto é bloqueado até o
-    cadastro ser corrigido. Sair da Homologação (PO) é do PO do projeto.
+    cadastro ser corrigido. Desde 2026-09-24 o kanban User Story não tem Homologação (PO):
+    a homologação é da Feature. O momento 'homologacao_po' só vale se a raia voltar.
 
     Imports do módulo Produtos são lazy dentro das funções (padrão de
     `_validate_procurement_question`): projetos não depende de produtos no topo do módulo.

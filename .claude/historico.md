@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-24 — Homologação (PO) só no kanban Features
+
+- **Pedido:** excluir a raia Homologação (PO) do kanban User Story (homologação só na Feature) e mover para Concluído as US que estavam nela.
+- **Feito:** 75 US movidas pelo `ProjectTaskService.update` como sistema (histórico, cascata da Feature, rollup); `completed_at` = entrada na Homologação (entrega do dev). Evidência de commit dispensada só nessa migração (4 US antigas sem evidência) e trava de cronograma dispensada para 1 US solta ("US16 – Base de conhecimento", sem Feature). Cascata: 22 Features em Homologação (PO) (+3), 8 seguem Em Desenvolvimento. Raia excluída (2 vínculos de formulário padrão saíram junto); Concluído passou para order 4. Textos da evidência de commit dizem "concluir a User Story". Retrato anterior no scratchpad da sessão.
+- **Não mexer:** regras genéricas de Homologação (PO) seguem no código (valem para a Feature e para a US se a raia voltar).
+- **Arquivos:** `projetos/service.py` (comentários), front `UsCommitsSection.tsx`, `docs/processo/03-...`, `docs/de-para-...`, `docs/analise-processo-...`.
+
 ## 2026-09-24 — Triagem não analisa Prazo desejado nem Justificativa do prazo
 
 - **Pedido:** o agente de triagem não deve analisar os campos "Prazo desejado" e "Justificativa do prazo".

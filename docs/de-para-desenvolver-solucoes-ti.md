@@ -22,7 +22,7 @@ Projetos e Programas (card-raiz planejamento)
 
 Features / User Story (execução)
   Feature: Backlog → Em Dev → Homologação (PO) → Ajustar → Concluído
-  US: Backlog → Impedimento → Em Dev → Code Review → Homologação (PO) → Concluído
+  US: Backlog → Impedimento → Em Dev → Code Review → Concluído (homologação só na Feature)
 ```
 
 ---

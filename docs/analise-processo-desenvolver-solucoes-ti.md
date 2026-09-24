@@ -45,7 +45,7 @@ SB01 Prospectar (entrada)
 | **Prospectar Soluções** | … → Concluído (converte) | Entrada SB01 quando veio da prospecção |
 | **Projetos e Programas** | Backlog → Agendar Reunião → Levantamento → Impedimento → Requisitos/Protótipo → Refinamento PO & Tech → Validar Escopo → Pronto p/ Dev → Em Desenvolvimento → DevOps (HML) → Homologando → DEVSECOPS (PROD) → Concluído | Espinha dorsal do To Be (abertura → go-live) |
 | **Features** | Backlog → Em Dev → Homologação (PO) → Ajustar → Concluído | Incremento / épicos |
-| **User Story** | Backlog → Impedimento → Em Dev → Code Review → Homologação (PO) → Concluído | Histórias do ciclo de sprint |
+| **User Story** | Backlog → Impedimento → Em Dev → Code Review → Concluído (homologação só na Feature) | Histórias do ciclo de sprint |
 | **Contratar** | (se produto externo no meio do caminho) | Bifurcação lateral — não é o núcleo do 02 |
 
 ---
