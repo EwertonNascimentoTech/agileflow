@@ -60,6 +60,7 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 
 ## Operação Assistida (clientes)
 
+- Bloco "Operação Assistida · atendimento" no card do projeto só aparece com desenvolvedores definidos (`hideWhenEmpty`); a definição é no modal obrigatório ao mover o projeto para a raia Operação Assistida.
 - Cliente da Operação Assistida é `project_clients` + login `public.users`; **não** é Pessoa do TeamOps.
 - E-mail do cliente é único: cadastrar começa por `GET /projetos/clients/lookup`; cliente existente é reaproveitado, nunca duplicado.
 - Cliente externo (Função "Cliente (Operação Assistida)") só acessa o Portal: `require_module` devolve 403 em tudo, exceto rotas com `allow_client=True`.

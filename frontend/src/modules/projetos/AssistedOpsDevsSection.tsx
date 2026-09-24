@@ -16,9 +16,12 @@ function apiError(err: unknown, fallback: string): string {
 /** Desenvolvedores fixos que atendem as Ocorrências da Operação Assistida do projeto.
  * Todos são avisados de ocorrência nova; quem assumir primeiro fica responsável.
  * Modo modal (`autoEdit`): abre já editando, exige ao menos um dev (`requireOne`) e avisa
- * quem chamou ao salvar/cancelar — usado ao mover o projeto para a Operação Assistida. */
+ * quem chamou ao salvar/cancelar — usado ao mover o projeto para a Operação Assistida.
+ * `hideWhenEmpty` (drawer): sem devs definidos o bloco não aparece — a definição acontece no
+ * modal ao mover o projeto para a raia Operação Assistida. */
 export function AssistedOpsDevsSection({
-  projectTaskId, readOnly, autoEdit = false, requireOne = false, bare = false, refreshKey = 0, onSaved, onCancel,
+  projectTaskId, readOnly, autoEdit = false, requireOne = false, bare = false, hideWhenEmpty = false,
+  refreshKey = 0, onSaved, onCancel,
 }: {
   projectTaskId: string
   readOnly: boolean
@@ -26,6 +29,8 @@ export function AssistedOpsDevsSection({
   requireOne?: boolean
   /** Sem a moldura/título (o modal já tem). */
   bare?: boolean
+  /** Não mostra nada enquanto não houver desenvolvedor definido. */
+  hideWhenEmpty?: boolean
   /** Muda quando os devs foram salvos em outro lugar (ex.: no modal) — recarrega. */
   refreshKey?: number
   onSaved?: (devs: AssistedOpsDev[]) => void
@@ -98,6 +103,8 @@ export function AssistedOpsDevsSection({
       setSaving(false)
     }
   }
+
+  if (hideWhenEmpty && !editing && devs.length === 0) return null
 
   return (
     <div className={bare ? "space-y-2" : "space-y-2 rounded-md border border-teal-500/30 bg-teal-50/40 p-3 dark:bg-teal-950/20"}>

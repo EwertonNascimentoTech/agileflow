@@ -14,6 +14,12 @@ Modelo:
 
 ---
 
+## 2026-09-24 — Bloco de atendimento da Operação Assistida só com devs definidos
+
+- **Pedido:** o bloco "Operação Assistida · atendimento" do card do projeto só deve aparecer quando os dados estiverem preenchidos.
+- **Feito:** `AssistedOpsDevsSection` ganhou `hideWhenEmpty`; o drawer usa. Sem devs, nada aparece; com devs, lista + "Definir" para alterar. Definição inicial segue no modal ao mover para a raia Operação Assistida.
+- **Arquivos:** front `AssistedOpsDevsSection.tsx`, `ProjectTaskDrawer.tsx`.
+
 ## 2026-09-24 — Homologação (PO) só no kanban Features
 
 - **Pedido:** excluir a raia Homologação (PO) do kanban User Story (homologação só na Feature) e mover para Concluído as US que estavam nela.

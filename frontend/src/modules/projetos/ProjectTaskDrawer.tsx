@@ -1601,7 +1601,7 @@ export function ProjectTaskDrawer({
             )}
 
             {task && isPlanningRootTask(task.planning_kind) && isProjectOrProgramKanbanFunnel(taskFunnelName) && (
-              <AssistedOpsDevsSection projectTaskId={task.id} readOnly={readOnly} refreshKey={oaDevsRefresh} />
+              <AssistedOpsDevsSection projectTaskId={task.id} readOnly={readOnly} refreshKey={oaDevsRefresh} hideWhenEmpty />
             )}
 
             {!readOnly && task && isPlanningRootTask(task.planning_kind) && canImportScheduleInStatus(statusLabel) && (
