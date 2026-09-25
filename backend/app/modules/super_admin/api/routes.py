@@ -61,6 +61,8 @@ async def _attach_role_name(db: AsyncSession, user) -> None:
     # Equipe com visão de tudo no Modo Cliente (coordenação/gestão, inclui Administrativo): também
     # lê Ocorrências e Soluções com IA, sem agir.
     user.team_sees_all = bool(user.has_team_portal) and await _team_sees_all(db, user)
+    # Pessoa de Times que faz a triagem N1 de ocorrências (Produto ou Dono/Especialista do Processo).
+    user.oa_n1 = bool(user.has_team_portal) and not user.team_sees_all and await _is_oa_n1(db, user)
 
 
 async def _has_client_portal(db: AsyncSession, user) -> bool:
@@ -110,6 +112,47 @@ async def _team_sees_all(db: AsyncSession, user) -> bool:
         return False
     cargo = f"{row[0] or ''} {row[1] or ''}".lower()
     return any(t in cargo for t in ProjectTaskService._COORDINATION_CARGO_TOKENS)
+
+
+async def _is_oa_n1(db: AsyncSession, user) -> bool:
+    """É responsável de N1 (POP 8.2.1) em algum Produto, como Pessoa ou Cliente, ou Dono/Especialista
+    do Processo em algum projeto/programa. Mesma regra de AssistedOpsService.n1_roots_for_user."""
+    schema = (
+        await db.execute(select(Tenant.schema_name).where(Tenant.id == user.tenant_id))
+    ).scalar_one_or_none()
+    if not schema:
+        return False
+    tables = (await db.execute(text(
+        "SELECT to_regclass(:a) IS NOT NULL, to_regclass(:b) IS NOT NULL, to_regclass(:c) IS NOT NULL"
+    ), {"a": f'"{schema}".product_supports', "b": f'"{schema}".project_clients', "c": f'"{schema}".team_persons'})).first()
+    has_supports, has_clients, has_persons = tables or (False, False, False)
+    pid = (await db.execute(text(
+        f'SELECT id FROM "{schema}".team_persons WHERE user_id = :uid AND status <> \'desligado\' LIMIT 1'
+    ), {"uid": str(user.id)})).scalar_one_or_none() if has_persons else None
+    cids = [str(r[0]) for r in (await db.execute(text(
+        f'SELECT id FROM "{schema}".project_clients WHERE is_active AND (user_id = :uid OR lower(email) = lower(:email))'
+    ), {"uid": str(user.id), "email": user.email or ""})).all()] if has_clients else []
+    if has_supports:
+        # Pessoa ou cliente citado no N1 de algum Produto (config JSON: listas de ids em texto).
+        checks = ([("person_ids", str(pid))] if pid else []) + [("client_ids", c) for c in cids]
+        for key, value in checks:
+            hit = (await db.execute(text(
+                f'SELECT 1 FROM "{schema}".product_supports WHERE is_active AND nivel = \'n1\' '
+                f"AND niveis_atendimento->'{key}' @> jsonb_build_array(CAST(:v AS text)) LIMIT 1"
+            ), {"v": value})).scalar()
+            if hit:
+                return True
+    if cids:
+        roles = "('dono_processo', 'especialista_processo')"
+        hit = (await db.execute(text(
+            f'SELECT 1 FROM "{schema}".project_client_access WHERE client_id = ANY(CAST(:c AS uuid[])) '
+            f"AND project_role IN {roles} "
+            f'UNION ALL SELECT 1 FROM "{schema}".project_program_client_access WHERE client_id = ANY(CAST(:c AS uuid[])) '
+            f"AND project_role IN {roles} LIMIT 1"
+        ), {"c": cids})).scalar()
+        if hit:
+            return True
+    return False
 
 
 async def _has_team_portal(db: AsyncSession, user) -> bool:

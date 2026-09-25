@@ -4,8 +4,8 @@ import { AlertTriangle, ArrowLeft, CheckCircle2, Download, ExternalLink, FileTex
 
 import {
   produtosApi, reposApi, type AnexoItem, type Contrato, type ContratoCreate, type ContratoUpdate, type Documento, type Documentation,
-  type PersonMini, type Product, type ProductHealth, type Release, type ReleaseCreate, type Repositorio, type Servico,
-  type ServicoStatus, type Support, type SupportCreate, type SupportNivel,
+  type Product, type ProductHealth, type Release, type ReleaseCreate, type Repositorio, type Servico,
+  type ServicoStatus, type Support, type SupportCreate, type SupportNivel, type SupportPerson,
 } from "@/api/produtos"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -1266,11 +1266,12 @@ const NIVEL_LABEL: Record<SupportNivel, string> = { n1: "Nível 1", n2: "Nível 
 const NIVEL_OPTS: SupportNivel[] = ["n1", "n2", "n3"]
 
 function supportResponsaveisLabel(s: Support): string {
-  if (s.interno) {
-    const nomes = s.responsaveis.map((r) => r.full_name)
-    return nomes.length > 0 ? nomes.join(", ") : "—"
-  }
-  return s.nomes_externos.length > 0 ? s.nomes_externos.join(", ") : "—"
+  const nomes = [
+    ...s.responsaveis.map((r) => r.full_name),
+    ...(s.clientes ?? []).map((c) => `${c.full_name} (cliente)`),
+    ...s.nomes_externos.map((n) => `${n} (sem cadastro)`),
+  ]
+  return nomes.length > 0 ? nomes.join(", ") : "—"
 }
 
 function SustentacaoTab({ p, onChange }: { p: Product; onChange: () => void | Promise<void> }) {
@@ -1352,13 +1353,15 @@ function SupportDialog({ open, onOpenChange, productId, support, usedNiveis, onS
   onSaved: () => void | Promise<void>
 }) {
   const editing = !!support
-  const [persons, setPersons] = useState<PersonMini[]>([])
+  // Responsáveis cadastrados: Pessoas (Times) e Clientes (Portal) — no N1, fazem a triagem das ocorrências.
+  const [people, setPeople] = useState<SupportPerson[]>([])
   const [canal, setCanal] = useState("")
   const [nivel, setNivel] = useState<SupportNivel>("n1")
   const [interno, setInterno] = useState(true)
   const [personIds, setPersonIds] = useState<string[]>([])
+  const [clientIds, setClientIds] = useState<string[]>([])
   const [nomesExt, setNomesExt] = useState<string[]>([])
-  const [personSel, setPersonSel] = useState<string | undefined>(undefined)
+  const [busca, setBusca] = useState("")
   const [nomeExt, setNomeExt] = useState("")
   const [slaHoras, setSlaHoras] = useState<string>("")
   const [obs, setObs] = useState("")
@@ -1368,12 +1371,13 @@ function SupportDialog({ open, onOpenChange, productId, support, usedNiveis, onS
 
   useEffect(() => {
     if (!open) return
-    produtosApi.listPersons().then(setPersons).catch(() => setPersons([]))
+    produtosApi.listSupportPeople().then(setPeople).catch(() => setPeople([]))
     if (support) {
       setCanal(support.canal_atendimento ?? "")
       setNivel(support.nivel)
       setInterno(support.interno)
       setPersonIds([...support.person_ids])
+      setClientIds([...(support.client_ids ?? [])])
       setNomesExt([...support.nomes_externos])
       setSlaHoras(support.sla_horas != null ? String(support.sla_horas) : "")
       setObs(support.observacoes ?? "")
@@ -1382,20 +1386,29 @@ function SupportDialog({ open, onOpenChange, productId, support, usedNiveis, onS
       setNivel(niveisDisponiveis[0] ?? "n1")
       setInterno(true)
       setPersonIds([])
+      setClientIds([])
       setNomesExt([])
       setSlaHoras("")
       setObs("")
     }
-    setPersonSel(undefined)
+    setBusca("")
     setNomeExt("")
   }, [open, support])
 
-  const disponiveis = persons.filter((p) => !personIds.includes(p.id))
+  const selected = (p: SupportPerson) => (p.kind === "person" ? personIds : clientIds).includes(p.id)
+  const q = busca.trim().toLowerCase()
+  const sugestoes = q
+    ? people.filter((p) => !selected(p) && `${p.full_name} ${p.email ?? ""}`.toLowerCase().includes(q)).slice(0, 8)
+    : []
+  const nameOf = (kind: SupportPerson["kind"], id: string) =>
+    people.find((p) => p.kind === kind && p.id === id)?.full_name
+    ?? (kind === "person" ? support?.responsaveis : support?.clientes)?.find((x) => x.id === id)?.full_name
+    ?? id
 
-  function addPerson() {
-    if (!personSel || personIds.includes(personSel)) return
-    setPersonIds((ids) => [...ids, personSel])
-    setPersonSel(undefined)
+  function addPerson(p: SupportPerson) {
+    if (p.kind === "person") setPersonIds((ids) => [...ids, p.id])
+    else setClientIds((ids) => [...ids, p.id])
+    setBusca("")
   }
   function addNome() {
     const t = nomeExt.trim()
@@ -1407,15 +1420,16 @@ function SupportDialog({ open, onOpenChange, productId, support, usedNiveis, onS
   async function save() {
     if (!canal.trim()) { toast.error("Informe o canal de atendimento."); return }
     if (!slaHoras || Number(slaHoras) < 1) { toast.error("Informe o SLA em horas."); return }
-    if (interno && personIds.length === 0) { toast.error("Adicione ao menos um responsável interno."); return }
-    if (!interno && nomesExt.length === 0) { toast.error("Adicione ao menos um responsável externo."); return }
+    const cadastrados = personIds.length + clientIds.length
+    if (cadastrados === 0 && (interno || nomesExt.length === 0)) { toast.error("Adicione ao menos um responsável."); return }
     setSaving(true)
     try {
       const payload: SupportCreate = {
         canal_atendimento: canal.trim(),
         nivel,
         interno,
-        person_ids: interno ? personIds : [],
+        person_ids: personIds,
+        client_ids: clientIds,
         nomes_externos: interno ? [] : nomesExt,
         sla_horas: Number(slaHoras),
         observacoes: obs.trim() || null,
@@ -1430,6 +1444,11 @@ function SupportDialog({ open, onOpenChange, productId, support, usedNiveis, onS
       await onSaved()
     } catch (e) { toast.error(detail(e)) } finally { setSaving(false) }
   }
+
+  const chips: Array<{ kind: SupportPerson["kind"]; id: string }> = [
+    ...personIds.map((id) => ({ kind: "person" as const, id })),
+    ...clientIds.map((id) => ({ kind: "client" as const, id })),
+  ]
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1452,49 +1471,76 @@ function SupportDialog({ open, onOpenChange, productId, support, usedNiveis, onS
             </Select>
           </div>
           <label className="flex items-center gap-2 text-sm">
-            <Switch checked={interno} onCheckedChange={(v) => { setInterno(v); setPersonIds([]); setNomesExt([]) }} />
-            Atendimento interno
+            <Switch checked={interno} onCheckedChange={setInterno} />
+            Atendimento interno (TI)
           </label>
-          {interno ? (
-            <div className="space-y-2">
-              <Label className="text-xs">Responsáveis pelo atendimento</Label>
-              <div className="flex flex-wrap gap-2">
-                <Select value={personSel} onValueChange={setPersonSel}>
-                  <SelectTrigger className="min-w-[200px] flex-1"><SelectValue placeholder="Selecionar usuário..." /></SelectTrigger>
-                  <SelectContent>
-                    {disponiveis.map((p) => <SelectItem key={p.id} value={p.id}>{p.full_name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                <Button type="button" variant="outline" size="sm" onClick={addPerson} disabled={!personSel}>Adicionar</Button>
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {personIds.map((id) => {
-                  const person = persons.find((p) => p.id === id)
-                  return (
-                    <Badge key={id} variant="secondary" className="gap-1 text-xs">
-                      {person?.full_name ?? id}
-                      <button type="button" onClick={() => setPersonIds((ids) => ids.filter((x) => x !== id))}><XCircle size={12} /></button>
-                    </Badge>
-                  )
-                })}
-              </div>
+          <div className="space-y-2">
+            <Label className="text-xs">Responsáveis pelo atendimento</Label>
+            <div className="relative">
+              <Input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar pessoa de Times ou cliente pelo nome ou e-mail" />
+              {sugestoes.length > 0 && (
+                <div className="absolute z-10 mt-1 max-h-56 w-full overflow-y-auto rounded-md border bg-popover shadow-md">
+                  {sugestoes.map((p) => (
+                    <button
+                      key={`${p.kind}-${p.id}`}
+                      type="button"
+                      onClick={() => addPerson(p)}
+                      className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-sm hover:bg-muted"
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate">{p.full_name}</span>
+                        {(p.detail || p.email) && <span className="block truncate text-[11px] text-muted-foreground">{p.detail || p.email}</span>}
+                      </span>
+                      <Badge variant={p.kind === "person" ? "secondary" : "outline"} className="shrink-0 text-[10px]">
+                        {p.kind === "person" ? "Times" : "Cliente"}
+                      </Badge>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
-          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {chips.map(({ kind, id }) => (
+                <Badge key={`${kind}-${id}`} variant="secondary" className="gap-1 text-xs">
+                  {nameOf(kind, id)}
+                  <span className="text-[10px] text-muted-foreground">· {kind === "person" ? "Times" : "Cliente"}</span>
+                  <button
+                    type="button"
+                    onClick={() => (kind === "person" ? setPersonIds : setClientIds)((ids) => ids.filter((x) => x !== id))}
+                  >
+                    <XCircle size={12} />
+                  </button>
+                </Badge>
+              ))}
+            </div>
+            {nivel === "n1" && (
+              <p className="text-[11px] text-muted-foreground">
+                No Nível 1, estas pessoas fazem a triagem das ocorrências da Operação Assistida no Portal (junto com o Dono e o
+                Especialista do Processo do projeto).
+              </p>
+            )}
+          </div>
+          {!interno && (
             <div className="space-y-2">
-              <Label className="text-xs">Responsáveis (nomes)</Label>
+              <Label className="text-xs">Sem cadastro (só nome)</Label>
               <div className="flex flex-wrap gap-2">
-                <Input className="flex-1" value={nomeExt} onChange={(e) => setNomeExt(e.target.value)} placeholder="Nome da pessoa"
+                <Input className="flex-1" value={nomeExt} onChange={(e) => setNomeExt(e.target.value)} placeholder="Ex.: fornecedor"
                   onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addNome() } }} />
                 <Button type="button" variant="outline" size="sm" onClick={addNome}>Adicionar</Button>
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {nomesExt.map((nome) => (
-                  <Badge key={nome} variant="secondary" className="gap-1 text-xs">
+                  <Badge key={nome} variant="outline" className="gap-1 text-xs">
                     {nome}
                     <button type="button" onClick={() => setNomesExt((n) => n.filter((x) => x !== nome))}><XCircle size={12} /></button>
                   </Badge>
                 ))}
               </div>
+              {nomesExt.length > 0 && (
+                <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                  Nome sem cadastro não recebe ocorrências nem acessa o sistema. Troque pela pessoa cadastrada quando houver.
+                </p>
+              )}
             </div>
           )}
           <div className="space-y-1.5">

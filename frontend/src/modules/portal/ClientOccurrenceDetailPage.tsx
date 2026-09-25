@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom"
 import {
   CheckCircle2,
   Clock,
+  Filter,
   Flag,
   FolderKanban,
   GitBranch,
@@ -54,6 +55,7 @@ import { usePortalBase } from "@/modules/portal/portfolioMeta"
 /** Origem do movimento na visão do cliente (sem o jargão interno do kanban). */
 const PORTAL_SOURCE_LABELS: Record<string, string> = {
   client: "Portal do cliente",
+  n1: "Triagem N1",
   system: "Automático",
   automation: "Automático",
 }
@@ -165,6 +167,13 @@ export default function ClientOccurrenceDetailPage() {
   const [nps, setNps] = useState<number | null>(null)
   const [homologText, setHomologText] = useState("")
   const [homologating, setHomologating] = useState(false)
+  // Triagem N1 (POP 8.2.4)
+  const triageRef = useRef<HTMLElement>(null)
+  const [triageMode, setTriageMode] = useState<"resolver" | "encaminhar" | null>(null)
+  const [triageTipo, setTriageTipo] = useState<"erro" | "melhoria">("erro")
+  const [triagePrio, setTriagePrio] = useState<OccurrencePrioridade | null>(null)
+  const [triageText, setTriageText] = useState("")
+  const [triaging, setTriaging] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -223,6 +232,30 @@ export default function ClientOccurrenceDetailPage() {
     }
   }
 
+  async function triage() {
+    if (!occ || !triageMode) return
+    if (triageMode === "resolver" && triageText.trim().length < 10) {
+      return toast.error("Escreva a orientação para quem abriu (mín. 10 caracteres).")
+    }
+    setTriaging(true)
+    try {
+      const updated = await portalOccurrencesApi.triage(occ.task_id, {
+        action: triageMode,
+        tipo: triageMode === "encaminhar" ? triageTipo : null,
+        prioridade: triageMode === "encaminhar" && triageTipo === "erro" ? triagePrio ?? occ.prioridade : null,
+        comment: triageText.trim() || null,
+      })
+      setOcc(updated)
+      setTriageMode(null)
+      setTriageText("")
+      toast.success(triageMode === "resolver" ? "Ocorrência respondida e encerrada." : "Ocorrência encaminhada à TI.")
+    } catch (err) {
+      toast.error(apiErrorDetail(err, "Não foi possível registrar a triagem."))
+    } finally {
+      setTriaging(false)
+    }
+  }
+
   function focusReply() {
     replyRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })
     replyRef.current?.focus({ preventScroll: true })
@@ -256,9 +289,25 @@ export default function ClientOccurrenceDetailPage() {
   const mine = occ.opened_by_me
   const waitingMe = mine && occ.stage_key === "aguardando_cliente"
   const validateMe = mine && occ.stage_key === "homologando"
+  const triageMe = occ.can_triage
 
   let nextStep: ReactNode
-  if (waitingMe) {
+  if (triageMe) {
+    nextStep = (
+      <NextStep
+        tone="amber"
+        icon={<Filter size={16} />}
+        action={
+          <Button size="sm" className="gap-1.5" onClick={() => triageRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+            <Filter size={14} /> Fazer a triagem
+          </Button>
+        }
+      >
+        <p className="font-medium">Você é o nível 1 deste projeto.</p>
+        <p className="text-xs opacity-80">Oriente quem abriu e encerre, ou encaminhe à TI como correção ou melhoria.</p>
+      </NextStep>
+    )
+  } else if (waitingMe) {
     nextStep = (
       <NextStep
         tone="amber"
@@ -309,7 +358,9 @@ export default function ClientOccurrenceDetailPage() {
         ) : (
           <p>
             <span className="font-medium">Encerrada</span>
-            {occ.finalized_by_team ? " pelo time." : "."}
+            {occ.n1_outcome === "resolvida"
+              ? ` no nível 1${occ.n1_by_name ? ` por ${occ.n1_by_name}` : ""}.`
+              : occ.finalized_by_team ? " pelo time." : "."}
           </p>
         )}
       </NextStep>
@@ -381,6 +432,108 @@ export default function ClientOccurrenceDetailPage() {
           {nextStep}
         </div>
       </Section>
+
+      {triageMe && (
+        <section
+          ref={triageRef}
+          className="scroll-mt-20 space-y-4 rounded-2xl border border-sky-300 bg-sky-50/60 p-5 shadow-sm dark:border-sky-800 dark:bg-sky-950/30"
+        >
+          <div>
+            <h2 className="text-lg font-semibold">Triagem N1</h2>
+            <p className="text-sm text-muted-foreground">
+              É dúvida de uso? Oriente e encerre. Se o sistema não faz o que foi combinado, é correção; se é algo novo, melhoria.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {(
+              [
+                { mode: "resolver", label: "Resolver aqui", desc: "É dúvida de uso: oriento quem abriu e encerro.", icon: MessageSquareReply },
+                { mode: "encaminhar", label: "Encaminhar à TI", desc: "Precisa de correção ou é uma melhoria.", icon: Send },
+              ] as const
+            ).map(({ mode, label, desc, icon: Icon }) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setTriageMode(mode)}
+                aria-pressed={triageMode === mode}
+                className={`flex items-start gap-3 rounded-xl border bg-background p-4 text-left transition-colors ${
+                  triageMode === mode ? "border-sky-500 bg-sky-50 ring-1 ring-sky-500 dark:bg-sky-950/40" : "hover:border-primary/40"
+                }`}
+              >
+                <Icon size={20} className="text-sky-600" />
+                <span>
+                  <span className="block font-medium">{label}</span>
+                  <span className="block text-sm text-muted-foreground">{desc}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+          {triageMode === "encaminhar" && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-2">
+                {(
+                  [
+                    { v: "erro", label: "Correção", desc: "não faz o que foi combinado" },
+                    { v: "melhoria", label: "Melhoria", desc: "algo novo ou diferente" },
+                  ] as const
+                ).map(({ v, label, desc }) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setTriageTipo(v)}
+                    aria-pressed={triageTipo === v}
+                    className={`rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+                      triageTipo === v ? "border-primary bg-primary/10 ring-1 ring-primary" : "bg-background hover:bg-muted"
+                    }`}
+                  >
+                    <span className="font-medium">{label}</span> <span className="text-muted-foreground">· {desc}</span>
+                  </button>
+                ))}
+              </div>
+              {triageTipo === "erro" && (
+                <div className="space-y-1.5">
+                  <p className="text-sm">Criticidade</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(["P1", "P2", "P3", "P4"] as const).map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() => setTriagePrio(p)}
+                        aria-pressed={(triagePrio ?? occ.prioridade) === p}
+                        className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
+                          (triagePrio ?? occ.prioridade) === p ? "border-primary bg-primary text-primary-foreground" : "bg-background hover:bg-muted"
+                        }`}
+                      >
+                        {PRIORITY_LABEL[p]}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Crítica: processo crítico parado sem contorno · Alta: função essencial com contorno parcial · Média: impacto
+                    localizado · Baixa: ajuste cosmético.
+                  </p>
+                </div>
+              )}
+              <Textarea rows={2} placeholder="Observação para a TI (opcional)" value={triageText} onChange={(e) => setTriageText(e.target.value)} />
+            </div>
+          )}
+          {triageMode === "resolver" && (
+            <div className="space-y-1.5">
+              <Textarea rows={3} placeholder="Orientação para quem abriu" value={triageText} onChange={(e) => setTriageText(e.target.value)} />
+              <p className="text-xs text-muted-foreground">A orientação aparece na conversa e a ocorrência é encerrada como dúvida.</p>
+            </div>
+          )}
+          {triageMode && (
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => { setTriageMode(null); setTriageText("") }} disabled={triaging}>Cancelar</Button>
+              <Button onClick={() => void triage()} disabled={triaging} className="gap-1.5">
+                {triaging && <Loader2 className="h-4 w-4 animate-spin" />}
+                {triageMode === "resolver" ? "Responder e encerrar" : "Encaminhar"}
+              </Button>
+            </div>
+          )}
+        </section>
+      )}
 
       {validateMe && (
         <section

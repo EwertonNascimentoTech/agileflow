@@ -580,11 +580,24 @@ export interface Support {
   canal_atendimento: string | null
   nivel: SupportNivel
   interno: boolean
+  /** Responsáveis cadastrados: Pessoas (Times) e Clientes (Portal). No N1, fazem a triagem das ocorrências. */
   person_ids: string[]
+  client_ids: string[]
+  /** Só nome, sem cadastro (legado/fornecedor): não recebe ocorrência. */
   nomes_externos: string[]
   sla_horas: number | null
   responsaveis: PersonMini[]
+  clientes: PersonMini[]
   observacoes: string | null
+}
+
+/** Quem pode ser responsável de um nível: Pessoa de Times ou Cliente do Portal. */
+export interface SupportPerson {
+  kind: "person" | "client"
+  id: string
+  full_name: string
+  email: string | null
+  detail: string | null
 }
 
 export interface SupportCreate {
@@ -592,6 +605,7 @@ export interface SupportCreate {
   nivel: SupportNivel
   interno: boolean
   person_ids: string[]
+  client_ids: string[]
   nomes_externos: string[]
   sla_horas?: number | null
   observacoes?: string | null
@@ -888,6 +902,8 @@ export const produtosApi = {
 
   listPersons: () =>
     api.get<PersonMini[]>("/produtos/persons").then((r) => r.data),
+  listSupportPeople: () =>
+    api.get<SupportPerson[]>("/produtos/support-people").then((r) => r.data),
 
   listPos: () =>
     api.get<PersonMini[]>("/produtos/pos").then((r) => r.data),

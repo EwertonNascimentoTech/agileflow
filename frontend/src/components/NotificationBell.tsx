@@ -8,8 +8,10 @@ import { cn } from "@/lib/utils"
 const ENTITY_PATHS: Record<string, (id: string) => string> = {
   project_task: (id) => `/app/modules/projetos/minhas?task=${id}`,
   task: (id) => `/app/modules/projetos/minhas?task=${id}`,
-  // Operação Assistida (cliente): ocorrência e projeto que passou a aceitar ocorrências.
-  occurrence: (id) => `/portal/ocorrencias/${id}`,
+  // Operação Assistida: ocorrência (dentro do app, no Modo Cliente — ex.: N1 que é Pessoa de Times)
+  // e projeto que passou a aceitar ocorrências.
+  occurrence: (id) =>
+    window.location.pathname.startsWith("/app") ? `/app/modules/portal_cliente/ocorrencias/${id}` : `/portal/ocorrencias/${id}`,
   occurrence_project: () => `/portal`,
 }
 

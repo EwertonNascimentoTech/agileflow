@@ -221,6 +221,19 @@ export function OccurrenceTeamPanel({
           </p>
         )
       )}
+      {/* Triagem N1 (POP 8.2.1): quem tria e o resultado. */}
+      {occ.stage_key === "triagem_n1" ? (
+        <p className="rounded-md border border-sky-300 bg-sky-50 px-3 py-2 text-xs text-sky-900 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-200">
+          <span className="font-semibold">Em triagem no N1</span> ({occ.n1_names.join(", ") || "responsáveis do Produto e Dono do Processo"}). A TI
+          recebe quando o N1 encaminhar pelo Portal.
+        </p>
+      ) : occ.n1_outcome ? (
+        <p className="text-xs text-muted-foreground">
+          Triagem N1: {occ.n1_outcome === "resolvida" ? "resolvida no N1" : "encaminhada à TI"}
+          {occ.n1_by_name && <> por <span className="font-medium text-foreground">{occ.n1_by_name}</span></>}
+          {occ.n1_at && <> em {new Date(occ.n1_at.endsWith("Z") ? occ.n1_at : `${occ.n1_at}Z`).toLocaleDateString("pt-BR")}</>}.
+        </p>
+      ) : null}
       {occ.release_project_title && (
         <p className="text-xs">
           Encaminhada para <span className="font-medium">{occ.release_project_title}</span>

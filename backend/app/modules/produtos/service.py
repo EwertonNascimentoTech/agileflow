@@ -412,9 +412,7 @@ class ProductService:
             return False
         if cfg.get("sla_horas") is None:
             return False
-        if cfg.get("interno"):
-            return bool(cfg.get("person_ids"))
-        return bool(cfg.get("nomes_externos"))
+        return bool(cfg.get("person_ids") or cfg.get("client_ids") or cfg.get("nomes_externos"))
 
     @classmethod
     def _supports_ok(cls, supports: list[ProductSupport]) -> bool:
@@ -2212,17 +2210,77 @@ class SupportService:
         *,
         interno: bool,
         person_ids: Optional[list],
+        client_ids: Optional[list] = None,
         nomes_externos: Optional[list],
         sla_horas: Optional[int],
     ) -> dict:
-        ids = [str(x) for x in (person_ids or [])] if interno else []
+        """Responsáveis cadastrados (Pessoas e Clientes) valem nos dois tipos de atendimento;
+        nome solto (sem cadastro) só no externo."""
+        ids = list(dict.fromkeys(str(x) for x in (person_ids or [])))
+        cids = list(dict.fromkeys(str(x) for x in (client_ids or [])))
         nomes = [str(x).strip() for x in (nomes_externos or []) if x and str(x).strip()] if not interno else []
         return {
             "interno": interno,
             "person_ids": ids,
+            "client_ids": cids,
             "nomes_externos": nomes,
             "sla_horas": int(sla_horas) if sla_horas is not None else None,
         }
+
+    @staticmethod
+    def _uuids(values) -> list[uuid.UUID]:
+        out: list[uuid.UUID] = []
+        for v in values or []:
+            try:
+                out.append(uuid.UUID(str(v)))
+            except ValueError:
+                pass
+        return out
+
+    @classmethod
+    async def _clients_map(cls, db: AsyncSession, supports: list[ProductSupport]) -> dict[uuid.UUID, str]:
+        """Clientes (Portal) citados nos níveis. Tabela do módulo Projetos: sem ela, vazio."""
+        ids = {cid for s in supports for cid in cls._uuids((s.niveis_atendimento or {}).get("client_ids"))}
+        if not ids:
+            return {}
+        try:
+            from app.modules.projetos.models import ProjectClient
+
+            async with db.begin_nested():
+                rows = await db.execute(select(ProjectClient.id, ProjectClient.full_name).where(ProjectClient.id.in_(ids)))
+                return {r[0]: r[1] for r in rows.all()}
+        except Exception:  # noqa: BLE001 — módulo Projetos ausente no tenant
+            return {}
+
+    @classmethod
+    async def list_people(cls, db: AsyncSession) -> list[schemas.SupportPerson]:
+        """Quem pode ser responsável de um nível: Pessoas ativas de Times e Clientes ativos."""
+        from app.modules.teamops.models import PersonStatus, Position
+
+        people = [
+            schemas.SupportPerson(kind="person", id=p.id, full_name=p.full_name, email=p.email, detail=pos)
+            for p, pos in (await db.execute(
+                select(Person, Position.name)
+                .outerjoin(Position, Position.id == Person.position_id)
+                .where(Person.status == PersonStatus.ATIVO)
+                .order_by(Person.full_name.asc())
+            )).all()
+        ]
+        try:
+            from app.modules.projetos.models import ProjectClient
+
+            async with db.begin_nested():
+                for c in (await db.execute(
+                    select(ProjectClient).where(ProjectClient.is_active == True)  # noqa: E712
+                    .order_by(ProjectClient.full_name.asc())
+                )).scalars().all():
+                    people.append(schemas.SupportPerson(
+                        kind="client", id=c.id, full_name=c.full_name, email=c.email,
+                        detail=c.department or c.organization,
+                    ))
+        except Exception:  # noqa: BLE001 — módulo Projetos ausente no tenant
+            pass
+        return people
 
     @classmethod
     async def _persons_map(cls, db: AsyncSession, supports: list[ProductSupport]) -> dict[uuid.UUID, Person]:
@@ -2240,15 +2298,14 @@ class SupportService:
         return {p.id: p for p in rows.scalars().all()}
 
     @classmethod
-    def to_response(cls, s: ProductSupport, persons: dict[uuid.UUID, Person]) -> schemas.SupportResponse:
+    def to_response(
+        cls, s: ProductSupport, persons: dict[uuid.UUID, Person], clients: Optional[dict[uuid.UUID, str]] = None,
+    ) -> schemas.SupportResponse:
         cfg = s.niveis_atendimento or {}
         interno = bool(cfg.get("interno", True))
-        pids: list[uuid.UUID] = []
-        for pid in cfg.get("person_ids") or []:
-            try:
-                pids.append(uuid.UUID(str(pid)))
-            except ValueError:
-                pass
+        pids = cls._uuids(cfg.get("person_ids"))
+        cids = cls._uuids(cfg.get("client_ids"))
+        clients = clients or {}
         nomes = [str(x) for x in (cfg.get("nomes_externos") or [])]
         return schemas.SupportResponse(
             id=s.id,
@@ -2256,21 +2313,24 @@ class SupportService:
             nivel=s.nivel or "n1",
             interno=interno,
             person_ids=pids,
+            client_ids=cids,
             nomes_externos=nomes,
             sla_horas=cfg.get("sla_horas"),
             responsaveis=[
                 schemas.PersonMini(id=persons[pid].id, full_name=persons[pid].full_name)
                 for pid in pids if pid in persons
             ],
+            clientes=[schemas.PersonMini(id=cid, full_name=clients[cid]) for cid in cids if cid in clients],
             observacoes=s.observacoes,
         )
 
     @classmethod
     async def list_responses(cls, db: AsyncSession, supports: list[ProductSupport]) -> list[schemas.SupportResponse]:
         persons = await cls._persons_map(db, supports)
+        clients = await cls._clients_map(db, supports)
         order = {"n1": 0, "n2": 1, "n3": 2}
         sorted_rows = sorted(supports, key=lambda s: (order.get(s.nivel or "n1", 9), s.created_at))
-        return [cls.to_response(s, persons) for s in sorted_rows]
+        return [cls.to_response(s, persons, clients) for s in sorted_rows]
 
     @classmethod
     async def list(cls, db, product_id) -> list[schemas.SupportResponse]:
@@ -2304,6 +2364,7 @@ class SupportService:
         cfg = cls._normalize_config(
             interno=data.interno,
             person_ids=data.person_ids,
+            client_ids=data.client_ids,
             nomes_externos=data.nomes_externos,
             sla_horas=data.sla_horas,
         )
@@ -2319,7 +2380,7 @@ class SupportService:
         await db.commit()
         await db.refresh(s)
         persons = await cls._persons_map(db, [s])
-        return cls.to_response(s, persons)
+        return cls.to_response(s, persons, await cls._clients_map(db, [s]))
 
     @classmethod
     async def update(cls, db, product_id, support_id, data: schemas.SupportUpdate, user_id) -> schemas.SupportResponse:
@@ -2339,12 +2400,13 @@ class SupportService:
             s.canal_atendimento = (payload["canal_atendimento"] or "").strip() or None
         if "observacoes" in payload:
             s.observacoes = (payload["observacoes"] or "").strip() or None
-        cfg_keys = {"interno", "person_ids", "nomes_externos", "sla_horas"}
+        cfg_keys = {"interno", "person_ids", "client_ids", "nomes_externos", "sla_horas"}
         if cfg_keys & payload.keys():
             cur = s.niveis_atendimento or {}
             s.niveis_atendimento = cls._normalize_config(
                 interno=payload.get("interno", cur.get("interno", True)),
                 person_ids=payload.get("person_ids", cur.get("person_ids")),
+                client_ids=payload.get("client_ids", cur.get("client_ids")),
                 nomes_externos=payload.get("nomes_externos", cur.get("nomes_externos")),
                 sla_horas=payload.get("sla_horas", cur.get("sla_horas")),
             )
@@ -2353,7 +2415,7 @@ class SupportService:
         await db.commit()
         await db.refresh(s)
         persons = await cls._persons_map(db, [s])
-        return cls.to_response(s, persons)
+        return cls.to_response(s, persons, await cls._clients_map(db, [s]))
 
     @classmethod
     async def delete(cls, db, product_id, support_id, user_id) -> None:

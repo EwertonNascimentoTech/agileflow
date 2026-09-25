@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import {
-  ArrowRight, CheckCircle2, ChevronRight, CircleDot, Headset, Hourglass, LifeBuoy, List, MessageSquareReply, Plus,
+  ArrowRight, CheckCircle2, ChevronRight, CircleDot, Filter, Headset, Hourglass, LifeBuoy, List, MessageSquareReply, Plus,
 } from "lucide-react"
 
 import {
@@ -60,7 +60,8 @@ function ActionLink({ o, href }: { o: OccurrenceSummary; href: string }) {
   return (
     <Button asChild size="sm" className="h-8 gap-1.5 px-2.5 text-xs">
       <Link to={href}>
-        {validar ? <CheckCircle2 size={14} /> : <MessageSquareReply size={14} />} {validar ? "Validar" : "Responder"}
+        {o.can_triage ? <Filter size={14} /> : validar ? <CheckCircle2 size={14} /> : <MessageSquareReply size={14} />}{" "}
+        {o.can_triage ? "Triar" : validar ? "Validar" : "Responder"}
       </Link>
     </Button>
   )
@@ -351,7 +352,7 @@ export default function ClientOccurrencesPage() {
                         <StageBadge stageKey={o.stage_key} name={o.stage_name} mine={o.opened_by_me} />
                         {needsMyAction(o) && (
                           <span className="inline-flex items-center gap-1 text-xs font-medium text-primary">
-                            {o.stage_key === "homologando" ? "Validar" : "Responder"} <ArrowRight size={12} />
+                            {o.can_triage ? "Triar" : o.stage_key === "homologando" ? "Validar" : "Responder"} <ArrowRight size={12} />
                           </span>
                         )}
                       </div>

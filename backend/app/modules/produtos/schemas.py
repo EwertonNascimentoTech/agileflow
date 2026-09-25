@@ -1202,7 +1202,11 @@ class SupportCreate(BaseModel):
     canal_atendimento: Optional[str] = Field(None, max_length=200)
     nivel: _NIVEL_ATENDIMENTO
     interno: bool = True
+    # Responsáveis cadastrados: Pessoas (Times) e Clientes (Portal). No N1, são eles que fazem
+    # a triagem das ocorrências da Operação Assistida.
     person_ids: list[uuid.UUID] = Field(default_factory=list)
+    client_ids: list[uuid.UUID] = Field(default_factory=list)
+    # Só nome (sem cadastro): não recebe ocorrência. Legado / fornecedor.
     nomes_externos: list[str] = Field(default_factory=list)
     sla_horas: Optional[int] = Field(None, ge=1)
     observacoes: Optional[str] = None
@@ -1213,6 +1217,7 @@ class SupportUpdate(BaseModel):
     nivel: Optional[_NIVEL_ATENDIMENTO] = None
     interno: Optional[bool] = None
     person_ids: Optional[list[uuid.UUID]] = None
+    client_ids: Optional[list[uuid.UUID]] = None
     nomes_externos: Optional[list[str]] = None
     sla_horas: Optional[int] = Field(None, ge=1)
     observacoes: Optional[str] = None
@@ -1224,10 +1229,21 @@ class SupportResponse(BaseModel):
     nivel: str
     interno: bool
     person_ids: list[uuid.UUID] = Field(default_factory=list)
+    client_ids: list[uuid.UUID] = Field(default_factory=list)
     nomes_externos: list[str] = Field(default_factory=list)
     sla_horas: Optional[int] = None
     responsaveis: list[PersonMini] = Field(default_factory=list)
+    clientes: list[PersonMini] = Field(default_factory=list)
     observacoes: Optional[str] = None
+
+
+class SupportPerson(BaseModel):
+    """Pessoa cadastrada que pode ser responsável de um nível: de Times ou cliente do Portal."""
+    kind: Literal["person", "client"]
+    id: uuid.UUID
+    full_name: str
+    email: Optional[str] = None
+    detail: Optional[str] = None
 
 
 # Resolve forward references (ProductResponse referencia Release/Documentation/Support;

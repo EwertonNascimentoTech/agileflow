@@ -2496,6 +2496,8 @@ class OccurrenceSummary(BaseModel):
     # Horas úteis da abertura até ir para homologação (pausa em Aguardando Cliente).
     sla_elapsed_hours: Optional[float] = None
     sla_state: Optional[Literal["ok", "risco", "estourado"]] = None
+    # Quem vê é responsável do N1 do projeto e a ocorrência está na Triagem N1.
+    can_triage: bool = False
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -2523,6 +2525,11 @@ class OccurrenceDetail(OccurrenceSummary):
     assisted_ops_dev_names: list[str] = Field(default_factory=list)
     # Visão do time: o usuário logado pode assumir (dev fixo, PO do projeto ou admin).
     can_assume: bool = False
+    # Triagem N1: responsáveis (Produto + Dono/Especialista do Processo) e o resultado.
+    n1_names: list[str] = Field(default_factory=list)
+    n1_outcome: Optional[str] = None
+    n1_by_name: Optional[str] = None
+    n1_at: Optional[datetime] = None
     comments: list[OccurrenceComment] = Field(default_factory=list)
     history: list[dict] = Field(default_factory=list)
 
@@ -2554,6 +2561,15 @@ class AssistedOpsDevsSet(BaseModel):
     person_ids: list[uuid.UUID] = Field(default_factory=list)
     # Divisão da jornada editada pelo PO ao escolher os devs (grava em Pessoas).
     allocations: list[AssistedOpsDevAllocation] = Field(default_factory=list)
+
+
+class OccurrenceTriage(BaseModel):
+    """Triagem N1 no Portal (POP 8.2.2/8.2.4): resolve a dúvida e encerra, ou encaminha à TI
+    como correção (com criticidade) ou melhoria."""
+    action: Literal["resolver", "encaminhar"]
+    tipo: Optional[Literal["erro", "melhoria"]] = None
+    prioridade: Optional[OccurrencePrioridade] = None
+    comment: Optional[str] = Field(None, max_length=20000)
 
 
 class OccurrenceHomologation(BaseModel):

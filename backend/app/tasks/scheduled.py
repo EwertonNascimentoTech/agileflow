@@ -85,6 +85,7 @@ async def _check_unassigned_occurrences() -> None:
                 # POP.COR.GTD.003: prazo de resolução da correção e fim previsto da OA.
                 alerted += await AssistedOpsService.scan_sla_breaches(db)
                 alerted += await AssistedOpsService.scan_assisted_op_due(db)
+                alerted += await AssistedOpsService.scan_n1_overdue(db)
                 if alerted:
                     logger.info("[check_unassigned_occurrences] %s: %s alerta(s)", schema, alerted)
         except Exception as e:  # noqa: BLE001

@@ -255,6 +255,8 @@ export interface OccurrenceSummary {
   sla_target_hours: number | null
   sla_elapsed_hours: number | null
   sla_state: "ok" | "risco" | "estourado" | null
+  /** Quem vê é do N1 do projeto e a ocorrência está na Triagem N1. */
+  can_triage: boolean
   created_at: string
   updated_at: string | null
 }
@@ -289,6 +291,11 @@ export interface OccurrenceDetail extends OccurrenceSummary {
   /** Visão do time: devs de atendimento do projeto (quem pode assumir, além do PO e da coordenação). */
   assisted_ops_dev_names?: string[]
   can_assume: boolean
+  /** Triagem N1 (POP): responsáveis e resultado ("resolvida" no N1 ou "encaminhada" à TI). */
+  n1_names: string[]
+  n1_outcome: "resolvida" | "encaminhada" | null
+  n1_by_name: string | null
+  n1_at: string | null
   comments: OccurrenceComment[]
   history: Array<{
     stage_name: string | null
@@ -334,6 +341,10 @@ export const portalOccurrencesApi = {
     fd.append("file", file)
     return api.post<Upload>("/projetos/portal/uploads", fd).then((r) => r.data)
   },
+  triage: (
+    taskId: string,
+    data: { action: "resolver" | "encaminhar"; tipo?: "erro" | "melhoria" | null; prioridade?: OccurrencePrioridade | null; comment?: string | null },
+  ) => api.post<OccurrenceDetail>(`/projetos/portal/occurrences/${taskId}/triage`, data).then((r) => r.data),
   homologate: (taskId: string, data: { approve: boolean; nps_score?: number | null; comment?: string | null }) =>
     api.post<OccurrenceDetail>(`/projetos/portal/occurrences/${taskId}/homologation`, data).then((r) => r.data),
   uploadUrl: (objectName: string) =>

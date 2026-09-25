@@ -59,6 +59,7 @@ from app.modules.projetos.schemas import (
     OccurrenceDetail,
     OccurrenceSummary,
     OccurrenceTeamUpdate,
+    OccurrenceTriage,
     PortalProject,
 )
 from app.modules.super_admin.models import User, UserRole
@@ -66,6 +67,9 @@ from app.modules.super_admin.models import User, UserRole
 FUNNEL_NAME = "Ocorrências – Operação Assistida"
 
 STAGES: list[dict[str, Any]] = [
+    # POP 8.2.1: o N1 (responsáveis do Produto + Dono/Especialista do Processo) tria primeiro.
+    # Em funil que já existe, nasce antes do Backlog (`before`).
+    {"key": "triagem_n1", "name": "Triagem N1", "color": "#0EA5E9", "order": -1, "before": "backlog"},
     {"key": "backlog", "name": "Backlog", "color": "#64748B", "order": 0, "is_initial": True},
     {"key": "aguardando_cliente", "name": "Aguardando Cliente", "color": "#F59E0B", "order": 1},
     {"key": "ajustando", "name": "Ajustando", "color": "#3B82F6", "order": 2},
@@ -114,6 +118,22 @@ OA_PREREQS: list[tuple[str, str, bool]] = [
     ("canais", "Canais de suporte e ferramenta de chamados configurados", False),
     ("golive", "Go-live realizado e solução disponível em produção", False),
 ]
+
+
+# POP 8.2.1: N1 = Dono do Processo + Especialista do Processo (além dos responsáveis de N1 do Produto).
+N1_ROLES = ("dono_processo", "especialista_processo")
+# SLA da triagem quando o N1 do Produto não informa (horas úteis).
+N1_SLA_PADRAO = 8.0
+
+
+def _uuid_set(values) -> set[uuid.UUID]:
+    out: set[uuid.UUID] = set()
+    for v in values or []:
+        try:
+            out.add(uuid.UUID(str(v)))
+        except ValueError:
+            pass
+    return out
 
 
 # POP 4: papéis que precisam estar nos clientes do projeto (ou do programa) para confirmar
@@ -209,14 +229,20 @@ class AssistedOpsService:
         by_name = {s.name.strip().lower(): s for s in existing}
         stages: dict[str, ProjectStatusConfig] = {}
         in_funnel = list(existing)
-        for spec in STAGES:
+        # `before` depende de uma etapa que vem depois na lista: essas etapas vão por último.
+        ordered = [sp for sp in STAGES if not sp.get("before")] + [sp for sp in STAGES if sp.get("before")]
+        for spec in ordered:
             st = by_key.get(spec["key"]) or by_name.get(spec["name"].lower())
             if st is None:
                 order = spec["order"]
                 after = stages.get(spec.get("after") or "")
+                before = stages.get(spec.get("before") or "")
                 if existing and after is not None:
                     # Funil antigo: abre espaço logo depois da etapa de referência.
                     order = (after.order or 0) + 1
+                elif before is not None:
+                    order = before.order or 0
+                if (existing and after is not None) or before is not None:
                     for other in in_funnel:
                         if (other.order or 0) >= order:
                             other.order = (other.order or 0) + 1
@@ -288,15 +314,135 @@ class AssistedOpsService:
         return bool(scope and scope.get("all"))
 
     @staticmethod
-    async def _portal_viewer(db: AsyncSession, user_id: uuid.UUID) -> tuple[Optional[ProjectClient], bool]:
-        """(cadastro de cliente, equipe vê tudo). Nenhum dos dois → 403."""
+    async def _portal_viewer(
+        db: AsyncSession, user_id: uuid.UUID,
+    ) -> tuple[Optional[ProjectClient], bool, set[uuid.UUID]]:
+        """(cadastro de cliente, equipe vê tudo, projetos em que é N1). Nenhum dos três → 403."""
         from app.modules.projetos.clients import ProjectClientService
 
         client = await ProjectClientService.get_by_user(db, user_id)
         team_all = await AssistedOpsService._team_sees_all(db, user_id)
-        if client is None and not team_all:
+        n1_roots, is_n1 = await AssistedOpsService.n1_scope(db, user_id, client)
+        # N1 de Produto ainda sem projeto vinculado entra (lista vazia), não leva 403.
+        if client is None and not team_all and not is_n1:
             raise HTTPException(status_code=403, detail="Usuário sem acesso ao Portal do Cliente.")
-        return client, team_all
+        return client, team_all, n1_roots
+
+    # ── Nível 1 (POP 8.2.1): responsáveis do Produto + Dono/Especialista do Processo ──
+    @staticmethod
+    async def _n1_supports(db: AsyncSession, product_ids: Optional[set[uuid.UUID]] = None) -> list[tuple[uuid.UUID, dict]]:
+        """(product_id, config) dos N1 ativos dos Produtos. Sem o módulo Produtos, vazio."""
+        try:
+            from app.modules.produtos.models import ProductSupport
+
+            q = select(ProductSupport.product_id, ProductSupport.niveis_atendimento).where(
+                ProductSupport.nivel == "n1", ProductSupport.is_active == True,  # noqa: E712
+            )
+            if product_ids is not None:
+                q = q.where(ProductSupport.product_id.in_(product_ids))
+            async with db.begin_nested():  # savepoint: falha aqui não derruba a transação
+                return [(r[0], r[1] or {}) for r in (await db.execute(q)).all()]
+        except Exception:  # noqa: BLE001 — módulo Produtos ausente no tenant
+            return []
+
+    @staticmethod
+    async def n1_targets(db: AsyncSession, root: ProjectTask) -> tuple[set[uuid.UUID], set[uuid.UUID]]:
+        """(Pessoas, Clientes) do N1 do projeto: responsáveis de N1 do Produto vinculado e os
+        clientes com função Dono/Especialista do Processo no projeto ou no programa."""
+        persons: set[uuid.UUID] = set()
+        clients: set[uuid.UUID] = set()
+        if root.linked_product_id:
+            for _pid, cfg in await AssistedOpsService._n1_supports(db, {root.linked_product_id}):
+                persons |= _uuid_set(cfg.get("person_ids"))
+                clients |= _uuid_set(cfg.get("client_ids"))
+        clients |= set((await db.execute(
+            select(ProjectClientAccess.client_id).where(
+                ProjectClientAccess.task_id == root.id, ProjectClientAccess.project_role.in_(N1_ROLES),
+            )
+        )).scalars().all())
+        if root.linked_program_id:
+            clients |= set((await db.execute(
+                select(ProjectProgramClientAccess.client_id).where(
+                    ProjectProgramClientAccess.program_id == root.linked_program_id,
+                    ProjectProgramClientAccess.project_role.in_(N1_ROLES),
+                )
+            )).scalars().all())
+        return persons, clients
+
+    @staticmethod
+    async def _n1_recipients(
+        db: AsyncSession, persons: set[uuid.UUID], clients: set[uuid.UUID],
+    ) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
+        """(ids de Pessoa ativas, users.id de clientes ativos com login) — quem recebe e age."""
+        from app.modules.teamops.models import Person, PersonStatus
+
+        person_ids = list((await db.execute(
+            select(Person.id).where(Person.id.in_(persons), Person.status == PersonStatus.ATIVO)
+        )).scalars().all()) if persons else []
+        client_users = list((await db.execute(
+            select(ProjectClient.user_id).where(
+                ProjectClient.id.in_(clients), ProjectClient.is_active == True,  # noqa: E712
+                ProjectClient.user_id.isnot(None),
+            )
+        )).scalars().all()) if clients else []
+        return person_ids, client_users
+
+    @staticmethod
+    async def _n1_names(db: AsyncSession, persons: set[uuid.UUID], clients: set[uuid.UUID]) -> list[str]:
+        from app.modules.teamops.models import Person
+
+        names = set((await db.execute(select(Person.full_name).where(Person.id.in_(persons)))).scalars().all()) if persons else set()
+        if clients:
+            names |= set((await db.execute(
+                select(ProjectClient.full_name).where(ProjectClient.id.in_(clients), ProjectClient.is_active == True)  # noqa: E712
+            )).scalars().all())
+        return sorted(names)
+
+    @staticmethod
+    async def n1_roots_for_user(
+        db: AsyncSession, user_id: uuid.UUID, client: Optional[ProjectClient] = None,
+    ) -> set[uuid.UUID]:
+        return (await AssistedOpsService.n1_scope(db, user_id, client))[0]
+
+    @staticmethod
+    async def n1_scope(
+        db: AsyncSession, user_id: uuid.UUID, client: Optional[ProjectClient] = None,
+    ) -> tuple[set[uuid.UUID], bool]:
+        """(projetos em que o usuário é N1, se é N1 em algum lugar). N1 = Pessoa ou Cliente no N1
+        do Produto, ou Dono/Especialista do Processo do projeto/programa."""
+        pid = await AssistedOpsService._person_id_for_user(db, user_id)
+        cid = client.id if client is not None else None
+        if pid is None and cid is None:
+            return set(), False
+        product_ids = {
+            prod for prod, cfg in await AssistedOpsService._n1_supports(db)
+            if (pid and pid in _uuid_set(cfg.get("person_ids"))) or (cid and cid in _uuid_set(cfg.get("client_ids")))
+        }
+        roots: set[uuid.UUID] = set()
+        if product_ids:
+            roots |= set((await db.execute(
+                select(ProjectTask.id).where(
+                    ProjectTask.parent_task_id.is_(None), ProjectTask.linked_product_id.in_(product_ids),
+                )
+            )).scalars().all())
+        if cid:
+            roots |= set((await db.execute(
+                select(ProjectClientAccess.task_id).where(
+                    ProjectClientAccess.client_id == cid, ProjectClientAccess.project_role.in_(N1_ROLES),
+                )
+            )).scalars().all())
+            programs = set((await db.execute(
+                select(ProjectProgramClientAccess.program_id).where(
+                    ProjectProgramClientAccess.client_id == cid, ProjectProgramClientAccess.project_role.in_(N1_ROLES),
+                )
+            )).scalars().all())
+            if programs:
+                roots |= set((await db.execute(
+                    select(ProjectTask.id).where(
+                        ProjectTask.parent_task_id.is_(None), ProjectTask.linked_program_id.in_(programs),
+                    )
+                )).scalars().all())
+        return roots, bool(product_ids or roots)
 
     @staticmethod
     async def _client_for_user(db: AsyncSession, user_id: uuid.UUID) -> ProjectClient:
@@ -793,8 +939,18 @@ class AssistedOpsService:
                 except Exception:  # noqa: BLE001 — módulo Produtos ausente no tenant
                     product_name = None
 
+        root_for_n1 = await db.get(ProjectTask, occ.project_task_id)
+        n1_names = (
+            await AssistedOpsService._n1_names(db, *await AssistedOpsService.n1_targets(db, root_for_n1))
+            if root_for_n1 is not None else []
+        )
+        n1_by = await db.get(User, occ.n1_by_user_id) if occ.n1_by_user_id else None
         return OccurrenceDetail(
             **summary.model_dump(),
+            n1_names=n1_names,
+            n1_outcome=occ.n1_outcome,
+            n1_by_name=n1_by.full_name if n1_by else None,
+            n1_at=occ.n1_at,
             description=task.description,
             passos=occ.passos,
             esperado=occ.esperado,
@@ -843,9 +999,9 @@ class AssistedOpsService:
     async def portal_projects(db: AsyncSession, user_id: uuid.UUID) -> list[PortalProject]:
         from app.modules.projetos.clients import ProjectClientService
 
-        client, _team_all = await AssistedOpsService._portal_viewer(db, user_id)
+        client, _team_all, _n1 = await AssistedOpsService._portal_viewer(db, user_id)
         if client is None:
-            return []  # equipe no Modo Cliente: não abre ocorrência (só lê)
+            return []  # equipe no Modo Cliente / N1 sem cadastro de cliente: não abre ocorrência
         refs = await ProjectClientService.portal_projects(db, user_id)
         task_ids = [r.task_id for r in refs]
         in_oa: set[uuid.UUID] = set()
@@ -883,7 +1039,7 @@ class AssistedOpsService:
         project_task_id: Optional[uuid.UUID] = None,
         mine: bool = False,
     ) -> list[OccurrenceSummary]:
-        client, team_all = await AssistedOpsService._portal_viewer(db, user_id)
+        client, team_all, n1_roots = await AssistedOpsService._portal_viewer(db, user_id)
         q = (
             select(ProjectOccurrence, ProjectTask)
             .join(ProjectTask, ProjectTask.id == ProjectOccurrence.task_id)
@@ -893,7 +1049,8 @@ class AssistedOpsService:
             if project_task_id is not None:
                 q = q.where(ProjectOccurrence.project_task_id == project_task_id)
         else:
-            allowed = {a.task_id for a in client.access}
+            # Cliente: projetos vinculados; N1: projetos em que faz a triagem.
+            allowed = ({a.task_id for a in client.access} if client is not None else set()) | n1_roots
             if project_task_id is not None:
                 if project_task_id not in allowed:
                     raise HTTPException(status_code=404, detail="Projeto não encontrado.")
@@ -906,14 +1063,21 @@ class AssistedOpsService:
                 return []
             q = q.where(ProjectOccurrence.opened_by_client_id == client.id)
         pairs = [(o, t) for o, t in (await db.execute(q.order_by(ProjectOccurrence.code.desc()))).all()]
-        return await AssistedOpsService._summaries(db, pairs, client)
+        out = await AssistedOpsService._summaries(db, pairs, client)
+        for summary in out:
+            summary.can_triage = summary.stage_key == "triagem_n1" and summary.project_task_id in n1_roots
+        return out
 
     @staticmethod
     async def _portal_get(
         db: AsyncSession, client: Optional[ProjectClient], task_id: uuid.UUID, team_all: bool = False,
+        n1_roots: Optional[set[uuid.UUID]] = None,
     ) -> tuple[ProjectOccurrence, ProjectTask]:
         occ = await AssistedOpsService.get_occurrence(db, task_id)
-        allowed = team_all or (client is not None and occ is not None and occ.project_task_id in {a.task_id for a in client.access})
+        allowed = team_all or (occ is not None and (
+            (client is not None and occ.project_task_id in {a.task_id for a in client.access})
+            or occ.project_task_id in (n1_roots or set())
+        ))
         if occ is None or not allowed:
             raise HTTPException(status_code=404, detail="Ocorrência não encontrada.")
         task = await db.get(ProjectTask, task_id)
@@ -921,9 +1085,13 @@ class AssistedOpsService:
 
     @staticmethod
     async def portal_detail(db: AsyncSession, user_id: uuid.UUID, task_id: uuid.UUID) -> OccurrenceDetail:
-        client, team_all = await AssistedOpsService._portal_viewer(db, user_id)
-        occ, task = await AssistedOpsService._portal_get(db, client, task_id, team_all)
-        return await AssistedOpsService._detail(db, occ, task, client, as_client=True)
+        client, team_all, n1_roots = await AssistedOpsService._portal_viewer(db, user_id)
+        occ, task = await AssistedOpsService._portal_get(db, client, task_id, team_all, n1_roots)
+        detail = await AssistedOpsService._detail(db, occ, task, client, as_client=True)
+        detail.can_triage = detail.stage_key == "triagem_n1" and occ.project_task_id in n1_roots
+        # O N1 conversa com quem abriu durante a triagem.
+        detail.can_interact = detail.can_interact or detail.can_triage
+        return detail
 
     @staticmethod
     async def portal_open(db: AsyncSession, user: User, data: OccurrenceCreate) -> OccurrenceDetail:
@@ -940,11 +1108,19 @@ class AssistedOpsService:
             )
         flow = await AssistedOpsService.ensure(db, root.project_id)
         backlog = flow["stages"]["backlog"]
+        # POP 8.2.1/8.2.4: passa primeiro pelo N1 — salvo quando quem abre já é o N1 (classifica
+        # no registro) ou quando ninguém do N1 tem acesso para triar.
+        n1_persons, n1_clients = await AssistedOpsService.n1_targets(db, root)
+        opener_pid = await AssistedOpsService._person_id_for_user(db, user.id)
+        opener_is_n1 = client.id in n1_clients or (opener_pid is not None and opener_pid in n1_persons)
+        n1_person_ids, n1_user_ids = await AssistedOpsService._n1_recipients(db, n1_persons, n1_clients)
+        triage = bool(n1_person_ids or n1_user_ids) and not opener_is_n1
+        start = flow["stages"]["triagem_n1"] if triage else backlog
         code = int((await db.execute(text("SELECT nextval('project_occurrence_code_seq')"))).scalar())
 
         task = ProjectTask(
             project_id=root.project_id,
-            status_id=backlog.id,
+            status_id=start.id,
             demand_type_id=flow["demand_type"].id,
             origin_task_id=root.id,
             title=f"{code_label(code)} · {data.title.strip()}"[:200],
@@ -969,18 +1145,27 @@ class AssistedOpsService:
             abrangencia=data.abrangencia,
             prioridade=suggested_priority(data.impacto, data.abrangencia),
         )
+        if opener_is_n1:
+            # Aberta pelo próprio N1: a classificação do registro vale como triagem.
+            occ.n1_outcome, occ.n1_by_user_id, occ.n1_at = "encaminhada", user.id, datetime.utcnow()
         db.add(occ)
         db.add(ProjectTaskStatusHistory(
-            task_id=task.id, to_status_id=backlog.id, to_status_name=backlog.name,
+            task_id=task.id, to_status_id=start.id, to_status_name=start.name,
             to_funnel_name=flow["funnel"].name, moved_by=user.id, moved_at=datetime.utcnow(),
             source="client",
         ))
-        await notify_persons(
-            db, [root.assigned_to, *await AssistedOpsService._dev_person_ids(db, root.id)],
-            f"Nova ocorrência {code_label(code)} ({occ.prioridade})",
-            f"{client.full_name} abriu “{data.title.strip()}” no projeto {root.title}.",
-            "project_task", task.id, exclude_user_id=user.id,
-        )
+        if triage:
+            title = f"Triagem N1: nova ocorrência {code_label(code)}"
+            body = f"{client.full_name} abriu “{data.title.strip()}” no projeto {root.title}. Faça a triagem no Portal."
+            await notify_persons(db, n1_person_ids, title, body, "occurrence", task.id, exclude_user_id=user.id)
+            await notify_users(db, n1_user_ids, title, body, "occurrence", task.id, exclude_user_id=user.id)
+        else:
+            await notify_persons(
+                db, [root.assigned_to, *await AssistedOpsService._dev_person_ids(db, root.id)],
+                f"Nova ocorrência {code_label(code)} ({occ.prioridade})",
+                f"{client.full_name} abriu “{data.title.strip()}” no projeto {root.title}.",
+                "project_task", task.id, exclude_user_id=user.id,
+            )
         await db.commit()
         return await AssistedOpsService._detail(db, occ, task, client)
 
@@ -988,13 +1173,17 @@ class AssistedOpsService:
     async def portal_comment(
         db: AsyncSession, user: User, task_id: uuid.UUID, data: OccurrenceCommentCreate
     ) -> OccurrenceDetail:
-        client = await AssistedOpsService._client_for_user(db, user.id)
-        occ, task = await AssistedOpsService._portal_get(db, client, task_id)
-        if occ.opened_by_client_id != client.id:
-            raise HTTPException(status_code=403, detail="Só quem abriu a ocorrência pode interagir nela.")
+        client, _team_all, n1_roots = await AssistedOpsService._portal_viewer(db, user.id)
+        occ, task = await AssistedOpsService._portal_get(db, client, task_id, False, n1_roots)
         status = await db.get(ProjectStatusConfig, task.status_id)
+        in_triage = bool(status is not None and status.assisted_stage_key == "triagem_n1")
+        is_opener = client is not None and occ.opened_by_client_id == client.id
+        is_n1 = in_triage and occ.project_task_id in n1_roots
+        if not (is_opener or is_n1):
+            raise HTTPException(status_code=403, detail="Só quem abriu a ocorrência (ou o N1, na triagem) pode interagir nela.")
         if status is not None and status.is_final:
             raise HTTPException(status_code=400, detail="Ocorrência encerrada — não aceita novas mensagens.")
+        author_name = client.full_name if client is not None else user.full_name
 
         db.add(ProjectTaskComment(
             task_id=task.id, author_id=user.id, content=_plain_to_html(data.content),
@@ -1005,21 +1194,101 @@ class AssistedOpsService:
             flow = await AssistedOpsService.ensure(db, task.project_id)
             await AssistedOpsService._move(db, task, flow["stages"]["ajustando"], user.id, "client", notify=False)
         task.updated_at = datetime.utcnow()
-        await notify_persons(
-            db, await AssistedOpsService._team_person_ids(db, task, occ),
-            f"{code_label(occ.code)}: resposta do cliente",
-            f"{client.full_name} respondeu na ocorrência “{task.title}”.",
-            "project_task", task.id, exclude_user_id=user.id,
-        )
+        label = code_label(occ.code)
+        if in_triage:
+            # Na triagem a conversa é entre quem abriu e o N1 (a TI ainda não recebeu).
+            root = await db.get(ProjectTask, occ.project_task_id)
+            n1_person_ids, n1_user_ids = await AssistedOpsService._n1_recipients(
+                db, *await AssistedOpsService.n1_targets(db, root),
+            )
+            if is_opener:
+                await notify_persons(db, n1_person_ids, f"{label}: resposta de quem abriu",
+                                     f"{author_name} respondeu na ocorrência “{task.title}”.", "occurrence", task.id,
+                                     exclude_user_id=user.id)
+                await notify_users(db, n1_user_ids, f"{label}: resposta de quem abriu",
+                                   f"{author_name} respondeu na ocorrência “{task.title}”.", "occurrence", task.id,
+                                   exclude_user_id=user.id)
+            else:
+                await notify_users(db, [await AssistedOpsService._opener_user_id(db, occ)],
+                                   f"{label}: mensagem do N1", f"{author_name} escreveu na ocorrência “{task.title}”.",
+                                   "occurrence", task.id, exclude_user_id=user.id)
+        else:
+            await notify_persons(
+                db, await AssistedOpsService._team_person_ids(db, task, occ),
+                f"{label}: resposta do cliente",
+                f"{author_name} respondeu na ocorrência “{task.title}”.",
+                "project_task", task.id, exclude_user_id=user.id,
+            )
         await db.commit()
         await db.refresh(task)
-        return await AssistedOpsService._detail(db, occ, task, client)
+        return await AssistedOpsService.portal_detail(db, user.id, task.id)
+
+    @staticmethod
+    async def portal_triage(db: AsyncSession, user: User, task_id: uuid.UUID, data: OccurrenceTriage) -> OccurrenceDetail:
+        """Triagem N1 (POP 8.2.2/8.2.4): o N1 orienta e encerra a dúvida, ou encaminha à TI como
+        correção (com criticidade) ou melhoria."""
+        client, _team_all, n1_roots = await AssistedOpsService._portal_viewer(db, user.id)
+        occ, task = await AssistedOpsService._portal_get(db, client, task_id, False, n1_roots)
+        if occ.project_task_id not in n1_roots:
+            raise HTTPException(status_code=403, detail="Só o N1 do projeto faz a triagem.")
+        status = await db.get(ProjectStatusConfig, task.status_id)
+        if status is None or status.assisted_stage_key != "triagem_n1":
+            raise HTTPException(status_code=400, detail="A ocorrência não está na Triagem N1.")
+        flow = await AssistedOpsService.ensure(db, task.project_id)
+        root = await db.get(ProjectTask, occ.project_task_id)
+        comment = (data.comment or "").strip()
+        label = code_label(occ.code)
+        opener = await AssistedOpsService._opener_user_id(db, occ)
+        now = datetime.utcnow()
+        if data.action == "resolver":
+            if len(comment) < 10:
+                raise HTTPException(status_code=400, detail="Escreva a orientação para quem abriu (mín. 10 caracteres).")
+            occ.tipo = "duvida"
+            occ.solucao = comment
+            occ.n1_outcome, occ.n1_by_user_id, occ.n1_at = "resolvida", user.id, now
+            db.add(ProjectTaskComment(
+                task_id=task.id, author_id=user.id, visibility="public",
+                content="<p><strong>Resolvida no N1</strong> — orientação:</p>" + _plain_to_html(comment),
+            ))
+            await AssistedOpsService._move(db, task, flow["stages"]["finalizado"], user.id, "n1", notify=False)
+            await notify_users(db, [opener], f"{label}: resolvida no N1",
+                               f"A ocorrência “{task.title}” foi respondida pelo N1 e encerrada.", "occurrence", task.id,
+                               exclude_user_id=user.id)
+        else:
+            if data.tipo not in ("erro", "melhoria"):
+                raise HTTPException(status_code=400, detail="Escolha se é correção ou melhoria.")
+            occ.tipo = data.tipo
+            if data.tipo == "erro" and data.prioridade:
+                occ.prioridade = data.prioridade
+            occ.n1_outcome, occ.n1_by_user_id, occ.n1_at = "encaminhada", user.id, now
+            como = f"Correção ({CRITICIDADE.get(occ.prioridade, occ.prioridade)})" if data.tipo == "erro" else "Melhoria"
+            db.add(ProjectTaskComment(
+                task_id=task.id, author_id=user.id, visibility="public",
+                content=f"<p><strong>Triagem N1</strong> — encaminhada à TI como {html.escape(como)}.</p>"
+                        + (_plain_to_html(comment) if comment else ""),
+            ))
+            target = flow["stages"]["backlog"] if data.tipo == "erro" else flow["stages"]["melhoria_analise"]
+            await AssistedOpsService._move(db, task, target, user.id, "n1", notify=False)
+            team = [root.assigned_to] if root else []
+            if data.tipo == "erro":
+                team += await AssistedOpsService._dev_person_ids(db, occ.project_task_id)
+            await notify_persons(
+                db, team, f"{label}: encaminhada pelo N1 — {como}",
+                f"“{task.title}” ({root.title if root else 'projeto'}) passou pela triagem N1.",
+                "project_task", task.id, exclude_user_id=user.id,
+            )
+            await notify_users(db, [opener], f"{label}: encaminhada à TI",
+                               f"A ocorrência “{task.title}” passou pela triagem e foi encaminhada como {como}.",
+                               "occurrence", task.id, exclude_user_id=user.id)
+        task.updated_at = now
+        await db.commit()
+        return await AssistedOpsService.portal_detail(db, user.id, task.id)
 
     @staticmethod
     async def portal_can_read_object(db: AsyncSession, user_id: uuid.UUID, object_name: str) -> bool:
         """Anexo visível ao cliente: da própria ocorrência ou de comentário público nela."""
-        client, team_all = await AssistedOpsService._portal_viewer(db, user_id)
-        allowed = {a.task_id for a in client.access} if client is not None else set()
+        client, team_all, n1_roots = await AssistedOpsService._portal_viewer(db, user_id)
+        allowed = ({a.task_id for a in client.access} if client is not None else set()) | n1_roots
         if not allowed and not team_all:
             return False
         pattern = f'%"{object_name}"%'
@@ -1303,6 +1572,40 @@ class AssistedOpsService:
         await db.commit()
 
     # ── Alertas do POP (rodam junto com o de "sem responsável") ──────────────
+    @staticmethod
+    async def scan_n1_overdue(db: AsyncSession) -> int:
+        """Triagem N1 parada além do SLA do N1 do Produto (padrão 8h úteis): avisa o N1 e o PO, uma vez."""
+        rows = list((await db.execute(
+            select(ProjectOccurrence, ProjectTask)
+            .join(ProjectTask, ProjectTask.id == ProjectOccurrence.task_id)
+            .join(ProjectStatusConfig, ProjectStatusConfig.id == ProjectTask.status_id)
+            .where(ProjectStatusConfig.assisted_stage_key == "triagem_n1", ProjectOccurrence.n1_alert_at.is_(None))
+        )).all())
+        if not rows:
+            return 0
+        cal, tz = await AssistedOpsService._calendar(db)
+        now = datetime.utcnow()
+        alerted = 0
+        for occ, task in rows:
+            root = await db.get(ProjectTask, occ.project_task_id)
+            if root is None:
+                continue
+            sla = N1_SLA_PADRAO
+            if root.linked_product_id:
+                slas = [cfg.get("sla_horas") for _p, cfg in await AssistedOpsService._n1_supports(db, {root.linked_product_id})]
+                sla = float(next((x for x in slas if x), N1_SLA_PADRAO))
+            if cal.working_hours_between(_to_local(occ.created_at, tz), _to_local(now, tz)) < sla:
+                continue
+            person_ids, user_ids = await AssistedOpsService._n1_recipients(db, *await AssistedOpsService.n1_targets(db, root))
+            title = f"{code_label(occ.code)}: triagem N1 atrasada"
+            body = f"“{task.title}” ({root.title}) está na Triagem N1 há mais de {sla:g}h úteis."
+            await notify_persons(db, [*person_ids, root.assigned_to], title, body, "occurrence", task.id)
+            await notify_users(db, user_ids, title, body, "occurrence", task.id)
+            occ.n1_alert_at = now
+            alerted += 1
+        await db.commit()
+        return alerted
+
     @staticmethod
     async def scan_sla_breaches(db: AsyncSession) -> int:
         """Correção que estourou o prazo de resolução: avisa PO, devs e responsável (uma vez)."""
@@ -1768,6 +2071,8 @@ class AssistedOpsService:
                 ProjectOccurrence.assumed_at.is_(None),
                 ProjectOccurrence.unassigned_alert_at.is_(None),
                 ProjectStatusConfig.is_final == False,  # noqa: E712
+                # Na Triagem N1 a ocorrência ainda não chegou à TI.
+                ProjectStatusConfig.assisted_stage_key.is_distinct_from("triagem_n1"),
             )
         )).all())
         if not rows:
@@ -1776,7 +2081,9 @@ class AssistedOpsService:
         now = datetime.utcnow()
         alerted = 0
         for occ, task in rows:
-            if cal.working_hours_between(_to_local(occ.created_at, tz), _to_local(now, tz)) < 1.0:
+            # Passou pelo N1: o relógio da TI começa quando foi encaminhada.
+            start = occ.n1_at if occ.n1_outcome == "encaminhada" and occ.n1_at else occ.created_at
+            if cal.working_hours_between(_to_local(start, tz), _to_local(now, tz)) < 1.0:
                 continue
             root = await db.get(ProjectTask, occ.project_task_id)
             await notify_persons(

@@ -107,6 +107,12 @@ async def list_persons(ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_vi
         return []
 
 
+@router.get("/support-people", response_model=list[schemas.SupportPerson])
+async def list_support_people(ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
+    """Responsáveis possíveis de um nível de sustentação: Pessoas (Times) e Clientes (Portal)."""
+    return await SupportService.list_people(ctx.db)
+
+
 @router.get("/pos", response_model=list[schemas.PersonMini])
 async def list_pos(ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_view)):
     """Pessoas com cargo PO/Product Owner — para o campo Responsável do produto."""

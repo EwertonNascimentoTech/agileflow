@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-25 — Triagem N1 com pessoas cadastradas (Pessoas e Clientes)
+
+- **Pedido:** usar as pessoas cadastradas no sistema para o nível 1, inclusive as que têm acesso de cliente.
+- **Feito:** Sustentação do Produto escolhe responsáveis num seletor único de Pessoas (Times) e Clientes (Portal) (`client_ids` em `niveis_atendimento`, `GET /produtos/support-people`); nome sem cadastro fica só para fornecedor/legado. Ocorrências: raia "Triagem N1" antes do Backlog; N1 = responsáveis de N1 do Produto + Dono/Especialista do Processo; o N1 tria no Portal (resolve a dúvida e encerra, ou encaminha como correção com criticidade ou melhoria), conversa com quem abriu e só então a TI é avisada. Aberta pelo próprio N1 vai direto ao Backlog. Alerta de triagem parada (SLA do N1 do Produto, padrão 8h). `/auth/me` ganhou `oa_n1` (Pessoa N1 vê Ocorrências no Modo Cliente). Step 143 (`project_occurrences.n1_outcome/n1_by_user_id/n1_at/n1_alert_at`).
+- **Não mexer:** os 32 N1 com só nomes externos continuam como estão até alguém escolher as pessoas cadastradas na tela do Produto (a importação pelo Genus segue adiada).
+- **Arquivos:** `produtos/schemas.py`, `produtos/service.py`, `produtos/api/routes.py`, `projetos/models.py`, `projetos/schemas.py`, `projetos/assisted_ops.py`, `projetos/api/client_routes.py`, `core/tenant_migrations.py`, `tasks/scheduled.py`, `super_admin/api/routes.py`, `super_admin/schemas.py`; front `api/produtos.ts`, `produtos/ProductDetailPage.tsx`, `api/clientes.ts`, `types/index.ts`, `crm/AppLayout.tsx`, `components/NotificationBell.tsx`, `portal/occurrenceUi.tsx`, `portal/ClientOccurrencesPage.tsx`, `portal/ClientOccurrenceDetailPage.tsx`, `projetos/OccurrenceTeamPanel.tsx`.
+
 ## 2026-09-25 — Operação Assistida no POP.COR.GTD.003 (Onda 2: papéis, escalonamento, fases e ritos)
 
 - **Pedido:** seguir a Onda 2 do POP, menos o N1 pelos responsáveis do Produto (adiado até a infra liberar o Genus no Cloudflare).

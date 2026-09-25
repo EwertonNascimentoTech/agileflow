@@ -64,6 +64,15 @@ Se faltar algo, o sistema abre o modal ao mover o card. Os demais usuários veem
 
 **Na dúvida, é melhoria, salvo bloqueio.** O time pode reclassificar. Quando há classificação do time, é ela que vale.
 
+## Triagem N1 (8.2.1 e 8.2.2)
+
+- **Quem é o N1 do projeto:** os responsáveis de Nível 1 cadastrados na Sustentação do **Produto** vinculado ao projeto (Pessoas de Times e Clientes, escolhidos no seletor da tela do Produto), mais os clientes com função **Dono do Processo** ou **Especialista do Processo** no projeto ou no programa. Nome digitado sem cadastro não recebe ocorrência.
+- **Fluxo:** a ocorrência nova entra na raia **Triagem N1** e o N1 é avisado. No Portal, o N1 pode conversar com quem abriu e:
+  - **Resolver aqui:** é dúvida de uso. Ele escreve a orientação e a ocorrência é encerrada.
+  - **Encaminhar à TI:** como **Correção**, com a criticidade, vai para o Backlog e avisa o PO e os desenvolvedores de atendimento; como **Melhoria**, vai para "Melhoria – Análise PO".
+- **Sem triagem:** se quem abriu já é do N1, ou se ninguém do N1 tem acesso ao sistema, a ocorrência vai direto para o Backlog.
+- **Prazo:** triagem parada além do SLA do N1 do Produto (padrão 8 horas úteis) avisa o N1 e o PO. O aviso de "sem responsável há 1h" da TI conta a partir do encaminhamento.
+
 ## Escalonamento (8.2.1 e 8.4.1)
 
 O kanban de Ocorrências tem duas raias depois de **Ajustando**:
@@ -97,5 +106,5 @@ Só **correção** tem criticidade. A sugestão vem do impacto e de quem é afet
 
 ## Próximas ondas
 
-- **Onda 2 (falta):** N1 pelos responsáveis de nível 1 cadastrados no Produto. Aguarda a liberação do Genus para cadastrar os responsáveis externos como clientes.
+- **N1 com nomes sem cadastro:** trocar, na tela do Produto, os nomes digitados pelas pessoas cadastradas. A importação automática pelo Genus aguarda a liberação do servidor no Cloudflare.
 - **Onda 3:** painel de indicadores da Operação Assistida; encerramento formal (critérios, aceite do Dono do Processo e análise crítica).

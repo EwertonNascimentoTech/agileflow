@@ -1225,6 +1225,12 @@ class ProjectOccurrence(TenantBase):
     unassigned_alert_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     # Prazo de resolução da correção estourado (aviso enviado uma vez).
     sla_breach_alert_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Triagem N1 (POP 8.2.1/8.2.2): "resolvida" (orientação, encerra) ou "encaminhada" (à TI),
+    # por quem e quando; aviso único de triagem parada além do SLA do N1.
+    n1_outcome: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    n1_by_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    n1_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    n1_alert_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     # Horas úteis gastas (pausa em Aguardando Cliente/Homologando) — gravadas ao encerrar.
     worked_hours: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2), nullable=True)
     # Homologação pelo cliente.

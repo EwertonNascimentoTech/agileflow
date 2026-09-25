@@ -4634,6 +4634,17 @@ async def _step_142_operacao_assistida_governanca(conn: AsyncConnection, schema:
                         "task_id", columns=("task_id",))
 
 
+async def _step_143_ocorrencias_triagem_n1(conn: AsyncConnection, schema: str) -> None:
+    """Triagem N1 das ocorrências (POP 8.2.1): resultado, quem triou, quando e aviso de SLA.
+    A raia "Triagem N1" nasce em AssistedOpsService.ensure (ORM)."""
+    await _add_columns(conn, schema, "project_occurrences", {
+        "n1_outcome": "VARCHAR(20)",
+        "n1_by_user_id": "UUID",
+        "n1_at": "TIMESTAMP",
+        "n1_alert_at": "TIMESTAMP",
+    })
+
+
 async def _step_129_projetos_agent_fail_to(conn: AsyncConnection, schema: str) -> None:
     """Raia de destino quando a triagem do backlog (review_and_route) não aprova."""
     await _add_columns(conn, schema, "project_stage_agent_bindings", {
@@ -4874,6 +4885,7 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("140_portal_programas", _step_140_portal_programas),
     ("141_operacao_assistida_pop", _step_141_operacao_assistida_pop),
     ("142_operacao_assistida_governanca", _step_142_operacao_assistida_governanca),
+    ("143_ocorrencias_triagem_n1", _step_143_ocorrencias_triagem_n1),
     ("123_reconcile_indexes", _step_123_reconcile_indexes),
 ]
 

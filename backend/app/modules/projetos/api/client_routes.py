@@ -44,6 +44,7 @@ from app.modules.projetos.schemas import (
     AssistedOpsDevsSet,
     OccurrenceForwardRelease,
     OccurrenceHomologation,
+    OccurrenceTriage,
     OccurrenceCommentCreate,
     OccurrenceCreate,
     OccurrenceDetail,
@@ -396,6 +397,16 @@ async def portal_comment_occurrence(
     ctx: ModuleContext = Depends(_portal_ctx),
 ):
     return await AssistedOpsService.portal_comment(ctx.db, ctx.user, task_id, data)
+
+
+@router.post("/portal/occurrences/{task_id}/triage", response_model=OccurrenceDetail)
+async def portal_triage_occurrence(
+    task_id: uuid.UUID,
+    data: OccurrenceTriage,
+    ctx: ModuleContext = Depends(_portal_ctx),
+):
+    """Triagem N1 (POP 8.2.2): resolver a dúvida ou encaminhar à TI (correção ou melhoria)."""
+    return await AssistedOpsService.portal_triage(ctx.db, ctx.user, task_id, data)
 
 
 @router.post("/portal/occurrences/{task_id}/homologation", response_model=OccurrenceDetail)

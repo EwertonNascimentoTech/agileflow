@@ -253,7 +253,8 @@ export default function AppLayout() {
         if (item.hiddenForExternalPO && isExternalPO) return false
         // Ocorrências e soluções com IA (Modo Cliente): do cliente; a equipe com visão de tudo
         // (coordenação/gestão, inclui Administrativo) também vê, só para leitura.
-        if (item.requiresClientPortal && !user?.has_client_portal && !user?.team_sees_all) return false
+        // Quem faz a triagem N1 (Pessoa de Times) também vê Ocorrências.
+        if (item.requiresClientPortal && !user?.has_client_portal && !user?.team_sees_all && !user?.oa_n1) return false
         // Itens com permissão exigida só aparecem se a função tiver alguma delas.
         if (item.requiredAnyPermission && !isAdmin) {
           return hasAnyPermission(user?.permissions, item.requiredAnyPermission)
@@ -284,7 +285,7 @@ export default function AppLayout() {
       sidebarColor: undefined,
       sections: homeSections,
     }
-  }, [activeModuleSlug, activeModule, inSettings, isAdmin, isBasicUser, basicNewRequestRoute, basicMyRequestsRoute, user?.permissions, user?.has_client_portal, needsSolicitacoesShortcut, inSolicitacoes, isExternalPO])
+  }, [activeModuleSlug, activeModule, inSettings, isAdmin, isBasicUser, basicNewRequestRoute, basicMyRequestsRoute, user?.permissions, user?.has_client_portal, user?.team_sees_all, user?.oa_n1, needsSolicitacoesShortcut, inSolicitacoes, isExternalPO])
 
   // Seção atual (para o breadcrumb) — match mais específico vence
   const currentSectionLabel = useMemo(() => {

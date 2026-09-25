@@ -4,6 +4,7 @@ import type { OccurrencePrioridade } from "@/api/clientes"
 
 // Selos no padrão do Portal (portfólio/projetos): fundo claro, anel interno e bolinha.
 const STAGE_CLASS: Record<string, string> = {
+  triagem_n1: "bg-sky-50 text-sky-700 ring-sky-200 dark:bg-sky-950/60 dark:text-sky-300 dark:ring-sky-800",
   backlog: "bg-slate-100 text-slate-700 ring-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700",
   aguardando_cliente: "bg-amber-50 text-amber-800 ring-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:ring-amber-800",
   ajustando: "bg-blue-50 text-blue-700 ring-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:ring-blue-800",
@@ -16,6 +17,7 @@ const STAGE_CLASS: Record<string, string> = {
 }
 
 const STAGE_DOT: Record<string, string> = {
+  triagem_n1: "bg-sky-500",
   backlog: "bg-slate-400",
   aguardando_cliente: "bg-amber-500",
   ajustando: "bg-blue-500",
@@ -55,6 +57,8 @@ export function StageBadge({
 /** O que a etapa significa para o cliente e o que acontece a seguir. */
 export function stageHint(stageKey: string | null, mine: boolean): string {
   switch (stageKey) {
+    case "triagem_n1":
+      return "Em triagem no nível 1 (área de negócio): orientação de uso ou encaminhamento à TI."
     case "backlog":
       return "Recebida. Um responsável do time vai assumir em breve."
     case "ajustando":
@@ -84,8 +88,9 @@ export function occTitle(o: { title: string; code_label: string }): string {
   return t.startsWith(o.code_label) ? t.slice(o.code_label.length).replace(/^\s*·\s*/, "") || t : t
 }
 
-/** Ocorrência que depende de quem abriu (responder ou validar). */
-export function needsMyAction(o: { opened_by_me: boolean; stage_key: string | null }): boolean {
+/** Ocorrência que depende de quem vê: quem abriu (responder ou validar) ou o N1 (triar). */
+export function needsMyAction(o: { opened_by_me: boolean; stage_key: string | null; can_triage?: boolean }): boolean {
+  if (o.can_triage) return true
   return o.opened_by_me && (o.stage_key === "aguardando_cliente" || o.stage_key === "homologando")
 }
 
@@ -171,13 +176,13 @@ export function PersonChip({ name, empty = "—" }: { name: string | null | unde
 
 /** Etapas do fluxo em linha (o cliente vê onde a ocorrência está). */
 const TRACK_DEFAULT = [
-  { keys: ["backlog"], label: "Recebida" },
+  { keys: ["triagem_n1", "backlog"], label: "Recebida" },
   { keys: ["ajustando", "aguardando_cliente", "n3_fornecedor", "escalonada_ie"], label: "Em atendimento" },
   { keys: ["homologando"], label: "Validação" },
   { keys: ["finalizado"], label: "Resolvida" },
 ]
 const TRACK_MELHORIA = [
-  { keys: ["backlog"], label: "Recebida" },
+  { keys: ["triagem_n1", "backlog"], label: "Recebida" },
   { keys: ["melhoria_analise"], label: "Análise do PO" },
   { keys: ["encaminhada_release"], label: "Encaminhada p/ Release" },
 ]
