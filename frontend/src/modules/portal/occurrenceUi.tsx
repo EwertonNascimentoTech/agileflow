@@ -7,6 +7,8 @@ const STAGE_CLASS: Record<string, string> = {
   backlog: "bg-slate-100 text-slate-700 ring-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700",
   aguardando_cliente: "bg-amber-50 text-amber-800 ring-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:ring-amber-800",
   ajustando: "bg-blue-50 text-blue-700 ring-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:ring-blue-800",
+  n3_fornecedor: "bg-orange-50 text-orange-700 ring-orange-200 dark:bg-orange-950/60 dark:text-orange-300 dark:ring-orange-800",
+  escalonada_ie: "bg-red-50 text-red-700 ring-red-200 dark:bg-red-950/60 dark:text-red-300 dark:ring-red-800",
   homologando: "bg-violet-50 text-violet-700 ring-violet-200 dark:bg-violet-950/60 dark:text-violet-300 dark:ring-violet-800",
   finalizado: "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:ring-emerald-800",
   melhoria_analise: "bg-teal-50 text-teal-700 ring-teal-200 dark:bg-teal-950/60 dark:text-teal-300 dark:ring-teal-800",
@@ -17,6 +19,8 @@ const STAGE_DOT: Record<string, string> = {
   backlog: "bg-slate-400",
   aguardando_cliente: "bg-amber-500",
   ajustando: "bg-blue-500",
+  n3_fornecedor: "bg-orange-500",
+  escalonada_ie: "bg-red-500",
   homologando: "bg-violet-500",
   finalizado: "bg-emerald-500",
   melhoria_analise: "bg-teal-500",
@@ -55,6 +59,10 @@ export function stageHint(stageKey: string | null, mine: boolean): string {
       return "Recebida. Um responsável do time vai assumir em breve."
     case "ajustando":
       return "O time está trabalhando nesta ocorrência."
+    case "n3_fornecedor":
+      return "A causa está numa ferramenta ou sistema de terceiro: o time acompanha o fornecedor."
+    case "escalonada_ie":
+      return "Levada à Instância Executiva do projeto para decisão."
     case "aguardando_cliente":
       return mine ? "O time precisa de uma informação sua para continuar." : "O time aguarda uma informação de quem abriu."
     case "homologando":
@@ -164,7 +172,7 @@ export function PersonChip({ name, empty = "—" }: { name: string | null | unde
 /** Etapas do fluxo em linha (o cliente vê onde a ocorrência está). */
 const TRACK_DEFAULT = [
   { keys: ["backlog"], label: "Recebida" },
-  { keys: ["ajustando", "aguardando_cliente"], label: "Em atendimento" },
+  { keys: ["ajustando", "aguardando_cliente", "n3_fornecedor", "escalonada_ie"], label: "Em atendimento" },
   { keys: ["homologando"], label: "Validação" },
   { keys: ["finalizado"], label: "Resolvida" },
 ]

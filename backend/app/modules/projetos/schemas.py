@@ -2314,7 +2314,12 @@ class ProjectClientLookupResponse(BaseModel):
 # ── Clientes do projeto (card do projeto) ────────────────────────────────────
 
 # Rótulos em PROJECT_CLIENT_ROLES (clients.py). "outro" exige o texto da função.
-ProjectClientRole = Literal["solicitante", "sponsor", "usuario_chave", "homologador", "gestor_area", "outro"]
+# dono_processo / especialista_processo / escritorio_processos: papéis do POP.COR.GTD.003 (4);
+# o Sponsor é a Instância Executiva (Patrocinador) do POP.
+ProjectClientRole = Literal[
+    "solicitante", "sponsor", "dono_processo", "especialista_processo", "escritorio_processos",
+    "usuario_chave", "homologador", "gestor_area", "outro",
+]
 
 
 def _normalize_optional_email(v: Optional[str]) -> Optional[str]:
@@ -2690,6 +2695,8 @@ class AssistedOpsPrereqItem(BaseModel):
     label: str
     allow_na: bool = False
     value: Optional[Literal["sim", "na"]] = None
+    # O que falta para poder confirmar (ex.: papéis sem Dono do Processo).
+    hint: Optional[str] = None
 
 
 class AssistedOpsEntryState(BaseModel):
@@ -2701,6 +2708,12 @@ class AssistedOpsEntryState(BaseModel):
     extensions: list[dict] = Field(default_factory=list)
     overdue: bool = False
     can_manage: bool = False
+    # POP 4: papéis exigidos nos clientes do projeto que ainda faltam.
+    missing_roles: list[str] = Field(default_factory=list)
+    # POP 8.3.1: fase atual (1 a 3) e se o usuário registra atas dos ritos.
+    phase: Optional[int] = None
+    phase_label: Optional[str] = None
+    can_record: bool = False
 
 
 class AssistedOpsEntrySet(BaseModel):
@@ -2711,3 +2724,33 @@ class AssistedOpsEntrySet(BaseModel):
 class AssistedOpsExtend(BaseModel):
     new_due_date: date
     reason: str = Field(..., min_length=10, max_length=4000)
+
+
+class AssistedOpsPhaseSet(BaseModel):
+    phase: int = Field(..., ge=1, le=3)
+
+
+AssistedOpMeetingKind = Literal["diaria", "semanal", "comite"]
+
+
+class AssistedOpMeetingIn(BaseModel):
+    """Ata de rito (POP 8.3.2/8.3.5)."""
+    kind: AssistedOpMeetingKind
+    held_on: date
+    participants: Optional[str] = Field(None, max_length=2000)
+    summary: str = Field(..., min_length=10, max_length=20000)
+    decisions: Optional[str] = Field(None, max_length=20000)
+
+
+class AssistedOpMeetingOut(BaseModel):
+    id: uuid.UUID
+    kind: str
+    kind_label: str
+    held_on: date
+    phase: Optional[int] = None
+    participants: Optional[str] = None
+    summary: str
+    decisions: Optional[str] = None
+    created_by_name: Optional[str] = None
+    created_at: Optional[datetime] = None
+    can_edit: bool = False

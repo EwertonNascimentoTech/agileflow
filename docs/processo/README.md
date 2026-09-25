@@ -15,4 +15,4 @@ Visão Mermaid para negócio: [`docs/usuario/05-fluxo-processo-negocio.md`](../u
 Implementação no código: [`docs/técnico/05-gestao-projetos-demandas.md`](../técnico/05-gestao-projetos-demandas.md).
 - [06 — Soluções com IA](06-solucoes-com-ia.md): pedido pelo Portal, análise, construção pelo cliente, adequação, homologação, segurança e produção.
 - [07 — Portal do Cliente: portfólio, programas e roadmap](07-portal-cliente-programas.md): o que o cliente vê, de onde vem cada número e como configurar pilares e clientes do programa.
-- [08 — Operação Assistida (POP.COR.GTD.003)](08-operacao-assistida-pop.md): pré-requisitos para entrar na raia, prazo de 15 dias e prorrogação, tipos, triagem, criticidade e prazo-alvo, encerramento.
+- [08 — Operação Assistida (POP.COR.GTD.003)](08-operacao-assistida-pop.md): papéis, pré-requisitos para entrar na raia, prazo de 15 dias e prorrogação, fases e ritos, tipos, triagem, escalonamento N3/IE, criticidade e prazo-alvo, encerramento.

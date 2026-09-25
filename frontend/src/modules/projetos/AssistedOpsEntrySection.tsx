@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { CalendarClock, ClipboardCheck, Loader2, Pencil } from "lucide-react"
 
-import { teamOccurrencesApi, type AssistedOpsEntryState } from "@/api/clientes"
+import { ASSISTED_OP_PHASES, teamOccurrencesApi, type AssistedOpsEntryState } from "@/api/clientes"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -62,15 +62,19 @@ function ChecklistEditor({
     <div className="divide-y rounded-md border bg-background">
       {state.items.map((item) => (
         <div key={item.key} className="flex flex-wrap items-center gap-2 px-2 py-1.5 text-sm">
-          <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
+          <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-2">
             <input
               type="checkbox"
-              className="h-4 w-4 rounded border-input accent-primary"
+              className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
               checked={marks[item.key] === "sim"}
               onChange={() => toggle(item.key, "sim")}
-              disabled={disabled}
+              // Com pendência (ex.: papéis sem Dono do Processo) não dá para confirmar; desmarcar pode.
+              disabled={disabled || (!!item.hint && marks[item.key] !== "sim")}
             />
-            <span className={marks[item.key] === "na" ? "text-muted-foreground line-through" : ""}>{item.label}</span>
+            <span className="min-w-0">
+              <span className={marks[item.key] === "na" ? "text-muted-foreground line-through" : ""}>{item.label}</span>
+              {item.hint && <span className="block text-[11px] text-amber-700 dark:text-amber-300">{item.hint}</span>}
+            </span>
           </label>
           {item.allow_na && (
             <button
@@ -107,6 +111,7 @@ export function AssistedOpsEntrySection({
   const [extending, setExtending] = useState(false)
   const [newDate, setNewDate] = useState("")
   const [reason, setReason] = useState("")
+  const [savingPhase, setSavingPhase] = useState(false)
 
   useEffect(() => {
     teamOccurrencesApi.entry(projectTaskId).then(setState).catch(() => setState(null))
@@ -129,6 +134,19 @@ export function AssistedOpsEntrySection({
       toast.error(apiError(err, "Não foi possível salvar."))
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function changePhase(phase: number) {
+    if (!state || phase === state.phase) return
+    setSavingPhase(true)
+    try {
+      setState(await teamOccurrencesApi.setPhase(projectTaskId, phase))
+      toast.success(`Operação Assistida na Fase ${phase}.`)
+    } catch (err) {
+      toast.error(apiError(err, "Não foi possível mudar a fase."))
+    } finally {
+      setSavingPhase(false)
     }
   }
 
@@ -159,7 +177,7 @@ export function AssistedOpsEntrySection({
         <div className="flex items-center gap-2">
           <ClipboardCheck size={14} className="text-teal-600" />
           <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-teal-700 dark:text-teal-400">
-            Operação Assistida · preparação e prazo
+            Operação Assistida · preparação, prazo e fase
           </p>
         </div>
         {canManage && !editing && !extending && (
@@ -192,7 +210,41 @@ export function AssistedOpsEntrySection({
           {state.overdue && <span className="ml-1 font-semibold text-red-700 dark:text-red-400">· vencido</span>}
         </span>
         {state.extensions.length > 0 && <span>{state.extensions.length} prorrogação(ões)</span>}
+        {state.missing_roles.length > 0 && (
+          <span className="text-amber-700 dark:text-amber-300">
+            Falta nos Clientes do projeto: <span className="font-medium">{state.missing_roles.join(", ")}</span>
+          </span>
+        )}
       </div>
+
+      {/* Fases do POP (8.3.1): a cadência dos ritos acompanha a fase. */}
+      {state.entered_at && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-muted-foreground">Fase:</span>
+          {[1, 2, 3].map((n) => {
+            const active = state.phase === n
+            return canManage ? (
+              <button
+                key={n}
+                type="button"
+                onClick={() => void changePhase(n)}
+                disabled={savingPhase}
+                aria-pressed={active}
+                className={`rounded-md border px-2 py-0.5 font-medium transition-colors ${
+                  active ? "border-teal-600 bg-teal-600 text-white" : "bg-background text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                {n} · {ASSISTED_OP_PHASES[n]}
+              </button>
+            ) : active ? (
+              <span key={n} className="rounded-md border border-teal-600 bg-teal-600 px-2 py-0.5 font-medium text-white">
+                {n} · {ASSISTED_OP_PHASES[n]}
+              </span>
+            ) : null
+          })}
+          {!state.phase && !canManage && <span className="text-muted-foreground">não definida</span>}
+        </div>
+      )}
 
       {editing && (
         <div className="space-y-2">

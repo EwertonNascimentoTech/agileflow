@@ -29,12 +29,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.notifications import notify_persons, notify_users
 from app.modules.projetos.models import (
     Project,
+    ProjectAssistedOpMeeting,
     ProjectAssistedOpsDev,
     ProjectClient,
     ProjectClientAccess,
     ProjectDemandType,
     ProjectFunnel,
     ProjectOccurrence,
+    ProjectProgramClientAccess,
     ProjectStatusConfig,
     ProjectTask,
     ProjectTaskComment,
@@ -45,7 +47,10 @@ from app.modules.projetos.schemas import (
     AssistedOpsEntrySet,
     AssistedOpsEntryState,
     AssistedOpsExtend,
+    AssistedOpsPhaseSet,
     AssistedOpsPrereqItem,
+    AssistedOpMeetingIn,
+    AssistedOpMeetingOut,
     OccurrenceForwardRelease,
     OccurrenceHomologation,
     OccurrenceComment,
@@ -64,10 +69,16 @@ STAGES: list[dict[str, Any]] = [
     {"key": "backlog", "name": "Backlog", "color": "#64748B", "order": 0, "is_initial": True},
     {"key": "aguardando_cliente", "name": "Aguardando Cliente", "color": "#F59E0B", "order": 1},
     {"key": "ajustando", "name": "Ajustando", "color": "#3B82F6", "order": 2},
-    {"key": "homologando", "name": "Homologando", "color": "#8B5CF6", "order": 3},
-    {"key": "finalizado", "name": "Finalizado", "color": "#16A34A", "order": 4, "is_final": True},
-    {"key": "melhoria_analise", "name": "Melhoria – Análise PO", "color": "#0D9488", "order": 5},
-    {"key": "encaminhada_release", "name": "Encaminhada p/ Release", "color": "#475569", "order": 6, "is_final": True},
+    # POP 8.2.1: escalonamento para o fornecedor (N3) e para a Instância Executiva. Entrar
+    # exige motivo (428 stage_reason_required). Em funil que já existe, nascem depois de `after`.
+    {"key": "n3_fornecedor", "name": "N3 – Fornecedor", "color": "#EA580C", "order": 3,
+     "after": "ajustando", "reason": True},
+    {"key": "escalonada_ie", "name": "Escalonada à Instância Executiva", "color": "#DC2626", "order": 4,
+     "after": "n3_fornecedor", "reason": True},
+    {"key": "homologando", "name": "Homologando", "color": "#8B5CF6", "order": 5},
+    {"key": "finalizado", "name": "Finalizado", "color": "#16A34A", "order": 6, "is_final": True},
+    {"key": "melhoria_analise", "name": "Melhoria – Análise PO", "color": "#0D9488", "order": 7},
+    {"key": "encaminhada_release", "name": "Encaminhada p/ Release", "color": "#475569", "order": 8, "is_final": True},
 ]
 
 # Impacto × Abrangência → prioridade sugerida (o PO pode ajustar).
@@ -81,6 +92,9 @@ _PRIORITY = {
 # Com o cliente (não conta hora do dev) e encerradas (param a contagem).
 _PAUSED_KEYS = frozenset({"aguardando_cliente", "homologando"})
 _CLOSED_KEYS = frozenset({"finalizado", "encaminhada_release"})
+# Escalonada (fornecedor ou Instância Executiva): o prazo de resolução segue contando, mas não
+# são horas do dev de atendimento.
+_ESCALATED_KEYS = frozenset({"n3_fornecedor", "escalonada_ie"})
 
 # POP.COR.GTD.003 (8.2.3): só correção tem criticidade e prazo-alvo de resolução. Os prazos
 # são valores de referência em horas úteis, "a calibrar" pelo SLA institucional.
@@ -100,6 +114,18 @@ OA_PREREQS: list[tuple[str, str, bool]] = [
     ("canais", "Canais de suporte e ferramenta de chamados configurados", False),
     ("golive", "Go-live realizado e solução disponível em produção", False),
 ]
+
+
+# POP 4: papéis que precisam estar nos clientes do projeto (ou do programa) para confirmar
+# "Papéis e responsáveis nomeados".
+OA_REQUIRED_ROLES: list[tuple[str, str]] = [
+    ("dono_processo", "Dono do Processo"),
+    ("sponsor", "Sponsor (Instância Executiva)"),
+]
+
+# POP 8.3.1 e 8.3.5: fases e ritos.
+OA_PHASES = {1: "Estabilização intensiva", 2: "Acompanhamento assistido", 3: "Preparação para encerramento"}
+MEETING_KINDS = {"diaria": "Diária", "semanal": "Semanal", "comite": "Comitê"}
 
 
 def is_correction(occ) -> bool:
@@ -182,27 +208,40 @@ class AssistedOpsService:
         by_key = {s.assisted_stage_key: s for s in existing if s.assisted_stage_key}
         by_name = {s.name.strip().lower(): s for s in existing}
         stages: dict[str, ProjectStatusConfig] = {}
+        in_funnel = list(existing)
         for spec in STAGES:
             st = by_key.get(spec["key"]) or by_name.get(spec["name"].lower())
             if st is None:
+                order = spec["order"]
+                after = stages.get(spec.get("after") or "")
+                if existing and after is not None:
+                    # Funil antigo: abre espaço logo depois da etapa de referência.
+                    order = (after.order or 0) + 1
+                    for other in in_funnel:
+                        if (other.order or 0) >= order:
+                            other.order = (other.order or 0) + 1
                 st = ProjectStatusConfig(
                     project_id=project_id,
                     funnel_id=funnel.id,
                     name=spec["name"],
                     color=spec["color"],
-                    order=spec["order"],
+                    order=order,
                     is_initial=bool(spec.get("is_initial")),
                     is_final=bool(spec.get("is_final")),
                     is_active=True,
                     assisted_stage_key=spec["key"],
+                    entry_reason_required=bool(spec.get("reason")),
                 )
                 db.add(st)
+                in_funnel.append(st)
             else:
                 # A chave e o papel da etapa são do sistema; nome/cor/ordem ficam com a config.
                 st.assisted_stage_key = spec["key"]
                 st.is_initial = bool(spec.get("is_initial"))
                 st.is_final = bool(spec.get("is_final"))
                 st.is_active = True
+                if spec.get("reason"):
+                    st.entry_reason_required = True
             stages[spec["key"]] = st
         await db.flush()
 
@@ -439,7 +478,7 @@ class AssistedOpsService:
         db: AsyncSession, task: ProjectTask, occ: ProjectOccurrence
     ) -> list[tuple[datetime, datetime]]:
         """Intervalos (UTC) em que a ocorrência estava com o time: do 1º "Assumir" em diante,
-        fora de Aguardando Cliente/Homologando, até encerrar."""
+        fora de Aguardando Cliente/Homologando e das raias de escalonamento (N3/IE), até encerrar."""
         if occ.assumed_at is None:
             return []
         hist = list((await db.execute(
@@ -463,7 +502,7 @@ class AssistedOpsService:
                 break
             end = events[i + 1][0] if i + 1 < len(events) else now
             start = max(start, occ.assumed_at)
-            if key in _PAUSED_KEYS or end <= start:
+            if key in _PAUSED_KEYS or key in _ESCALATED_KEYS or end <= start:
                 continue
             out.append((start, end))
         return out
@@ -1051,15 +1090,46 @@ class AssistedOpsService:
         return root
 
     @staticmethod
+    async def roles_missing(db: AsyncSession, root: ProjectTask) -> list[str]:
+        """Papéis do POP que ainda não estão nos clientes do projeto (nem do programa dele)."""
+        roles = set((await db.execute(
+            select(ProjectClientAccess.project_role).where(ProjectClientAccess.task_id == root.id)
+        )).scalars().all())
+        if root.linked_program_id:
+            roles |= set((await db.execute(
+                select(ProjectProgramClientAccess.project_role)
+                .where(ProjectProgramClientAccess.program_id == root.linked_program_id)
+            )).scalars().all())
+        return [label for key, label in OA_REQUIRED_ROLES if key not in roles]
+
+    @staticmethod
+    async def _can_record(db: AsyncSession, user: Optional[User], root_id: uuid.UUID) -> bool:
+        """Registra atas: PO do projeto, coordenação/admin e devs de atendimento."""
+        if await AssistedOpsService._can_manage_oa(db, user, root_id):
+            return True
+        pid = await AssistedOpsService._person_id_for_user(db, user.id) if user else None
+        return bool(pid and pid in await AssistedOpsService._dev_person_ids(db, root_id))
+
+    @staticmethod
     async def entry_state(db: AsyncSession, root_id: uuid.UUID, user: Optional[User]) -> AssistedOpsEntryState:
         root = await AssistedOpsService._root(db, root_id)
         done = root.assisted_op_checklist or {}
+        missing_roles = await AssistedOpsService.roles_missing(db, root)
+        hint = (
+            f"Falta nos Clientes do projeto: {', '.join(missing_roles)}." if missing_roles else None
+        )
         return AssistedOpsEntryState(
             items=[
-                AssistedOpsPrereqItem(key=k, label=label, allow_na=na, value=done.get(k))
+                AssistedOpsPrereqItem(
+                    key=k, label=label, allow_na=na, value=done.get(k), hint=hint if k == "papeis" else None,
+                )
                 for k, label, na in OA_PREREQS
             ],
-            complete=not prereqs_missing(done),
+            complete=not prereqs_missing(done) and not missing_roles,
+            missing_roles=missing_roles,
+            phase=root.assisted_op_phase,
+            phase_label=OA_PHASES.get(root.assisted_op_phase or 0),
+            can_record=await AssistedOpsService._can_record(db, user, root_id),
             due_date=root.assisted_op_due_date,
             max_days=OA_MAX_DIAS,
             entered_at=root.assisted_op_entered_at,
@@ -1088,6 +1158,13 @@ class AssistedOpsService:
             if value == "na" and not valid[key]:
                 raise HTTPException(status_code=400, detail="Este pré-requisito não aceita “não se aplica”.")
             checklist[key] = value
+        if checklist.get("papeis") == "sim":
+            faltam = await AssistedOpsService.roles_missing(db, root)
+            if faltam:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Para confirmar os papéis, cadastre nos Clientes do projeto: {', '.join(faltam)}.",
+                )
         root.assisted_op_checklist = checklist
         if data.due_date is not None and data.due_date != root.assisted_op_due_date:
             if root.assisted_op_entered_at is not None and root.assisted_op_due_date is not None:
@@ -1131,6 +1208,99 @@ class AssistedOpsService:
         ))
         await db.commit()
         return await AssistedOpsService.entry_state(db, root_id, user)
+
+    # ── Fases e ritos (POP 8.3.1, 8.3.2 e 8.3.5) ────────────────────────────
+    @staticmethod
+    async def set_phase(db: AsyncSession, root_id: uuid.UUID, data: AssistedOpsPhaseSet, user: User) -> AssistedOpsEntryState:
+        root = await AssistedOpsService._root(db, root_id)
+        if not await AssistedOpsService._can_manage_oa(db, user, root_id):
+            raise HTTPException(status_code=403, detail="Só o PO do projeto ou a coordenação mudam a fase.")
+        if root.assisted_op_entered_at is None:
+            raise HTTPException(status_code=400, detail="O projeto ainda não entrou em Operação Assistida.")
+        if data.phase != root.assisted_op_phase:
+            root.assisted_op_phase = data.phase
+            root.updated_at = datetime.utcnow()
+            db.add(ProjectTaskComment(
+                task_id=root.id, author_id=user.id, visibility="internal",
+                content=f"<p><strong>Operação Assistida: Fase {data.phase}</strong> — "
+                        f"{html.escape(OA_PHASES[data.phase])}.</p>",
+            ))
+            await db.commit()
+        return await AssistedOpsService.entry_state(db, root_id, user)
+
+    @staticmethod
+    async def _meeting_out(db: AsyncSession, m: ProjectAssistedOpMeeting, user: Optional[User], can_manage: bool) -> AssistedOpMeetingOut:
+        author = await db.get(User, m.created_by) if m.created_by else None
+        return AssistedOpMeetingOut(
+            id=m.id, kind=m.kind, kind_label=MEETING_KINDS.get(m.kind, m.kind), held_on=m.held_on, phase=m.phase,
+            participants=m.participants, summary=m.summary, decisions=m.decisions,
+            created_by_name=author.full_name if author else None, created_at=m.created_at,
+            can_edit=bool(can_manage or (user and m.created_by == user.id)),
+        )
+
+    @staticmethod
+    async def list_meetings(db: AsyncSession, root_id: uuid.UUID, user: Optional[User]) -> list[AssistedOpMeetingOut]:
+        await AssistedOpsService._root(db, root_id)
+        can_manage = await AssistedOpsService._can_manage_oa(db, user, root_id)
+        rows = (await db.execute(
+            select(ProjectAssistedOpMeeting)
+            .where(ProjectAssistedOpMeeting.task_id == root_id)
+            .order_by(ProjectAssistedOpMeeting.held_on.desc(), ProjectAssistedOpMeeting.created_at.desc())
+        )).scalars().all()
+        return [await AssistedOpsService._meeting_out(db, m, user, can_manage) for m in rows]
+
+    @staticmethod
+    async def create_meeting(db: AsyncSession, root_id: uuid.UUID, data: AssistedOpMeetingIn, user: User) -> AssistedOpMeetingOut:
+        root = await AssistedOpsService._root(db, root_id)
+        if not await AssistedOpsService._can_record(db, user, root_id):
+            raise HTTPException(status_code=403, detail="Só o PO, a coordenação e os devs de atendimento registram atas.")
+        if root.assisted_op_entered_at is None:
+            raise HTTPException(status_code=400, detail="O projeto ainda não entrou em Operação Assistida.")
+        if data.held_on > datetime.utcnow().date():
+            raise HTTPException(status_code=400, detail="A data do rito não pode ser futura.")
+        m = ProjectAssistedOpMeeting(
+            task_id=root.id, kind=data.kind, held_on=data.held_on, phase=root.assisted_op_phase,
+            participants=(data.participants or "").strip() or None, summary=data.summary.strip(),
+            decisions=(data.decisions or "").strip() or None, created_by=user.id,
+        )
+        db.add(m)
+        await db.commit()
+        await db.refresh(m)
+        return await AssistedOpsService._meeting_out(
+            db, m, user, await AssistedOpsService._can_manage_oa(db, user, root_id),
+        )
+
+    @staticmethod
+    async def _meeting(db: AsyncSession, root_id: uuid.UUID, meeting_id: uuid.UUID, user: User) -> tuple[ProjectAssistedOpMeeting, bool]:
+        m = await db.get(ProjectAssistedOpMeeting, meeting_id)
+        if m is None or m.task_id != root_id:
+            raise HTTPException(status_code=404, detail="Ata não encontrada.")
+        can_manage = await AssistedOpsService._can_manage_oa(db, user, root_id)
+        if not (can_manage or m.created_by == user.id):
+            raise HTTPException(status_code=403, detail="Só quem registrou, o PO ou a coordenação alteram a ata.")
+        return m, can_manage
+
+    @staticmethod
+    async def update_meeting(
+        db: AsyncSession, root_id: uuid.UUID, meeting_id: uuid.UUID, data: AssistedOpMeetingIn, user: User,
+    ) -> AssistedOpMeetingOut:
+        m, can_manage = await AssistedOpsService._meeting(db, root_id, meeting_id, user)
+        if data.held_on > datetime.utcnow().date():
+            raise HTTPException(status_code=400, detail="A data do rito não pode ser futura.")
+        m.kind = data.kind
+        m.held_on = data.held_on
+        m.participants = (data.participants or "").strip() or None
+        m.summary = data.summary.strip()
+        m.decisions = (data.decisions or "").strip() or None
+        m.updated_at = datetime.utcnow()
+        await db.commit()
+        return await AssistedOpsService._meeting_out(db, m, user, can_manage)
+
+    @staticmethod
+    async def delete_meeting(db: AsyncSession, root_id: uuid.UUID, meeting_id: uuid.UUID, user: User) -> None:
+        m, _can = await AssistedOpsService._meeting(db, root_id, meeting_id, user)
+        await db.delete(m)
+        await db.commit()
 
     # ── Alertas do POP (rodam junto com o de "sem responsável") ──────────────
     @staticmethod
@@ -1209,6 +1379,8 @@ class AssistedOpsService:
     @staticmethod
     async def on_project_enters_assisted_operation(db: AsyncSession, root: ProjectTask) -> None:
         await AssistedOpsService.ensure(db, root.project_id)
+        if root.assisted_op_phase is None:
+            root.assisted_op_phase = 1
         if root.assisted_op_due_date is None:
             from datetime import timedelta
             root.assisted_op_due_date = datetime.utcnow().date() + timedelta(days=OA_MAX_DIAS)
@@ -1296,6 +1468,15 @@ class AssistedOpsService:
         elif key == "homologando":
             client_title = f"{label}: pronta para homologar"
             client_body = f"A ocorrência “{task.title}” foi ajustada. Teste e homologue no Portal do Cliente."
+        elif key == "n3_fornecedor":
+            client_title = f"{label}: encaminhada ao fornecedor"
+            client_body = (
+                f"A causa da ocorrência “{task.title}” está numa ferramenta ou sistema de terceiro. "
+                "O time acompanha o fornecedor e avisa quando houver retorno."
+            )
+        elif key == "escalonada_ie":
+            client_title = f"{label}: levada à Instância Executiva"
+            client_body = f"A ocorrência “{task.title}” foi escalonada para decisão da Instância Executiva do projeto."
         elif key == "encaminhada_release":
             client_title = f"{label}: encaminhada como melhoria"
             client_body = (
@@ -1310,6 +1491,41 @@ class AssistedOpsService:
         await notify_persons(
             db, await AssistedOpsService._team_person_ids(db, task, occ),
             f"{label}: {target_status.name}", f"A ocorrência “{task.title}” passou para {target_status.name}.",
+            "project_task", task.id, exclude_user_id=actor_user_id,
+        )
+        if key == "escalonada_ie":
+            await AssistedOpsService._notify_executive(db, task, occ, actor_user_id)
+
+    @staticmethod
+    async def _notify_executive(
+        db: AsyncSession, task: ProjectTask, occ: ProjectOccurrence, actor_user_id: Optional[uuid.UUID],
+    ) -> None:
+        """POP 8.2.1/8.4.1: a Instância Executiva (Sponsor do projeto ou do programa) e a
+        coordenação decidem o escalonamento."""
+        from app.modules.projetos.ai_solutions import _COORD_SLUGS, AiSolutionsService
+
+        root = await db.get(ProjectTask, occ.project_task_id)
+        q = (
+            select(ProjectClient.user_id)
+            .join(ProjectClientAccess, ProjectClientAccess.client_id == ProjectClient.id)
+            .where(ProjectClientAccess.task_id == occ.project_task_id, ProjectClientAccess.project_role == "sponsor",
+                   ProjectClient.is_active == True, ProjectClient.user_id.isnot(None))  # noqa: E712
+        )
+        sponsors = set((await db.execute(q)).scalars().all())
+        if root is not None and root.linked_program_id:
+            sponsors |= set((await db.execute(
+                select(ProjectClient.user_id)
+                .join(ProjectProgramClientAccess, ProjectProgramClientAccess.client_id == ProjectClient.id)
+                .where(ProjectProgramClientAccess.program_id == root.linked_program_id,
+                       ProjectProgramClientAccess.project_role == "sponsor",
+                       ProjectClient.is_active == True, ProjectClient.user_id.isnot(None))  # noqa: E712
+            )).scalars().all())
+        label = code_label(occ.code)
+        title = f"{label}: decisão da Instância Executiva"
+        body = f"A ocorrência “{task.title}” ({root.title if root else 'projeto'}) foi escalonada e aguarda decisão."
+        await notify_users(db, list(sponsors), title, body, "occurrence", task.id, exclude_user_id=actor_user_id)
+        await notify_persons(
+            db, await AiSolutionsService._person_ids_by_cargo(db, slugs=_COORD_SLUGS), title, body,
             "project_task", task.id, exclude_user_id=actor_user_id,
         )
 

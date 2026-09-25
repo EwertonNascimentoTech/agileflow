@@ -2272,9 +2272,13 @@ class ProjectTaskService:
         funnel = await db.get(ProjectFunnel, target_status.funnel_id)
         if funnel is None or not ProjectTaskService._is_planning_funnel_name(funnel.name):
             return
-        from app.modules.projetos.assisted_ops import prereqs_missing
+        from app.modules.projetos.assisted_ops import AssistedOpsService, OA_PREREQS, prereqs_missing
 
         faltam = prereqs_missing(task.assisted_op_checklist)
+        papeis = OA_PREREQS[0][1]
+        # "Papéis nomeados" também exige Dono do Processo e Sponsor (IE) nos clientes do projeto.
+        if papeis not in faltam and await AssistedOpsService.roles_missing(db, task):
+            faltam.append(papeis)
         if faltam:
             raise HTTPException(
                 status_code=428,

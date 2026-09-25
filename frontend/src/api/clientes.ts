@@ -75,11 +75,18 @@ export const clientesApi = {
 
 // ── Clientes do projeto (card do projeto) ───────────────────────────────────
 
-export type ProjectClientRole = "solicitante" | "sponsor" | "usuario_chave" | "homologador" | "gestor_area" | "outro"
+export type ProjectClientRole =
+  | "solicitante" | "sponsor" | "dono_processo" | "especialista_processo" | "escritorio_processos"
+  | "usuario_chave" | "homologador" | "gestor_area" | "outro"
 
+/** Dono do Processo, Especialista do Processo e Escritório de Processos são papéis do
+ *  POP.COR.GTD.003; o Sponsor é a Instância Executiva (Patrocinador) do POP. */
 export const PROJECT_CLIENT_ROLE_LABEL: Record<ProjectClientRole, string> = {
   solicitante: "Solicitante",
   sponsor: "Sponsor",
+  dono_processo: "Dono do Processo",
+  especialista_processo: "Especialista do Processo",
+  escritorio_processos: "Escritório de Processos",
   usuario_chave: "Usuário-chave",
   homologador: "Homologador",
   gestor_area: "Gestor da área",
@@ -358,6 +365,8 @@ export interface AssistedOpsPrereqItem {
   label: string
   allow_na: boolean
   value: "sim" | "na" | null
+  /** O que falta para poder confirmar (ex.: papéis sem Dono do Processo). */
+  hint: string | null
 }
 
 export interface AssistedOpsExtension {
@@ -377,6 +386,49 @@ export interface AssistedOpsEntryState {
   extensions: AssistedOpsExtension[]
   overdue: boolean
   can_manage: boolean
+  /** Papéis do POP que faltam nos clientes do projeto. */
+  missing_roles: string[]
+  /** Fase atual (POP 8.3.1): 1 Estabilização intensiva, 2 Acompanhamento assistido, 3 Preparação para encerramento. */
+  phase: number | null
+  phase_label: string | null
+  /** Pode registrar atas dos ritos (PO, coordenação e devs de atendimento). */
+  can_record: boolean
+}
+
+export type AssistedOpMeetingKind = "diaria" | "semanal" | "comite"
+
+export const ASSISTED_OP_MEETING_KIND_LABEL: Record<AssistedOpMeetingKind, string> = {
+  diaria: "Diária",
+  semanal: "Semanal",
+  comite: "Comitê",
+}
+
+export const ASSISTED_OP_PHASES: Record<number, string> = {
+  1: "Estabilização intensiva",
+  2: "Acompanhamento assistido",
+  3: "Preparação para encerramento",
+}
+
+export interface AssistedOpMeeting {
+  id: string
+  kind: AssistedOpMeetingKind
+  kind_label: string
+  held_on: string
+  phase: number | null
+  participants: string | null
+  summary: string
+  decisions: string | null
+  created_by_name: string | null
+  created_at: string | null
+  can_edit: boolean
+}
+
+export interface AssistedOpMeetingInput {
+  kind: AssistedOpMeetingKind
+  held_on: string
+  participants?: string | null
+  summary: string
+  decisions?: string | null
 }
 
 export const teamOccurrencesApi = {
@@ -386,6 +438,16 @@ export const teamOccurrencesApi = {
     api.put<AssistedOpsEntryState>(`/projetos/tasks/${projectTaskId}/assisted-ops-entry`, data).then((r) => r.data),
   extend: (projectTaskId: string, data: { new_due_date: string; reason: string }) =>
     api.post<AssistedOpsEntryState>(`/projetos/tasks/${projectTaskId}/assisted-ops-entry/extend`, data).then((r) => r.data),
+  setPhase: (projectTaskId: string, phase: number) =>
+    api.put<AssistedOpsEntryState>(`/projetos/tasks/${projectTaskId}/assisted-ops-phase`, { phase }).then((r) => r.data),
+  meetings: (projectTaskId: string) =>
+    api.get<AssistedOpMeeting[]>(`/projetos/tasks/${projectTaskId}/assisted-ops-meetings`).then((r) => r.data),
+  createMeeting: (projectTaskId: string, data: AssistedOpMeetingInput) =>
+    api.post<AssistedOpMeeting>(`/projetos/tasks/${projectTaskId}/assisted-ops-meetings`, data).then((r) => r.data),
+  updateMeeting: (projectTaskId: string, meetingId: string, data: AssistedOpMeetingInput) =>
+    api.put<AssistedOpMeeting>(`/projetos/tasks/${projectTaskId}/assisted-ops-meetings/${meetingId}`, data).then((r) => r.data),
+  deleteMeeting: (projectTaskId: string, meetingId: string) =>
+    api.delete(`/projetos/tasks/${projectTaskId}/assisted-ops-meetings/${meetingId}`).then(() => undefined),
   get: (taskId: string) => api.get<OccurrenceDetail>(`/projetos/occurrences/${taskId}`).then((r) => r.data),
   update: (taskId: string, data: OccurrenceTeamUpdate) =>
     api.patch<OccurrenceDetail>(`/projetos/occurrences/${taskId}`, data).then((r) => r.data),

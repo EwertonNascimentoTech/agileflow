@@ -43,6 +43,7 @@ import {
   AssistedOpsPrereqsDialog,
   isAssistedOpsPrereqsRequired,
 } from "@/modules/projetos/AssistedOpsEntrySection"
+import { AssistedOpsRitesSection } from "@/modules/projetos/AssistedOpsRitesSection"
 import { ProjectClientsSection } from "@/modules/projetos/ProjectClientsSection"
 import { AttachmentField, type Attachment } from "@/components/AttachmentField"
 import { fmtEstimatedHours, isFeatureOrUsKanbanFunnel, isPlanningRootTask, isProjectOrProgramKanbanFunnel, isUserStoryDemandType, isUserStoryKanbanFunnel } from "@/modules/projetos/kanbanDisplay"
@@ -1640,6 +1641,10 @@ export function ProjectTaskDrawer({
 
             {task && isPlanningRootTask(task.planning_kind) && isProjectOrProgramKanbanFunnel(taskFunnelName) && (
               <AssistedOpsEntrySection projectTaskId={task.id} readOnly={readOnly} refreshKey={oaDevsRefresh} />
+            )}
+
+            {task && isPlanningRootTask(task.planning_kind) && isProjectOrProgramKanbanFunnel(taskFunnelName) && (
+              <AssistedOpsRitesSection projectTaskId={task.id} readOnly={readOnly} refreshKey={oaDevsRefresh} />
             )}
 
             {!readOnly && task && isPlanningRootTask(task.planning_kind) && canImportScheduleInStatus(statusLabel) && (

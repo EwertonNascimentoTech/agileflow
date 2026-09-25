@@ -4606,6 +4606,34 @@ async def _step_141_operacao_assistida_pop(conn: AsyncConnection, schema: str) -
     })
 
 
+async def _step_142_operacao_assistida_governanca(conn: AsyncConnection, schema: str) -> None:
+    """POP.COR.GTD.003 (Onda 2): fase da Operação Assistida no card-raiz e atas dos ritos.
+    As raias N3 e Instância Executiva nascem em AssistedOpsService.ensure (ORM)."""
+    await _add_columns(conn, schema, "project_tasks", {
+        "assisted_op_phase": "INTEGER",
+    })
+    if await _table_exists(conn, schema, "project_tasks") and not await _table_exists(
+        conn, schema, "project_assisted_op_meetings"
+    ):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_assisted_op_meetings (
+                id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                task_id      UUID NOT NULL REFERENCES {schema}.project_tasks(id) ON DELETE CASCADE,
+                kind         VARCHAR(20) NOT NULL,
+                held_on      DATE NOT NULL,
+                phase        INTEGER,
+                participants TEXT,
+                summary      TEXT NOT NULL,
+                decisions    TEXT,
+                created_by   UUID,
+                created_at   TIMESTAMP DEFAULT now(),
+                updated_at   TIMESTAMP
+            )
+        """))
+    await _ensure_index(conn, schema, "assisted_op_meetings_task", "project_assisted_op_meetings",
+                        "task_id", columns=("task_id",))
+
+
 async def _step_129_projetos_agent_fail_to(conn: AsyncConnection, schema: str) -> None:
     """Raia de destino quando a triagem do backlog (review_and_route) não aprova."""
     await _add_columns(conn, schema, "project_stage_agent_bindings", {
@@ -4845,6 +4873,7 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("139_projetos_solucoes_ia", _step_139_projetos_solucoes_ia),
     ("140_portal_programas", _step_140_portal_programas),
     ("141_operacao_assistida_pop", _step_141_operacao_assistida_pop),
+    ("142_operacao_assistida_governanca", _step_142_operacao_assistida_governanca),
     ("123_reconcile_indexes", _step_123_reconcile_indexes),
 ]
 

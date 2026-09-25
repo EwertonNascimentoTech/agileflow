@@ -286,6 +286,9 @@ class ProjectTask(TenantBase):
     assisted_op_due_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     assisted_op_extensions: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     assisted_op_due_alert_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Fase da Operação Assistida (POP 8.3.1): 1 Estabilização intensiva, 2 Acompanhamento
+    # assistido, 3 Preparação para encerramento. Começa em 1 ao entrar na raia.
+    assisted_op_phase: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     # SLA: quando o card entrou na etapa atual + estado calculado pela rotina de SLA.
     status_entered_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     sla_state: Mapped[str] = mapped_column(String(12), nullable=False, default="none")  # none|ok|warning|breached
@@ -1236,6 +1239,27 @@ class ProjectOccurrence(TenantBase):
     release_item_task_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ProjectAssistedOpMeeting(TenantBase):
+    """Ata de rito da Operação Assistida (POP 8.3.2 e 8.3.5): diária (Fase 1), semanal
+    (Fases 1 e 2) ou comitê (escalonamento à Instância Executiva). Fica no card-raiz."""
+
+    __tablename__ = "project_assisted_op_meetings"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("project_tasks.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)  # diaria | semanal | comite
+    held_on: Mapped[date] = mapped_column(Date, nullable=False)
+    phase: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    participants: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    decisions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
 class ProjectAssistedOpsDev(TenantBase):

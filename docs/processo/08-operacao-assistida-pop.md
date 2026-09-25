@@ -1,6 +1,20 @@
 # Operação Assistida — regras do POP.COR.GTD.003
 
-O **POP.COR.GTD.003** é o procedimento oficial da Operação Assistida. Esta página resume o que o AgileFlow já aplica (Onda 1) e o que falta (Ondas 2 e 3).
+O **POP.COR.GTD.003** é o procedimento oficial da Operação Assistida. Esta página resume o que o AgileFlow já aplica (Ondas 1 e 2) e o que falta.
+
+## Papéis (POP 4)
+
+Os papéis do POP são **funções dos clientes do projeto**, definidas no bloco "Clientes do projeto" do card:
+
+| Papel do POP | Função no AgileFlow |
+| :--- | :--- |
+| Dono do Processo | Dono do Processo |
+| Especialista do Processo (N1 junto com o Dono) | Especialista do Processo |
+| Escritório de Processos (Assessoria de Gestão por Processos) | Escritório de Processos |
+| Instância Executiva (Patrocinador) | Sponsor |
+| Tecnologias Digitais (N2) | PO e desenvolvedores de atendimento do projeto |
+
+O pré-requisito **"Papéis e responsáveis nomeados"** só pode ser confirmado quando o projeto (ou o programa dele) tem ao menos um **Dono do Processo** e um **Sponsor**.
 
 ## Entrada na raia
 
@@ -21,10 +35,16 @@ O projeto ou programa só entra na raia **Operação Assistida** (kanban Projeto
 
 Se faltar algo, o sistema abre o modal ao mover o card. Os demais usuários veem só o aviso e o card não entra na raia.
 
+## Fases e ritos (8.3.1 e 8.3.5)
+
+- O projeto entra na raia na **Fase 1 — Estabilização intensiva**. O PO ou a coordenação mudam para a **Fase 2 — Acompanhamento assistido** e para a **Fase 3 — Preparação para encerramento** no card do projeto.
+- O bloco **"Operação Assistida · ritos e atas"** registra as atas: rito **diário** (Fase 1, incidentes críticos), **semanal** (Fases 1 e 2, chamados, indicadores e ajustes) e **comitê** (sob demanda, escalonamento à Instância Executiva).
+- Cada ata tem data, participantes, texto e decisões. Registram o PO, a coordenação e os desenvolvedores de atendimento. Quem registrou, o PO ou a coordenação editam ou excluem.
+
 ## Duração
 
 - **Fim previsto:** até **15 dias**. É escolhido no modal. Se ninguém escolher, vale hoje + 15.
-- **Prorrogação:** feita no card do projeto (bloco "Operação Assistida · preparação e prazo"), com nova data e justificativa. Fica registrada no card, com histórico.
+- **Prorrogação:** feita no card do projeto (bloco "Operação Assistida · preparação, prazo e fase"), com nova data e justificativa. Fica registrada no card, com histórico.
 - **Vencida:** o PO e a coordenação recebem aviso uma vez por dia até o projeto ser encerrado ou prorrogado.
 - **Projeto que já estava na raia antes da regra:** o PO define o fim previsto no card, sem justificativa.
 
@@ -43,6 +63,17 @@ Se faltar algo, o sistema abre o modal ao mover o card. Os demais usuários veem
 3. O sistema deixou de fazer algo que foi combinado?
 
 **Na dúvida, é melhoria, salvo bloqueio.** O time pode reclassificar. Quando há classificação do time, é ela que vale.
+
+## Escalonamento (8.2.1 e 8.4.1)
+
+O kanban de Ocorrências tem duas raias depois de **Ajustando**:
+
+| Raia | Quando | O que acontece |
+| :--- | :--- | :--- |
+| **N3 – Fornecedor** | A causa está em ferramenta, legado ou contrato de terceiro | Motivo obrigatório ao mover; o cliente é avisado |
+| **Escalonada à Instância Executiva** | Inviabilidade de estabilização ou decisão estratégica | Motivo obrigatório; avisa o cliente, os Sponsors do projeto e do programa e a coordenação |
+
+Nessas raias o prazo de resolução continua contando, mas o tempo não entra nas horas do desenvolvedor.
 
 ## Criticidade e prazo-alvo (8.2.3)
 
@@ -66,5 +97,5 @@ Só **correção** tem criticidade. A sugestão vem do impacto e de quem é afet
 
 ## Próximas ondas
 
-- **Onda 2:** N1 pelos responsáveis de nível 1 cadastrados no Produto; papéis do POP nos clientes do projeto; escalonamento N3/IE; fases e atas dos ritos.
+- **Onda 2 (falta):** N1 pelos responsáveis de nível 1 cadastrados no Produto. Aguarda a liberação do Genus para cadastrar os responsáveis externos como clientes.
 - **Onda 3:** painel de indicadores da Operação Assistida; encerramento formal (critérios, aceite do Dono do Processo e análise crítica).

@@ -51,6 +51,10 @@ from app.modules.super_admin.models import Role, Tenant, User, UserRole
 PROJECT_CLIENT_ROLES: dict[str, str] = {
     "solicitante": "Solicitante",
     "sponsor": "Sponsor",
+    # Papéis do POP.COR.GTD.003 (4). Sponsor = Instância Executiva (Patrocinador).
+    "dono_processo": "Dono do Processo",
+    "especialista_processo": "Especialista do Processo",
+    "escritorio_processos": "Escritório de Processos",
     "usuario_chave": "Usuário-chave",
     "homologador": "Homologador",
     "gestor_area": "Gestor da área",

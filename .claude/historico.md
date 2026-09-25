@@ -14,6 +14,14 @@ Modelo:
 
 ---
 
+## 2026-09-25 — Operação Assistida no POP.COR.GTD.003 (Onda 2: papéis, escalonamento, fases e ritos)
+
+- **Pedido:** seguir a Onda 2 do POP, menos o N1 pelos responsáveis do Produto (adiado até a infra liberar o Genus no Cloudflare).
+- **Feito:** funções Dono do Processo, Especialista do Processo e Escritório de Processos nos clientes do projeto (Sponsor = Instância Executiva); "Papéis nomeados" exige Dono do Processo e Sponsor (checklist e trava 428). Raias "N3 - Fornecedor" e "Escalonada à Instância Executiva" no kanban de Ocorrências, com motivo obrigatório, avisos ao cliente e, na IE, aos Sponsors e à coordenação; horas do dev pausam nelas, prazo de resolução não. Fase 1-3 da Operação Assistida (começa em 1) e atas dos ritos diário/semanal/comitê no card do projeto. Step 142 (`project_tasks.assisted_op_phase`, `project_assisted_op_meetings`); raias criadas no tenant_ss por `AssistedOpsService.ensure`.
+- **Não mexer:** Sponsor continua sendo a chave `sponsor` (Solicitação exige Solicitante + Sponsor).
+- **Pendente:** N1 pelo Dono do Processo/responsáveis do Produto; Onda 3 (indicadores e encerramento formal); atas não aparecem no Portal.
+- **Arquivos:** `core/tenant_migrations.py`, `projetos/models.py`, `projetos/schemas.py`, `projetos/clients.py`, `projetos/assisted_ops.py`, `projetos/service.py`, `projetos/api/client_routes.py`; front `api/clientes.ts`, `portal/occurrenceUi.tsx`, `projetos/AssistedOpsEntrySection.tsx`, `projetos/AssistedOpsRitesSection.tsx`, `projetos/ProjectTaskDrawer.tsx`.
+
 ## 2026-09-25 — Operação Assistida no POP.COR.GTD.003 (Onda 1)
 
 - **Pedido:** o POP.COR.GTD.003 é o processo certo de Operação Assistida; avaliar e melhorar o nosso. Decisões: satisfação de 1 a 5; N1 passa pelos responsáveis de nível 1 do Produto (Onda 2); criticidade igual ao POP; prazos "pelo POP" (o POP não traz números: valores de referência a calibrar).

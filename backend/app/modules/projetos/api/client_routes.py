@@ -23,6 +23,9 @@ from app.modules.projetos.schemas import (
     AssistedOpsEntrySet,
     AssistedOpsEntryState,
     AssistedOpsExtend,
+    AssistedOpsPhaseSet,
+    AssistedOpMeetingIn,
+    AssistedOpMeetingOut,
     PortalAssistantAnswer,
     PortalAssistantAsk,
     AiSolutionCancel,
@@ -507,6 +510,40 @@ async def set_assisted_ops_entry(task_id: uuid.UUID, data: AssistedOpsEntrySet, 
 async def extend_assisted_ops(task_id: uuid.UUID, data: AssistedOpsExtend, ctx: ModuleContext = Depends(_ctx)):
     await _assert_task_in_scope(ctx, task_id)
     return await AssistedOpsService.extend(ctx.db, task_id, data, ctx.user)
+
+
+@router.put("/tasks/{task_id}/assisted-ops-phase", response_model=AssistedOpsEntryState)
+async def set_assisted_ops_phase(task_id: uuid.UUID, data: AssistedOpsPhaseSet, ctx: ModuleContext = Depends(_ctx)):
+    """Fase da Operação Assistida (POP 8.3.1)."""
+    await _assert_task_in_scope(ctx, task_id)
+    return await AssistedOpsService.set_phase(ctx.db, task_id, data, ctx.user)
+
+
+@router.get("/tasks/{task_id}/assisted-ops-meetings", response_model=list[AssistedOpMeetingOut])
+async def list_assisted_ops_meetings(task_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+    """Atas dos ritos da Operação Assistida (POP 8.3.5)."""
+    await _assert_task_in_scope(ctx, task_id)
+    return await AssistedOpsService.list_meetings(ctx.db, task_id, ctx.user)
+
+
+@router.post("/tasks/{task_id}/assisted-ops-meetings", response_model=AssistedOpMeetingOut, status_code=201)
+async def create_assisted_ops_meeting(task_id: uuid.UUID, data: AssistedOpMeetingIn, ctx: ModuleContext = Depends(_ctx)):
+    await _assert_task_in_scope(ctx, task_id)
+    return await AssistedOpsService.create_meeting(ctx.db, task_id, data, ctx.user)
+
+
+@router.put("/tasks/{task_id}/assisted-ops-meetings/{meeting_id}", response_model=AssistedOpMeetingOut)
+async def update_assisted_ops_meeting(
+    task_id: uuid.UUID, meeting_id: uuid.UUID, data: AssistedOpMeetingIn, ctx: ModuleContext = Depends(_ctx),
+):
+    await _assert_task_in_scope(ctx, task_id)
+    return await AssistedOpsService.update_meeting(ctx.db, task_id, meeting_id, data, ctx.user)
+
+
+@router.delete("/tasks/{task_id}/assisted-ops-meetings/{meeting_id}", status_code=204)
+async def delete_assisted_ops_meeting(task_id: uuid.UUID, meeting_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+    await _assert_task_in_scope(ctx, task_id)
+    await AssistedOpsService.delete_meeting(ctx.db, task_id, meeting_id, ctx.user)
 
 
 @router.put("/tasks/{task_id}/assisted-ops-devs", response_model=list[AssistedOpsDevResponse])
