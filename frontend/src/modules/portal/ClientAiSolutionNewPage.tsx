@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
-import { ChevronRight, Loader2, Send } from "lucide-react"
+import { ChevronRight, Info, Loader2, Send, ShieldAlert } from "lucide-react"
 
 import { aiSolutionsPortalApi, type AiSolutionFormField } from "@/api/clientes"
 import { Button } from "@/components/ui/button"
@@ -10,7 +10,15 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "@/lib/toast"
 import { apiErrorDetail } from "@/modules/portal/occurrenceUi"
 import { AiFieldEditor } from "@/modules/portal/aiSolutionUi"
-import { missingAiFields } from "@/modules/portal/aiSolutionRules"
+import {
+  AI_INSTITUTIONAL_PATH,
+  AI_PROTOTYPE_NOT_RELEASE,
+  aiFieldInvalid,
+  aiFieldPayload,
+  aiFieldRequired,
+  aiFieldShown,
+  missingAiFields,
+} from "@/modules/portal/aiSolutionRules"
 import { Card, IconTile } from "@/modules/portal/portfolioUi"
 import { FieldError, FormSection, HowItWorks, Req, StepProgress, SummaryRow } from "@/modules/portal/portalForm"
 import { usePortalBase } from "@/modules/portal/portfolioMeta"
@@ -20,13 +28,18 @@ import { usePortalBase } from "@/modules/portal/portfolioMeta"
 const GROUPS: { id: string; title: string; hint: string; keys: string[] }[] = [
   { id: "ai-step-1", title: "A solução", hint: "Dê um nome e conte o objetivo e o problema que ela resolve.", keys: ["objetivo", "problema"] },
   {
-    id: "ai-step-2", title: "Quem usa e o que faz", hint: "Público, principais funcionalidades e com quais sistemas ela conversa.",
-    keys: ["publico", "funcionalidades", "integracoes"],
+    id: "ai-step-2", title: "Quem usa e o que faz", hint: "Público, principais funcionalidades e se ela conversa com outros sistemas.",
+    keys: ["publico", "funcionalidades", "precisa_integracao", "integracoes"],
   },
   {
-    id: "ai-step-3", title: "Dados e ferramenta", hint: "Que dados a solução usa, em qual ferramenta será construída e os custos.",
-    keys: ["dados_envolvidos", "dados_pessoais", "plataforma", "plataforma_outra", "custos"],
+    id: "ai-step-3", title: "Dados", hint: "Que dados a solução usa e como eles se classificam.",
+    keys: ["dados_envolvidos", "dados_pessoais", "dados_classificacao"],
   },
+  {
+    id: "ai-step-4", title: "Acesso ao Base44 e custos", hint: "Quem vai construir a solução no Base44 e os custos previstos.",
+    keys: ["base44_nome", "base44_email", "custos"],
+  },
+  { id: "ai-step-5", title: "Ciência", hint: "O caminho institucional para soluções com IA.", keys: ["ciencia"] },
 ]
 
 /** Os 9 pontos que a coordenação confere na Análise (checklist da etapa). */
@@ -60,19 +73,17 @@ export default function ClientAiSolutionNewPage() {
       .finally(() => setLoading(false))
   }, [])
 
-  const val = (k: string) => (values[k] ?? "").trim()
-  const outra = values.plataforma === "Outra"
-  const isRequired = (f: AiSolutionFormField) => f.required || (f.key === "plataforma_outra" && outra)
-  const shown = (f: AiSolutionFormField) => f.key !== "plataforma_outra" || outra
+  const isRequired = (f: AiSolutionFormField) => aiFieldRequired(f, values)
+  const shown = (f: AiSolutionFormField) => aiFieldShown(f, values)
   const errors: Record<string, boolean> = { title: title.trim().length < 3 }
-  for (const f of fields) if (shown(f) && isRequired(f)) errors[f.key] = !val(f.key)
+  for (const f of fields) if (shown(f) && isRequired(f)) errors[f.key] = aiFieldInvalid(f, values)
   const show = (k: string) => tried && !!errors[k]
 
   const known = new Set(GROUPS.flatMap((g) => g.keys))
   const groups = [
     ...GROUPS.map((g) => ({ ...g, fields: g.keys.map((k) => fields.find((f) => f.key === k)).filter(Boolean) as AiSolutionFormField[] })),
     ...(fields.some((f) => !known.has(f.key))
-      ? [{ id: "ai-step-4", title: "Outras informações", hint: "Complete o pedido.", keys: [], fields: fields.filter((f) => !known.has(f.key)) }]
+      ? [{ id: "ai-step-6", title: "Outras informações", hint: "Complete o pedido.", keys: [], fields: fields.filter((f) => !known.has(f.key)) }]
       : []),
   ].filter((g, i) => i === 0 || g.fields.length > 0)
   const steps = groups.map((g, i) => ({
@@ -97,7 +108,7 @@ export default function ClientAiSolutionNewPage() {
     try {
       const created = await aiSolutionsPortalApi.create({
         title: title.trim(),
-        values: Object.fromEntries(fields.map((f) => [f.key, (values[f.key] ?? "").trim() || null])),
+        values: aiFieldPayload(fields, values),
       })
       toast.success(`${created.code_label} enviada para análise.`)
       navigate(`${base}/solucoes-ia/${created.task_id}`)
@@ -127,7 +138,6 @@ export default function ClientAiSolutionNewPage() {
       Enviar para análise
     </Button>
   )
-  const plataforma = outra ? val("plataforma_outra") || "Outra" : values.plataforma
 
   return (
     <div className="space-y-5">
@@ -144,10 +154,15 @@ export default function ClientAiSolutionNewPage() {
           <div className="min-w-0">
             <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Solicitar análise de solução com IA</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Conte o que você quer construir. A coordenação de tecnologia avalia e responde por aqui.
+              Conte o que você quer construir no Base44. A coordenação de tecnologia avalia e responde por aqui.
             </p>
           </div>
         </div>
+      </div>
+
+      <div className="space-y-2 rounded-xl border border-violet-200 bg-violet-50/70 px-4 py-3 text-sm text-violet-950 dark:border-violet-900 dark:bg-violet-950/30 dark:text-violet-100">
+        <p className="flex items-start gap-2"><ShieldAlert size={16} className="mt-0.5 shrink-0" /> {AI_INSTITUTIONAL_PATH}</p>
+        <p className="flex items-start gap-2"><Info size={16} className="mt-0.5 shrink-0" /> {AI_PROTOTYPE_NOT_RELEASE}</p>
       </div>
 
       {loading ? (
@@ -204,8 +219,15 @@ export default function ClientAiSolutionNewPage() {
                     <SummaryRow label="Solução">
                       <span className="line-clamp-2">{title.trim() || <span className="font-normal text-muted-foreground">Sem nome</span>}</span>
                     </SummaryRow>
-                    <SummaryRow label="Ferramenta">{plataforma || <span className="font-normal text-muted-foreground">—</span>}</SummaryRow>
-                    <SummaryRow label="Dados pessoais">{values.dados_pessoais || <span className="font-normal text-muted-foreground">—</span>}</SummaryRow>
+                    <SummaryRow label="Acesso ao Base44">
+                      <span className="line-clamp-2">{(values.base44_nome ?? "").trim() || <span className="font-normal text-muted-foreground">—</span>}</span>
+                    </SummaryRow>
+                    <SummaryRow label="Integração">{values.precisa_integracao || <span className="font-normal text-muted-foreground">—</span>}</SummaryRow>
+                    <SummaryRow label="Dados pessoais">
+                      {values.dados_pessoais
+                        ? `${values.dados_pessoais}${values.dados_pessoais === "Sim" && values.dados_classificacao ? ` · ${values.dados_classificacao}` : ""}`
+                        : <span className="font-normal text-muted-foreground">—</span>}
+                    </SummaryRow>
                   </dl>
                   <div className="py-3">
                     <div className="h-2 overflow-hidden rounded-full bg-muted dark:bg-white/10">
@@ -226,8 +248,8 @@ export default function ClientAiSolutionNewPage() {
                 title="O que acontece depois"
                 items={[
                   ["A coordenação analisa", "Aprova, pede ajustes no pedido ou não aprova — sempre com o motivo."],
-                  ["Você constrói", "Aprovada, você constrói na ferramenta autorizada e envia o link da versão."],
-                  ["A TI adequa e você homologa", "A TI adequa o código; você testa e aprova ou pede ajustes."],
+                  ["Você constrói no Base44", "Aprovada, a pessoa indicada recebe o acesso, constrói e envia o link da versão."],
+                  ["A TI adequa e você homologa", "O protótipo ainda não é a solução: a TI adequa à stack, à governança e à Segurança da Informação; você testa e aprova."],
                   ["Segurança e produção", "Segurança da Informação confere, a TI publica e sustenta."],
                 ]}
               />

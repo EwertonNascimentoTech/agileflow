@@ -614,6 +614,8 @@ export interface AiSolutionFormField {
   required: boolean
   placeholder: string | null
   options: { value: string; label: string }[]
+  /** Campo condicional: aparece (e é obrigatório) só quando o outro campo tem aquele valor. */
+  show_if?: { field: string; equals: string } | null
 }
 
 export type AiSolutionClientAction = "ajustar" | "versao" | "homologar" | null

@@ -2597,6 +2597,8 @@ class AiSolutionFormField(BaseModel):
     required: bool = False
     placeholder: Optional[str] = None
     options: list[dict] = Field(default_factory=list)
+    # Campo condicional: aparece (e é obrigatório) só quando {"field": x, "equals": v}.
+    show_if: Optional[dict] = None
 
 
 class AiSolutionForm(BaseModel):

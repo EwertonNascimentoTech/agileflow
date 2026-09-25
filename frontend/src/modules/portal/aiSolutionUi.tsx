@@ -1,4 +1,4 @@
-import { Check, Info, ShieldAlert, ShieldCheck, Sparkles, Wand2, type LucideIcon } from "lucide-react"
+import { Building2, Check, Globe, Info, Link2, Lock, ShieldAlert, ShieldCheck, Unplug, UserRound, type LucideIcon } from "lucide-react"
 
 import type { AiSolutionFormField } from "@/api/clientes"
 import { Input } from "@/components/ui/input"
@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ChoiceCards, FieldError, Req, type Choice } from "@/modules/portal/portalForm"
-import { AI_TRACK } from "@/modules/portal/aiSolutionRules"
+import { AI_INSTITUTIONAL_PATH, AI_PROTOTYPE_NOT_RELEASE, AI_TRACK } from "@/modules/portal/aiSolutionRules"
 
 export function AiSolutionStepper({ stageKey }: { stageKey: string | null }) {
   const current = Math.max(0, AI_TRACK.findIndex((s) => s.keys.includes(stageKey ?? "")))
@@ -138,7 +138,9 @@ const HINTS: Record<string, string> = {
   publico: "Quem vai usar (área, cargo) e quantas pessoas, aproximadamente.",
   funcionalidades: "As principais telas ou ações, uma por linha.",
   dados_envolvidos: "Que informações a solução lê ou grava (ex.: planilhas, cadastros, sistemas).",
-  plataforma_outra: "Nome da ferramenta",
+  integracoes: "Sistemas com que a solução vai conversar (ex.: SIS, TOTVS, e-mail).",
+  base44_nome: "Quem vai construir a solução no Base44",
+  base44_email: "nome@sistemafiea.com.br",
 }
 
 /** Ícone e descrição das opções conhecidas (as demais aparecem só com o rótulo). */
@@ -147,9 +149,15 @@ const CHOICE_META: Record<string, Record<string, { icon: LucideIcon; desc: strin
     Sim: { icon: ShieldAlert, desc: "Nomes, CPF, e-mails, dados de saúde ou de colaboradores." },
     Não: { icon: ShieldCheck, desc: "Só dados institucionais ou anônimos." },
   },
-  plataforma: {
-    Base44: { icon: Sparkles, desc: "Ferramenta autorizada pela TI." },
-    Outra: { icon: Wand2, desc: "Informe qual; a TI avalia se pode ser usada." },
+  precisa_integracao: {
+    Sim: { icon: Link2, desc: "Vai ler ou gravar em outros sistemas." },
+    Não: { icon: Unplug, desc: "Funciona sozinha." },
+  },
+  dados_classificacao: {
+    Público: { icon: Globe, desc: "Pode ser divulgado sem restrição." },
+    "Dados Pessoais": { icon: UserRound, desc: "Identifica pessoas (LGPD)." },
+    Interno: { icon: Building2, desc: "Uso interno da instituição." },
+    Confidencial: { icon: Lock, desc: "Acesso restrito; vazamento causa dano." },
   },
 }
 
@@ -181,10 +189,40 @@ export function AiFieldEditor({
       <Textarea id={`ai-input-${f.key}`} rows={3} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
         aria-invalid={invalid} className={invalid ? "border-destructive" : ""} />
     )
-  } else if (f.field_type === "text" || f.field_type === "url") {
+  } else if (f.field_type === "text" || f.field_type === "url" || f.field_type === "email") {
     input = (
-      <Input id={`ai-input-${f.key}`} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
+      <Input id={`ai-input-${f.key}`} type={f.field_type === "email" ? "email" : "text"} value={value}
+        onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
         aria-invalid={invalid} className={`h-10 ${invalid ? "border-destructive" : ""}`} />
+    )
+  } else if (f.field_type === "checkbox") {
+    // Caixa de ciência: o texto é o próprio rótulo.
+    return (
+      <div id={`ai-field-${f.key}`} className="scroll-mt-24 space-y-1.5">
+        <label
+          className={`flex cursor-pointer items-start gap-3 rounded-xl border bg-background p-4 text-sm ${
+            invalid ? "border-destructive" : value === "true" ? "border-primary/50 bg-primary/5" : ""
+          }`}
+        >
+          <input
+            type="checkbox" className="mt-0.5 h-4 w-4 shrink-0 rounded border-input accent-primary"
+            checked={value === "true"} onChange={(e) => onChange(e.target.checked ? "true" : "")}
+          />
+          <span className="space-y-1">
+            <span className="block font-medium">
+              {f.label}
+              {required && <Req />}
+            </span>
+            {f.key === "ciencia" && (
+              <>
+                <span className="block text-muted-foreground">{AI_INSTITUTIONAL_PATH}</span>
+                <span className="block text-muted-foreground">{AI_PROTOTYPE_NOT_RELEASE}</span>
+              </>
+            )}
+          </span>
+        </label>
+        <FieldError show={invalid}>Confirme para enviar.</FieldError>
+      </div>
     )
   } else {
     input = <AiSolutionFieldInput field={f} value={value} onChange={onChange} />
@@ -196,7 +234,7 @@ export function AiFieldEditor({
         {required && <Req />}
       </Label>
       {input}
-      <FieldError show={invalid}>Preencha este campo.</FieldError>
+      <FieldError show={invalid}>{f.field_type === "email" && value.trim() ? "Informe um e-mail válido." : "Preencha este campo."}</FieldError>
       {f.key === "dados_pessoais" && value === "Sim" && (
         <p className="flex items-start gap-2 rounded-xl bg-muted/60 px-4 py-3 text-sm text-muted-foreground">
           <Info size={15} className="mt-0.5 shrink-0" />

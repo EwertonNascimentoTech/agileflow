@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-25 — Soluções com IA: ajustes no pedido (Base44, integração, classificação dos dados)
+
+- **Pedido:** classificação dos dados quando envolve dados pessoais (Público, Dados Pessoais, Interno, Confidencial); nome e e-mail de quem terá acesso ao Base44; "A solução precisará de integração?" com campo das integrações quando Sim; tirar o campo de ferramenta (é sempre Base44); reforçar que é o caminho institucional e que o protótipo pronto não é a solução disponível.
+- **Feito:** campos novos no pedido (`precisa_integracao`, `integracoes` condicional, `dados_classificacao` condicional, `base44_nome`, `base44_email`, `ciencia` obrigatória); `plataforma`/`plataforma_outra` desativados. Condicional via `validation.show_if` + `required_if_shown` (backend `_clean_pedido` e front `aiSolutionRules`); `_sync_pedido` no `ensure` acrescenta os campos no formulário que já existe. Recados do caminho institucional e de "protótipo não é disponibilização" no pedido, na lista, na etapa de construção e no aviso de aprovação; descrição do tipo atualizada.
+- **Não mexer:** rótulo de campo cabe em 140 caracteres (coluna `label`) — texto longo vai na tela.
+- **Arquivos:** `projetos/ai_solutions.py`, `projetos/schemas.py`; front `api/clientes.ts`, `portal/aiSolutionRules.ts`, `portal/aiSolutionUi.tsx`, `portal/ClientAiSolutionNewPage.tsx`, `portal/ClientAiSolutionDetailPage.tsx`, `portal/ClientAiSolutionsPage.tsx`; `docs/processo/06-solucoes-com-ia.md`.
+
 ## 2026-09-25 — Operação Assistida no POP.COR.GTD.003 (Onda 3: indicadores e encerramento formal)
 
 - **Pedido:** seguir para a Onda 3.

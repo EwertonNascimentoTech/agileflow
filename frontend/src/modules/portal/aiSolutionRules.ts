@@ -2,11 +2,43 @@ import type { AiSolutionFormField } from "@/api/clientes"
 
 // Regras de tela de Soluções com IA (sem componentes — ficam em aiSolutionUi.tsx).
 
-export function missingAiFields(fields: AiSolutionFormField[], values: Record<string, string>): string[] {
-  const out = fields.filter((f) => f.required && !(values[f.key] ?? "").trim()).map((f) => f.label)
-  if (values.plataforma === "Outra" && !(values.plataforma_outra ?? "").trim()) out.push("Qual ferramenta?")
-  return out
+/** Campo condicional (show_if) só aparece quando o campo de referência tem o valor indicado. */
+export function aiFieldShown(f: AiSolutionFormField, values: Record<string, string>): boolean {
+  return !f.show_if || (values[f.show_if.field] ?? "") === f.show_if.equals
 }
+
+/** Obrigatório: marcado no formulário ou condicional visível. */
+export function aiFieldRequired(f: AiSolutionFormField, values: Record<string, string>): boolean {
+  return aiFieldShown(f, values) && (f.required || !!f.show_if)
+}
+
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
+
+/** Campo com problema: obrigatório vazio (caixa de ciência desmarcada) ou e-mail inválido. */
+export function aiFieldInvalid(f: AiSolutionFormField, values: Record<string, string>): boolean {
+  if (!aiFieldShown(f, values)) return false
+  const v = (values[f.key] ?? "").trim()
+  if (f.field_type === "checkbox") return aiFieldRequired(f, values) && v !== "true"
+  if (f.field_type === "email" && v && !EMAIL_RE.test(v)) return true
+  return aiFieldRequired(f, values) && !v
+}
+
+export function missingAiFields(fields: AiSolutionFormField[], values: Record<string, string>): string[] {
+  return fields
+    .filter((f) => aiFieldInvalid(f, values))
+    .map((f) => (f.key === "ciencia" ? "a ciência sobre o fluxo institucional" : f.label))
+}
+
+/** Valor enviado ao backend: campo oculto vai vazio. */
+export function aiFieldPayload(fields: AiSolutionFormField[], values: Record<string, string>): Record<string, string | null> {
+  return Object.fromEntries(fields.map((f) => [f.key, aiFieldShown(f, values) ? (values[f.key] ?? "").trim() || null : null]))
+}
+
+/** Os dois recados do fluxo institucional (mostrados no pedido e na etapa de construção). */
+export const AI_INSTITUTIONAL_PATH =
+  "Este é o caminho institucionalmente definido para desenvolver e prototipar soluções com IA. A área de Tecnologias Digitais não recebe soluções com IA desenvolvidas por outros meios ou fora deste fluxo."
+export const AI_PROTOTYPE_NOT_RELEASE =
+  "Concluir a prototipação não disponibiliza a solução: depois dela, o protótipo ainda é adequado à stack tecnológica da instituição e aos padrões de governança e de Segurança da Informação."
 
 export function aiStageTone(stageKey: string | null, isClosed: boolean): string {
   if (stageKey === "producao") return "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
@@ -19,7 +51,7 @@ export function aiStageTone(stageKey: string | null, isClosed: boolean): string 
 
 export const CLIENT_ACTION_HINT: Record<string, string> = {
   ajustar: "A TI pediu ajustes no pedido. Corrija e reenvie.",
-  versao: "Aprovada! Construa a solução na ferramenta autorizada e avise quando tiver uma versão funcional.",
+  versao: "Aprovada! Construa a solução no Base44 e avise quando tiver uma versão funcional.",
   homologar: "Valide a solução no ambiente de homologação e aprove ou reprove.",
 }
 

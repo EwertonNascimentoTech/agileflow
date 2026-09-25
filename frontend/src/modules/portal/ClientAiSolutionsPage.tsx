@@ -40,15 +40,15 @@ const EMPTY_TEXT: Record<Filtro, string> = {
 const JOURNEY: [string, string, "Você" | "TI"][] = [
   ["Solicitação", "Você conta o que quer construir.", "Você"],
   ["Análise", "A coordenação avalia objetivo, custos, dados e sustentação.", "TI"],
-  ["Seu desenvolvimento", "Aprovada, você constrói na ferramenta autorizada e envia o link.", "Você"],
+  ["Seu desenvolvimento", "Aprovada, você constrói no Base44 e envia o link.", "Você"],
   ["Apresentação", "A versão funcional é apresentada à coordenação e ao PO.", "TI"],
-  ["Adequação pela TI", "A TI adequa o código e prepara a homologação.", "TI"],
+  ["Adequação pela TI", "O protótipo não é a solução pronta: a TI adequa à stack, à governança e à segurança.", "TI"],
   ["Sua homologação", "Você testa e aprova ou pede ajustes.", "Você"],
   ["Segurança e publicação", "Segurança da Informação e deploy em produção.", "TI"],
   ["Em produção", "A TI publica e passa a sustentar a solução.", "TI"],
 ]
 
-/** Soluções com IA pedidas pelo cliente: a TI analisa, o cliente constrói (ex.: Base44) e a TI
+/** Soluções com IA pedidas pelo cliente: a TI analisa, o cliente constrói no Base44 e a TI
  *  adequa, publica e sustenta. Layout das telas de portfólio e ocorrências. */
 export default function ClientAiSolutionsPage() {
   const base = usePortalBase()
@@ -108,8 +108,9 @@ export default function ClientAiSolutionsPage() {
             <div className="min-w-0">
               <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Soluções com IA</h1>
               <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-                Peça a análise de uma solução que você vai construir numa ferramenta de IA autorizada (ex.: Base44). Depois de
-                aprovada e construída, a TI adequa, publica e sustenta.
+                O caminho institucional para soluções com IA: peça a análise, construa o protótipo no Base44 e a TI adequa à
+                stack e aos padrões de governança e segurança, publica e sustenta. A TI não recebe soluções com IA feitas fora
+                deste fluxo.
               </p>
             </div>
           </div>

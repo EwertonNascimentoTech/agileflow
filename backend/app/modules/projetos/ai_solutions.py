@@ -1,7 +1,7 @@
 """
 Soluções com IA — qualquer pessoa com acesso à plataforma (cliente pelo Portal; equipe pelo
 Modo Cliente ou por Nova Solicitação) pede a análise
-de uma solução que ele mesmo vai construir numa ferramenta de IA autorizada (ex.: Base44); a TI
+de uma solução que ele mesmo vai construir no Base44 (ferramenta institucional de IA); a TI
 analisa, adequa, publica e sustenta.
 
 Fluxo (spec: `.claude/invariantes.md` → Soluções com IA):
@@ -21,6 +21,7 @@ Fluxo (spec: `.claude/invariantes.md` → Soluções com IA):
 from __future__ import annotations
 
 import html
+import re
 import uuid
 from datetime import datetime
 from typing import Any, Optional
@@ -88,7 +89,16 @@ _CLIENT_FACING = frozenset({"necessita_ajustes", "nao_aprovado", "cancelado", "a
 CLIENT_ACTION = {"necessita_ajustes": "ajustar", "aguardando_cliente": "versao", "homologacao": "homologar"}
 
 _YES_NO = {"items": [{"value": "Sim", "label": "Sim"}, {"value": "Não", "label": "Não"}]}
-_TOOLS = {"items": [{"value": "Base44", "label": "Base44"}, {"value": "Outra", "label": "Outra (informe qual)"}]}
+_DATA_CLASS = {"items": [
+    {"value": "Público", "label": "Público"},
+    {"value": "Dados Pessoais", "label": "Dados Pessoais"},
+    {"value": "Interno", "label": "Interno"},
+    {"value": "Confidencial", "label": "Confidencial"},
+]}
+# Ciência do solicitante (o Base44 é o caminho institucional; protótipo pronto ≠ solução disponível).
+# Rótulo cabe em 140 caracteres (coluna label); o texto completo aparece na tela do pedido.
+CIENCIA_LABEL = "Estou ciente de que este é o caminho institucional para soluções com IA e de que o protótipo ainda passa pela adequação da TI"
+assert len(CIENCIA_LABEL) <= 140
 
 
 def _chk(key: str, label: str, required: bool = False) -> dict:
@@ -103,14 +113,22 @@ SECTIONS: list[dict[str, Any]] = [
         {"key": "problema", "label": "Problema a ser resolvido", "type": "text_long", "required": True},
         {"key": "publico", "label": "Público / usuários", "type": "text_long", "required": True},
         {"key": "funcionalidades", "label": "Principais funcionalidades", "type": "text_long", "required": True},
-        {"key": "integracoes", "label": "Integrações previstas", "type": "text_long", "required": True,
-         "placeholder": "Sistemas com que a solução conversa. Se não houver, escreva “Nenhuma”."},
+        {"key": "precisa_integracao", "label": "A solução precisará de integração?", "type": "select",
+         "required": True, "options": _YES_NO},
+        # `show_if`: o campo só aparece (e só é obrigatório) quando o outro tem aquele valor.
+        {"key": "integracoes", "label": "Qual(is) integração(ões) serão necessárias?", "type": "text_long",
+         "show_if": {"field": "precisa_integracao", "equals": "Sim"},
+         "placeholder": "Sistemas com que a solução vai conversar (ex.: SIS, TOTVS, e-mail)."},
         {"key": "dados_envolvidos", "label": "Dados envolvidos", "type": "text_long", "required": True},
         {"key": "dados_pessoais", "label": "Envolve dados pessoais?", "type": "select", "required": True, "options": _YES_NO},
-        {"key": "plataforma", "label": "Ferramenta de IA", "type": "select", "required": True, "options": _TOOLS},
-        {"key": "plataforma_outra", "label": "Qual ferramenta?", "type": "text"},
+        {"key": "dados_classificacao", "label": "Classificação dos dados manipulados pela solução", "type": "select",
+         "options": _DATA_CLASS, "show_if": {"field": "dados_pessoais", "equals": "Sim"}},
+        # A prototipação é no Base44 (ferramenta institucional): quem vai ter o acesso.
+        {"key": "base44_nome", "label": "Nome completo de quem terá acesso ao Base44", "type": "text", "required": True},
+        {"key": "base44_email", "label": "E-mail de quem terá acesso ao Base44", "type": "email", "required": True},
         {"key": "custos", "label": "Custos previstos", "type": "text_long",
          "placeholder": "Licenças, planos pagos, APIs… (se houver)."},
+        {"key": "ciencia", "label": CIENCIA_LABEL, "type": "checkbox", "required": True},
     ]},
     {"key": "analise", "title": "Análise da coordenação", "stage": "analise", "fields": [
         _chk("chk_objetivo", "Objetivo da solução avaliado"),
@@ -173,6 +191,18 @@ SECTIONS: list[dict[str, Any]] = [
     ]},
 ]
 _PEDIDO_KEYS = [f["key"] for f in SECTIONS[0]["fields"]]
+DEMAND_TYPE_DESCRIPTION = (
+    "Caminho institucional para prototipar soluções com IA no Base44: a área constrói, a TI adequa à "
+    "stack e aos padrões de governança e Segurança da Informação, publica e sustenta."
+)
+_OLD_DESCRIPTION = "Solução com IA construída pela área (ex.: Base44) e adequada, publicada e sustentada pela TI."
+# Saíram do pedido (a ferramenta é sempre o Base44): desativados no formulário que já existe.
+_PEDIDO_REMOVED = ("plataforma", "plataforma_outra")
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _field_validation(spec: dict) -> Optional[dict]:
+    return {"show_if": spec["show_if"], "required_if_shown": True} if spec.get("show_if") else None
 
 # Cargos avisados em cada etapa (slug do Cargo no TeamOps).
 _DEVOPS_SLUGS = ("devops",)
@@ -279,7 +309,7 @@ class AiSolutionsService:
             dt = ProjectDemandType(
                 slug=DEMAND_TYPE_SLUG,
                 name="Solicitar análise de solução com IA",
-                description="Solução com IA construída pela área (ex.: Base44) e adequada, publicada e sustentada pela TI.",
+                description=DEMAND_TYPE_DESCRIPTION,
                 funnel_id=funnel.id,
                 available_for_basic=True,  # aparece em Nova Solicitação, que leva ao pedido do Portal
                 show_in_schedule=False,
@@ -289,6 +319,8 @@ class AiSolutionsService:
             db.add(dt)
             await db.flush()
             funnel.allowed_demand_type_ids = [str(dt.id)]
+        elif dt.description == _OLD_DESCRIPTION:
+            dt.description = DEMAND_TYPE_DESCRIPTION  # texto antigo do sistema (não editado): atualiza
 
         sections = {
             s.key: s for s in (await db.execute(
@@ -298,6 +330,8 @@ class AiSolutionsService:
         for order, spec in enumerate(SECTIONS):
             sec = sections.get(spec["key"])
             if sec is not None:
+                if spec["key"] == "pedido":
+                    await AiSolutionsService._sync_pedido(db, sec)
                 continue  # seção já existe: campos e modos ficam com a configuração
             sec = ProjectDemandFormSection(
                 demand_type_id=dt.id, key=spec["key"], title=spec["title"], order=order, is_active=True,
@@ -312,6 +346,7 @@ class AiSolutionsService:
                     field_type=f["type"],
                     placeholder=f.get("placeholder"),
                     options=f.get("options"),
+                    validation=_field_validation(f),
                     is_required=bool(f.get("required")),
                     is_active=True,
                     order=forder,
@@ -332,6 +367,44 @@ class AiSolutionsService:
             db.add(ProjectStatusDefaultFormLink(status_id=apr.id, field_key="assigned_to", mode="required"))
         await db.flush()
         return {"funnel": funnel, "stages": stages, "demand_type": dt}
+
+    @staticmethod
+    async def _sync_pedido(db: AsyncSession, sec: ProjectDemandFormSection) -> None:
+        """Pedido que já existe no tenant: acrescenta os campos novos do sistema, desativa os que
+        saíram e transforma "Integrações previstas" no campo condicional. O resto (rótulos,
+        ordem editados na configuração) fica como está."""
+        fields = {
+            f.field_key: f for f in (await db.execute(
+                select(ProjectDemandFormField).where(ProjectDemandFormField.section_id == sec.id)
+            )).scalars().all()
+        }
+        added = False
+        for forder, spec in enumerate(SECTIONS[0]["fields"]):
+            f = fields.get(spec["key"])
+            if f is None:
+                db.add(ProjectDemandFormField(
+                    section_id=sec.id, field_key=spec["key"], label=spec["label"], field_type=spec["type"],
+                    placeholder=spec.get("placeholder"), options=spec.get("options"),
+                    validation=_field_validation(spec), is_required=bool(spec.get("required")),
+                    is_active=True, order=forder,
+                ))
+                added = True
+            elif spec.get("show_if") and not (f.validation or {}).get("show_if"):
+                # Campo antigo que virou condicional (ex.: integrações): passa a depender do outro.
+                f.label, f.field_type = spec["label"], spec["type"]
+                f.placeholder, f.is_required = spec.get("placeholder"), False
+                f.validation = {**(f.validation or {}), **_field_validation(spec)}
+        for key in _PEDIDO_REMOVED:
+            f = fields.get(key)
+            if f is not None and f.is_active:
+                f.is_active = False
+        if added:
+            # Campo novo entra na posição do sistema: reordena o pedido pela lista do sistema.
+            pos = {spec["key"]: i for i, spec in enumerate(SECTIONS[0]["fields"])}
+            for key, f in fields.items():
+                if key in pos:
+                    f.order = pos[key]
+        await db.flush()
 
     # ── Apoio ────────────────────────────────────────────────────────────────
     @staticmethod
@@ -390,23 +463,34 @@ class AiSolutionsService:
 
     @staticmethod
     def _clean_pedido(fields: list[ProjectDemandFormField], raw: dict) -> dict:
-        """Só os campos do pedido; obrigatórios preenchidos; seleção dentro das opções."""
+        """Só os campos do pedido; obrigatórios preenchidos; seleção dentro das opções; campo
+        condicional (show_if) só vale — e só é obrigatório — quando a condição bate."""
         out: dict = {}
         faltam: list[str] = []
         for f in fields:
             value = raw.get(f.field_key)
             value = value.strip() if isinstance(value, str) else value
+            if f.field_type == "checkbox":
+                value = value is True or str(value).lower() in ("true", "sim", "1", "on")
+            out[f.field_key] = value or None
+        for f in fields:
+            cond = (f.validation or {}).get("show_if")
+            value = out.get(f.field_key)
+            if cond and out.get(cond.get("field")) != cond.get("equals"):
+                out[f.field_key] = None
+                continue
             if f.field_type == "select" and value:
                 allowed = {str(i.get("value")) for i in ((f.options or {}).get("items") or [])}
                 if allowed and str(value) not in allowed:
                     raise HTTPException(status_code=400, detail=f"Valor inválido em “{f.label}”.")
-            if f.is_required and not value:
-                faltam.append(f.label)
-            out[f.field_key] = value or None
-        if out.get("plataforma") == "Outra" and not out.get("plataforma_outra"):
-            faltam.append("Qual ferramenta?")
+            if f.field_type == "email" and value and not _EMAIL_RE.match(str(value)):
+                raise HTTPException(status_code=400, detail=f"E-mail inválido em “{f.label}”.")
+            required = f.is_required or (cond and (f.validation or {}).get("required_if_shown"))
+            if required and not value:
+                faltam.append("a ciência sobre o fluxo institucional" if f.field_key == "ciencia" else f.label)
         if faltam:
-            raise HTTPException(status_code=400, detail="Preencha: " + ", ".join(faltam) + ".")
+            msg = "Preencha: " + ", ".join(faltam)
+            raise HTTPException(status_code=400, detail=msg if msg[-1] in ".?!" else msg + ".")
         return out
 
     # ── Movimento ────────────────────────────────────────────────────────────
@@ -484,7 +568,8 @@ class AiSolutionsService:
             )
 
         client_msgs = {
-            "aguardando_cliente": ("aprovada", "Pode construir a solução na ferramenta autorizada. Quando tiver uma versão funcional, avise pelo Portal."),
+            "aguardando_cliente": ("aprovada", "Pode construir a solução no Base44. Quando tiver uma versão funcional, avise pelo "
+                                   "Portal. Lembre: o protótipo pronto ainda passa pela adequação da TI antes de ser disponibilizado."),
             "necessita_ajustes": ("precisa de ajustes", "Veja o motivo no Portal, ajuste o pedido e reenvie."),
             "nao_aprovado": ("não aprovada", "Veja a justificativa no Portal."),
             "homologacao": ("pronta para homologação", "Valide no ambiente de homologação e aprove ou reprove no Portal."),
@@ -566,6 +651,7 @@ class AiSolutionsService:
             AiSolutionFormField(
                 key=f.field_key, label=f.label, field_type=f.field_type, required=f.is_required,
                 placeholder=f.placeholder, options=list((f.options or {}).get("items") or []),
+                show_if=(f.validation or {}).get("show_if"),
             )
             for f in fields
         ])
@@ -631,8 +717,8 @@ class AiSolutionsService:
         shown = []
         for f in fields:
             v = values.get(f.field_key)
-            if v not in (None, "", []):
-                shown.append(AiSolutionField(label=f.label, value=str(v)))
+            if v not in (None, "", [], False):
+                shown.append(AiSolutionField(label=f.label, value="Sim" if v is True else str(v)))
         key = summary.stage_key or ""
         after = lambda k: key in MAIN_KEYS and _ORDER[key] >= _ORDER[k]  # noqa: E731
 

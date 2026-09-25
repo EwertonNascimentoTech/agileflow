@@ -1,6 +1,9 @@
 # Fluxo — Soluções com IA
 
-A área de negócio pede, pelo **Portal do Cliente**, a análise de uma solução que ela mesma vai construir numa ferramenta de IA autorizada (ex.: Base44). Aprovada e construída, a TI adequa, publica e sustenta.
+A área de negócio pede, pelo **Portal do Cliente**, a análise de uma solução que ela mesma vai prototipar no **Base44**. Aprovada e construída, a TI adequa, publica e sustenta.
+
+- **Caminho institucional:** este é o caminho definido para desenvolver e prototipar soluções com IA. A área de Tecnologias Digitais não recebe soluções com IA desenvolvidas por outros meios ou fora deste fluxo.
+- **Protótipo não é solução disponível:** concluir a prototipação não disponibiliza a solução. Depois dela, o protótipo ainda é adequado à stack tecnológica e aos padrões de governança e de Segurança da Informação.
 
 - **Kanban:** "Soluções com IA" (processo TD), criado pelo sistema (`AiSolutionsService.ensure`).
 - **Tipo:** "Solicitar análise de solução com IA" (slug `solucao_ia`) — só o Portal abre; não aparece em "Solicitar".
@@ -29,6 +32,19 @@ A área de negócio pede, pelo **Portal do Cliente**, a análise de uma soluçã
 | — | Cancelado (`cancelado`, final) | Cliente (Portal) ou time | Motivo obrigatório ao entrar |
 
 Negrito = obrigatório para avançar (formulário da etapa). Os checklists não obrigatórios são guia da etapa.
+
+## Pedido (formulário do Portal)
+
+| Campo | Regra |
+| :--- | :--- |
+| Nome, objetivo, problema, público, funcionalidades, dados envolvidos | Obrigatórios |
+| A solução precisará de integração? (Sim/Não) | Obrigatório. Com **Sim**, abre "Qual(is) integração(ões) serão necessárias?" (obrigatório) |
+| Envolve dados pessoais? (Sim/Não) | Obrigatório. Com **Sim**, abre "Classificação dos dados manipulados pela solução": Público, Dados Pessoais, Interno ou Confidencial (obrigatório) |
+| Acesso ao Base44: nome completo e e-mail de quem terá acesso | Obrigatórios (e-mail válido) |
+| Custos previstos | Opcional |
+| Ciência do caminho institucional e de que o protótipo ainda passa pela adequação da TI | Obrigatória |
+
+A ferramenta de prototipação é sempre o Base44 (o campo "Ferramenta de IA" saiu). Campo condicional com a condição desfeita é gravado vazio. Os campos condicionais usam `validation.show_if` no formulário do tipo; pedidos antigos continuam com os valores que tinham.
 
 ## Regras
 

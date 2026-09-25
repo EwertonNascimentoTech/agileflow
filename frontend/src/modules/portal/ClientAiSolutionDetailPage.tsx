@@ -31,7 +31,18 @@ import { CommentBody } from "@/modules/projetos/CommentComposer"
 import { DetailHeader, KpiPerson, KpiRow, KpiText, type MenuAction } from "@/modules/portal/DetailShell"
 import { apiErrorDetail, fmtDateTime, fmtRelative, initials } from "@/modules/portal/occurrenceUi"
 import { AiFieldEditor, AiSolutionStepper, AiStageBadge } from "@/modules/portal/aiSolutionUi"
-import { CLIENT_ACTION_HINT, aiStageHint, aiStep, aiTitle, missingAiFields } from "@/modules/portal/aiSolutionRules"
+import {
+  AI_PROTOTYPE_NOT_RELEASE,
+  CLIENT_ACTION_HINT,
+  aiFieldInvalid,
+  aiFieldPayload,
+  aiFieldRequired,
+  aiFieldShown,
+  aiStageHint,
+  aiStep,
+  aiTitle,
+  missingAiFields,
+} from "@/modules/portal/aiSolutionRules"
 import { Card } from "@/modules/portal/portfolioUi"
 import { usePortalBase } from "@/modules/portal/portfolioMeta"
 
@@ -134,7 +145,8 @@ export default function ClientAiSolutionDetailPage() {
   function apply(next: AiSolutionDetail, previous: AiSolutionDetail | null) {
     setResult({ id: next.task_id, sol: next, error: null })
     if (next.client_action === "ajustar" && (previous?.client_action !== "ajustar" || previous?.task_id !== next.task_id)) {
-      setEdit(Object.fromEntries(Object.entries(next.values).map(([k, v]) => [k, v ?? ""])))
+      // Caixa de ciência volta como booleano (true): no formulário vale "true".
+      setEdit(Object.fromEntries(Object.entries(next.values).map(([k, v]) => [k, (v as unknown) === true ? "true" : v ?? ""])))
       setTriedEdit(false)
       aiSolutionsPortalApi.form().then((r) => setFormFields(r.fields)).catch(() => setFormFields([]))
     }
@@ -196,7 +208,7 @@ export default function ClientAiSolutionDetailPage() {
   const noteValid = note.trim().length >= 10
   const step = aiStep(sol.stage_key)
   const withClient = !!action
-  const plataforma = sol.values.plataforma === "Outra" ? sol.values.plataforma_outra || "Outra" : sol.values.plataforma
+  const base44 = sol.values.base44_nome ?? null
   const goAction = () => actionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
 
   let nextStep: ReactNode
@@ -211,7 +223,8 @@ export default function ClientAiSolutionDetailPage() {
     nextStep = (
       <NextStep tone="amber" icon={<Rocket size={16} />} action={<Button size="sm" onClick={goAction}>Enviar minha versão</Button>}>
         <p className="font-medium">Aprovada! Agora é com você.</p>
-        <p className="text-xs opacity-80">Construa na ferramenta autorizada e avise quando tiver uma versão funcional.</p>
+        <p className="text-xs opacity-80">Construa no Base44 e avise quando tiver uma versão funcional.</p>
+        <p className="mt-1 text-xs opacity-80">{AI_PROTOTYPE_NOT_RELEASE}</p>
       </NextStep>
     )
   } else if (action === "homologar") {
@@ -265,9 +278,7 @@ export default function ClientAiSolutionDetailPage() {
     sol.homolog_url && { href: sol.homolog_url, label: "Ambiente de homologação" },
     sol.producao_url && { href: sol.producao_url, label: "Aplicação em produção" },
   ].filter(Boolean) as { href: string; label: string }[]
-  const editErrors = Object.fromEntries(
-    formFields.map((f) => [f.key, (f.required || (f.key === "plataforma_outra" && edit.plataforma === "Outra")) && !(edit[f.key] ?? "").trim()]),
-  ) as Record<string, boolean>
+  const editErrors = Object.fromEntries(formFields.map((f) => [f.key, aiFieldInvalid(f, edit)])) as Record<string, boolean>
 
   return (
     <div className="space-y-5">
@@ -299,7 +310,7 @@ export default function ClientAiSolutionDetailPage() {
           value={withClient ? "Com você" : sol.stage_key === "producao" ? "Em produção" : sol.is_closed ? "Encerrada" : "Com a TI"}
           label="Com quem está"
         />
-        <KpiText icon={Wand2} value={plataforma || "—"} label="Ferramenta de IA" />
+        <KpiText icon={Wand2} value={base44 || "—"} label="Acesso ao Base44" />
         <KpiPerson name={sol.po_name ?? "A definir"} role="PO de acompanhamento" />
         <KpiText icon={CalendarDays} tone="slate" value={fmtRelative(sol.updated_at)} label="Última movimentação" />
       </KpiRow>
@@ -339,14 +350,14 @@ export default function ClientAiSolutionDetailPage() {
                 <Skeleton className="h-40 rounded-xl" />
               ) : (
                 formFields
-                  .filter((f) => f.key !== "plataforma_outra" || edit.plataforma === "Outra")
+                  .filter((f) => aiFieldShown(f, edit))
                   .map((f) => (
                     <AiFieldEditor
                       key={f.key}
                       field={f}
                       value={edit[f.key] ?? ""}
                       onChange={(v) => setEdit((c) => ({ ...c, [f.key]: v }))}
-                      required={f.required || f.key === "plataforma_outra"}
+                      required={aiFieldRequired(f, edit)}
                       invalid={triedEdit && !!editErrors[f.key]}
                     />
                   ))
@@ -370,7 +381,7 @@ export default function ClientAiSolutionDetailPage() {
                       return
                     }
                     void run(() => aiSolutionsPortalApi.resubmit(id, {
-                      values: Object.fromEntries(formFields.map((f) => [f.key, (edit[f.key] ?? "").trim() || null])),
+                      values: aiFieldPayload(formFields, edit),
                       note: note.trim() || null,
                     }), "Reenviada para análise.")
                   }}
@@ -383,6 +394,9 @@ export default function ClientAiSolutionDetailPage() {
 
           {action === "versao" && (
             <div className="space-y-4 rounded-xl border bg-card p-5">
+              <p className="flex items-start gap-2 rounded-lg bg-muted/60 px-3 py-2 text-sm text-muted-foreground">
+                <Info size={15} className="mt-0.5 shrink-0" /> {AI_PROTOTYPE_NOT_RELEASE}
+              </p>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label htmlFor="ai-versao">Link da versão funcional <span className="text-destructive">*</span></Label>
