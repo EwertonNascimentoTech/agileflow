@@ -12,7 +12,12 @@ from app.core.dependencies import (
     require_module,
     require_permission,
 )
+from app.modules.projetos.program_portal import ProgramAdminService
 from app.modules.projetos.schemas import (
+    ProgramAdminDetail,
+    ProgramPillarIn,
+    ProgramPillarSuggestResult,
+    ProgramProjectPillarSet,
     CriticalPathItem,
     ProjectCardAvailableField,
     ProjectCardFieldResponse,
@@ -1153,6 +1158,54 @@ async def delete_program(
     program_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_program_manage),
 ):
     await ProjectProgramService.delete(ctx.db, program_id)
+
+
+# ── Programa: pilares e pilar de cada projeto (Portal do Cliente) ──
+@router.get("/programs/{program_id}/admin", response_model=ProgramAdminDetail)
+async def get_program_admin(
+    program_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_program_manage),
+):
+    return await ProgramAdminService.detail(ctx.db, program_id)
+
+
+@router.post("/programs/{program_id}/pillars", response_model=ProgramAdminDetail, status_code=201)
+async def create_program_pillar(
+    program_id: uuid.UUID, data: ProgramPillarIn, ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_program_manage),
+):
+    return await ProgramAdminService.create_pillar(ctx.db, program_id, data)
+
+
+@router.post("/programs/{program_id}/pillars/suggest", response_model=ProgramPillarSuggestResult)
+async def suggest_program_pillars(
+    program_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_program_manage),
+):
+    """Projetos sem pilar recebem o pilar com o nome da Área do card (criado se faltar)."""
+    return await ProgramAdminService.suggest_from_area(ctx.db, program_id)
+
+
+@router.patch("/programs/{program_id}/pillars/{pillar_id}", response_model=ProgramAdminDetail)
+async def update_program_pillar(
+    program_id: uuid.UUID, pillar_id: uuid.UUID, data: ProgramPillarIn,
+    ctx: ModuleContext = Depends(_ctx), _=Depends(_can_program_manage),
+):
+    return await ProgramAdminService.update_pillar(ctx.db, program_id, pillar_id, data)
+
+
+@router.delete("/programs/{program_id}/pillars/{pillar_id}", response_model=ProgramAdminDetail)
+async def delete_program_pillar(
+    program_id: uuid.UUID, pillar_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_program_manage),
+):
+    return await ProgramAdminService.delete_pillar(ctx.db, program_id, pillar_id)
+
+
+@router.put("/programs/{program_id}/projects/{task_id}/pillar", response_model=ProgramAdminDetail)
+async def set_program_project_pillar(
+    program_id: uuid.UUID, task_id: uuid.UUID, data: ProgramProjectPillarSet,
+    ctx: ModuleContext = Depends(_ctx), _=Depends(_can_program_manage),
+):
+    return await ProgramAdminService.set_project_pillar(ctx.db, program_id, task_id, data.pillar_id)
 
 
 @router.post("/projects/{project_id}/tasks", response_model=ProjectTaskResponse, status_code=201)

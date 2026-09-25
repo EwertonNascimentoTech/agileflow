@@ -2,14 +2,15 @@ import { Check } from "lucide-react"
 
 import type { OccurrencePrioridade } from "@/api/clientes"
 
+// Selos no padrão do Portal (portfólio/projetos): fundo claro, anel interno e bolinha.
 const STAGE_CLASS: Record<string, string> = {
-  backlog: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200",
-  aguardando_cliente: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200",
-  ajustando: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200",
-  homologando: "bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200",
-  finalizado: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200",
-  melhoria_analise: "bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-200",
-  encaminhada_release: "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200",
+  backlog: "bg-slate-100 text-slate-700 ring-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700",
+  aguardando_cliente: "bg-amber-50 text-amber-800 ring-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:ring-amber-800",
+  ajustando: "bg-blue-50 text-blue-700 ring-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:ring-blue-800",
+  homologando: "bg-violet-50 text-violet-700 ring-violet-200 dark:bg-violet-950/60 dark:text-violet-300 dark:ring-violet-800",
+  finalizado: "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:ring-emerald-800",
+  melhoria_analise: "bg-teal-50 text-teal-700 ring-teal-200 dark:bg-teal-950/60 dark:text-teal-300 dark:ring-teal-800",
+  encaminhada_release: "bg-slate-100 text-slate-600 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700",
 }
 
 const STAGE_DOT: Record<string, string> = {
@@ -22,15 +23,26 @@ const STAGE_DOT: Record<string, string> = {
   encaminhada_release: "bg-slate-500",
 }
 
-/** `mine` = quem vê abriu a ocorrência: "Aguardando Cliente" vira um chamado à ação. */
-export function StageBadge({ stageKey, name, mine = false }: { stageKey: string | null; name: string | null; mine?: boolean }) {
+/** `mine` = quem vê abriu a ocorrência: "Aguardando Cliente" vira um chamado à ação.
+ *  `size="lg"` = selo do cabeçalho, ao lado do título. */
+export function StageBadge({
+  stageKey,
+  name,
+  mine = false,
+  size = "sm",
+}: {
+  stageKey: string | null
+  name: string | null
+  mine?: boolean
+  size?: "sm" | "lg"
+}) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium ${
-        STAGE_CLASS[stageKey ?? ""] ?? "bg-muted text-muted-foreground"
-      }`}
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-md font-medium ring-1 ring-inset ${
+        size === "lg" ? "px-2.5 py-0.5 text-sm" : "px-2 py-0.5 text-xs"
+      } ${STAGE_CLASS[stageKey ?? ""] ?? "bg-muted text-muted-foreground ring-border"}`}
     >
-      <span className={`h-1.5 w-1.5 rounded-full ${STAGE_DOT[stageKey ?? ""] ?? "bg-muted-foreground"}`} />
+      <span className={`${size === "lg" ? "h-2 w-2" : "h-1.5 w-1.5"} rounded-full ${STAGE_DOT[stageKey ?? ""] ?? "bg-muted-foreground"}`} />
       {mine && stageKey === "aguardando_cliente" ? "Aguardando sua resposta" : name ?? "—"}
     </span>
   )
@@ -70,10 +82,18 @@ export function needsMyAction(o: { opened_by_me: boolean; stage_key: string | nu
 }
 
 const PRIORITY_CLASS: Record<OccurrencePrioridade, string> = {
-  P1: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200",
-  P2: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-200",
-  P3: "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-200",
-  P4: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
+  P1: "bg-red-50 text-red-700 ring-red-200 dark:bg-red-950/60 dark:text-red-300 dark:ring-red-800",
+  P2: "bg-orange-50 text-orange-700 ring-orange-200 dark:bg-orange-950/60 dark:text-orange-300 dark:ring-orange-800",
+  P3: "bg-sky-50 text-sky-700 ring-sky-200 dark:bg-sky-950/60 dark:text-sky-300 dark:ring-sky-800",
+  P4: "bg-slate-100 text-slate-600 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700",
+}
+
+/** Nome curto da prioridade (cartão de indicador). */
+export const PRIORITY_LABEL: Record<OccurrencePrioridade, string> = {
+  P1: "Crítica",
+  P2: "Alta",
+  P3: "Média",
+  P4: "Baixa",
 }
 
 const PRIORITY_TITLE: Record<OccurrencePrioridade, string> = {
@@ -83,10 +103,27 @@ const PRIORITY_TITLE: Record<OccurrencePrioridade, string> = {
   P4: "Prioridade 4 — baixa",
 }
 
-export function PriorityBadge({ value }: { value: OccurrencePrioridade }) {
+export function PriorityBadge({ value, withLabel = false }: { value: OccurrencePrioridade; withLabel?: boolean }) {
   return (
-    <span title={PRIORITY_TITLE[value]} className={`inline-block rounded px-1.5 py-0.5 text-[11px] font-semibold ${PRIORITY_CLASS[value]}`}>
+    <span
+      title={PRIORITY_TITLE[value]}
+      className={`inline-flex items-center whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-semibold ring-1 ring-inset ${PRIORITY_CLASS[value]}`}
+    >
       {value}
+      {withLabel && <span className="ml-1 font-medium">· {PRIORITY_LABEL[value]}</span>}
+    </span>
+  )
+}
+
+/** Pessoa com as iniciais (mesmo chip da árvore de projetos). */
+export function PersonChip({ name, empty = "—" }: { name: string | null | undefined; empty?: string }) {
+  if (!name) return <span className="text-sm text-muted-foreground">{empty}</span>
+  return (
+    <span className="flex min-w-0 items-center gap-2">
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary" aria-hidden>
+        {initials(name)}
+      </span>
+      <span className="truncate">{name}</span>
     </span>
   )
 }
@@ -118,12 +155,12 @@ export function StageStepper({ stageKey }: { stageKey: string | null }) {
           <li key={step.label} className="relative flex flex-1 flex-col items-center text-center">
             {i > 0 && (
               <span
-                className={`absolute right-1/2 top-3 h-0.5 w-full -translate-y-1/2 ${i <= current ? "bg-primary" : "bg-border"}`}
+                className={`absolute right-1/2 top-4 h-0.5 w-full -translate-y-1/2 ${i <= current ? "bg-primary" : "bg-border"}`}
                 aria-hidden
               />
             )}
             <span
-              className={`relative z-10 flex h-6 w-6 items-center justify-center rounded-full border-2 text-[11px] font-semibold ${
+              className={`relative z-10 flex h-8 w-8 items-center justify-center rounded-full border-2 text-xs font-semibold ${
                 done
                   ? "border-primary bg-primary text-primary-foreground"
                   : waiting
@@ -133,16 +170,16 @@ export function StageStepper({ stageKey }: { stageKey: string | null }) {
                       : "border-border bg-background text-muted-foreground"
               }`}
             >
-              {done ? <Check size={13} strokeWidth={3} /> : i + 1}
+              {done ? <Check size={15} strokeWidth={3} /> : i + 1}
             </span>
             <span
-              className={`mt-1.5 px-1 text-[11px] leading-tight ${
+              className={`mt-2 px-1 text-sm leading-tight ${
                 active || done ? "font-medium text-foreground" : "text-muted-foreground"
               }`}
             >
               {step.label}
             </span>
-            {waiting && <span className="mt-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">aguardando você</span>}
+            {waiting && <span className="mt-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">aguardando você</span>}
           </li>
         )
       })}

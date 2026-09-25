@@ -216,6 +216,10 @@ class UserResponse(BaseModel):
     # Operação Assistida: cliente externo (só Portal) e acesso ao Portal (externo ou interno).
     is_client: bool = False
     has_client_portal: bool = False
+    # Pessoa ativa em Times: vê o Portal em "modo cliente" (projetos em que atua; coordenação, todos).
+    has_team_portal: bool = False
+    # Equipe com visão de tudo no Modo Cliente: também lê Ocorrências e Soluções com IA.
+    team_sees_all: bool = False
     tenant_id: Optional[uuid.UUID]
     is_active: bool
     last_login: Optional[datetime]

@@ -11,6 +11,7 @@ import {
   Network, Code2, CalendarOff,
   CirclePlus, ClipboardList, Gauge, TrendingUp, ListChecks, PackageCheck,
   Gavel, BookOpen, GitBranch, Wrench, Contact,
+  LayoutDashboard, FolderKanban, Flag, LifeBuoy, Sparkles,
 } from "lucide-react"
 import type { ElementType } from "react"
 
@@ -24,6 +25,8 @@ export type ModuleNavItem = {
   /** Visão consolidada do portfólio: fora do menu do Product Owner (Externo), que só
    * enxerga os projetos onde é o responsável. O backend também barra esses endpoints. */
   hiddenForExternalPO?: boolean
+  /** Só para quem tem cadastro de cliente (ocorrências e soluções com IA são ações do cliente). */
+  requiresClientPortal?: boolean
 }
 
 export const moduleNavConfig: Record<string, ModuleNavItem[]> = {
@@ -51,6 +54,15 @@ export const moduleNavConfig: Record<string, ModuleNavItem[]> = {
     { to: "/app/modules/pdv/sales",     icon: ReceiptText,  label: "Vendas" },
     { to: "/app/modules/pdv/dashboard", icon: BarChart3,    label: "Dashboard" },
     { to: "/app/modules/pdv/config",    icon: Settings2,    label: "Configurações" },
+  ],
+  // Modo Cliente: o Portal do Cliente dentro do AgileFlow (visível para quem está em Times).
+  portal_cliente: [
+    { to: "/app/modules/portal_cliente", icon: LayoutDashboard, label: "Visão geral" },
+    { to: "/app/modules/portal_cliente/programas", icon: Layers, label: "Programas" },
+    { to: "/app/modules/portal_cliente/projetos", icon: FolderKanban, label: "Projetos" },
+    { to: "/app/modules/portal_cliente/entregas", icon: Flag, label: "Entregas e Marcos" },
+    { to: "/app/modules/portal_cliente/ocorrencias", icon: LifeBuoy, label: "Ocorrências", requiresClientPortal: true },
+    { to: "/app/modules/portal_cliente/solucoes-ia", icon: Sparkles, label: "Soluções com IA" },
   ],
   projetos: [
     { to: "/app/modules/projetos/solicitacoes", icon: CirclePlus, label: "Nova Solicitação" },

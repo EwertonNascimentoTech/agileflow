@@ -378,6 +378,8 @@ class ProjectStatusResponse(BaseModel):
     procurement_stage_key: Optional[str] = None
     is_assisted_operation: bool = False
     assisted_stage_key: Optional[str] = None
+    ai_stage_key: Optional[str] = None
+    entry_reason_required: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -438,6 +440,9 @@ class ProjectTaskUpdate(BaseModel):
     status_id: Optional[uuid.UUID] = None
     # Projeto que vai a Concluído sem passar pela Operação Assistida: justificativa obrigatória.
     assisted_op_skip_reason: Optional[str] = Field(None, max_length=2000)
+    # Motivo ao entrar em etapa que o exige (entry_reason_required) ou ao voltar etapa no
+    # kanban Soluções com IA — 428 stage_reason_required sem ele.
+    stage_reason: Optional[str] = Field(None, max_length=4000)
     # Justificativa de ausência de commit na conclusão da US. String vazia limpa.
     commit_justificativa: Optional[str] = Field(None, max_length=2000)
     demand_type_id: Optional[uuid.UUID] = None
@@ -2085,10 +2090,16 @@ class StatusReportResponse(BaseModel):
 
 
 
+_HEX_COLOR = r"^#[0-9A-Fa-f]{6}$"
+
+
 class ProjectProgramCreate(BaseModel):
     name: str = Field(..., min_length=2, max_length=200)
     description: Optional[str] = None
     responsavel_person_id: Optional[uuid.UUID] = None
+    icon: Optional[str] = Field(None, max_length=40)
+    color: Optional[str] = Field(None, pattern=_HEX_COLOR)
+    oa_days: int = Field(30, ge=0, le=365)
     is_active: bool = True
 
 
@@ -2096,6 +2107,9 @@ class ProjectProgramUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=2, max_length=200)
     description: Optional[str] = None
     responsavel_person_id: Optional[uuid.UUID] = None
+    icon: Optional[str] = Field(None, max_length=40)
+    color: Optional[str] = Field(None, pattern=_HEX_COLOR)
+    oa_days: Optional[int] = Field(None, ge=0, le=365)
     is_active: Optional[bool] = None
 
 
@@ -2105,11 +2119,64 @@ class ProjectProgramResponse(BaseModel):
     description: Optional[str] = None
     responsavel_person_id: Optional[uuid.UUID] = None
     responsavel_nome: Optional[str] = None
+    icon: Optional[str] = None
+    color: Optional[str] = None
+    oa_days: int = 30
     is_active: bool
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ── Programa: pilares, projetos e clientes (gestão) ──
+class ProgramPillarIn(BaseModel):
+    name: str = Field(..., min_length=2, max_length=120)
+    description: Optional[str] = None
+    icon: Optional[str] = Field(None, max_length=40)
+    color: Optional[str] = Field(None, pattern=_HEX_COLOR)
+    order: Optional[int] = None
+
+
+class ProgramPillarResponse(BaseModel):
+    id: uuid.UUID
+    program_id: uuid.UUID
+    name: str
+    description: Optional[str] = None
+    icon: Optional[str] = None
+    color: Optional[str] = None
+    order: int = 0
+    project_count: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+class ProgramProjectRow(BaseModel):
+    """Card vinculado ao programa, com o pilar escolhido (tela de gestão do programa)."""
+    task_id: uuid.UUID
+    title: str
+    planning_kind: Optional[str] = None
+    stage_name: Optional[str] = None
+    area: Optional[str] = None
+    area_label: Optional[str] = None
+    po_name: Optional[str] = None
+    pillar_id: Optional[uuid.UUID] = None
+
+
+class ProgramAdminDetail(BaseModel):
+    program: ProjectProgramResponse
+    pillars: list[ProgramPillarResponse] = []
+    projects: list[ProgramProjectRow] = []
+
+
+class ProgramProjectPillarSet(BaseModel):
+    pillar_id: Optional[uuid.UUID] = None
+
+
+class ProgramPillarSuggestResult(BaseModel):
+    created: int = 0
+    assigned: int = 0
+    detail: ProgramAdminDetail
 
 
 # ── Ociosidade diária (API pública com token fixo) ──
@@ -2343,36 +2410,6 @@ class ProjectClientCandidates(BaseModel):
     genus: Literal["ok", "not_found", "unavailable", "off", "skipped"] = "skipped"
 
 
-class ClientProjectFeature(BaseModel):
-    title: str
-    status_name: Optional[str] = None
-    state: Literal["a_iniciar", "andamento", "validacao", "ajuste", "concluida"]
-    start_date: Optional[date] = None
-    due_date: Optional[date] = None
-    us_total: int = 0
-    us_done: int = 0
-
-
-class ClientProjectReport(BaseModel):
-    """Andamento do projeto para o Portal do Cliente (só leitura, calculado na hora)."""
-    task_id: uuid.UUID
-    title: str
-    planning_kind: Optional[str] = None
-    my_role_label: Optional[str] = None
-    po_name: Optional[str] = None
-    stage_name: Optional[str] = None
-    # planejamento · desenvolvimento · homologacao · producao · concluido · impedimento
-    phase: str = "planejamento"
-    in_assisted_operation: bool = False
-    paused: bool = False
-    exec_pct: Optional[float] = None
-    start_date: Optional[date] = None
-    due_date: Optional[date] = None
-    completed_at: Optional[datetime] = None
-    features: list[ClientProjectFeature] = Field(default_factory=list)
-    updated_at: Optional[datetime] = None
-
-
 # ── Operação Assistida: Ocorrências ──────────────────────────────────────────
 
 OccurrenceTipo = Literal["erro", "duvida", "ajuste", "melhoria"]
@@ -2520,3 +2557,119 @@ class OccurrenceForwardRelease(BaseModel):
     item_kind: Literal["feature", "user_story"] = "feature"
     # US precisa de Feature pai no projeto de Release.
     parent_feature_id: Optional[uuid.UUID] = None
+
+
+# ── Soluções com IA (Portal do Cliente) ──────────────────────────────────────
+
+class AiSolutionFormField(BaseModel):
+    key: str
+    label: str
+    field_type: str
+    required: bool = False
+    placeholder: Optional[str] = None
+    options: list[dict] = Field(default_factory=list)
+
+
+class AiSolutionForm(BaseModel):
+    fields: list[AiSolutionFormField] = Field(default_factory=list)
+
+
+class AiSolutionCreate(BaseModel):
+    title: str = Field(..., min_length=3, max_length=180)
+    values: dict = Field(default_factory=dict)
+
+
+class AiSolutionResubmit(BaseModel):
+    values: dict = Field(default_factory=dict)
+    note: Optional[str] = Field(None, max_length=4000)
+
+
+class AiSolutionReady(BaseModel):
+    """Cliente avisa que tem versão funcional (pede a apresentação)."""
+    versao_url: str = Field(..., min_length=8, max_length=500)
+    repositorio_url: str = Field(..., min_length=8, max_length=500)
+    note: Optional[str] = Field(None, max_length=4000)
+
+    @field_validator("versao_url", "repositorio_url")
+    @classmethod
+    def _http(cls, v: str) -> str:
+        v = v.strip()
+        if not v.lower().startswith(("http://", "https://")):
+            raise ValueError("Informe o link completo (https://...).")
+        return v
+
+
+class AiSolutionHomologation(BaseModel):
+    approve: bool
+    comment: Optional[str] = Field(None, max_length=4000)
+
+    @model_validator(mode="after")
+    def _reprovar_explica(self):
+        if not self.approve and len((self.comment or "").strip()) < 10:
+            raise ValueError("Conte o que não funcionou (mín. 10 caracteres).")
+        return self
+
+
+class AiSolutionCancel(BaseModel):
+    reason: str = Field(..., min_length=10, max_length=4000)
+
+
+class AiSolutionField(BaseModel):
+    label: str
+    value: str
+
+
+class AiSolutionSummary(BaseModel):
+    task_id: uuid.UUID
+    code_label: str
+    title: str
+    stage_key: Optional[str] = None
+    stage_name: Optional[str] = None
+    is_closed: bool = False
+    # Ação que o cliente tem nesta etapa: ajustar · versao · homologar · None
+    client_action: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class AiSolutionDetail(AiSolutionSummary):
+    fields: list[AiSolutionField] = Field(default_factory=list)
+    # Valores editáveis do pedido (para "Necessita Ajustes").
+    values: dict = Field(default_factory=dict)
+    versao_url: Optional[str] = None
+    repositorio_url: Optional[str] = None
+    homolog_url: Optional[str] = None
+    producao_url: Optional[str] = None
+    po_name: Optional[str] = None
+    comments: list[OccurrenceComment] = Field(default_factory=list)
+    history: list[dict] = Field(default_factory=list)
+    can_cancel: bool = False
+    # Pode mandar mensagem/agir (quem pediu). Equipe no Modo Cliente: só leitura.
+    can_interact: bool = False
+
+
+# ── Portal: assistente (chat) ─────────────────────────────────────────────────
+
+class PortalAssistantTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(..., max_length=4000)
+
+
+class PortalAssistantAsk(BaseModel):
+    question: str = Field(..., min_length=1, max_length=1000)
+    # Últimas trocas da conversa (vivem no navegador; nada é gravado).
+    history: list[PortalAssistantTurn] = Field(default_factory=list, max_length=12)
+    # Tela em que a pessoa está (dá prioridade ao projeto/programa aberto).
+    project_id: Optional[uuid.UUID] = None
+    program_id: Optional[uuid.UUID] = None
+
+
+class PortalAssistantSource(BaseModel):
+    kind: Literal["projeto", "programa"]
+    id: uuid.UUID
+    title: str
+
+
+class PortalAssistantAnswer(BaseModel):
+    answer: str
+    sources: list[PortalAssistantSource] = Field(default_factory=list)

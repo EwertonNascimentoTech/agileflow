@@ -92,14 +92,23 @@ const PdvPaymentMethodsConfigPage = lazy(() => import("@/modules/pdv/PaymentMeth
 const ProjetosLayout = lazy(() => import("@/modules/projetos/ProjetosLayout"))
 const ProjectBoardPage = lazy(() => import("@/modules/projetos/ProjectBoardPage"))
 const ProjectProgramsPage = lazy(() => import("@/modules/projetos/ProjectProgramsPage"))
+const ProjectProgramDetailPage = lazy(() => import("@/modules/projetos/ProjectProgramDetailPage"))
 const ProjectConfigHomePage = lazy(() => import("@/modules/projetos/config/ProjectConfigHomePage"))
 const ProjectClientsPage = lazy(() => import("@/modules/projetos/ProjectClientsPage"))
 const ClientPortalLayout = lazy(() => import("@/modules/portal/ClientPortalLayout"))
-const ClientPortalHomePage = lazy(() => import("@/modules/portal/ClientPortalHomePage"))
+const ClientPortfolioPage = lazy(() => import("@/modules/portal/ClientPortfolioPage"))
+const ClientProgramsPage = lazy(() => import("@/modules/portal/ClientProgramsPage"))
+const ClientProgramPage = lazy(() => import("@/modules/portal/ClientProgramPage"))
+const ClientProjectsPage = lazy(() => import("@/modules/portal/ClientProjectsPage"))
+const ClientDeliveriesPage = lazy(() => import("@/modules/portal/ClientDeliveriesPage"))
+const PortalModuleLayout = lazy(() => import("@/modules/portal/PortalModuleLayout"))
 const ClientOccurrencesPage = lazy(() => import("@/modules/portal/ClientOccurrencesPage"))
 const ClientNewOccurrencePage = lazy(() => import("@/modules/portal/ClientNewOccurrencePage"))
 const ClientOccurrenceDetailPage = lazy(() => import("@/modules/portal/ClientOccurrenceDetailPage"))
 const ClientProjectPage = lazy(() => import("@/modules/portal/ClientProjectPage"))
+const ClientAiSolutionsPage = lazy(() => import("@/modules/portal/ClientAiSolutionsPage"))
+const ClientAiSolutionNewPage = lazy(() => import("@/modules/portal/ClientAiSolutionNewPage"))
+const ClientAiSolutionDetailPage = lazy(() => import("@/modules/portal/ClientAiSolutionDetailPage"))
 const ProjectDefaultFormConfigPage = lazy(() => import("@/modules/projetos/config/ProjectDefaultFormConfigPage"))
 const ProjectDemandTypesConfigPage = lazy(() => import("@/modules/projetos/config/ProjectDemandTypesConfigPage"))
 const ProjectDemandTypeFormEditorPage = lazy(() => import("@/modules/projetos/config/ProjectDemandTypeFormEditorPage"))
@@ -200,11 +209,18 @@ export default function App() {
               <Route element={<ProtectedRoute allowedRoles={["company_admin", "company_user"]} />}>
                 <Route element={<ClientPortalGuard />}>
                   <Route path="/portal" element={<ClientPortalLayout />}>
-                    <Route index element={<ClientPortalHomePage />} />
+                    <Route index element={<ClientPortfolioPage />} />
+                    <Route path="programas" element={<ClientProgramsPage />} />
+                    <Route path="programas/:id" element={<ClientProgramPage />} />
+                    <Route path="projetos" element={<ClientProjectsPage />} />
+                    <Route path="entregas" element={<ClientDeliveriesPage />} />
                     <Route path="ocorrencias" element={<ClientOccurrencesPage />} />
                     <Route path="ocorrencias/nova" element={<ClientNewOccurrencePage />} />
                     <Route path="ocorrencias/:id" element={<ClientOccurrenceDetailPage />} />
                     <Route path="projetos/:id" element={<ClientProjectPage />} />
+                    <Route path="solucoes-ia" element={<ClientAiSolutionsPage />} />
+                    <Route path="solucoes-ia/nova" element={<ClientAiSolutionNewPage />} />
+                    <Route path="solucoes-ia/:id" element={<ClientAiSolutionDetailPage />} />
                   </Route>
                 </Route>
               </Route>
@@ -234,6 +250,22 @@ export default function App() {
                   <Route path="modules/documentacao" element={<DocumentacaoLayout />}>
                     <Route index element={<Navigate to="usuario" replace />} />
                     <Route path=":section" element={<DocumentationPage />} />
+                  </Route>
+
+                  {/* Modo Cliente: as telas do Portal do Cliente dentro do AgileFlow (equipe de Times) */}
+                  <Route path="modules/portal_cliente" element={<PortalModuleLayout />}>
+                    <Route index element={<ClientPortfolioPage />} />
+                    <Route path="programas" element={<ClientProgramsPage />} />
+                    <Route path="programas/:id" element={<ClientProgramPage />} />
+                    <Route path="projetos" element={<ClientProjectsPage />} />
+                    <Route path="projetos/:id" element={<ClientProjectPage />} />
+                    <Route path="entregas" element={<ClientDeliveriesPage />} />
+                    <Route path="ocorrencias" element={<ClientOccurrencesPage />} />
+                    <Route path="ocorrencias/nova" element={<ClientNewOccurrencePage />} />
+                    <Route path="ocorrencias/:id" element={<ClientOccurrenceDetailPage />} />
+                    <Route path="solucoes-ia" element={<ClientAiSolutionsPage />} />
+                    <Route path="solucoes-ia/nova" element={<ClientAiSolutionNewPage />} />
+                    <Route path="solucoes-ia/:id" element={<ClientAiSolutionDetailPage />} />
                   </Route>
 
                   {/* Atendimento (deprecated) → redireciona para CRM */}
@@ -299,6 +331,7 @@ export default function App() {
                       <Route path="status-reports/new" element={<StatusReportEditorPage />} />
                       <Route path="status-reports/:id" element={<StatusReportViewPage />} />
                       <Route path="programas" element={<ProjectProgramsPage />} />
+                      <Route path="programas/:programId" element={<ProjectProgramDetailPage />} />
                     </Route>
                     <Route path="solicitacoes" element={<BasicNewRequestPage />} />
                     <Route path="minhas" element={<BasicMyRequestsPage />} />

@@ -201,6 +201,26 @@ class AssistedOpsService:
         return ProjectTaskService._is_assisted_operation_status(status)
 
     @staticmethod
+    async def _team_sees_all(db: AsyncSession, user_id: uuid.UUID) -> bool:
+        """Equipe no "Modo Cliente" com visão de tudo (coordenação/gestão, inclui Administrativo):
+        lê as ocorrências como o cliente vê, sem interagir."""
+        from app.modules.projetos.program_portal import PortalPortfolioService
+
+        scope = await PortalPortfolioService._team_scope(db, await db.get(User, user_id))
+        return bool(scope and scope.get("all"))
+
+    @staticmethod
+    async def _portal_viewer(db: AsyncSession, user_id: uuid.UUID) -> tuple[Optional[ProjectClient], bool]:
+        """(cadastro de cliente, equipe vê tudo). Nenhum dos dois → 403."""
+        from app.modules.projetos.clients import ProjectClientService
+
+        client = await ProjectClientService.get_by_user(db, user_id)
+        team_all = await AssistedOpsService._team_sees_all(db, user_id)
+        if client is None and not team_all:
+            raise HTTPException(status_code=403, detail="Usuário sem acesso ao Portal do Cliente.")
+        return client, team_all
+
+    @staticmethod
     async def _client_for_user(db: AsyncSession, user_id: uuid.UUID) -> ProjectClient:
         from app.modules.projetos.clients import ProjectClientService
 
@@ -570,9 +590,11 @@ class AssistedOpsService:
         task: ProjectTask,
         viewer_client: Optional[ProjectClient],
         viewer_user: Optional[User] = None,
+        as_client: Optional[bool] = None,
     ) -> OccurrenceDetail:
         summary = (await AssistedOpsService._summaries(db, [(occ, task)], viewer_client))[0]
-        for_client = viewer_client is not None
+        # Equipe no Modo Cliente vê como o cliente (as_client), mesmo sem cadastro de cliente.
+        for_client = viewer_client is not None if as_client is None else as_client
         if occ.worked_hours is None:
             summary.worked_hours = await AssistedOpsService.compute_worked_hours(db, task, occ)
         can_assume = False
@@ -697,7 +719,9 @@ class AssistedOpsService:
     async def portal_projects(db: AsyncSession, user_id: uuid.UUID) -> list[PortalProject]:
         from app.modules.projetos.clients import ProjectClientService
 
-        client = await AssistedOpsService._client_for_user(db, user_id)
+        client, _team_all = await AssistedOpsService._portal_viewer(db, user_id)
+        if client is None:
+            return []  # equipe no Modo Cliente: não abre ocorrência (só lê)
         refs = await ProjectClientService.portal_projects(db, user_id)
         task_ids = [r.task_id for r in refs]
         in_oa: set[uuid.UUID] = set()
@@ -735,39 +759,47 @@ class AssistedOpsService:
         project_task_id: Optional[uuid.UUID] = None,
         mine: bool = False,
     ) -> list[OccurrenceSummary]:
-        client = await AssistedOpsService._client_for_user(db, user_id)
-        allowed = {a.task_id for a in client.access}
-        if project_task_id is not None:
-            if project_task_id not in allowed:
-                raise HTTPException(status_code=404, detail="Projeto não encontrado.")
-            allowed = {project_task_id}
-        if not allowed:
-            return []
+        client, team_all = await AssistedOpsService._portal_viewer(db, user_id)
         q = (
             select(ProjectOccurrence, ProjectTask)
             .join(ProjectTask, ProjectTask.id == ProjectOccurrence.task_id)
-            .where(ProjectOccurrence.project_task_id.in_(allowed))
         )
+        if team_all:
+            # Equipe com visão de tudo: todas as ocorrências (filtro de projeto opcional).
+            if project_task_id is not None:
+                q = q.where(ProjectOccurrence.project_task_id == project_task_id)
+        else:
+            allowed = {a.task_id for a in client.access}
+            if project_task_id is not None:
+                if project_task_id not in allowed:
+                    raise HTTPException(status_code=404, detail="Projeto não encontrado.")
+                allowed = {project_task_id}
+            if not allowed:
+                return []
+            q = q.where(ProjectOccurrence.project_task_id.in_(allowed))
         if mine:
+            if client is None:
+                return []
             q = q.where(ProjectOccurrence.opened_by_client_id == client.id)
         pairs = [(o, t) for o, t in (await db.execute(q.order_by(ProjectOccurrence.code.desc()))).all()]
         return await AssistedOpsService._summaries(db, pairs, client)
 
     @staticmethod
     async def _portal_get(
-        db: AsyncSession, client: ProjectClient, task_id: uuid.UUID
+        db: AsyncSession, client: Optional[ProjectClient], task_id: uuid.UUID, team_all: bool = False,
     ) -> tuple[ProjectOccurrence, ProjectTask]:
         occ = await AssistedOpsService.get_occurrence(db, task_id)
-        if occ is None or occ.project_task_id not in {a.task_id for a in client.access}:
+        allowed = team_all or (client is not None and occ is not None and occ.project_task_id in {a.task_id for a in client.access})
+        if occ is None or not allowed:
             raise HTTPException(status_code=404, detail="Ocorrência não encontrada.")
         task = await db.get(ProjectTask, task_id)
         return occ, task
 
     @staticmethod
     async def portal_detail(db: AsyncSession, user_id: uuid.UUID, task_id: uuid.UUID) -> OccurrenceDetail:
-        client = await AssistedOpsService._client_for_user(db, user_id)
-        occ, task = await AssistedOpsService._portal_get(db, client, task_id)
-        return await AssistedOpsService._detail(db, occ, task, client)
+        client, team_all = await AssistedOpsService._portal_viewer(db, user_id)
+        occ, task = await AssistedOpsService._portal_get(db, client, task_id, team_all)
+        return await AssistedOpsService._detail(db, occ, task, client, as_client=True)
 
     @staticmethod
     async def portal_open(db: AsyncSession, user: User, data: OccurrenceCreate) -> OccurrenceDetail:
@@ -862,21 +894,21 @@ class AssistedOpsService:
     @staticmethod
     async def portal_can_read_object(db: AsyncSession, user_id: uuid.UUID, object_name: str) -> bool:
         """Anexo visível ao cliente: da própria ocorrência ou de comentário público nela."""
-        client = await AssistedOpsService._client_for_user(db, user_id)
-        allowed = {a.task_id for a in client.access}
-        if not allowed:
+        client, team_all = await AssistedOpsService._portal_viewer(db, user_id)
+        allowed = {a.task_id for a in client.access} if client is not None else set()
+        if not allowed and not team_all:
             return False
         pattern = f'%"{object_name}"%'
         hit = (await db.execute(text("""
             SELECT 1 FROM project_occurrences o
               JOIN project_tasks t ON t.id = o.task_id
-             WHERE o.project_task_id = ANY(CAST(:roots AS uuid[]))
+             WHERE (:all_roots OR o.project_task_id = ANY(CAST(:roots AS uuid[])))
                AND (CAST(t.anexos AS text) LIKE :pat
                     OR EXISTS (SELECT 1 FROM project_task_comments c
                                 WHERE c.task_id = t.id AND c.visibility = 'public'
                                   AND CAST(c.anexos AS text) LIKE :pat))
              LIMIT 1
-        """), {"roots": [str(r) for r in allowed], "pat": pattern})).scalar()
+        """), {"roots": [str(r) for r in allowed], "pat": pattern, "all_roots": team_all})).scalar()
         return bool(hit)
 
     # ── Time (drawer do card) ────────────────────────────────────────────────

@@ -44,7 +44,10 @@ export default function CompanyDashboardPage() {
   const isAdmin = user?.role === "company_admin" || user?.role === "super_admin"
   const isExternalPO = isExternalProductOwner(user)
   const visibleModules = (tenant?.active_modules ?? []).filter(
-    (m) => !(isExternalPO && EXTERNAL_PO_BLOCKED_MODULES.includes(m.slug)),
+    (m) =>
+      !(isExternalPO && EXTERNAL_PO_BLOCKED_MODULES.includes(m.slug)) &&
+      // Modo Cliente: só para quem está em Times ou tem cadastro de cliente.
+      (m.slug !== "portal_cliente" || !!(user?.has_team_portal || user?.has_client_portal)),
   )
   const hasProjetosModule = visibleModules.some((m) => m.slug === "projetos")
   const basicNewRequestRoute = hasProjetosModule ? "/app/modules/projetos" : "/app/modules/crm/attendances/new"

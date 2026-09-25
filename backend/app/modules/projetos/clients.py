@@ -15,7 +15,7 @@ Regras (ver `.claude/invariantes.md`):
 """
 import secrets
 import uuid
-from datetime import date, datetime
+from datetime import datetime
 from typing import Optional
 
 from fastapi import HTTPException
@@ -33,8 +33,6 @@ from app.modules.projetos.models import (
     ProjectTask,
 )
 from app.modules.projetos.schemas import (
-    ClientProjectFeature,
-    ClientProjectReport,
     ProjectClientCandidate,
     ProjectClientCandidates,
     ProjectClientCreate,
@@ -554,6 +552,7 @@ class ProjectClientService:
     @staticmethod
     async def search_candidates(
         db: AsyncSession, task_id: Optional[uuid.UUID], q: str, tenant_id: uuid.UUID,
+        *, linked_client_ids: Optional[set[uuid.UUID]] = None,
     ) -> ProjectClientCandidates:
         """Sugestões ao digitar nome ou e-mail: clientes já cadastrados, Pessoas (TeamOps) e
         usuários do tenant. Se a busca for um e-mail, consulta também a folha (Genus), que
@@ -565,10 +564,12 @@ class ProjectClientService:
         if len(term) < 2:
             return ProjectClientCandidates()
         like = f"%{term}%"
-        # Sem card (campo Clientes da solicitação): ninguém está "já vinculado".
-        linked_client_ids = set() if task_id is None else set((await db.execute(
-            select(ProjectClientAccess.client_id).where(ProjectClientAccess.task_id == task_id)
-        )).scalars().all())
+        # Sem card (campo Clientes da solicitação): ninguém está "já vinculado". O Programa
+        # informa os vinculados dele em `linked_client_ids`.
+        if linked_client_ids is None:
+            linked_client_ids = set() if task_id is None else set((await db.execute(
+                select(ProjectClientAccess.client_id).where(ProjectClientAccess.task_id == task_id)
+            )).scalars().all())
         found: dict[str, ProjectClientCandidate] = {}
 
         def add(c: ProjectClientCandidate) -> None:
@@ -657,6 +658,42 @@ class ProjectClientService:
         from app.core.cache import invalidate_user
 
         await ProjectClientService._assert_linkable_projects(db, [task_id])
+        client = await ProjectClientService.client_for_link(
+            db, data, tenant_id, created_by, note="Cadastrado como cliente do projeto",
+        )
+
+        exists = (await db.execute(
+            select(ProjectClientAccess.id).where(
+                ProjectClientAccess.client_id == client.id, ProjectClientAccess.task_id == task_id,
+            )
+        )).scalar_one_or_none()
+        if exists is not None:
+            raise HTTPException(status_code=409, detail=f"{client.full_name} já é cliente deste projeto.")
+
+        reactivated_user = await ProjectClientService.reactivate_for_link(db, client, tenant_id)
+        db.add(ProjectClientAccess(
+            client_id=client.id,
+            task_id=task_id,
+            project_role=data.project_role,
+            project_role_other=data.project_role_other,
+            created_by=created_by,
+        ))
+        client.updated_at = datetime.utcnow()
+        await db.commit()
+        if reactivated_user:
+            await invalidate_user(reactivated_user)
+
+    @staticmethod
+    async def client_for_link(
+        db: AsyncSession,
+        data: ProjectClientMemberAdd,
+        tenant_id: uuid.UUID,
+        created_by: uuid.UUID,
+        *,
+        note: str,
+    ) -> ProjectClient:
+        """Cadastro a vincular (projeto ou programa): o existente pelo id/e-mail ou um novo, com
+        a regra de sempre (e-mail único; Pessoa sem login fica sem login). Não faz commit."""
         client: Optional[ProjectClient] = None
         if data.client_id is not None:
             client = await ProjectClientService._get(db, data.client_id)
@@ -687,7 +724,7 @@ class ProjectClientService:
                 organization=data.organization,
                 department=data.department,
                 job_title=job_title,
-                notes=f"Cadastrado como cliente do projeto em {datetime.utcnow():%d/%m/%Y}.",
+                notes=f"{note} em {datetime.utcnow():%d/%m/%Y}.",
                 created_by=created_by,
             )
             db.add(client)
@@ -697,37 +734,25 @@ class ProjectClientService:
                 value = getattr(data, field)
                 if value and not getattr(client, field):
                     setattr(client, field, value)
+        return client
 
-        exists = (await db.execute(
-            select(ProjectClientAccess.id).where(
-                ProjectClientAccess.client_id == client.id, ProjectClientAccess.task_id == task_id,
-            )
-        )).scalar_one_or_none()
-        if exists is not None:
-            raise HTTPException(status_code=409, detail=f"{client.full_name} já é cliente deste projeto.")
-
-        reactivated_user: Optional[uuid.UUID] = None
-        if not client.is_active:
-            # Voltou a ser cliente: reativa o cadastro e, se for externo, o login do Portal.
-            client.is_active = True
-            if client.user_id:
-                user = await db.get(User, client.user_id)
-                client_role = await ProjectClientService._get_or_create_client_role(db, tenant_id)
-                if user is not None and user.role_id == client_role.id and not user.is_active:
-                    user.is_active = True
-                    user.updated_at = datetime.utcnow()
-                    reactivated_user = user.id
-        db.add(ProjectClientAccess(
-            client_id=client.id,
-            task_id=task_id,
-            project_role=data.project_role,
-            project_role_other=data.project_role_other,
-            created_by=created_by,
-        ))
-        client.updated_at = datetime.utcnow()
-        await db.commit()
-        if reactivated_user:
-            await invalidate_user(reactivated_user)
+    @staticmethod
+    async def reactivate_for_link(
+        db: AsyncSession, client: ProjectClient, tenant_id: uuid.UUID,
+    ) -> Optional[uuid.UUID]:
+        """Voltou a ser cliente: reativa o cadastro e, se for externo, o login do Portal.
+        Devolve o id do login reativado (para invalidar o cache) ou None."""
+        if client.is_active:
+            return None
+        client.is_active = True
+        if client.user_id:
+            user = await db.get(User, client.user_id)
+            client_role = await ProjectClientService._get_or_create_client_role(db, tenant_id)
+            if user is not None and user.role_id == client_role.id and not user.is_active:
+                user.is_active = True
+                user.updated_at = datetime.utcnow()
+                return user.id
+        return None
 
     @staticmethod
     async def import_request_clients(
@@ -805,125 +830,3 @@ class ProjectClientService:
         access = await ProjectClientService._access(db, task_id, client_id)
         await db.delete(access)
         await db.commit()
-
-    # ── Portal: andamento do projeto ─────────────────────────────────────────
-    @staticmethod
-    def _feature_state(status: Optional[ProjectStatusConfig]) -> str:
-        name = (status.name if status else "") or ""
-        n = name.lower()
-        if status is not None and (status.is_final or "conclu" in n):
-            return "concluida"
-        if "homolog" in n or "valid" in n:
-            return "validacao"
-        if "ajust" in n:
-            return "ajuste"
-        if status is not None and status.is_initial:
-            return "a_iniciar"
-        return "andamento"
-
-    @staticmethod
-    def _as_date(value) -> Optional[date]:
-        """Datas do cronograma são timestamps (meia-noite local gravada em UTC)."""
-        return value.date() if isinstance(value, datetime) else value
-
-    @staticmethod
-    async def portal_project_report(
-        db: AsyncSession, user_id: uuid.UUID, task_id: uuid.UUID,
-    ) -> ClientProjectReport:
-        from sqlalchemy import text as _text
-
-        from app.modules.projetos.service import PoSyncService, ProjectTaskService
-
-        client = await ProjectClientService.get_by_user(db, user_id)
-        if client is None:
-            raise HTTPException(status_code=403, detail="Usuário sem acesso ao Portal do Cliente.")
-        access = next((a for a in client.access if a.task_id == task_id), None)
-        if access is None:
-            raise HTTPException(status_code=404, detail="Projeto não encontrado.")
-        root = (await db.execute(
-            select(ProjectTask).options(selectinload(ProjectTask.status)).where(ProjectTask.id == task_id)
-        )).scalar_one_or_none()
-        if root is None:
-            raise HTTPException(status_code=404, detail="Projeto não encontrado.")
-
-        # Fase e execução: o mesmo cálculo do PO Sync (com cache), para o cliente ver o mesmo
-        # número que a gestão.
-        item = None
-        try:
-            data = await PoSyncService.build(db)
-            item = next(
-                (p for grupo in data.get("por_po", []) for p in grupo.get("projetos", [])
-                 if p.get("task_id") == str(task_id)),
-                None,
-            )
-        except Exception:  # noqa: BLE001 — sem o PO Sync, cai no cálculo local da fase
-            item = None
-
-        # Features da árvore do projeto (kanban Features) e contagem das User Stories delas.
-        rows = (await db.execute(_text("""
-            WITH RECURSIVE tree AS (
-                SELECT id FROM project_tasks WHERE id = :root
-                UNION ALL
-                SELECT t.id FROM project_tasks t JOIN tree ON t.parent_task_id = tree.id
-            )
-            SELECT t.id, t.parent_task_id, t.title, t.start_date, t.due_date, t.status_id, f.name
-              FROM project_tasks t
-              JOIN tree ON tree.id = t.id
-              LEFT JOIN project_status_configs s ON s.id = t.status_id
-              LEFT JOIN project_funnels f ON f.id = s.funnel_id
-             WHERE t.id <> :root
-        """), {"root": task_id})).all()
-        status_ids = {r[5] for r in rows if r[5]}
-        statuses: dict[uuid.UUID, ProjectStatusConfig] = {}
-        if status_ids:
-            statuses = {
-                s.id: s for s in (await db.execute(
-                    select(ProjectStatusConfig).where(ProjectStatusConfig.id.in_(status_ids))
-                )).scalars()
-            }
-        feature_rows = [r for r in rows if ProjectTaskService._is_feature_funnel_name(r[6])]
-        us_by_feature: dict[uuid.UUID, list[str]] = {}
-        for r in rows:
-            if ProjectTaskService._is_user_story_funnel_name(r[6]) and r[1]:
-                us_by_feature.setdefault(r[1], []).append(
-                    ProjectClientService._feature_state(statuses.get(r[5]))
-                )
-        features = []
-        for r in feature_rows:
-            st = statuses.get(r[5])
-            us = us_by_feature.get(r[0], [])
-            features.append(ClientProjectFeature(
-                title=r[2],
-                status_name=st.name if st else None,
-                state=ProjectClientService._feature_state(st),
-                start_date=ProjectClientService._as_date(r[3]),
-                due_date=ProjectClientService._as_date(r[4]),
-                us_total=len(us),
-                us_done=sum(1 for x in us if x == "concluida"),
-            ))
-        features.sort(key=lambda f: (f.due_date is None, f.due_date or f.start_date or date.max, f.title.lower()))
-
-        stage = root.status.name if root.status else None
-        po_name = item.get("po") if item else None
-        if po_name is None and root.assigned_to:
-            from app.modules.teamops.models import Person
-
-            person = await db.get(Person, root.assigned_to)
-            po_name = person.full_name if person else None
-        return ClientProjectReport(
-            task_id=root.id,
-            title=root.title,
-            planning_kind=root.planning_kind,
-            my_role_label=project_role_label(access.project_role, access.project_role_other) or None,
-            po_name=po_name,
-            stage_name=stage,
-            phase=(item or {}).get("fase") or PoSyncService._project_phase(root),
-            in_assisted_operation=ProjectTaskService._is_assisted_operation_status(root.status),
-            paused="paus" in (stage or "").lower(),
-            exec_pct=(item or {}).get("exec_pct"),
-            start_date=ProjectClientService._as_date(root.start_date),
-            due_date=ProjectClientService._as_date(root.due_date),
-            completed_at=root.completed_at,
-            features=features,
-            updated_at=root.updated_at,
-        )

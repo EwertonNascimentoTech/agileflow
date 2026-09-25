@@ -15,10 +15,22 @@ from app.modules.projetos.api.routes import (
     _po_external_scope,
 )
 from app.modules.projetos.assisted_ops import AssistedOpsService
+from app.modules.projetos.ai_solutions import AiSolutionsService
 from app.modules.projetos.clients import ProjectClientService
+from app.modules.projetos.portal_assistant import PortalAssistantService
+from app.modules.projetos.program_portal import PortalPortfolioService, ProgramAdminService
 from app.modules.projetos.schemas import (
+    PortalAssistantAnswer,
+    PortalAssistantAsk,
+    AiSolutionCancel,
+    AiSolutionCreate,
+    AiSolutionDetail,
+    AiSolutionForm,
+    AiSolutionHomologation,
+    AiSolutionReady,
+    AiSolutionResubmit,
+    AiSolutionSummary,
     AssistedOpsDevResponse,
-    ClientProjectReport,
     ProjectClientCandidates,
     ProjectClientMemberAdd,
     ProjectClientMembers,
@@ -45,6 +57,7 @@ from app.modules.projetos.schemas import (
 router = APIRouter(prefix="/projetos", tags=["Projetos - Operação Assistida"])
 
 _can_client_manage = require_permission("projetos.client.manage")
+_can_program_manage = require_permission("projetos.program.manage")
 _can_task_manage = require_permission("projetos.task.manage")
 # Portal: única entrada do cliente externo no sistema.
 _portal_ctx = require_module("projetos", allow_client=True)
@@ -213,12 +226,136 @@ async def remove_project_client_member(
     return await ProjectClientService.list_members(ctx.db, task_id, ctx.user)
 
 
+# ── Clientes do programa (cadastro de Programas): veem todos os projetos no Portal ──
+
+@router.get("/programs/{program_id}/clients", response_model=ProjectClientMembers)
+async def list_program_clients(
+    program_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_program_manage),
+):
+    return await ProgramAdminService.list_clients(ctx.db, program_id)
+
+
+@router.get("/programs/{program_id}/clients/candidates", response_model=ProjectClientCandidates)
+async def search_program_client_candidates(
+    program_id: uuid.UUID,
+    q: str = Query("", max_length=120),
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_program_manage),
+):
+    return await ProgramAdminService.search_candidates(ctx.db, program_id, q, ctx.user.tenant_id)
+
+
+@router.post("/programs/{program_id}/clients", response_model=ProjectClientMembers, status_code=201)
+async def add_program_client(
+    program_id: uuid.UUID, data: ProjectClientMemberAdd, ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_program_manage),
+):
+    return await ProgramAdminService.add_client(ctx.db, program_id, data, ctx.user.tenant_id, ctx.user.id)
+
+
+@router.patch("/programs/{program_id}/clients/{client_id}", response_model=ProjectClientMembers)
+async def update_program_client(
+    program_id: uuid.UUID, client_id: uuid.UUID, data: ProjectClientMemberUpdate,
+    ctx: ModuleContext = Depends(_ctx), _=Depends(_can_program_manage),
+):
+    return await ProgramAdminService.update_client(ctx.db, program_id, client_id, data)
+
+
+@router.delete("/programs/{program_id}/clients/{client_id}", response_model=ProjectClientMembers)
+async def remove_program_client(
+    program_id: uuid.UUID, client_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_program_manage),
+):
+    return await ProgramAdminService.remove_client(ctx.db, program_id, client_id)
+
+
 # ── Portal do Cliente ────────────────────────────────────────────────────────
 
-@router.get("/portal/projects/{task_id}/report", response_model=ClientProjectReport)
-async def portal_project_report(task_id: uuid.UUID, ctx: ModuleContext = Depends(_portal_ctx)):
-    """Andamento do projeto para o cliente vinculado (fase, execução, Features e prazos)."""
-    return await ProjectClientService.portal_project_report(ctx.db, ctx.user.id, task_id)
+@router.get("/portal/portfolio")
+async def portal_portfolio(ctx: ModuleContext = Depends(_portal_ctx)):
+    """Visão geral do cliente: mapa Impacto × Esforço, programas e projetos que ele acompanha."""
+    return await PortalPortfolioService.portfolio(ctx.db, ctx.user.id)
+
+
+@router.get("/portal/projects/{task_id}")
+async def portal_project(task_id: uuid.UUID, ctx: ModuleContext = Depends(_portal_ctx)):
+    """Projeto: indicadores, árvore Feature → User Story e roadmap (mesma visão do programa)."""
+    return await PortalPortfolioService.project(ctx.db, ctx.user.id, task_id)
+
+
+@router.get("/portal/programs/{program_id}")
+async def portal_program(program_id: uuid.UUID, ctx: ModuleContext = Depends(_portal_ctx)):
+    """Programa: cabeçalho, pilares, projetos com Features/US e roadmap."""
+    return await PortalPortfolioService.program(ctx.db, ctx.user.id, program_id)
+
+
+@router.get("/portal/deliveries")
+async def portal_deliveries(ctx: ModuleContext = Depends(_portal_ctx)):
+    """Entregas e Marcos: Features concluídas e previstas e a entrega de cada projeto."""
+    return await PortalPortfolioService.deliveries(ctx.db, ctx.user.id)
+
+
+@router.post("/portal/assistant", response_model=PortalAssistantAnswer)
+async def portal_assistant(data: PortalAssistantAsk, ctx: ModuleContext = Depends(_portal_ctx)):
+    """Assistente do Portal: responde sobre o que a pessoa vê no Portal (dados anonimizados antes da IA)."""
+    return await PortalAssistantService.ask(ctx.db, ctx.user.id, data)
+
+# ── Portal: Soluções com IA ─────────────────────────────────────────────────
+
+@router.get("/portal/ai-solutions/form", response_model=AiSolutionForm)
+async def portal_ai_solution_form(ctx: ModuleContext = Depends(_portal_ctx)):
+    """Campos do pedido (seção "Pedido do cliente" do tipo Solicitar análise de solução com IA)."""
+    return await AiSolutionsService.form(ctx.db)
+
+
+@router.get("/portal/ai-solutions", response_model=list[AiSolutionSummary])
+async def portal_ai_solutions(ctx: ModuleContext = Depends(_portal_ctx)):
+    return await AiSolutionsService.portal_list(ctx.db, ctx.user)
+
+
+@router.post("/portal/ai-solutions", response_model=AiSolutionDetail, status_code=201)
+async def portal_ai_solution_create(data: AiSolutionCreate, ctx: ModuleContext = Depends(_portal_ctx)):
+    return await AiSolutionsService.portal_create(ctx.db, ctx.user, data)
+
+
+@router.get("/portal/ai-solutions/{task_id}", response_model=AiSolutionDetail)
+async def portal_ai_solution_detail(task_id: uuid.UUID, ctx: ModuleContext = Depends(_portal_ctx)):
+    return await AiSolutionsService.portal_detail(ctx.db, ctx.user, task_id)
+
+
+@router.post("/portal/ai-solutions/{task_id}/resubmit", response_model=AiSolutionDetail)
+async def portal_ai_solution_resubmit(
+    task_id: uuid.UUID, data: AiSolutionResubmit, ctx: ModuleContext = Depends(_portal_ctx),
+):
+    return await AiSolutionsService.portal_resubmit(ctx.db, ctx.user, task_id, data)
+
+
+@router.post("/portal/ai-solutions/{task_id}/ready", response_model=AiSolutionDetail)
+async def portal_ai_solution_ready(
+    task_id: uuid.UUID, data: AiSolutionReady, ctx: ModuleContext = Depends(_portal_ctx),
+):
+    return await AiSolutionsService.portal_ready(ctx.db, ctx.user, task_id, data)
+
+
+@router.post("/portal/ai-solutions/{task_id}/homologation", response_model=AiSolutionDetail)
+async def portal_ai_solution_homologate(
+    task_id: uuid.UUID, data: AiSolutionHomologation, ctx: ModuleContext = Depends(_portal_ctx),
+):
+    return await AiSolutionsService.portal_homologate(ctx.db, ctx.user, task_id, data)
+
+
+@router.post("/portal/ai-solutions/{task_id}/cancel", response_model=AiSolutionDetail)
+async def portal_ai_solution_cancel(
+    task_id: uuid.UUID, data: AiSolutionCancel, ctx: ModuleContext = Depends(_portal_ctx),
+):
+    return await AiSolutionsService.portal_cancel(ctx.db, ctx.user, task_id, data)
+
+
+@router.post("/portal/ai-solutions/{task_id}/comments", response_model=AiSolutionDetail, status_code=201)
+async def portal_ai_solution_comment(
+    task_id: uuid.UUID, data: OccurrenceCommentCreate, ctx: ModuleContext = Depends(_portal_ctx),
+):
+    return await AiSolutionsService.portal_comment(ctx.db, ctx.user, task_id, data)
 
 
 @router.get("/portal/projects", response_model=list[PortalProject])

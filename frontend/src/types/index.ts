@@ -50,6 +50,8 @@ export interface User {
   position_slug: string | null  // slug do cargo no TeamOps (ex: "coordenador")
   is_client?: boolean  // cliente externo da Operação Assistida (só o Portal do Cliente)
   has_client_portal?: boolean  // tem acesso ao Portal do Cliente (externo ou colaborador interno)
+  has_team_portal?: boolean  // pessoa ativa em Times: vê o Portal em "modo cliente" (projetos em que atua; coordenação, todos)
+  team_sees_all?: boolean  // equipe com visão de tudo no Modo Cliente: lê Ocorrências e Soluções com IA
   tenant_id: string | null
   is_active: boolean
   last_login: string | null

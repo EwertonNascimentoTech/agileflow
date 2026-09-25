@@ -113,6 +113,9 @@ class Settings(BaseSettings):
     AZURE_AI_TENANT_ID: str = ""
     AZURE_AI_CLIENT_ID: str = ""
     AZURE_AI_CLIENT_SECRET: str = ""
+    # Assistente do Portal do Cliente: agente próprio (opcional). Vazio = reaproveita o agente
+    # do primeiro binding de etapa ativo, com as instruções do assistente passadas na execução.
+    AZURE_AI_PORTAL_AGENT_ID: str = ""
 
     # ── Azure DevOps — commits dos repositórios vinculados aos produtos ──
     # PAT único da instituição (escopo mínimo: Code → Read). Sem PAT a integração fica

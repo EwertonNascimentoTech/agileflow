@@ -10,6 +10,10 @@ import { EmptyState } from "@/components/EmptyState"
 import { Skeleton } from "@/components/ui/skeleton"
 import { CreateDemandDialog } from "@/modules/projetos/CreateDemandDialog"
 import { toast } from "@/lib/toast"
+import { PORTAL_MODULE_BASE } from "@/modules/portal/portfolioMeta"
+
+/** Tipo "Solicitar análise de solução com IA" (AiSolutionsService.DEMAND_TYPE_SLUG). */
+const AI_SOLUTION_SLUG = "solucao_ia"
 
 export default function BasicNewRequestPage() {
   const navigate = useNavigate()
@@ -81,7 +85,11 @@ export default function BasicNewRequestPage() {
             <button
               key={type.id}
               type="button"
-              onClick={() => setSelectedType(type)}
+              onClick={() => {
+                // Solução com IA tem fluxo próprio (IA-0001, ações do solicitante): abre o pedido no Modo Cliente.
+                if (type.slug === AI_SOLUTION_SLUG) navigate(`${PORTAL_MODULE_BASE}/solucoes-ia/nova`)
+                else setSelectedType(type)
+              }}
               className="group text-left rounded-xl border bg-card p-4 transition hover:border-primary/50 hover:shadow-sm flex flex-col gap-3"
             >
               <div className="flex items-start justify-between gap-2">

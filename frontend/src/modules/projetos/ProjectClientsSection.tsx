@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Loader2, Plus, Trash2, Users } from "lucide-react"
 
 import {
   PROJECT_CLIENT_ROLE_LABEL,
+  programClientsApi,
   projectClientsApi,
   type ProjectClientMember,
   type ProjectClientRole,
@@ -21,8 +22,12 @@ function apiError(err: unknown, fallback: string): string {
 
 /** Clientes do projeto (card-raiz do kanban Projetos e Programas): quem acompanha o andamento
  *  no Portal do Cliente, com a função de cada um. O PO do projeto e a coordenação adicionam e
- *  retiram a qualquer momento; os demais só veem — e, sem clientes, o bloco nem aparece. */
-export function ProjectClientsSection({ projectTaskId }: { projectTaskId: string }) {
+ *  retiram a qualquer momento; os demais só veem — e, sem clientes, o bloco nem aparece.
+ *  Com `programId`, são os clientes do Programa (veem todos os projetos dele no Portal). */
+export function ProjectClientsSection({ projectTaskId, programId }: { projectTaskId?: string; programId?: string }) {
+  const targetId = programId ?? projectTaskId ?? ""
+  const noun = programId ? "programa" : "projeto"
+  const membersApi = useMemo(() => (programId ? programClientsApi : projectClientsApi), [programId])
   const [members, setMembers] = useState<ProjectClientMember[]>([])
   const [canManage, setCanManage] = useState(false)
   const [loaded, setLoaded] = useState(false)
@@ -31,16 +36,16 @@ export function ProjectClientsSection({ projectTaskId }: { projectTaskId: string
 
   useEffect(() => {
     setLoaded(false)
-    projectClientsApi
-      .list(projectTaskId)
+    membersApi
+      .list(targetId)
       .then((r) => { setMembers(r.members); setCanManage(r.can_manage) })
       .catch(() => { setMembers([]); setCanManage(false) })
       .finally(() => setLoaded(true))
-  }, [projectTaskId])
+  }, [membersApi, targetId])
 
   async function add(c: PickedClient): Promise<boolean> {
     try {
-      const r = await projectClientsApi.add(projectTaskId, {
+      const r = await membersApi.add(targetId, {
         client_id: c.client_id,
         email: c.client_id ? null : c.email,
         full_name: c.full_name || null,
@@ -51,7 +56,7 @@ export function ProjectClientsSection({ projectTaskId }: { projectTaskId: string
         project_role_other: c.project_role_other,
       })
       setMembers(r.members)
-      toast.success(`${c.full_name || c.email} agora é cliente do projeto.`)
+      toast.success(`${c.full_name || c.email} agora é cliente do ${noun}.`)
       setAdding(false)
       return true
     } catch (err) {
@@ -63,12 +68,12 @@ export function ProjectClientsSection({ projectTaskId }: { projectTaskId: string
   async function changeRole(m: ProjectClientMember, next: ProjectClientRole) {
     let other: string | null = null
     if (next === "outro") {
-      other = window.prompt(`Função de ${m.full_name} no projeto:`, m.project_role_other ?? "")?.trim() ?? ""
+      other = window.prompt(`Função de ${m.full_name} no ${noun}:`, m.project_role_other ?? "")?.trim() ?? ""
       if (!other) return
     }
     setBusyId(m.client_id)
     try {
-      const r = await projectClientsApi.update(projectTaskId, m.client_id, { project_role: next, project_role_other: other })
+      const r = await membersApi.update(targetId, m.client_id, { project_role: next, project_role_other: other })
       setMembers(r.members)
     } catch (err) {
       toast.error(apiError(err, "Não foi possível alterar a função."))
@@ -78,12 +83,12 @@ export function ProjectClientsSection({ projectTaskId }: { projectTaskId: string
   }
 
   async function remove(m: ProjectClientMember) {
-    if (!window.confirm(`Retirar ${m.full_name} dos clientes deste projeto? Ele deixa de ver o projeto no Portal.`)) return
+    if (!window.confirm(`Retirar ${m.full_name} dos clientes deste ${noun}? Deixa de ver o ${noun} no Portal.`)) return
     setBusyId(m.client_id)
     try {
-      const r = await projectClientsApi.remove(projectTaskId, m.client_id)
+      const r = await membersApi.remove(targetId, m.client_id)
       setMembers(r.members)
-      toast.success(`${m.full_name} saiu dos clientes do projeto.`)
+      toast.success(`${m.full_name} saiu dos clientes do ${noun}.`)
     } catch (err) {
       toast.error(apiError(err, "Não foi possível retirar o cliente."))
     } finally {
@@ -99,7 +104,7 @@ export function ProjectClientsSection({ projectTaskId }: { projectTaskId: string
         <div className="flex items-center gap-2">
           <Users size={14} className="text-sky-600" />
           <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-sky-700 dark:text-sky-400">
-            Clientes do projeto
+            Clientes do {noun}
           </p>
           {members.length > 0 && <span className="text-[11px] text-muted-foreground">({members.length})</span>}
         </div>
@@ -109,7 +114,11 @@ export function ProjectClientsSection({ projectTaskId }: { projectTaskId: string
           </Button>
         )}
       </div>
-      <p className="text-xs text-muted-foreground">Acompanham o andamento deste projeto no Portal do Cliente.</p>
+      <p className="text-xs text-muted-foreground">
+        {programId
+          ? "Veem no Portal do Cliente todos os projetos deste programa. Quem tem a função Sponsor aparece como Patrocinador."
+          : "Acompanham o andamento deste projeto no Portal do Cliente."}
+      </p>
 
       {members.length > 0 && (
         <div className="space-y-1.5">
@@ -141,7 +150,7 @@ export function ProjectClientsSection({ projectTaskId }: { projectTaskId: string
                   </Select>
                   <Button
                     variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                    title="Retirar do projeto" disabled={busyId === m.client_id}
+                    title={`Retirar do ${noun}`} disabled={busyId === m.client_id}
                     onClick={() => void remove(m)}
                   >
                     {busyId === m.client_id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
@@ -161,7 +170,7 @@ export function ProjectClientsSection({ projectTaskId }: { projectTaskId: string
 
       {canManage && adding && (
         <ClientPicker
-          search={(q) => projectClientsApi.candidates(projectTaskId, q)}
+          search={(q) => membersApi.candidates(targetId, q)}
           onPick={add}
           onCancel={() => setAdding(false)}
           excludeEmails={members.map((m) => m.email)}

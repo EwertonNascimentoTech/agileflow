@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
-import { Layers, Loader2, Pencil, Plus, Trash2 } from "lucide-react"
+import { Link } from "react-router-dom"
+import { Layers, Loader2, Pencil, Plus, Settings2, Trash2 } from "lucide-react"
 
 import { projetosApi, type ProjectProgram } from "@/api/projetos"
 import { teamopsApi, type Person } from "@/api/teamops"
@@ -14,11 +15,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "@/lib/toast"
 import { useAuth } from "@/contexts/AuthContext"
 import { hasPermission } from "@/lib/permissions"
+import { IconTile } from "@/modules/portal/portfolioUi"
+import { ProgramAppearanceFields } from "@/modules/projetos/ProgramAppearanceFields"
+import { colorFor } from "@/modules/portal/portfolioMeta"
 
 const NONE = "__none__"
 
-type Form = { name: string; description: string; responsavelId: string; isActive: boolean }
-const emptyForm = (): Form => ({ name: "", description: "", responsavelId: NONE, isActive: true })
+type Form = {
+  name: string
+  description: string
+  responsavelId: string
+  isActive: boolean
+  icon: string | null
+  color: string | null
+  oaDays: number
+}
+const emptyForm = (): Form => ({ name: "", description: "", responsavelId: NONE, isActive: true, icon: null, color: null, oaDays: 30 })
 
 export default function ProjectProgramsPage() {
   const { user } = useAuth()
@@ -59,6 +71,9 @@ export default function ProjectProgramsPage() {
       description: p.description ?? "",
       responsavelId: p.responsavel_person_id ?? NONE,
       isActive: p.is_active,
+      icon: p.icon,
+      color: p.color,
+      oaDays: p.oa_days ?? 30,
     })
     setOpen(true)
   }
@@ -75,6 +90,9 @@ export default function ProjectProgramsPage() {
         description: form.description.trim() || null,
         responsavel_person_id: form.responsavelId === NONE ? null : form.responsavelId,
         is_active: form.isActive,
+        icon: form.icon,
+        color: form.color,
+        oa_days: Math.max(0, Math.min(365, Math.round(form.oaDays || 0))),
       }
       if (editing) {
         await projetosApi.updateProgram(editing.id, payload)
@@ -110,6 +128,7 @@ export default function ProjectProgramsPage() {
           <h1 className="text-xl font-bold">Programa</h1>
           <p className="text-sm text-muted-foreground">
             Cadastro de programas (nome, descrição e responsável). Cards podem ser vinculados a um programa na conversão.
+            Em "Gerenciar": pilares, pilar de cada projeto e clientes que veem o programa no Portal.
           </p>
         </div>
         {canManage && <Button className="gap-1.5" onClick={openCreate}><Plus size={15} /> Novo programa</Button>}
@@ -130,13 +149,18 @@ export default function ProjectProgramsPage() {
                 <th className="px-3 py-2 font-semibold">Responsável</th>
                 <th className="px-3 py-2 font-semibold">Descrição</th>
                 <th className="px-3 py-2 font-semibold">Status</th>
-                <th className="w-20 px-3 py-2"></th>
+                <th className="w-44 px-3 py-2"></th>
               </tr>
             </thead>
             <tbody>
               {programs.map((p) => (
                 <tr key={p.id} className="border-t">
-                  <td className="px-3 py-2 font-medium">{p.name}</td>
+                  <td className="px-3 py-2 font-medium">
+                    <span className="flex items-center gap-2">
+                      <IconTile icon={p.icon} color={colorFor(p.color, p.id)} size={28} />
+                      {p.name}
+                    </span>
+                  </td>
                   <td className="px-3 py-2 text-muted-foreground">{p.responsavel_nome ?? personName(p.responsavel_person_id)}</td>
                   <td className="max-w-[28rem] truncate px-3 py-2 text-muted-foreground">{p.description ?? "—"}</td>
                   <td className="px-3 py-2">
@@ -146,6 +170,9 @@ export default function ProjectProgramsPage() {
                   </td>
                   <td className="px-3 py-2 text-right">
                     {canManage && <div className="flex items-center justify-end gap-0.5">
+                      <Button asChild variant="ghost" size="sm" className="gap-1 text-muted-foreground hover:text-primary">
+                        <Link to={`/app/modules/projetos/programas/${p.id}`}><Settings2 size={14} /> Gerenciar</Link>
+                      </Button>
                       <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-primary" onClick={() => openEdit(p)}>
                         <Pencil size={14} />
                       </Button>
@@ -162,7 +189,7 @@ export default function ProjectProgramsPage() {
       )}
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editing ? "Editar programa" : "Novo programa"}</DialogTitle>
           </DialogHeader>
@@ -187,6 +214,18 @@ export default function ProjectProgramsPage() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="pg-oa">Operação Assistida prevista (dias)</Label>
+              <Input id="pg-oa" type="number" min={0} max={365} value={form.oaDays}
+                onChange={(e) => setForm((f) => ({ ...f, oaDays: Number(e.target.value) }))} className="w-32" />
+              <p className="text-xs text-muted-foreground">Usado no roadmap do Portal para prever a fase depois da entrega.</p>
+            </div>
+            <ProgramAppearanceFields
+              icon={form.icon}
+              color={form.color}
+              onIcon={(v) => setForm((f) => ({ ...f, icon: v }))}
+              onColor={(v) => setForm((f) => ({ ...f, color: v }))}
+            />
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={form.isActive} onChange={(e) => setForm((f) => ({ ...f, isActive: e.target.checked }))}
                 className="h-4 w-4 rounded border-input accent-primary" />

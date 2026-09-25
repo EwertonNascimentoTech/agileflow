@@ -70,6 +70,10 @@ export interface ProjectStatus {
   is_assisted_operation?: boolean
   /** Etapa do kanban de Ocorrências (backlog, aguardando_cliente, ajustando, ...). */
   assisted_stage_key?: string | null
+  /** Etapa do kanban Soluções com IA (chave fixa). */
+  ai_stage_key?: string | null
+  /** Entrar nesta etapa exige motivo (428 stage_reason_required). */
+  entry_reason_required?: boolean
   created_at: string
   updated_at: string
 }
@@ -134,6 +138,8 @@ export interface ProjectTask {
   assisted_op_entered_at?: string | null
   /** Justificativa de ir a Concluído sem passar pela Operação Assistida. */
   assisted_op_skip_reason?: string | null
+  /** Motivo ao entrar em etapa que o exige ou ao voltar etapa (Soluções com IA). */
+  stage_reason?: string | null
   status_entered_at: string | null
   /** Justificativa de ausência de commit (exigida ao enviar a US para Homologação do PO). */
   commit_justificativa?: string | null
@@ -429,6 +435,11 @@ export interface ProjectProgram {
   description: string | null
   responsavel_person_id: string | null
   responsavel_nome: string | null
+  /** Ícone lucide (nome) e cor hex no Portal do Cliente. */
+  icon: string | null
+  color: string | null
+  /** Roadmap do Portal: dias previstos de Operação Assistida depois da entrega. */
+  oa_days: number
   is_active: boolean
   created_at: string
   updated_at: string
@@ -438,7 +449,46 @@ export interface ProjectProgramInput {
   name: string
   description?: string | null
   responsavel_person_id?: string | null
+  icon?: string | null
+  color?: string | null
+  oa_days?: number
   is_active?: boolean
+}
+
+export interface ProgramPillar {
+  id: string
+  program_id: string
+  name: string
+  description: string | null
+  icon: string | null
+  color: string | null
+  order: number
+  project_count: number
+}
+
+export interface ProgramPillarInput {
+  name: string
+  description?: string | null
+  icon?: string | null
+  color?: string | null
+  order?: number | null
+}
+
+export interface ProgramProjectRow {
+  task_id: string
+  title: string
+  planning_kind: string | null
+  stage_name: string | null
+  area: string | null
+  area_label: string | null
+  po_name: string | null
+  pillar_id: string | null
+}
+
+export interface ProgramAdminDetail {
+  program: ProjectProgram
+  pillars: ProgramPillar[]
+  projects: ProgramProjectRow[]
 }
 
 export interface ProjectAgentExecution {
@@ -2014,6 +2064,7 @@ export const projetosApi = {
     us_checklist: UsChecklistItem[] | null
     commit_justificativa: string | null
     assisted_op_skip_reason: string
+    stage_reason: string
   }>) => api.patch<ProjectTask>(`/projetos/projects/${projectId}/tasks/${taskId}`, data).then((r) => r.data),
   setPlanningClassification: (projectId: string, taskId: string, data: {
     kind: "projeto" | "programa"
@@ -2336,6 +2387,23 @@ export const projetosApi = {
     api.patch<ProjectProgram>(`/projetos/programs/${programId}`, data).then((r) => r.data),
   deleteProgram: (programId: string) =>
     api.delete<void>(`/projetos/programs/${programId}`).then((r) => r.data),
+  // Programa: pilares e pilar de cada projeto (Portal do Cliente).
+  programAdmin: (programId: string) =>
+    api.get<ProgramAdminDetail>(`/projetos/programs/${programId}/admin`).then((r) => r.data),
+  createProgramPillar: (programId: string, data: ProgramPillarInput) =>
+    api.post<ProgramAdminDetail>(`/projetos/programs/${programId}/pillars`, data).then((r) => r.data),
+  updateProgramPillar: (programId: string, pillarId: string, data: ProgramPillarInput) =>
+    api.patch<ProgramAdminDetail>(`/projetos/programs/${programId}/pillars/${pillarId}`, data).then((r) => r.data),
+  deleteProgramPillar: (programId: string, pillarId: string) =>
+    api.delete<ProgramAdminDetail>(`/projetos/programs/${programId}/pillars/${pillarId}`).then((r) => r.data),
+  suggestProgramPillars: (programId: string) =>
+    api
+      .post<{ created: number; assigned: number; detail: ProgramAdminDetail }>(`/projetos/programs/${programId}/pillars/suggest`)
+      .then((r) => r.data),
+  setProgramProjectPillar: (programId: string, taskId: string, pillarId: string | null) =>
+    api
+      .put<ProgramAdminDetail>(`/projetos/programs/${programId}/projects/${taskId}/pillar`, { pillar_id: pillarId })
+      .then((r) => r.data),
   listTaskAgentExecutions: (taskId: string) =>
     api.get<ProjectAgentExecution[]>(`/projetos/tasks/${taskId}/agent-executions`).then((r) => r.data),
   listAgentExecutionLogs: (params?: {

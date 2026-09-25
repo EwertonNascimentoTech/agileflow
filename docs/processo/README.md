@@ -13,3 +13,5 @@ Público-alvo: analistas de processo, auditoria e quem modela BPMN.
 
 Visão Mermaid para negócio: [`docs/usuario/05-fluxo-processo-negocio.md`](../usuario/05-fluxo-processo-negocio.md).  
 Implementação no código: [`docs/técnico/05-gestao-projetos-demandas.md`](../técnico/05-gestao-projetos-demandas.md).
+- [06 — Soluções com IA](06-solucoes-com-ia.md): pedido pelo Portal, análise, construção pelo cliente, adequação, homologação, segurança e produção.
+- [07 — Portal do Cliente: portfólio, programas e roadmap](07-portal-cliente-programas.md): o que o cliente vê, de onde vem cada número e como configurar pilares e clientes do programa.

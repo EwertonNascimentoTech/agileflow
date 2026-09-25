@@ -29,7 +29,7 @@ O texto antigo deste arquivo descrevia só Atendimento/CRM. Isso **não é mais 
 
 ## Módulos ativos
 
-`projetos` (Processos) · `teamops` · `produtos` · `indicadores` · `rtd` · `documentacao`
+`projetos` (Processos) · `teamops` · `produtos` · `indicadores` · `rtd` · `documentacao` · `portal_cliente` (Modo Cliente: Portal do Cliente dentro do app para a equipe)
 
 Desativados (não reativar sem pedido): `crm`, `estoque`, `pdv`, `atendimento`, `propostas_contratos`.
 

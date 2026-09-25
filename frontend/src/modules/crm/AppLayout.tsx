@@ -182,16 +182,20 @@ export default function AppLayout() {
     }
 
     // Admin vê tudo (["*"]); demais só os módulos onde o cargo tem ≥1 permissão.
-    // documentacao já passa em canSeeModule para todos.
-    const visibleModules = isAdmin
-      ? modules
-      : modules.filter(
-          (m) =>
-            canSeeModule(user?.permissions, m.slug) &&
-            // PO Externo é de fora da casa: Pessoas, Indicadores e RTD ficam fora do rail
-            // (a role dele já não recebe essas permissões; isto cobre roles legadas).
-            !(isExternalPO && EXTERNAL_PO_BLOCKED_MODULES.includes(m.slug)),
-        )
+    // documentacao já passa em canSeeModule para todos. Modo Cliente não depende de
+    // permissão: aparece para quem está em Times (ou tem cadastro de cliente) — o que cada um
+    // vê lá dentro é decidido no backend (coordenação, todos; PO e dev, os projetos em que atuam).
+    const canSeeClientMode = !!(user?.has_team_portal || user?.has_client_portal)
+    const visibleModules = modules.filter((m) => {
+      if (m.slug === "portal_cliente") return canSeeClientMode
+      if (isAdmin) return true
+      return (
+        canSeeModule(user?.permissions, m.slug) &&
+        // PO Externo é de fora da casa: Pessoas, Indicadores e RTD ficam fora do rail
+        // (a role dele já não recebe essas permissões; isto cobre roles legadas).
+        !(isExternalPO && EXTERNAL_PO_BLOCKED_MODULES.includes(m.slug))
+      )
+    })
 
     const items: RailItem[] = [
       { key: "home", label: "Visão geral", icon: LayoutDashboard, to: "/app/dashboard" },
@@ -210,7 +214,7 @@ export default function AppLayout() {
       { key: "settings", label: "Configurações", icon: Settings, to: "/app/settings", pinBottom: true },
     ]
     return items
-  }, [isBasicUser, isAdmin, modules, user?.permissions, basicMyRequestsRoute, needsSolicitacoesShortcut, isExternalPO])
+  }, [isBasicUser, isAdmin, modules, user?.permissions, user?.has_team_portal, user?.has_client_portal, basicMyRequestsRoute, needsSolicitacoesShortcut, isExternalPO])
 
   // Cabeçalho + seções da sidebar conforme o contexto ativo
   const { sidebarTitle, sidebarIcon, sidebarColor, sections } = useMemo(() => {
@@ -247,6 +251,9 @@ export default function AppLayout() {
         }
         // PO Externo não tem visão do portfólio inteiro — só dos projetos que lidera.
         if (item.hiddenForExternalPO && isExternalPO) return false
+        // Ocorrências e soluções com IA (Modo Cliente): do cliente; a equipe com visão de tudo
+        // (coordenação/gestão, inclui Administrativo) também vê, só para leitura.
+        if (item.requiresClientPortal && !user?.has_client_portal && !user?.team_sees_all) return false
         // Itens com permissão exigida só aparecem se a função tiver alguma delas.
         if (item.requiredAnyPermission && !isAdmin) {
           return hasAnyPermission(user?.permissions, item.requiredAnyPermission)
@@ -277,7 +284,7 @@ export default function AppLayout() {
       sidebarColor: undefined,
       sections: homeSections,
     }
-  }, [activeModuleSlug, activeModule, inSettings, isAdmin, isBasicUser, basicNewRequestRoute, basicMyRequestsRoute, user?.permissions, needsSolicitacoesShortcut, inSolicitacoes, isExternalPO])
+  }, [activeModuleSlug, activeModule, inSettings, isAdmin, isBasicUser, basicNewRequestRoute, basicMyRequestsRoute, user?.permissions, user?.has_client_portal, needsSolicitacoesShortcut, inSolicitacoes, isExternalPO])
 
   // Seção atual (para o breadcrumb) — match mais específico vence
   const currentSectionLabel = useMemo(() => {
@@ -369,17 +376,6 @@ export default function AppLayout() {
           <Button variant="ghost" size="icon" className="h-9 w-9" onClick={toggleTheme} aria-label="Alternar tema">
             {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
           </Button>
-          {user?.has_client_portal && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 px-2 text-xs text-muted-foreground"
-              onClick={() => navigate("/portal")}
-              title="Portal do Cliente (Operação Assistida)"
-            >
-              Portal do Cliente
-            </Button>
-          )}
           <NotificationBell />
         </header>
         {searchOpen && <GlobalSearch onClose={() => setSearchOpen(false)} />}

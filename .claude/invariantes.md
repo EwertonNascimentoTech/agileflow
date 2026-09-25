@@ -82,6 +82,28 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 - Capacidade de Projetos conta só User Story; Operação Assistida e Chamados são fatias separadas (`reserves`), pela divisão da jornada em Pessoas.
 - Divisão da jornada (Pessoas): Projetos % + Operação Assistida % <= 100; Chamados = o resto. `project_hours_per_day` continua só a fatia de Projetos.
 
+## Portal do Cliente — Programas (2026-09-25)
+
+- Programa = cadastro de Programas; projetos do programa = cards de Projetos e Programas com `linked_program_id` (projeto ou programa). Card cancelado fica fora do portfólio.
+- Cliente do programa (`project_program_client_access`) vê todos os projetos do programa; cliente do projeto vê só o projeto (na tela do programa, só os dele, com aviso). Vínculo pelo programa é só leitura: ocorrência continua exigindo vínculo com o projeto na raia Operação Assistida.
+- Patrocinador do programa = cliente com função `sponsor` no programa. Pilar é do programa (`project_program_pillars`); `program_pillar_id` do card é limpo quando o card troca de programa ou o pilar é excluído.
+- Números do Portal = os da gestão: fase e execução do PO Sync (planejamento conta 0%, concluído 100%), quadrante e nomes da Config -> Priorização. Saúde = régua do Status Report com a execução por etapa. Bolha = horas estimadas das US.
+- Roadmap: realizado pelo histórico de etapas do card-raiz; previsto pelo cronograma (Dev até o maior prazo das US, Homologação até o prazo do projeto, OA por `project_programs.oa_days`).
+- Cache do portfólio chaveado pela versão dos dados (`_VERSION_SQL` em `program_portal.py`): tabela nova lida pelo portfólio entra nessa versão.
+- Telas do Portal seguem o mesmo padrão visual (`DetailShell`: trilha, cabeçalho com selo, cartões de indicador, abas sublinhadas; cartões `rounded-2xl`; tabelas com cabeçalho `bg-muted/60`) — inclusive Ocorrências (lista e detalhe). Tela do projeto (`/portal/projetos/:id`) e do programa usam o mesmo layout (`DetailShell`, `WorkTree`, `RoadmapGrid`): cartões de indicador, abas com busca e expandir/colapsar, árvore e roadmap. Projeto cancelado abre pelo link, mas fica fora das listas (portfólio, programa, entregas). Abrir ocorrência na tela do projeto só com vínculo direto e o projeto na Operação Assistida.
+- "Modo cliente" da equipe é o módulo `portal_cliente` (não um botão): aparece na coluna de módulos para Pessoa ativa em Times (`has_team_portal`, que exige o módulo ativo no tenant) ou quem tem cadastro de cliente, e mostra as telas do Portal dentro do app (links via `usePortalBase`, nunca `/portal` fixo). Só leitura. Coordenação (`_is_coordination`) vê todos os projetos; PO, os cards-raiz em que é responsável e os programas de que é responsável; desenvolvedor, os projetos em que tem item atribuído ou é dev de atendimento da OA. Ocorrências e Soluções com IA: agir (abrir, comentar, homologar, cancelar) é só do cliente; a equipe com visão de tudo (coordenação/gestão, inclui Administrativo — `team_sees_all` no /auth/me) vê as duas telas só para leitura, na visão do cliente (comentários públicos); PO e desenvolvedor não veem.
+- Assistente do Portal (chat, `portal_assistant.py`): responde só com o recorte de `PortalPortfolioService._scope` (o mesmo das telas). Antes da IA externa, pessoas viram `PESSOA_n`, projetos/programas `[P#]`/`[G#]` e o texto inteiro passa por `anonymize_text`; a volta traduz os códigos. Conversa não é gravada; o assistente só consulta. Contexto tem teto (`MAX_CONTEXT_CHARS`) por causa da cota TPM do Azure: dado novo entra em forma curta e respeitando o corte (concluídos saem primeiro).
+- Prioridade prevista na abertura de ocorrência (Portal) = matriz `_PRIORITY` de `assisted_ops.py`, copiada em `ClientNewOccurrencePage.tsx`: mudou uma, muda a outra. A prioridade gravada continua vindo do backend.
+- Mapa estratégico e roadmap sem biblioteca de gráficos (SVG/CSS): a primeira tela do Portal não importa vendor-charts. Grade do roadmap = um elemento por mês/trimestre, nunca por linha.
+
+## Soluções com IA (Portal)
+
+- Kanban "Soluções com IA" nasce no código (`AiSolutionsService.ensure`); regras leem `ai_stage_key`, nunca o nome da raia. Qualquer pessoa com acesso à plataforma pede (cliente pelo Portal; equipe pelo Modo Cliente ou por Nova Solicitação, que redireciona o tipo `solucao_ia` ao pedido do Modo Cliente — nunca pelo formulário genérico de card). Dono = `opened_by_user_id`; cada um vê e age nos próprios pedidos; coordenação/gestão (inclui Administrativo) lê todos. Código IA-0001 (`project_ai_solutions`).
+- Fluxo livre: o time move para qualquer raia. Motivo obrigatório (428 `stage_reason_required`) ao entrar em etapa com `entry_reason_required` (Necessita Ajustes, Não Aprovado, Cancelado) e ao voltar no fluxo principal; comentário público quando o destino é do cliente ou sai da Homologação, interno entre etapas do time.
+- Quem pediu age só pelo Portal/Modo Cliente: reenviar (Necessita Ajustes -> Análise), versão pronta com link + repositório (Aguardando -> Apresentação), homologar (aprovar -> Segurança; reprovar com texto -> Adequação), cancelar com motivo.
+- Apresentação exige Responsável (PO) — vínculo do campo padrão. Formulário por etapa: seção editável na sua etapa e visível depois.
+- Não entra em Capacidade nem no PO Sync/Status Report. Avisos de coordenação vão só aos cargos coordenador, administrativo_coordenacao, coord_de_arq_dev_e_sustenta_o.
+
 ## Permissões sensíveis (auditoria 2026-09-23)
 
 - Admin da empresa só atribui `company_admin`/`company_user` e Funções do próprio tenant; `super_admin` só via /super-admin.

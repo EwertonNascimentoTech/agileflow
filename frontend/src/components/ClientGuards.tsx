@@ -21,10 +21,11 @@ export function NotClientGuard() {
   return <Outlet />
 }
 
-/** Portal do Cliente: cliente externo ou colaborador interno com cadastro de cliente. */
+/** Portal do Cliente: cliente externo, colaborador com cadastro de cliente ou pessoa de Times
+ *  em "modo cliente" (vê os projetos em que atua; coordenação, todos). */
 export function ClientPortalGuard() {
   const { user, isLoading } = useAuth()
   if (isLoading) return <Spinner />
-  if (!user?.is_client && !user?.has_client_portal) return <Navigate to="/app/dashboard" replace />
+  if (!user?.is_client && !user?.has_client_portal && !user?.has_team_portal) return <Navigate to="/app/dashboard" replace />
   return <Outlet />
 }

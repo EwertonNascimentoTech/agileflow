@@ -164,6 +164,10 @@ class ProjectStatusConfig(TenantBase):
     # Etapa do kanban de Ocorrências (backlog, aguardando_cliente, ajustando, homologando,
     # finalizado, melhoria_analise, encaminhada_release) — as regras leem a chave, não o nome.
     assisted_stage_key: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    # Etapa do kanban "Soluções com IA" (ai_solutions.STAGES) — as regras leem a chave.
+    ai_stage_key: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    # Entrar nesta etapa exige motivo (ex.: Não Aprovado, Cancelado): 428 stage_reason_required.
+    entry_reason_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -215,6 +219,8 @@ class ProjectTask(TenantBase):
     planning_kind: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     # Referência (somente etiqueta) a um Programa existente, escolhida na conversão. UUID sem FK.
     linked_program_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # Pilar do programa (project_program_pillars) — só vale se for do programa acima. UUID sem FK.
+    program_pillar_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     # Classificação obrigatória ao sair do backlog: 'desenvolvimento' | 'implantacao' |
     # 'melhoria' | NULL. Define o vínculo exigido com o portfólio de PRODUTOS.
     card_classification: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
@@ -503,6 +509,8 @@ class ProjectFunnel(TenantBase):
     )
     # Kanban de Ocorrências da Operação Assistida (criado por AssistedOpsService.ensure).
     is_assisted_ops: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Kanban "Soluções com IA" (criado por AiSolutionsService.ensure): cliente pede pelo Portal.
+    is_ai_solutions: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # Funil dedicado ao fluxo de contratação (Backlog → … → Concluído/Cancelado).
     is_procurement: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -1043,11 +1051,56 @@ class ProjectProgram(TenantBase):
     responsavel_person_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("team_persons.id", ondelete="SET NULL"), nullable=True,
     )
+    # Apresentação no Portal do Cliente: ícone lucide (texto) e cor hex.
+    icon: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    color: Mapped[Optional[str]] = mapped_column(String(7), nullable=True)
+    # Roadmap do Portal: duração prevista da Operação Assistida depois da entrega.
+    oa_days: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ProjectProgramPillar(TenantBase):
+    """Pilar de um Programa (ex.: Financeiro, Suprimentos). Cada projeto do programa escolhe
+    um (ProjectTask.program_pillar_id); agrupa a visão do programa no Portal do Cliente."""
+
+    __tablename__ = "project_program_pillars"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    program_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("project_programs.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    icon: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    color: Mapped[Optional[str]] = mapped_column(String(7), nullable=True)
+    order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ProjectProgramClientAccess(TenantBase):
+    """Vínculo cliente ↔ Programa: o cliente vê no Portal todos os projetos do programa
+    (só leitura). Ocorrência continua exigindo o vínculo com o projeto (ProjectClientAccess)."""
+
+    __tablename__ = "project_program_client_access"
+    __table_args__ = (UniqueConstraint("client_id", "program_id", name="uq_project_program_client_access"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("project_clients.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    program_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("project_programs.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    # Mesmas funções do vínculo com o projeto (PROJECT_CLIENT_ROLES); "sponsor" = Patrocinador.
+    project_role: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    project_role_other: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class ProjectClient(TenantBase):
@@ -1102,6 +1155,25 @@ class ProjectClientAccess(TenantBase):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     client: Mapped["ProjectClient"] = relationship(back_populates="access")
+
+
+class ProjectAiSolution(TenantBase):
+    """Solução com IA pedida pelo cliente no Portal (IA-0001). O card é um ProjectTask no
+    kanban "Soluções com IA"; os dados do pedido e das etapas ficam no formulário do tipo."""
+
+    __tablename__ = "project_ai_solutions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("project_tasks.id", ondelete="CASCADE"), nullable=False, unique=True,
+    )
+    code: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
+    opened_by_client_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("project_clients.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    opened_by_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    homologation_rejections: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class ProjectOccurrence(TenantBase):

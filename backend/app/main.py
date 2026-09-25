@@ -138,6 +138,15 @@ async def _seed_known_modules() -> None:
             "frontend_path": "frontend/src/modules/rtd",
         },
         {
+            "slug": "portal_cliente",
+            "name": "Modo Cliente",
+            "description": "Portal do Cliente dentro do AgileFlow: a equipe vê o que o cliente vê. Coordenação vê todos os projetos; PO e desenvolvedor, os projetos em que atuam.",
+            "icon": "Eye",
+            "color": "#7C3AED",
+            "backend_path": "backend/app/modules/projetos",
+            "frontend_path": "frontend/src/modules/portal",
+        },
+        {
             "slug": "documentacao",
             "name": "Documentação",
             "description": "Guias de utilizador, processo de negócio e referência técnica da plataforma.",

@@ -4499,6 +4499,99 @@ async def _step_138_projetos_clientes_funcao(conn: AsyncConnection, schema: str)
     })
 
 
+async def _step_139_projetos_solucoes_ia(conn: AsyncConnection, schema: str) -> None:
+    """Kanban "Soluções com IA": marca do funil, chave da etapa, motivo obrigatório ao entrar,
+    tabela das soluções (IA-0001) e o cargo Segurança da Informação. O funil, as etapas e o
+    formulário nascem em AiSolutionsService.ensure (ORM)."""
+    if not await _table_exists(conn, schema, "project_tasks"):
+        return
+    await _add_columns(conn, schema, "project_funnels", {
+        "is_ai_solutions": "BOOLEAN NOT NULL DEFAULT FALSE",
+    })
+    await _add_columns(conn, schema, "project_status_configs", {
+        "ai_stage_key": "VARCHAR(40)",
+        "entry_reason_required": "BOOLEAN NOT NULL DEFAULT FALSE",
+    })
+    if not await _table_exists(conn, schema, "project_ai_solutions"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_ai_solutions (
+                id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                task_id                 UUID NOT NULL UNIQUE REFERENCES {schema}.project_tasks(id) ON DELETE CASCADE,
+                code                    INTEGER NOT NULL UNIQUE,
+                opened_by_client_id     UUID REFERENCES {schema}.project_clients(id) ON DELETE SET NULL,
+                opened_by_user_id       UUID,
+                homologation_rejections INTEGER NOT NULL DEFAULT 0,
+                created_at              TIMESTAMP DEFAULT now()
+            )
+        """))
+    await conn.execute(text(f"CREATE SEQUENCE IF NOT EXISTS {schema}.project_ai_solution_code_seq"))
+    await _ensure_index(conn, schema, "ai_solutions_client", "project_ai_solutions",
+                        "opened_by_client_id", columns=("opened_by_client_id",))
+    await _ensure_index(conn, schema, "ai_solutions_user", "project_ai_solutions",
+                        "opened_by_user_id", columns=("opened_by_user_id",))
+    if await _table_exists(conn, schema, "team_positions"):
+        await conn.execute(text(f"""
+            INSERT INTO {schema}.team_positions
+                (id, slug, name, description, is_system, sort_order, is_active, created_at, updated_at)
+            VALUES (gen_random_uuid(), 'seguranca_informacao', 'Segurança da Informação',
+                    'Valida a segurança das soluções antes da produção (kanban Soluções com IA).',
+                    TRUE, 180, TRUE, now(), now())
+            ON CONFLICT (slug) DO NOTHING
+        """))
+
+
+async def _step_140_portal_programas(conn: AsyncConnection, schema: str) -> None:
+    """Portal do Cliente — visão de Programas: ícone/cor/dias de Operação Assistida no
+    Programa, pilares do programa, pilar do projeto e vínculo cliente ↔ programa."""
+    if not await _table_exists(conn, schema, "project_programs"):
+        return
+    await _add_columns(conn, schema, "project_programs", {
+        "icon": "VARCHAR(40)",
+        "color": "VARCHAR(7)",
+        "oa_days": "INTEGER NOT NULL DEFAULT 30",
+    })
+    await _add_columns(conn, schema, "project_tasks", {
+        "program_pillar_id": "UUID",
+    })
+    if not await _table_exists(conn, schema, "project_program_pillars"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_program_pillars (
+                id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                program_id  UUID NOT NULL REFERENCES {schema}.project_programs(id) ON DELETE CASCADE,
+                name        VARCHAR(120) NOT NULL,
+                description TEXT,
+                icon        VARCHAR(40),
+                color       VARCHAR(7),
+                "order"     INTEGER NOT NULL DEFAULT 0,
+                created_at  TIMESTAMP DEFAULT now(),
+                updated_at  TIMESTAMP DEFAULT now()
+            )
+        """))
+    if await _table_exists(conn, schema, "project_clients") and not await _table_exists(
+        conn, schema, "project_program_client_access"
+    ):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_program_client_access (
+                id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                client_id           UUID NOT NULL REFERENCES {schema}.project_clients(id) ON DELETE CASCADE,
+                program_id          UUID NOT NULL REFERENCES {schema}.project_programs(id) ON DELETE CASCADE,
+                project_role        VARCHAR(40),
+                project_role_other  VARCHAR(120),
+                created_by          UUID,
+                created_at          TIMESTAMP DEFAULT now(),
+                CONSTRAINT uq_project_program_client_access UNIQUE (client_id, program_id)
+            )
+        """))
+    await _ensure_index(conn, schema, "program_pillars_program", "project_program_pillars",
+                        "program_id", columns=("program_id",))
+    await _ensure_index(conn, schema, "program_client_access_program", "project_program_client_access",
+                        "program_id", columns=("program_id",))
+    await _ensure_index(conn, schema, "program_client_access_client", "project_program_client_access",
+                        "client_id", columns=("client_id",))
+    await _ensure_index(conn, schema, "project_tasks_linked_program", "project_tasks",
+                        "linked_program_id", columns=("linked_program_id",))
+
+
 async def _step_129_projetos_agent_fail_to(conn: AsyncConnection, schema: str) -> None:
     """Raia de destino quando a triagem do backlog (review_and_route) não aprova."""
     await _add_columns(conn, schema, "project_stage_agent_bindings", {
@@ -4735,6 +4828,8 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("136_projetos_procurement_resume", _step_136_projetos_procurement_resume),
     ("137_indicadores_rtd_coordenacao", _step_137_indicadores_rtd_coordenacao),
     ("138_projetos_clientes_funcao", _step_138_projetos_clientes_funcao),
+    ("139_projetos_solucoes_ia", _step_139_projetos_solucoes_ia),
+    ("140_portal_programas", _step_140_portal_programas),
     ("123_reconcile_indexes", _step_123_reconcile_indexes),
 ]
 

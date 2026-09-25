@@ -13,7 +13,7 @@ from typing import Callable, Optional
 
 import httpx
 from fastapi import HTTPException, status
-from sqlalchemy import and_, delete as sa_delete, func, or_, select
+from sqlalchemy import and_, delete as sa_delete, func, or_, select, update as sa_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer, selectinload
@@ -41,6 +41,7 @@ from app.modules.projetos.models import (
     ProjectPriorityScoreHistory,
     ProjectPrioritySettings,
     ProjectProgram,
+    ProjectProgramPillar,
     ProjectScheduleBaseline,
     ProjectScheduleBinding,
     ProjectStageAgentBinding,
@@ -3999,11 +4000,14 @@ class ProjectTaskService:
                 prog = await db.get(ProjectProgram, program_id)
                 if not prog or not prog.is_active:
                     raise HTTPException(status_code=400, detail="Programa inválido ou inativo.")
+            if target.linked_program_id != program_id:
+                target.program_pillar_id = None  # pilar é do programa anterior
             target.planning_kind = "programa"
             target.linked_program_id = program_id
         elif kind == "projeto":
             target.planning_kind = "projeto"
             target.linked_program_id = None
+            target.program_pillar_id = None
         else:
             raise HTTPException(status_code=400, detail="Classificação inválida.")
         target.updated_at = datetime.utcnow()
@@ -4425,6 +4429,7 @@ class ProjectTaskService:
         form_values = payload.pop("form_values", None)
         conversion_title = payload.pop("conversion_title", None)
         assisted_op_skip_reason = payload.pop("assisted_op_skip_reason", None)
+        stage_reason = payload.pop("stage_reason", None)
         conversion_kind = payload.pop("conversion_kind", None)
         conversion_description = payload.pop("conversion_description", None)
         conversion_items = payload.pop("conversion_items", None)
@@ -4554,6 +4559,13 @@ class ProjectTaskService:
                     db, task, source_status, target_status, assisted_op_skip_reason, current_user,
                 )
                 await ProjectTaskService._guard_assisted_op_devs(db, task, target_status)
+                # Motivo obrigatório ao entrar na etapa (entry_reason_required) ou ao voltar no
+                # kanban Soluções com IA — 428 stage_reason_required sem ele.
+                from app.modules.projetos.ai_solutions import AiSolutionsService
+
+                await AiSolutionsService.before_move(
+                    db, task, source_status, target_status, stage_reason, current_user,
+                )
                 # Operação Assistida: ocorrência encerrada não reabre; projeto com ocorrência
                 # aberta não conclui.
                 from app.modules.projetos.assisted_ops import AssistedOpsService
@@ -4833,6 +4845,11 @@ class ProjectTaskService:
                     task.assisted_op_entered_at = datetime.utcnow()
                 await AssistedOpsService.on_project_enters_assisted_operation(db, task)
             await AssistedOpsService.after_occurrence_move(
+                db, task, source_status, status_obj, current_user.id if current_user else None,
+            )
+            from app.modules.projetos.ai_solutions import AiSolutionsService
+
+            await AiSolutionsService.after_move(
                 db, task, source_status, status_obj, current_user.id if current_user else None,
             )
             # Reinicia o relógio de SLA ao entrar numa nova etapa.
@@ -8309,6 +8326,9 @@ class ProjectTaskCommentService:
         )
         db.add(comment)
         await AssistedOpsService.after_team_comment(db, task_id, data.visibility, author_id)
+        from app.modules.projetos.ai_solutions import AiSolutionsService
+
+        await AiSolutionsService.after_team_comment(db, task_id, data.visibility, author_id)
         await db.commit()
         await db.refresh(comment)
         await ProjectTaskCommentService._attach_author_names(db, [comment])
@@ -10388,9 +10408,12 @@ class ProjectAgentRunner:
         binding: ProjectStageAgentBinding,
         prompt: str,
         thread_id: Optional[str],
+        instructions: Optional[str] = None,
     ) -> tuple[int, dict, Optional[str]]:
         """Executa o agente no Azure AI Foundry (threads → message → run → poll → messages).
-        Auth por Microsoft Entra ID (Bearer). Retorna (status_code, body, answer_message)."""
+        Auth por Microsoft Entra ID (Bearer). Retorna (status_code, body, answer_message).
+        `instructions` substitui as instruções do agente só nesta execução (ex.: assistente do
+        Portal reaproveitando o agente das etapas)."""
         endpoint, api_version = ProjectAgentRunner._azure_config(binding)
         if not endpoint or not ProjectAgentRunner._azure_sp_configured() or not (binding.agent_id or "").strip():
             raise ValueError(ProjectAgentRunner._credentials_error_message(binding))
@@ -10409,9 +10432,12 @@ class ProjectAgentRunner:
                     json={"role": "user", "content": prompt},
                 )
                 r.raise_for_status()
+                run_body: dict = {"assistant_id": binding.agent_id}
+                if instructions:
+                    run_body["instructions"] = instructions
                 r = await client.post(
                     f"{endpoint}/threads/{tid}/runs", params=params, headers=headers,
-                    json={"assistant_id": binding.agent_id},
+                    json=run_body,
                 )
                 r.raise_for_status()
                 run = r.json()
@@ -14141,6 +14167,7 @@ class ProjectProgramService:
             id=item.id, name=item.name, description=item.description,
             responsavel_person_id=item.responsavel_person_id,
             responsavel_nome=names.get(item.responsavel_person_id),
+            icon=item.icon, color=item.color, oa_days=item.oa_days if item.oa_days is not None else 30,
             is_active=item.is_active, created_at=item.created_at, updated_at=item.updated_at,
         )
 
@@ -14160,6 +14187,9 @@ class ProjectProgramService:
             name=data.name.strip(),
             description=(data.description or None),
             responsavel_person_id=data.responsavel_person_id,
+            icon=(data.icon or None),
+            color=(data.color or None),
+            oa_days=data.oa_days,
             is_active=data.is_active,
             created_by=user_id,
         )
@@ -14182,6 +14212,12 @@ class ProjectProgramService:
             item.description = payload["description"] or None
         if "responsavel_person_id" in payload:
             item.responsavel_person_id = payload["responsavel_person_id"]
+        if "icon" in payload:
+            item.icon = payload["icon"] or None
+        if "color" in payload:
+            item.color = payload["color"] or None
+        if payload.get("oa_days") is not None:
+            item.oa_days = payload["oa_days"]
         if "is_active" in payload and payload["is_active"] is not None:
             item.is_active = payload["is_active"]
         item.updated_by = user_id
@@ -14196,5 +14232,13 @@ class ProjectProgramService:
         item = await db.get(ProjectProgram, program_id)
         if not item:
             raise HTTPException(status_code=404, detail="Programa não encontrado.")
+        # Pilares e clientes do programa caem em cascata; o pilar escolhido nos cards não tem FK.
+        await db.execute(
+            sa_update(ProjectTask)
+            .where(ProjectTask.program_pillar_id.in_(
+                select(ProjectProgramPillar.id).where(ProjectProgramPillar.program_id == program_id)
+            ))
+            .values(program_pillar_id=None)
+        )
         await db.delete(item)
         await db.commit()

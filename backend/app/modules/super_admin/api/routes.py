@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import is_client_only
-from app.modules.super_admin.models import Role, RolePermission, Tenant, UserRole
+from app.modules.super_admin.models import Role, RolePermission, Tenant, TenantModule, UserRole
 from app.core.security import require_super_admin, get_current_user
 from app.modules.super_admin.schemas import (
     PlanCreate, PlanUpdate, PlanResponse,
@@ -57,6 +57,10 @@ async def _attach_role_name(db: AsyncSession, user) -> None:
     user.position_slug = await _resolve_position_slug(db, user)
     user.is_client = await is_client_only(user)
     user.has_client_portal = await _has_client_portal(db, user)
+    user.has_team_portal = False if user.is_client else await _has_team_portal(db, user)
+    # Equipe com visão de tudo no Modo Cliente (coordenação/gestão, inclui Administrativo): também
+    # lê Ocorrências e Soluções com IA, sem agir.
+    user.team_sees_all = bool(user.has_team_portal) and await _team_sees_all(db, user)
 
 
 async def _has_client_portal(db: AsyncSession, user) -> bool:
@@ -82,6 +86,60 @@ async def _has_client_portal(db: AsyncSession, user) -> bool:
                 f'(user_id = :uid OR (user_id IS NULL AND lower(email) = lower(:email))) LIMIT 1'
             ),
             {"uid": str(user.id), "email": user.email or ""},
+        )
+    ).scalar_one_or_none())
+
+
+async def _team_sees_all(db: AsyncSession, user) -> bool:
+    """Mesma regra de ProjectTaskService._is_coordination: admin ou cargo de coordenação/gestão."""
+    from app.modules.projetos.service import ProjectTaskService
+
+    if user.role in (UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN):
+        return True
+    schema = (
+        await db.execute(select(Tenant.schema_name).where(Tenant.id == user.tenant_id))
+    ).scalar_one_or_none()
+    if not schema:
+        return False
+    row = (await db.execute(text(
+        f'SELECT po.slug, po.name FROM "{schema}".team_persons p '
+        f'JOIN "{schema}".team_positions po ON po.id = p.position_id '
+        f"WHERE p.user_id = :uid AND p.status <> 'desligado' LIMIT 1"
+    ), {"uid": str(user.id)})).first()
+    if not row:
+        return False
+    cargo = f"{row[0] or ''} {row[1] or ''}".lower()
+    return any(t in cargo for t in ProjectTaskService._COORDINATION_CARGO_TOKENS)
+
+
+async def _has_team_portal(db: AsyncSession, user) -> bool:
+    """Pessoa ativa em Times (TeamOps) com o módulo "Modo Cliente" ativo no tenant: vê o
+    Portal com os projetos em que atua (coordenação vê todos) — PortalPortfolioService._team_scope."""
+    if not user.tenant_id:
+        return False
+    module_on = (await db.execute(
+        select(TenantModule.id).where(
+            TenantModule.tenant_id == user.tenant_id,
+            TenantModule.module_slug == "portal_cliente",
+            TenantModule.is_active == True,  # noqa: E712
+        ).limit(1)
+    )).scalar_one_or_none()
+    if module_on is None:
+        return False
+    schema = (
+        await db.execute(select(Tenant.schema_name).where(Tenant.id == user.tenant_id))
+    ).scalar_one_or_none()
+    if not schema:
+        return False
+    exists = (
+        await db.execute(text("SELECT to_regclass(:t)"), {"t": f'"{schema}".team_persons'})
+    ).scalar_one_or_none()
+    if exists is None:
+        return False
+    return bool((
+        await db.execute(
+            text(f'SELECT 1 FROM "{schema}".team_persons WHERE user_id = :uid AND status <> \'desligado\' LIMIT 1'),
+            {"uid": str(user.id)},
         )
     ).scalar_one_or_none())
 

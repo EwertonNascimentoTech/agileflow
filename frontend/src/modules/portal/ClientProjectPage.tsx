@@ -1,247 +1,266 @@
-import { useEffect, useState, type ReactNode } from "react"
-import { Link, useParams } from "react-router-dom"
-import { AlertTriangle, ArrowLeft, Check, FolderKanban, Headset, PauseCircle } from "lucide-react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { Link, useParams, useSearchParams } from "react-router-dom"
+import {
+  AlertTriangle, Box, CalendarDays, CalendarRange, FileText, FolderKanban, Headset, Layers, LifeBuoy, ListTree, PauseCircle,
+  Plus, XCircle,
+} from "lucide-react"
 
-import { portalOccurrencesApi, type ClientProjectFeature, type ClientProjectReport, type ProjectPhase } from "@/api/clientes"
-import { EmptyState } from "@/components/EmptyState"
+import {
+  portalPortfolioApi,
+  type PortalFeature,
+  type PortalItemStatus,
+  type PortalProjectDetail,
+  type RoadmapSegment,
+} from "@/api/portalPortfolio"
+import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { apiErrorDetail, fmtRelative } from "@/modules/portal/occurrenceUi"
+import { EmptyState } from "@/components/EmptyState"
+import { apiErrorDetail } from "@/modules/portal/occurrenceUi"
+import {
+  DetailHeader,
+  DetailTabs,
+  KpiCount,
+  KpiEvolution,
+  KpiHealth,
+  KpiMilestone,
+  KpiPerson,
+  KpiRow,
+  type Crumb,
+  type MenuAction,
+  type TabDef,
+} from "@/modules/portal/DetailShell"
+import { RoadmapGrid, type RoadmapRow } from "@/modules/portal/RoadmapGrid"
+import { WorkTree } from "@/modules/portal/WorkTree"
+import { Card } from "@/modules/portal/portfolioUi"
+import { HEALTH, ITEM_STATUS, PHASE, colorFor, fmtDate, parseDay, readFavorites, treeKeys, writeFavorites, usePortalBase } from "@/modules/portal/portfolioMeta"
 
-/** Fases do projeto (mesma régua do PO Sync). Impedimento fica fora da régua: vira aviso. */
-const PHASES: { key: ProjectPhase; label: string }[] = [
-  { key: "planejamento", label: "Planejamento" },
-  { key: "desenvolvimento", label: "Desenvolvimento" },
-  { key: "homologacao", label: "Homologação" },
-  { key: "producao", label: "Produção" },
-  { key: "concluido", label: "Concluído" },
+type Tab = "entregas" | "roadmap"
+const TABS: TabDef<Tab>[] = [
+  { value: "entregas", label: "Visão por Features", icon: ListTree },
+  { value: "roadmap", label: "Roadmap", icon: CalendarRange },
 ]
 
-const FEATURE_STATE: Record<ClientProjectFeature["state"], { label: string; cls: string }> = {
-  a_iniciar: { label: "A iniciar", cls: "bg-muted text-muted-foreground" },
-  andamento: { label: "Em andamento", cls: "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200" },
-  validacao: { label: "Em validação", cls: "bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-200" },
-  ajuste: { label: "Em ajuste", cls: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200" },
-  concluida: { label: "Concluída", cls: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200" },
+/** Barra da Feature no roadmap: do início à previsão, na cor da fase dela. */
+function featureSegments(f: PortalFeature, today: number): RoadmapSegment[] {
+  const start = f.start_date ?? f.due_date
+  const end = f.due_date ?? f.start_date
+  if (!start || !end) return []
+  const [a, b] = parseDay(start) <= parseDay(end) ? [start, end] : [end, start]
+  const kind = f.status === "concluida" ? "realizado" : parseDay(a) > today ? "previsto" : "atual"
+  return [{ phase: f.phase, start: a, end: b, kind }]
 }
 
-function fmtDate(iso: string | null | undefined): string {
-  if (!iso) return "—"
-  const [y, m, d] = iso.slice(0, 10).split("-")
-  return `${d}/${m}/${y}`
+function Notice({ tone, icon: Icon, children }: { tone: "amber" | "slate" | "teal"; icon: typeof AlertTriangle; children: ReactNode }) {
+  const cls = {
+    amber: "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200",
+    slate: "border-border bg-muted text-muted-foreground",
+    teal: "border-teal-200 bg-teal-50 text-teal-900 dark:border-teal-900 dark:bg-teal-950/40 dark:text-teal-200",
+  }[tone]
+  return <div className={`flex flex-wrap items-center gap-3 rounded-lg border px-4 py-2.5 text-sm ${cls}`}><Icon size={16} className="shrink-0" />{children}</div>
 }
 
-function Card({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="space-y-3 rounded-xl border bg-card p-5 shadow-sm">
-      <div className="flex items-center gap-2">
-        <span className="h-4 w-1 rounded-full bg-primary" />
-        <h2 className="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">{title}</h2>
-      </div>
-      {children}
-    </section>
-  )
-}
-
-function PhaseStepper({ phase }: { phase: ProjectPhase }) {
-  const current = Math.max(0, PHASES.findIndex((p) => p.key === phase))
-  const lastDone = phase === "concluido"
-  return (
-    <ol className="flex w-full items-start">
-      {PHASES.map((step, i) => {
-        const done = i < current || (lastDone && i === current)
-        const active = i === current && !lastDone
-        return (
-          <li key={step.key} className="relative flex flex-1 flex-col items-center text-center">
-            {i > 0 && (
-              <span
-                className={`absolute right-1/2 top-3 h-0.5 w-full -translate-y-1/2 ${i <= current ? "bg-primary" : "bg-border"}`}
-                aria-hidden
-              />
-            )}
-            <span
-              className={`relative z-10 flex h-6 w-6 items-center justify-center rounded-full border-2 text-[11px] font-semibold ${
-                done
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : active
-                    ? "border-primary bg-background text-primary"
-                    : "border-border bg-background text-muted-foreground"
-              }`}
-            >
-              {done ? <Check size={13} strokeWidth={3} /> : i + 1}
-            </span>
-            <span className={`mt-1.5 px-1 text-[11px] leading-tight ${active || done ? "font-medium text-foreground" : "text-muted-foreground"}`}>
-              {step.label}
-            </span>
-          </li>
-        )
-      })}
-    </ol>
-  )
-}
-
-/** Andamento do projeto para o cliente: fase, execução, prazos e as Features (entregas). */
+/** Projeto no Portal: mesmo layout do programa — indicadores, árvore Feature → User Story e roadmap. */
 export default function ClientProjectPage() {
+  const base = usePortalBase()
   const { id } = useParams<{ id: string }>()
-  const [report, setReport] = useState<ClientProjectReport | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [params, setParams] = useSearchParams()
+  const tab = (TABS.some((t) => t.value === params.get("aba")) ? params.get("aba") : "entregas") as Tab
+  // Resultado guardado com o id: trocar de projeto volta ao "carregando" sem setState no efeito.
+  const [result, setResult] = useState<{ id: string; data: PortalProjectDetail | null; error: string | null } | null>(null)
+  const [favorites, setFavorites] = useState<string[]>(readFavorites)
+  const [q, setQ] = useState("")
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     if (!id) return
-    setLoading(true)
-    portalOccurrencesApi
-      .projectReport(id)
-      .then((r) => { setReport(r); setError(null) })
-      .catch((err) => { setReport(null); setError(apiErrorDetail(err, "Não foi possível carregar o projeto.")) })
-      .finally(() => setLoading(false))
+    let alive = true
+    portalPortfolioApi
+      .project(id)
+      .then((d) => {
+        if (!alive) return
+        setResult({ id, data: d, error: null })
+        setExpanded(new Set(treeKeys([d.project], false)))
+      })
+      .catch((err) => {
+        if (alive) setResult({ id, data: null, error: apiErrorDetail(err, "Não foi possível carregar o projeto.") })
+      })
+    return () => { alive = false }
   }, [id])
 
-  const back = (
-    <Link to="/portal" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-      <ArrowLeft size={14} /> Meus projetos
-    </Link>
-  )
+  const loading = !result || result.id !== id
+  const data = loading ? null : result.data
+  const error = loading ? null : result.error
+  const fav = !!id && favorites.includes(id)
+
+  const roadmapRows = useMemo<RoadmapRow[]>(() => {
+    if (!data) return []
+    const p = data.project
+    const now = new Date()
+    const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
+    return [
+      {
+        id: p.task_id,
+        title: "Fases do projeto",
+        pct: p.exec_pct,
+        dot: { className: HEALTH[p.health].dot, label: HEALTH[p.health].label },
+        segments: p.roadmap.segments,
+        milestones: p.roadmap.milestones,
+        strong: true,
+      },
+      ...p.features.map((f) => ({
+        id: f.id,
+        title: f.code ? `${f.code} ${f.title}` : f.title,
+        pct: f.exec_pct,
+        dot: { className: ITEM_STATUS[f.status].dot, label: ITEM_STATUS[f.status].label },
+        segments: featureSegments(f, today),
+        milestones: f.status !== "concluida" && f.due_date ? [{ date: f.due_date, label: `Previsão: ${f.title}` }] : [],
+      })),
+    ]
+  }, [data])
+
+  function toggleFav() {
+    if (!id) return
+    const next = favorites.includes(id) ? favorites.filter((x) => x !== id) : [...favorites, id]
+    writeFavorites(next)
+    setFavorites(next)
+  }
+  function toggle(key: string) {
+    setExpanded((prev) => {
+      const n = new Set(prev)
+      if (n.has(key)) n.delete(key)
+      else n.add(key)
+      return n
+    })
+  }
 
   if (loading) {
     return (
       <div className="space-y-5">
-        {back}
-        <Skeleton className="h-44 rounded-xl" />
-        <Skeleton className="h-72 rounded-xl" />
+        <Skeleton className="h-20 w-2/3 rounded-xl" />
+        <Skeleton className="h-24 rounded-2xl" />
+        <Skeleton className="h-96 rounded-2xl" />
       </div>
     )
   }
-  if (!report) {
+  if (!data) {
     return (
-      <div className="space-y-5">
-        {back}
-        <div className="rounded-xl border bg-card">
-          <EmptyState icon={FolderKanban} title="Projeto indisponível" description={error ?? "Projeto não encontrado."} />
-        </div>
-      </div>
+      <Card>
+        <EmptyState icon={FolderKanban} title="Projeto indisponível" description={error ?? "Projeto não encontrado."} />
+      </Card>
     )
   }
 
-  const exec = report.exec_pct != null ? Math.round(report.exec_pct) : null
-  const features = report.features
-  const done = features.filter((f) => f.state === "concluida").length
-  const next = features.filter((f) => f.state !== "concluida" && f.due_date).slice(0, 3)
+  const p = data.project
+  const sponsor = p.sponsors[0]
+  const others = p.sponsors.length > 1 ? `+${p.sponsors.length - 1}` : null
+  const crumbs: Crumb[] = p.program
+    ? [{ label: "Portfólio", to: base }, { label: p.program.name, to: `${base}/programas/${p.program.id}` }, { label: p.title }]
+    : [{ label: "Portfólio", to: base }, { label: "Projetos", to: `${base}/projetos` }, { label: p.title }]
+  const actions: MenuAction[] = [
+    ...(p.accepts_occurrences ? [{ label: "Abrir ocorrência", icon: Plus, to: `${base}/ocorrencias/nova?projeto=${p.task_id}` }] : []),
+    ...(p.occurrences_link ? [{ label: "Ver ocorrências", icon: LifeBuoy, to: `${base}/ocorrencias?projeto=${p.task_id}` }] : []),
+    ...(p.program ? [{ label: "Ver o programa", icon: Layers, to: `${base}/programas/${p.program.id}` }] : []),
+  ]
+  const phaseLabel = PHASE[p.roadmap_phase]?.label ?? p.stage_name
+  const itemStatus: PortalItemStatus[] = ["no_prazo", "andamento", "atrasado", "impedimento", "nao_iniciada", "concluida"]
 
   return (
     <div className="space-y-5">
-      {back}
+      <DetailHeader
+        crumbs={crumbs}
+        icon={p.pillar?.icon ?? p.program?.icon ?? "FileText"}
+        color={colorFor(p.pillar?.color ?? p.program?.color, p.pillar?.id ?? p.program?.id ?? p.task_id)}
+        title={p.title}
+        status={p.status}
+        description={p.subtitle}
+        meta={
+          <>
+            Fase atual: <span className="text-foreground">{phaseLabel}</span>
+            {p.stage_name && <> · Etapa: <span className="text-foreground">{p.stage_name}</span></>}
+            {p.pillar && <> · Pilar: <span className="text-foreground">{p.pillar.name}</span></>}
+            {" "}· Início {fmtDate(p.start_date)} · Previsão {fmtDate(p.delivered_at ?? p.due_date)}
+            {p.role_label && <> · Você é <span className="text-foreground">{p.role_label}</span></>}
+          </>
+        }
+        updatedAt={p.updated_at ?? data.generated_at}
+        favorite={fav}
+        onToggleFavorite={toggleFav}
+        actions={actions}
+      />
 
-      <section className="space-y-4 rounded-xl border bg-card p-5 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              {report.planning_kind === "programa" ? "Programa" : "Projeto"}
-              {report.my_role_label && <> · você é <span className="text-foreground">{report.my_role_label}</span></>}
-            </div>
-            <h1 className="mt-1 text-xl font-bold leading-snug md:text-2xl">{report.title}</h1>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {report.po_name && <>Product Owner: <span className="font-medium text-foreground">{report.po_name}</span> · </>}
-              Atualizado {fmtRelative(report.updated_at)}
-            </p>
-          </div>
-          {exec != null && (
-            <div className="text-right">
-              <div className="text-3xl font-bold tabular-nums">{exec}%</div>
-              <div className="text-[11px] text-muted-foreground">de execução</div>
-            </div>
+      <KpiRow>
+        <KpiEvolution value={p.exec_pct} delta={p.exec_delta} days={data.delta_days} />
+        <KpiCount icon={Box} value={p.feature_count} label={p.feature_count ? `Features (${p.feature_done} concluídas)` : "Features"} />
+        <KpiCount icon={FileText} value={p.story_count} label={p.story_count ? `User Stories (${p.story_done} concl.)` : "User Stories"} />
+        <KpiHealth value={p.health} label="Saúde do projeto" override={p.cancelled ? "Cancelado" : undefined} />
+        <KpiPerson name={sponsor?.name} role="Patrocinador" extra={[sponsor?.job_title, others].filter(Boolean).join(" · ") || null} />
+        <KpiPerson name={p.po?.name ?? p.po_name} role="Product Owner" extra={p.po?.position} />
+        <KpiMilestone
+          icon={CalendarDays}
+          date={p.next_milestone ? fmtDate(p.next_milestone.date) : null}
+          title={p.next_milestone?.title ?? (p.status === "concluido" ? "Projeto concluído" : null)}
+        />
+      </KpiRow>
+
+      {p.cancelled && <Notice tone="slate" icon={XCircle}>Este projeto foi cancelado.</Notice>}
+      {!p.cancelled && p.status === "pausado" && <Notice tone="slate" icon={PauseCircle}>O projeto está pausado no momento.</Notice>}
+      {!p.cancelled && p.status === "impedimento" && (
+        <Notice tone="amber" icon={AlertTriangle}>O projeto está com um impedimento. O Product Owner está tratando.</Notice>
+      )}
+      {p.in_assisted_operation && (
+        <Notice tone="teal" icon={Headset}>
+          <span className="flex-1">
+            Entregue e em Operação Assistida{p.accepts_occurrences ? ": você pode abrir ocorrências deste projeto." : "."}
+          </span>
+          {p.accepts_occurrences && (
+            <Button asChild size="sm" className="gap-1.5">
+              <Link to={`${base}/ocorrencias/nova?projeto=${p.task_id}`}><Plus size={14} /> Abrir ocorrência</Link>
+            </Button>
           )}
-        </div>
-
-        {exec != null && (
-          <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-            <div className="h-full rounded-full bg-primary" style={{ width: `${Math.min(100, Math.max(0, exec))}%` }} />
-          </div>
-        )}
-
-        <PhaseStepper phase={report.phase === "impedimento" ? "desenvolvimento" : report.phase} />
-
-        {report.phase === "impedimento" && (
-          <p className="flex items-center gap-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-200">
-            <AlertTriangle size={15} /> O projeto está com um impedimento. O Product Owner está tratando.
-          </p>
-        )}
-        {report.paused && (
-          <p className="flex items-center gap-2 rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
-            <PauseCircle size={15} /> O projeto está pausado no momento.
-          </p>
-        )}
-        {report.in_assisted_operation && (
-          <p className="flex items-center gap-2 rounded-md bg-teal-50 px-3 py-2 text-sm text-teal-800 dark:bg-teal-950 dark:text-teal-200">
-            <Headset size={15} /> Entregue e em Operação Assistida: você pode abrir ocorrências deste projeto.
-          </p>
-        )}
-
-        <dl className="grid gap-3 text-sm sm:grid-cols-3">
-          <div>
-            <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Etapa atual</dt>
-            <dd className="mt-0.5 font-medium">{report.stage_name ?? "—"}</dd>
-          </div>
-          <div>
-            <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Início</dt>
-            <dd className="mt-0.5 font-medium">{fmtDate(report.start_date)}</dd>
-          </div>
-          <div>
-            <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              {report.completed_at ? "Concluído em" : "Previsão de entrega"}
-            </dt>
-            <dd className="mt-0.5 font-medium">{fmtDate(report.completed_at ?? report.due_date)}</dd>
-          </div>
-        </dl>
-      </section>
-
-      {next.length > 0 && (
-        <Card title="Próximas entregas">
-          <ul className="divide-y">
-            {next.map((f) => (
-              <li key={`${f.title}-${f.due_date}`} className="flex items-center justify-between gap-3 py-2 text-sm">
-                <span className="min-w-0 truncate font-medium">{f.title}</span>
-                <span className="shrink-0 text-muted-foreground">{fmtDate(f.due_date)}</span>
-              </li>
-            ))}
-          </ul>
-        </Card>
+        </Notice>
       )}
 
-      <Card title={`Entregas do projeto (${done}/${features.length} concluídas)`}>
-        {features.length === 0 ? (
-          <p className="text-sm text-muted-foreground">O cronograma de entregas ainda está sendo montado.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-                  <th className="py-2 pr-3 font-semibold">Entrega</th>
-                  <th className="py-2 pr-3 font-semibold">Situação</th>
-                  <th className="py-2 pr-3 font-semibold">Início</th>
-                  <th className="py-2 pr-3 font-semibold">Previsão</th>
-                  <th className="py-2 font-semibold">Histórias</th>
-                </tr>
-              </thead>
-              <tbody>
-                {features.map((f) => {
-                  const st = FEATURE_STATE[f.state]
-                  return (
-                    <tr key={`${f.title}-${f.start_date}-${f.due_date}`} className="border-b last:border-b-0">
-                      <td className="py-2 pr-3 font-medium">{f.title}</td>
-                      <td className="py-2 pr-3">
-                        <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${st.cls}`}>{st.label}</span>
-                      </td>
-                      <td className="py-2 pr-3 tabular-nums text-muted-foreground">{fmtDate(f.start_date)}</td>
-                      <td className="py-2 pr-3 tabular-nums text-muted-foreground">{fmtDate(f.due_date)}</td>
-                      <td className="py-2 tabular-nums text-muted-foreground">{f.us_total ? `${f.us_done}/${f.us_total}` : "—"}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
+      <DetailTabs
+        tabs={TABS}
+        value={tab}
+        onChange={(v) => setParams((prev) => { const n = new URLSearchParams(prev); n.set("aba", v); return n }, { replace: true })}
+        {...(tab === "entregas"
+          ? {
+              search: q,
+              onSearch: setQ,
+              placeholder: "Buscar feature ou user story…",
+              onExpandAll: () => setExpanded(new Set(treeKeys([p], false))),
+              onCollapseAll: () => setExpanded(new Set()),
+            }
+          : {})}
+      />
+
+      {tab === "entregas" && <WorkTree mode="project" projects={[p]} q={q} expanded={expanded} onToggle={toggle} />}
+      {tab === "roadmap" && (
+        <RoadmapGrid
+          groups={[{ key: "projeto", rows: roadmapRows }]}
+          leftTitle="Projeto e Features"
+          defaultPeriod="tudo"
+          phases={["planejamento", "desenvolvimento", "homologacao", "producao", "operacao_assistida", "concluido", "impedimento"]}
+          legendExtra={
+            <>
+              <span className="font-medium text-foreground">Status:</span>
+              {itemStatus.map((k) => (
+                <span key={k} className="inline-flex items-center gap-1.5">
+                  <span className={`h-2.5 w-2.5 rounded-full ${ITEM_STATUS[k].dot}`} aria-hidden /> {ITEM_STATUS[k].label}
+                </span>
+              ))}
+            </>
+          }
+          footnote={
+            <>
+              A primeira linha mostra as fases do projeto: o realizado vem das mudanças de etapa e o previsto sai do cronograma
+              (Desenvolvimento até o último prazo das histórias, Homologação até a previsão do projeto e Operação Assistida depois
+              da entrega). Cada Feature aparece do início à previsão, na cor da fase em que está.
+            </>
+          }
+        />
+      )}
     </div>
   )
 }

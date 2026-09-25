@@ -71,6 +71,7 @@ import {
 import { UsCardProgressBar } from "@/modules/projetos/UsChecklistSection"
 import { canEditTaskOnBoard, canMoveTaskOnBoard } from "@/modules/projetos/taskMovePermissions"
 import { AssistedOpSkipDialog, isAssistedOpSkipRequired } from "@/modules/projetos/AssistedOpSkipDialog"
+import { StageReasonDialog, stageReasonRequired, type StageReasonPrompt } from "@/modules/projetos/StageReasonDialog"
 import { AssistedOpsDevsDialog, isAssistedOpsDevsRequired } from "@/modules/projetos/AssistedOpsDevsDialog"
 
 function personToUser(p: Person): User {
@@ -881,6 +882,12 @@ export default function ProjectBoardPage() {
   const [createFieldErrors, setCreateFieldErrors] = useState<Record<string, string>>({})
   // Concluir projeto sem passar pela Operação Assistida: backend pede justificativa (428).
   const [oaSkipPrompt, setOaSkipPrompt] = useState<{ task: ProjectTask; toStatusId: string } | null>(null)
+  const [stageReasonPrompt, setStageReasonPrompt] = useState<{
+    task: ProjectTask
+    toStatusId: string
+    prompt: StageReasonPrompt
+    extra?: { assistedOpSkipReason?: string; stageReason?: string }
+  } | null>(null)
   // Mover para a Operação Assistida sem devs de atendimento: o PO define no modal e o
   // movimento é reenviado ao salvar (o backend só aceita com os devs definidos).
   const [oaDevsPrompt, setOaDevsPrompt] = useState<{ task: ProjectTask; toStatusId: string } | null>(null)
@@ -1724,12 +1731,13 @@ export default function ProjectBoardPage() {
       releaseId: string | null
       procurementRequired?: boolean | null
     },
-    extra?: { assistedOpSkipReason?: string },
+    extra?: { assistedOpSkipReason?: string; stageReason?: string },
   ) {
     if (!projectId) return
     try {
       const payload: Parameters<typeof projetosApi.updateTask>[2] = { status_id: toStatusId }
       if (extra?.assistedOpSkipReason) payload.assisted_op_skip_reason = extra.assistedOpSkipReason
+      if (extra?.stageReason) payload.stage_reason = extra.stageReason
       if (classification) {
         payload.card_classification = classification.value
         payload.ia_assisted = classification.iaAssisted
@@ -1774,6 +1782,11 @@ export default function ProjectBoardPage() {
         setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
       }
     } catch (err) {
+      const reasonPrompt = stageReasonRequired(err)
+      if (reasonPrompt) {
+        setStageReasonPrompt({ task, toStatusId, prompt: reasonPrompt, extra })
+        return
+      }
       if (isAssistedOpsDevsRequired(err)) {
         setOaDevsPrompt({ task, toStatusId })
         return
@@ -2517,6 +2530,16 @@ export default function ProjectBoardPage() {
           const { task, toStatusId } = oaDevsPrompt
           setOaDevsPrompt(null)
           await performMove(task, toStatusId)
+        }}
+      />
+      <StageReasonDialog
+        prompt={stageReasonPrompt?.prompt ?? null}
+        onCancel={() => setStageReasonPrompt(null)}
+        onConfirm={async (reason) => {
+          if (!stageReasonPrompt) return
+          const { task, toStatusId, extra } = stageReasonPrompt
+          setStageReasonPrompt(null)
+          await performMove(task, toStatusId, undefined, undefined, undefined, { ...extra, stageReason: reason })
         }}
       />
       <AssistedOpSkipDialog

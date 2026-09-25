@@ -14,6 +14,91 @@ Modelo:
 
 ---
 
+## 2026-09-25 — Qualquer pessoa pede análise de Solução com IA
+
+- **Pedido:** todo mundo com acesso à plataforma deve poder solicitar o processo de análise de Soluções com IA.
+- **Feito:** pedido não exige cadastro de cliente (dono = `opened_by_user_id`; `opened_by_client_id` opcional). Cada um vê/age nos próprios pedidos; coordenação/gestão lê todos. "Soluções com IA" aparece para todos no Modo Cliente; "Solicitar análise" para todos. Tipo `solucao_ia` com `available_for_basic = true`: em Nova Solicitação o card leva a `/app/modules/portal_cliente/solucoes-ia/nova`. Sequência IA realinhada após testes.
+- **Pendência:** usuário ativo sem Pessoa em Times e sem cadastro de cliente (hoje 1: Maxsuel Martiniano) não tem Modo Cliente nem Portal, então não chega à tela.
+- **Arquivos:** `projetos/ai_solutions.py`; front `crm/moduleNavConfig.ts`, `portal/ClientAiSolutionsPage.tsx`, `projetos/basic/BasicNewRequestPage.tsx`.
+
+## 2026-09-25 — Modo Cliente: Administrativo vê Ocorrências e Soluções com IA
+
+- **Pedido:** o Administrativo tem que ver Ocorrências e Soluções com IA.
+- **Feito:** no Modo Cliente, quem tem visão de tudo (`PortalPortfolioService._team_scope` all = `_is_coordination`: admin, Coordenador, Administrativo, Administrativo (Coordenação), Gerente) vê as duas telas só para leitura: `AssistedOpsService._portal_viewer` (lista, detalhe na visão do cliente, anexos) e `AiSolutionsService._viewer` (lista e detalhe com `client_action` nulo, `can_interact`/`can_cancel` falsos). `/auth/me` ganhou `team_sees_all`; o menu usa. Tela: "Solicitar análise" e caixa de mensagem só para o cliente. PO e desenvolvedor seguem sem ver.
+- **Não mexer:** abrir/comentar/homologar/cancelar continuam só do cliente (403 para a equipe).
+- **Arquivos:** `projetos/assisted_ops.py`, `projetos/ai_solutions.py`, `projetos/schemas.py`, `super_admin/api/routes.py`, `super_admin/schemas.py`; front `types/index.ts`, `crm/AppLayout.tsx`, `api/clientes.ts`, `portal/ClientAiSolutionsPage.tsx`, `portal/ClientAiSolutionDetailPage.tsx`.
+
+## 2026-09-25 — Assistente (chat) no Portal do Cliente
+
+- **Pedido:** ícone de chat na tela do cliente para perguntar sobre projetos, programas, datas e o que mais ele tem acesso.
+- **Feito:** botão flutuante de chat no Portal (`/portal` e módulo Modo Cliente) com painel: sugestões conforme a tela, conversa, fontes (links para o projeto/programa citado) e "Nova conversa"; a conversa vive só no navegador. `POST /projetos/portal/assistant` (`portal_assistant.py`): mesmo escopo das telas (`PortalPortfolioService._scope`/`_visible`); contexto curto (projetos agrupados por programa com listas prontas de críticos e em atenção, Features dos projetos ligados à pergunta e do projeto em tela, entregas de ±30 dias); pessoas viram PESSOA_n e projetos/programas [P#]/[G#] (traduzidos na volta, sem nome duplicado); `anonymize_text` no texto inteiro. Agente Azure = `AZURE_AI_PORTAL_AGENT_ID` ou o do 1º binding de etapa ativo, com `instructions` na execução (`_call_azure_agent` ganhou o parâmetro). Limite de 15 perguntas/min por usuário (Redis); teto de 24 mil caracteres de contexto (a cota TPM do deployment estourou com ~50 mil; ~34 mil passou).
+- **Não mexer:** nomes de pessoas nunca saem do servidor (códigos + anonimização); o assistente só lê o recorte do `_scope`; conversa não é gravada; só consulta (não executa ação).
+- **Arquivos:** `projetos/portal_assistant.py`, `projetos/api/client_routes.py`, `projetos/schemas.py`, `projetos/service.py` (`_call_azure_agent`), `core/config.py`, `tests/test_portal_assistant.py`; front `api/portalPortfolio.ts`, `portal/PortalAssistant.tsx`, `portal/ClientPortalLayout.tsx`, `portal/PortalModuleLayout.tsx`.
+
+## 2026-09-25 — Modo Cliente vira módulo (em vez de botão)
+
+- **Pedido:** tirar o botão "Modo cliente" do topo e colocar como módulo; a regra de quem vê o quê continua.
+- **Feito:** módulo `portal_cliente` ("Modo Cliente", ícone Eye) em `KNOWN_MODULES` e ativado no tenant ss (`TenantService.activate_module`). Coluna de módulos e cartões do início mostram o módulo para quem está em Times (`has_team_portal`) ou tem cadastro de cliente; `has_team_portal` e `_team_scope` exigem o módulo ativo no tenant (desligar o módulo desliga o modo cliente da equipe). Menu do módulo: Visão geral, Programas, Projetos, Entregas e Marcos (+ Ocorrências e Soluções com IA só para cliente, `requiresClientPortal`). Rotas `/app/modules/portal_cliente/*` com as mesmas telas do Portal dentro do app (`PortalModuleLayout` com a faixa do modo cliente); todos os links das telas do Portal passam por `usePortalBase()` (`/portal` ou o módulo). Saiu o botão do topo.
+- **Não mexer:** cliente externo continua só no `/portal`; nas telas do Portal, link novo usa `usePortalBase()`, nunca `/portal` fixo.
+- **Arquivos:** `main.py`, `super_admin/api/routes.py`, `projetos/program_portal.py`; front `App.tsx`, `crm/AppLayout.tsx`, `crm/moduleNavConfig.ts`, `crm/admin/DashboardPage.tsx`, `lib/moduleIcons.ts`, `portal/PortalModuleLayout.tsx`, `portal/ClientModeBanner.tsx`, `portal/portfolioMeta.ts` e as telas do Portal (links).
+
+## 2026-09-25 — "Modo cliente" para a equipe (Times) no Portal
+
+- **Pedido:** quem está cadastrado em Times tem um botão para ver o Portal como o cliente vê; o PO vê os projetos em que é responsável, o desenvolvedor também os dele, a coordenação vê tudo.
+- **Feito:** `/auth/me` ganhou `has_team_portal` (Pessoa ativa com login; cliente externo nunca). Botão "Modo cliente" no topo do AgileFlow (antes "Portal do Cliente", só para quem era cliente) e `ClientPortalGuard` aceitando a equipe. `PortalPortfolioService._scope` soma o vínculo de cliente com `_team_scope`: coordenação (`_is_coordination`: admin ou cargo de coordenação/gestão) vê todos; PO, os cards-raiz em que é responsável e os programas de que é responsável; desenvolvedor, os projetos em que tem item atribuído (sobe pela árvore até o card-raiz) ou é dev de atendimento da OA. Faixa "Modo cliente" no Portal explicando o que se vê; Ocorrências e Soluções com IA somem do menu de quem não é cliente; abrir/ver ocorrência na tela do projeto só com vínculo de cliente (`occurrences_link`).
+- **Não mexer:** ocorrência e solução com IA continuam só do cliente; o modo cliente é só leitura.
+- **Arquivos:** `super_admin/api/routes.py`, `super_admin/schemas.py`, `projetos/program_portal.py`; front `types/index.ts`, `components/ClientGuards.tsx`, `crm/AppLayout.tsx`, `api/portalPortfolio.ts`, `portal/ClientPortalLayout.tsx`, `portal/ClientPortfolioPage.tsx`, `portal/ClientProjectPage.tsx`.
+
+## 2026-09-25 — Detalhe da Solução com IA no layout do Portal
+
+- **Pedido:** melhorar `/portal/solucoes-ia/:id`.
+- **Feito:** só front. `DetailHeader` com o selo da etapa e "Mais ações" (abrir a aplicação, nova solicitação, todas, cancelar); cartões (passo X de 8, com quem está, ferramenta, PO de acompanhamento, última movimentação); "Andamento da solução" com os 8 passos e a faixa de próximo passo por situação (ajustar, enviar versão, validar, em produção, não aprovada/cancelada, com a TI); cartão "Sua vez" (ajustar o pedido com o mesmo editor do pedido novo — `AiFieldEditor`; enviar versão; homologar em cartões Está funcionando / Ainda não está certo); mensagens em conversa (Ctrl + Enter), pedido em duas colunas, links (versão, repositório, homologação, produção), histórico em linha do tempo e cancelamento. A jornada de 8 passos virou `AI_TRACK` em `aiSolutionRules.ts` (com `aiStep`/`aiStageHint`). O Portal inteiro usa a largura cheia (saiu a regra por rota do layout). Sem `setState` síncrono em efeito na tela.
+- **Não mexer:** as ações chamam as mesmas rotas (`resubmit`, `ready`, `homologation`, `cancel`, `comments`); reprovar e cancelar seguem exigindo 10 caracteres.
+- **Arquivos:** `portal/ClientAiSolutionDetailPage.tsx`, `portal/ClientAiSolutionNewPage.tsx`, `portal/aiSolutionUi.tsx`, `portal/aiSolutionRules.ts`, `portal/DetailShell.tsx`, `portal/ClientPortalLayout.tsx`.
+
+## 2026-09-25 — Soluções com IA (lista e pedido) no layout do Portal
+
+- **Pedido:** melhorar o layout de `/portal/solucoes-ia` e `/portal/solucoes-ia/nova`.
+- **Feito:** só front. Lista: cabeçalho com ícone, cartões de indicador clicáveis (Com você, Em andamento, Em produção, Não aprovadas ou canceladas), abas com busca, tabela com etapa, próximo passo, progresso "passo X de 8" e cartão "Como funciona" com os 8 passos e quem age em cada um. Pedido: etapas em cartões (A solução; Quem usa e o que faz; Dados e ferramenta — campo desconhecido do formulário cai em "Outras informações"), progresso, opções Sim/Não e ferramenta em cartões com ícone, erro campo a campo, aviso de dados pessoais, resumo lateral com o envio, "O que acontece depois" e os 9 pontos que a coordenação confere na Análise. Peças dos formulários do Portal em `portalForm.tsx` (também usadas na nova ocorrência); `missingAiFields`/`aiStageTone`/`CLIENT_ACTION_HINT` em `aiSolutionRules.ts`. Lista e pedido em largura cheia (o detalhe da solução continua como estava).
+- **Não mexer:** os campos continuam vindo do backend (`SECTIONS` "pedido"); o agrupamento é só de tela, pela chave do campo.
+- **Arquivos:** `portal/ClientAiSolutionsPage.tsx`, `portal/ClientAiSolutionNewPage.tsx`, `portal/ClientAiSolutionDetailPage.tsx` (imports), `portal/aiSolutionUi.tsx`, `portal/aiSolutionRules.ts`, `portal/portalForm.tsx`, `portal/ClientNewOccurrencePage.tsx`, `portal/ClientPortalLayout.tsx`.
+
+## 2026-09-25 — Nova ocorrência no layout do Portal
+
+- **Pedido:** melhorar o layout da tela de abertura de ocorrência (`/portal/ocorrencias/nova`).
+- **Feito:** só front. Cabeçalho com ícone; barra de progresso das 4 etapas (clicável, marca "Pronto"); cada etapa num cartão com número; opções (tipo, impacto, quem é afetado) em cartões com ícone e check; aviso "este projeto tem N ocorrências em aberto" com link para conferir antes de abrir outra; prioridade prevista ao vivo; painel lateral "Resumo do envio" (projeto, tipo, impacto, quem é afetado, prioridade prevista, anexos) com o botão de enviar; largura cheia.
+- **Não mexer:** a prioridade prevista usa a mesma matriz de `assisted_ops._PRIORITY` (copiada em `ClientNewOccurrencePage.tsx`): mudou uma, muda a outra.
+- **Arquivos:** `portal/ClientNewOccurrencePage.tsx`, `portal/ClientPortalLayout.tsx`.
+
+## 2026-09-25 — Ocorrências do Portal no layout do portfólio
+
+- **Pedido:** lista e detalhe de Ocorrências no mesmo padrão visual das telas de Meu Portfólio e Projetos.
+- **Feito:** só front, sem mudar regra. Lista (`/portal/ocorrencias`): trilha, cartões de indicador clicáveis (Aguardando você, Em aberto, Resolvidas, Projetos em Operação Assistida), abas sublinhadas com busca, filtros com rótulo (Projeto, Prioridade, Tipo, Aberta por) e tabela no estilo do portfólio. Detalhe (`/portal/ocorrencias/:id`): `DetailHeader` com o selo da etapa, cartões (Prioridade, Impacto, Quem é afetado, Responsável, Tempo de atendimento), "Andamento" com etapas e próximo passo, validação, solução, detalhes, conversa e histórico. Nova ocorrência: trilha e título no mesmo estilo. `DetailShell` ganhou selo próprio (`badge`), estrela opcional, `KpiText`, `KpiCount` clicável com tom e grade configurável; selos de etapa/prioridade no padrão do Portal; `PersonChip`. Lista e detalhe usam a largura cheia (o formulário continua estreito).
+- **Não mexer:** regras das ocorrências (quem responde/valida, horas úteis, NPS) seguem as mesmas.
+- **Arquivos:** `portal/ClientOccurrencesPage.tsx`, `portal/ClientOccurrenceDetailPage.tsx`, `portal/ClientNewOccurrencePage.tsx`, `portal/occurrenceUi.tsx`, `portal/DetailShell.tsx`, `portal/portfolioMeta.ts`, `portal/ClientPortalLayout.tsx`.
+
+## 2026-09-25 — Tela do projeto no Portal no layout do programa
+
+- **Pedido:** a tela do projeto (`/portal/projetos/:id`) com a mesma visão do mockup do programa (cartões de indicador, abas, árvore Feature -> US e roadmap) — "serve para programas e projetos".
+- **Feito:** `GET /projetos/portal/projects/{id}` (`PortalPortfolioService.project`: patrocinador do projeto ou, sem ele, do programa; contagem de Features/US; `accepts_occurrences`); projeto cancelado continua na base com `cancelled` (abre pelo link, fora das listas). Front: `DetailShell.tsx` (cabeçalho, cartões, abas sublinhadas com busca e expandir/colapsar, "Mais ações"), `WorkTree.tsx` (árvore de programa e de projeto), `RoadmapGrid.tsx` (roadmap genérico: pilares no programa; fases + Features no projeto, abrindo em "Todo o período"); `ClientProgramPage` e `ClientProjectPage` reescritas com eles. Saíram `ProgramProjectsView.tsx`, `ProgramRoadmap.tsx` e o endpoint antigo `/portal/projects/{id}/report` (+ `ClientProjectReport`/`ClientProjectFeature`, `_feature_state` e o teste dele).
+- **Não mexer:** mesmo layout nas duas telas; ocorrência pela tela do projeto só com vínculo direto e projeto na Operação Assistida.
+- **Arquivos:** `projetos/program_portal.py`, `projetos/clients.py`, `projetos/schemas.py`, `projetos/api/client_routes.py`, `tests/test_project_clients.py`; front `api/portalPortfolio.ts`, `api/clientes.ts`, `portal/DetailShell.tsx`, `portal/WorkTree.tsx`, `portal/RoadmapGrid.tsx`, `portal/ClientProgramPage.tsx`, `portal/ClientProjectPage.tsx`, `portal/portfolioMeta.ts`, `portal/ClientPortalLayout.tsx`.
+
+## 2026-09-25 — Portal do Cliente: portfólio, programas e roadmap
+
+- **Pedido:** tela do cliente para programas e projetos no modelo dos mockups (Meu Portfólio com mapa Impacto × Esforço; Programa com visão por Pilares, por Projetos e Roadmap).
+- **Decisões do usuário:** (1) cliente vinculado ao Programa vê todos os projetos dele; só no projeto vê só o projeto; Patrocinador = cliente com função Sponsor no programa. (2) Pilar cadastrado por programa, cada projeto escolhe um. (3) Bolha = horas estimadas (não há custo). (4) Nomes dos quadrantes = os da Config -> Priorização (o mockup trocava dois). (5) Roadmap: realizado pelo histórico de etapas; previsto pelo cronograma (Dev até o maior prazo das US, Homologação até o prazo do projeto, OA por N dias do programa). (6) Ocorrências continua no menu. (7) Indicadores do Programa fora. (8) US aparecem para o cliente.
+- **Feito:** step 140 (`project_programs.icon/color/oa_days`, `project_program_pillars`, `project_tasks.program_pillar_id`, `project_program_client_access` + índices); `projetos/program_portal.py` (regras puras + `PortalPortfolioService` com cache pela versão dos dados + `ProgramAdminService`); rotas `GET /projetos/portal/portfolio`, `/portal/programs/{id}`, `/portal/deliveries`; gestão `/projetos/programs/{id}/admin`, `/pillars`, `/pillars/suggest`, `/projects/{task_id}/pillar`, `/clients`; andamento do projeto (`/portal/projects/{id}/report`) aceita o vínculo pelo programa; `clients.py` com `client_for_link`/`reactivate_for_link` (mesma regra de cadastro para projeto e programa). Front: Portal com menu lateral (Visão geral, Programas, Projetos, Entregas e Marcos, Ocorrências, Soluções com IA) e busca no topo; `ClientPortfolioPage`, `ClientProgramPage` (+ `ProgramPillarsView`, `ProgramProjectsView`, `ProgramRoadmap`), `ClientProgramsPage`, `ClientProjectsPage`, `ClientDeliveriesPage`; mapa em SVG próprio (sem vendor-charts); `ClientPortalHomePage` saiu (aviso de ocorrências aguardando o cliente foi para a Visão geral). Gestão: ícone/cor/dias de OA no cadastro de Programas e tela "Gerenciar" (`/app/modules/projetos/programas/:programId`). Testes `tests/test_program_portal.py`. Doc `docs/processo/07-portal-cliente-programas.md`.
+- **Não mexer:** números iguais aos da gestão (fase/execução do PO Sync, quadrante da priorização); cancelado fora do portfólio; vínculo pelo programa é só leitura (ocorrência exige vínculo com o projeto); tabela nova lida pelo portfólio entra em `_VERSION_SQL` de `program_portal.py`.
+- **Arquivos:** `core/tenant_migrations.py`, `projetos/models.py`, `projetos/schemas.py`, `projetos/service.py`, `projetos/clients.py`, `projetos/program_portal.py`, `projetos/api/routes.py`, `projetos/api/client_routes.py`; front `api/portalPortfolio.ts`, `api/projetos.ts`, `api/clientes.ts`, `portal/*` (layout, telas, `portfolioMeta.ts`, `portfolioUi.tsx`, `StrategicMap.tsx`, `PortfolioTable.tsx`, `PortalSearch.tsx`), `projetos/ProjectProgramsPage.tsx`, `ProjectProgramDetailPage.tsx`, `ProgramAppearanceFields.tsx`, `ProjectClientsSection.tsx`, `App.tsx`.
+
+## 2026-09-24 — Kanban Soluções com IA (pedido pelo Portal)
+
+- **Pedido:** novo kanban e tipo de solicitação para o cliente pedir análise de solução com IA (Base44), com o fluxo Solicitação -> Análise -> Aguardando cliente -> Apresentação -> Adequação -> DevOps HML -> Homologação -> Segurança -> Liberação -> DevOps PROD -> Produção (+ Necessita Ajustes, Não Aprovado, Cancelado).
+- **Decisões do usuário:** cliente = login IDigital com acesso de cliente (age pelo Portal); não entra em Capacidade; fluxo livre; pessoas de DevOps e Segurança cadastradas em Times.
+- **Feito:** step 139 (`is_ai_solutions`, `ai_stage_key`, `entry_reason_required`, `project_ai_solutions` + sequência, cargo Segurança da Informação); `ai_solutions.py` (ensure do kanban/tipo/formulário por etapa, motivo obrigatório 428, avisos, ações do Portal); ganchos em `ProjectTaskService.update` e nos comentários; rotas do Portal; front `StageReasonDialog` (quadro e card), comentário "visível ao cliente" nos cards do kanban, páginas do Portal (lista, nova, detalhe). Testes `tests/test_ai_solutions.py`. Kanban criado no tenant_ss (14 raias, 9 seções, Responsável obrigatório na Apresentação).
+- **Arquivos:** `core/tenant_migrations.py`, `projetos/models.py`, `projetos/schemas.py`, `projetos/ai_solutions.py`, `projetos/service.py`, `projetos/api/client_routes.py`; front `StageReasonDialog.tsx`, `ProjectBoardPage.tsx`, `ProjectTaskDrawer.tsx`, `api/projetos.ts`, `api/clientes.ts`, `portal/aiSolutionUi.tsx`, `portal/ClientAiSolutions*.tsx`, `portal/ClientPortalLayout.tsx`, `App.tsx`; `docs/processo/06-solucoes-com-ia.md`.
+
 ## 2026-09-24 — Tipo "Solicitações" renomeado para "Solicitar novo projeto"
 
 - **Pedido:** nome do card na tela de nova solicitação.

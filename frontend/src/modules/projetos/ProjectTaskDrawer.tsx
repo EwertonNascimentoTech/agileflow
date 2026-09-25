@@ -33,6 +33,7 @@ import { toast } from "@/lib/toast"
 import { UsChecklistSection } from "@/modules/projetos/UsChecklistSection"
 import { UsCommitsSection } from "@/modules/projetos/UsCommitsSection"
 import { AssistedOpSkipDialog, isAssistedOpSkipRequired } from "@/modules/projetos/AssistedOpSkipDialog"
+import { StageReasonDialog, stageReasonRequired, type StageReasonPrompt } from "@/modules/projetos/StageReasonDialog"
 import { isCoordination } from "@/lib/permissions"
 import { AssistedOpsDevsDialog, isAssistedOpsDevsRequired } from "@/modules/projetos/AssistedOpsDevsDialog"
 import { OccurrenceTeamPanel } from "@/modules/projetos/OccurrenceTeamPanel"
@@ -171,6 +172,12 @@ export function ProjectTaskDrawer({
   const [changingStatus, setChangingStatus] = useState(false)
   // Etapa pedida quando o backend exige justificativa de pular a Operação Assistida (428).
   const [oaSkipStatusId, setOaSkipStatusId] = useState<string | null>(null)
+  const [stageReason, setStageReason] = useState<{
+    statusId: string
+    conversionTitle?: string
+    assistedOpSkipReason?: string
+    prompt: StageReasonPrompt
+  } | null>(null)
   // Operação Assistida sem devs de atendimento: modal do PO; ao salvar reenvia a etapa.
   const [oaDevsStatusId, setOaDevsStatusId] = useState<string | null>(null)
   const [oaDevsRefresh, setOaDevsRefresh] = useState(0)
@@ -446,6 +453,12 @@ export function ProjectTaskDrawer({
   const currentDemandType = demandTypes.find((d) => d.id === task?.demand_type_id) ?? null
   // Card do kanban de Ocorrências (Operação Assistida): etapa com chave do sistema.
   const isOccurrence = !!(task && allStatuses.find((s) => s.id === task.status_id)?.assisted_stage_key)
+  // Soluções com IA: comentário pode ir ao cliente (Portal); padrão é nota interna.
+  const isAiSolution = !!(task && allStatuses.find((s) => s.id === task.status_id)?.ai_stage_key)
+  const clientFacingComments = isOccurrence || isAiSolution
+  useEffect(() => {
+    setCommentPublic(!isAiSolution)
+  }, [task?.id, isAiSolution])
   const taskFunnelName = (() => {
     if (!task) return kanbanFunnelName
     const st = allStatuses.find((s) => s.id === task.status_id)
@@ -688,7 +701,7 @@ export function ProjectTaskDrawer({
       .sort((a, b) => a.order - b.order)
   })()
 
-  async function persistStatus(newStatusId: string, conversionTitle?: string, assistedOpSkipReason?: string) {
+  async function persistStatus(newStatusId: string, conversionTitle?: string, assistedOpSkipReason?: string, stageReason?: string) {
     if (!task) return
     const before = allStatuses.find((s) => s.id === statusId)
     setChangingStatus(true)
@@ -698,6 +711,7 @@ export function ProjectTaskDrawer({
         form_values: formValues,
         ...(conversionTitle !== undefined ? { conversion_title: conversionTitle } : {}),
         ...(assistedOpSkipReason ? { assisted_op_skip_reason: assistedOpSkipReason } : {}),
+        ...(stageReason ? { stage_reason: stageReason } : {}),
       })
       setStatusId(updated.status_id)
       onSaved(updated)
@@ -709,6 +723,11 @@ export function ProjectTaskDrawer({
       toast.success(after && before && after.funnel_id !== before.funnel_id ? "Card movido para outro kanban." : "Etapa atualizada.")
     } catch (err) {
       setStatusId(task.status_id)  // reverte o seletor
+      const reasonPrompt = stageReasonRequired(err)
+      if (reasonPrompt) {
+        setStageReason({ statusId: newStatusId, conversionTitle, assistedOpSkipReason, prompt: reasonPrompt })
+        return
+      }
       if (isAssistedOpsDevsRequired(err)) {
         setOaDevsStatusId(newStatusId)
         return
@@ -902,7 +921,7 @@ export function ProjectTaskDrawer({
         projectId,
         task.id,
         newComment.trim(),
-        isOccurrence
+        clientFacingComments
           ? { visibility: commentPublic ? "public" : "internal", anexos: commentFiles.length ? commentFiles : null }
           : undefined,
       )
@@ -1718,7 +1737,7 @@ export function ProjectTaskDrawer({
                   </div>
                 ))}
               </div>
-              {isOccurrence && (
+              {clientFacingComments && (
                 <div className="space-y-2">
                   <label className="flex items-center gap-2 text-xs">
                     <input
@@ -1893,6 +1912,15 @@ export function ProjectTaskDrawer({
         setOaDevsStatusId(null)
         setOaDevsRefresh((n) => n + 1)
         if (target) await persistStatus(target)
+      }}
+    />
+    <StageReasonDialog
+      prompt={stageReason?.prompt ?? null}
+      onCancel={() => setStageReason(null)}
+      onConfirm={async (reason) => {
+        const pending = stageReason
+        setStageReason(null)
+        if (pending) await persistStatus(pending.statusId, pending.conversionTitle, pending.assistedOpSkipReason, reason)
       }}
     />
     <AssistedOpSkipDialog

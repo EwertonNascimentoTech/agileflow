@@ -149,36 +149,18 @@ export const projectClientsApi = {
     api.delete<ProjectClientMembers>(`/projetos/tasks/${taskId}/project-clients/${clientId}`).then((r) => r.data),
 }
 
-// ── Portal: andamento do projeto ────────────────────────────────────────────
-
-export type ProjectPhase = "planejamento" | "desenvolvimento" | "homologacao" | "producao" | "concluido" | "impedimento"
-
-export interface ClientProjectFeature {
-  title: string
-  status_name: string | null
-  state: "a_iniciar" | "andamento" | "validacao" | "ajuste" | "concluida"
-  start_date: string | null
-  due_date: string | null
-  us_total: number
-  us_done: number
-}
-
-export interface ClientProjectReport {
-  task_id: string
-  title: string
-  planning_kind: string | null
-  my_role_label: string | null
-  po_name: string | null
-  stage_name: string | null
-  phase: ProjectPhase
-  in_assisted_operation: boolean
-  paused: boolean
-  exec_pct: number | null
-  start_date: string | null
-  due_date: string | null
-  completed_at: string | null
-  features: ClientProjectFeature[]
-  updated_at: string | null
+/** Clientes do programa: veem no Portal todos os projetos do programa (só leitura). */
+export const programClientsApi = {
+  list: (programId: string) =>
+    api.get<ProjectClientMembers>(`/projetos/programs/${programId}/clients`).then((r) => r.data),
+  candidates: (programId: string, q: string) =>
+    api.get<ProjectClientCandidates>(`/projetos/programs/${programId}/clients/candidates`, { params: { q } }).then((r) => r.data),
+  add: (programId: string, data: ProjectClientMemberAdd) =>
+    api.post<ProjectClientMembers>(`/projetos/programs/${programId}/clients`, data).then((r) => r.data),
+  update: (programId: string, clientId: string, data: { project_role: ProjectClientRole; project_role_other?: string | null }) =>
+    api.patch<ProjectClientMembers>(`/projetos/programs/${programId}/clients/${clientId}`, data).then((r) => r.data),
+  remove: (programId: string, clientId: string) =>
+    api.delete<ProjectClientMembers>(`/projetos/programs/${programId}/clients/${clientId}`).then((r) => r.data),
 }
 
 // ── Operação Assistida: Ocorrências ─────────────────────────────────────────
@@ -325,8 +307,6 @@ export interface OccurrenceTeamUpdate {
 
 export const portalOccurrencesApi = {
   projects: () => api.get<PortalProject[]>("/projetos/portal/projects").then((r) => r.data),
-  projectReport: (taskId: string) =>
-    api.get<ClientProjectReport>(`/projetos/portal/projects/${taskId}/report`).then((r) => r.data),
   list: (params?: { project_task_id?: string; mine?: boolean }) =>
     api.get<OccurrenceSummary[]>("/projetos/portal/occurrences", { params }).then((r) => r.data),
   get: (taskId: string) => api.get<OccurrenceDetail>(`/projetos/portal/occurrences/${taskId}`).then((r) => r.data),
@@ -394,4 +374,62 @@ export const teamOccurrencesApi = {
         allocations,
       })
       .then((r) => r.data),
+}
+
+// ── Portal: Soluções com IA ─────────────────────────────────────────────────
+
+export interface AiSolutionFormField {
+  key: string
+  label: string
+  field_type: string
+  required: boolean
+  placeholder: string | null
+  options: { value: string; label: string }[]
+}
+
+export type AiSolutionClientAction = "ajustar" | "versao" | "homologar" | null
+
+export interface AiSolutionSummary {
+  task_id: string
+  code_label: string
+  title: string
+  stage_key: string | null
+  stage_name: string | null
+  is_closed: boolean
+  client_action: AiSolutionClientAction
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface AiSolutionDetail extends AiSolutionSummary {
+  fields: { label: string; value: string }[]
+  values: Record<string, string | null>
+  versao_url: string | null
+  repositorio_url: string | null
+  homolog_url: string | null
+  producao_url: string | null
+  po_name: string | null
+  comments: OccurrenceComment[]
+  history: { stage_name: string | null; from_stage_name: string | null; moved_at: string | null }[]
+  can_cancel: boolean
+  /** Quem pediu pode mandar mensagem/agir; a equipe no Modo Cliente só lê. */
+  can_interact: boolean
+}
+
+export const aiSolutionsPortalApi = {
+  form: () => api.get<{ fields: AiSolutionFormField[] }>("/projetos/portal/ai-solutions/form").then((r) => r.data),
+  list: () => api.get<AiSolutionSummary[]>("/projetos/portal/ai-solutions").then((r) => r.data),
+  get: (id: string) => api.get<AiSolutionDetail>(`/projetos/portal/ai-solutions/${id}`).then((r) => r.data),
+  create: (data: { title: string; values: Record<string, string | null> }) =>
+    api.post<AiSolutionDetail>("/projetos/portal/ai-solutions", data).then((r) => r.data),
+  resubmit: (id: string, data: { values: Record<string, string | null>; note?: string | null }) =>
+    api.post<AiSolutionDetail>(`/projetos/portal/ai-solutions/${id}/resubmit`, data).then((r) => r.data),
+  ready: (id: string, data: { versao_url: string; repositorio_url: string; note?: string | null }) =>
+    api.post<AiSolutionDetail>(`/projetos/portal/ai-solutions/${id}/ready`, data).then((r) => r.data),
+  homologate: (id: string, data: { approve: boolean; comment?: string | null }) =>
+    api.post<AiSolutionDetail>(`/projetos/portal/ai-solutions/${id}/homologation`, data).then((r) => r.data),
+  cancel: (id: string, reason: string) =>
+    api.post<AiSolutionDetail>(`/projetos/portal/ai-solutions/${id}/cancel`, { reason }).then((r) => r.data),
+  comment: (id: string, content: string) =>
+    api.post<AiSolutionDetail>(`/projetos/portal/ai-solutions/${id}/comments`, { content }).then((r) => r.data),
 }
