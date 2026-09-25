@@ -17,9 +17,11 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyState } from "@/components/EmptyState"
 import { DetailTabs, KpiCount, KpiRow, type TabDef } from "@/modules/portal/DetailShell"
 import {
+  CriticidadeCell,
   PRIORITY_LABEL,
   PersonChip,
   PriorityBadge,
+  SlaText,
   StageBadge,
   fmtDateTime,
   fmtRelative,
@@ -105,7 +107,8 @@ export default function ClientOccurrencesPage() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     return items.filter((o) => {
-      if (priority !== ALL && o.prioridade !== priority) return false
+      // Criticidade só existe em correção (POP).
+      if (priority !== ALL && (!o.is_correction || o.prioridade !== priority)) return false
       if (tipo !== ALL && o.tipo !== tipo) return false
       if (q && !o.title.toLowerCase().includes(q) && !o.code_label.toLowerCase().includes(q)) return false
       return true
@@ -203,10 +206,10 @@ export default function ClientOccurrencesPage() {
               options={[{ value: ALL, label: "Todos os projetos" }, ...projects.map((p) => ({ value: p.task_id, label: p.title }))]}
             />
             <FilterSelect
-              label="Prioridade" value={priority} onChange={setPriority}
+              label="Criticidade" value={priority} onChange={setPriority}
               options={[
                 { value: ALL, label: "Todas" },
-                ...(Object.keys(PRIORITY_LABEL) as OccurrencePrioridade[]).map((k) => ({ value: k, label: `${k} · ${PRIORITY_LABEL[k]}` })),
+                ...(Object.keys(PRIORITY_LABEL) as OccurrencePrioridade[]).map((k) => ({ value: k, label: PRIORITY_LABEL[k] })),
               ]}
             />
             <FilterSelect
@@ -245,14 +248,14 @@ export default function ClientOccurrencesPage() {
             <div className="hidden overflow-x-auto md:block">
               <table className="w-full min-w-[980px] table-fixed text-sm">
                 <colgroup>
-                  <col style={{ width: "33%" }} /><col style={{ width: "17%" }} /><col style={{ width: "10%" }} />
+                  <col style={{ width: "31%" }} /><col style={{ width: "16%" }} /><col style={{ width: "13%" }} />
                   <col style={{ width: "15%" }} /><col style={{ width: "14%" }} /><col style={{ width: "11%" }} />
                 </colgroup>
                 <thead className="bg-muted/60 text-left text-sm text-foreground">
                   <tr>
                     <th className="py-3 pl-4 pr-3 font-semibold">Ocorrência</th>
                     <th className="px-3 py-3 font-semibold">Projeto</th>
-                    <th className="px-3 py-3 font-semibold">Prioridade</th>
+                    <th className="px-3 py-3 font-semibold">Criticidade</th>
                     <th className="px-3 py-3 font-semibold">Situação</th>
                     <th className="px-3 py-3 font-semibold">Responsável</th>
                     <th className="px-3 py-3 text-right font-semibold">Atualizada</th>
@@ -299,7 +302,12 @@ export default function ClientOccurrencesPage() {
                           </div>
                         </td>
                         <td className="px-3 py-3"><span className="line-clamp-2 text-muted-foreground" title={o.project_title ?? undefined}>{o.project_title ?? "—"}</span></td>
-                        <td className="px-3 py-3"><PriorityBadge value={o.prioridade} /></td>
+                        <td className="px-3 py-3">
+                          <div className="flex flex-col items-start gap-1">
+                            <CriticidadeCell o={o} />
+                            {!o.is_closed && <SlaText o={o} />}
+                          </div>
+                        </td>
                         <td className="px-3 py-3">
                           <div className="flex flex-col items-start gap-1.5">
                             <StageBadge stageKey={o.stage_key} name={o.stage_name} mine={o.opened_by_me} />
@@ -330,7 +338,7 @@ export default function ClientOccurrencesPage() {
                       <div className="flex items-center justify-between gap-2">
                         <span className="flex items-center gap-2 text-xs">
                           <span className="font-mono font-medium">{o.code_label}</span>
-                          <PriorityBadge value={o.prioridade} />
+                          {o.is_correction && <PriorityBadge value={o.prioridade} />}
                         </span>
                         <span className="text-xs text-muted-foreground">{fmtRelative(o.updated_at ?? o.created_at)}</span>
                       </div>
@@ -338,6 +346,7 @@ export default function ClientOccurrencesPage() {
                       <div className="text-xs text-muted-foreground">
                         {o.project_title ?? "—"} · {o.assignee_name ?? (o.is_closed ? "—" : "Aguardando atendimento")}
                       </div>
+                      {!o.is_closed && <SlaText o={o} className="block" />}
                       <div className="flex items-center justify-between gap-2">
                         <StageBadge stageKey={o.stage_key} name={o.stage_name} mine={o.opened_by_me} />
                         {needsMyAction(o) && (

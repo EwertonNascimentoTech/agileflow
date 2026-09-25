@@ -82,6 +82,9 @@ async def _check_unassigned_occurrences() -> None:
                 if (await db.execute(text("SELECT to_regclass('project_occurrences')"))).scalar() is None:
                     continue
                 alerted = await AssistedOpsService.scan_unassigned(db)
+                # POP.COR.GTD.003: prazo de resolução da correção e fim previsto da OA.
+                alerted += await AssistedOpsService.scan_sla_breaches(db)
+                alerted += await AssistedOpsService.scan_assisted_op_due(db)
                 if alerted:
                     logger.info("[check_unassigned_occurrences] %s: %s alerta(s)", schema, alerted)
         except Exception as e:  # noqa: BLE001

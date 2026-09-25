@@ -19,6 +19,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { toast } from "@/lib/toast"
 import { AttachmentField, type Attachment } from "@/components/AttachmentField"
+import { PRIORITY_LABEL, SLA_RESOLUCAO_HORAS, SlaText } from "@/modules/portal/occurrenceUi"
 
 const NONE = "__none__"
 
@@ -40,7 +41,8 @@ function apiError(err: unknown, fallback: string): string {
 const NEW_RELEASE = "__new__"
 
 /** Dados da Ocorrência (Operação Assistida) no drawer do card: o que o cliente informou e
- * os campos do time — prioridade, classificação, solução (o cliente vê) e causa raiz. */
+ * os campos do time — criticidade (só correção, POP), classificação, solução (o cliente vê)
+ * e causa raiz (obrigatórias, na correção, antes de ir para a validação do cliente). */
 export function OccurrenceTeamPanel({
   taskId,
   readOnly,
@@ -88,6 +90,8 @@ export function OccurrenceTeamPanel({
   if (!occ) return null
 
   const selectedRelease = candidates?.find((c) => c.task_id === releaseId) ?? null
+  // Mesma regra do backend (assisted_ops.is_correction): a classificação do time manda.
+  const isCorrection = classificacao !== NONE ? classificacao === "erro_confirmado" : occ.tipo === "erro"
 
   async function assume() {
     setAssuming(true)
@@ -172,8 +176,13 @@ export function OccurrenceTeamPanel({
         </span>
         {occ.nps_score != null && (
           <span>
-            NPS: <span className="font-medium">{occ.nps_score}/10</span>
+            Satisfação: <span className="font-medium">{occ.nps_score}/5</span>
             {occ.nps_comment && <span className="text-muted-foreground"> — {occ.nps_comment}</span>}
+          </span>
+        )}
+        {occ.is_correction && occ.sla_state && (
+          <span>
+            Prazo: <SlaText o={occ} />
           </span>
         )}
         {occ.rejection_count > 0 && <span className="text-amber-700">Reprovada {occ.rejection_count}x</span>}
@@ -233,19 +242,25 @@ export function OccurrenceTeamPanel({
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1">
-          <Label className="text-xs">Prioridade</Label>
-          <Select value={prioridade} onValueChange={(v) => setPrioridade(v as OccurrencePrioridade)} disabled={readOnly}>
-            <SelectTrigger className="h-8">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {(["P1", "P2", "P3", "P4"] as const).map((p) => (
-                <SelectItem key={p} value={p}>
-                  {p}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Label className="text-xs">Criticidade</Label>
+          {isCorrection ? (
+            <Select value={prioridade} onValueChange={(v) => setPrioridade(v as OccurrencePrioridade)} disabled={readOnly}>
+              <SelectTrigger className="h-8">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(["P1", "P2", "P3", "P4"] as const).map((p) => (
+                  <SelectItem key={p} value={p}>
+                    {PRIORITY_LABEL[p]} · prazo-alvo {SLA_RESOLUCAO_HORAS[p]} h úteis
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <p className="flex h-8 items-center text-xs text-muted-foreground">
+              Não se aplica: só correção tem criticidade (POP).
+            </p>
+          )}
         </div>
         <div className="space-y-1">
           <Label className="text-xs">Classificação do time</Label>
@@ -268,12 +283,17 @@ export function OccurrenceTeamPanel({
         </div>
       </div>
       <div className="space-y-1">
-        <Label className="text-xs">Solução aplicada (visível ao cliente)</Label>
+        <Label className="text-xs">Solução aplicada (visível ao cliente){isCorrection && <span className="text-destructive"> *</span>}</Label>
         <Textarea rows={2} value={solucao} onChange={(e) => setSolucao(e.target.value)} disabled={readOnly} />
       </div>
       <div className="space-y-1">
-        <Label className="text-xs">Causa raiz (interna)</Label>
+        <Label className="text-xs">Causa raiz (interna){isCorrection && <span className="text-destructive"> *</span>}</Label>
         <Textarea rows={2} value={causaRaiz} onChange={(e) => setCausaRaiz(e.target.value)} disabled={readOnly} />
+        {isCorrection && (
+          <p className="text-[11px] text-muted-foreground">
+            Na correção, solução e causa raiz são obrigatórias antes de enviar para a validação do cliente (POP).
+          </p>
+        )}
       </div>
       {occ.stage_key === "melhoria_analise" && !readOnly && (
         <div className="space-y-2 rounded-md border bg-background/70 p-2">

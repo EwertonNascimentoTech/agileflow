@@ -1,11 +1,12 @@
 import enum
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy import (
     Boolean,
+    Date,
     DateTime,
     Enum as SAEnum,
     ForeignKey,
@@ -279,6 +280,12 @@ class ProjectTask(TenantBase):
     # projeto vai a Concluído sem passar por ela, a justificativa obrigatória.
     assisted_op_entered_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     assisted_op_skip_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # POP.COR.GTD.003: pré-requisitos confirmados para entrar na Operação Assistida
+    # ({chave: "sim" | "na"}), fim previsto (até 15 dias) e prorrogações com justificativa.
+    assisted_op_checklist: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    assisted_op_due_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    assisted_op_extensions: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    assisted_op_due_alert_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     # SLA: quando o card entrou na etapa atual + estado calculado pela rotina de SLA.
     status_entered_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     sla_state: Mapped[str] = mapped_column(String(12), nullable=False, default="none")  # none|ok|warning|breached
@@ -1213,6 +1220,8 @@ class ProjectOccurrence(TenantBase):
     # ninguém assumir (grava para não repetir).
     assumed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     unassigned_alert_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Prazo de resolução da correção estourado (aviso enviado uma vez).
+    sla_breach_alert_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     # Horas úteis gastas (pausa em Aguardando Cliente/Homologando) — gravadas ao encerrar.
     worked_hours: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2), nullable=True)
     # Homologação pelo cliente.

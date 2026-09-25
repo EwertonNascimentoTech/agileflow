@@ -75,10 +75,14 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 - Ocorrência = ProjectTask no funil `is_assisted_ops` + linha em `project_occurrences`; regras leem `assisted_stage_key`, não o nome da etapa.
 - Só abre ocorrência cliente vinculado a projeto que está na raia Operação Assistida. Projeto não vai a Concluído com ocorrência aberta. Ocorrência encerrada (etapa final) não reabre.
 - Portal: cliente vê todas as ocorrências dos projetos dele, só interage nas que abriu, só vê comentários `visibility = public`.
-- Ocorrência: Finalizado vem da homologação do cliente no Portal (NPS); o time só finaliza sendo PO do projeto/admin. "Encaminhada p/ Release" só via `forward-release`.
+- Ocorrência: Finalizado vem da homologação do cliente no Portal (satisfação de 1 a 5, POP; campo `nps_score`); o time só finaliza sendo PO do projeto/admin. "Encaminhada p/ Release" só via `forward-release`.
 - Ocorrência (time): só a veem o PO do projeto, os devs de atendimento do projeto e a coordenação/admin (todas) — `hidden_occurrence_task_ids` em `_assert_task_in_scope` e nas listas (404 para os demais).
 - Ocorrência: responsável só pelo "Assumir" (dev de atendimento, PO do projeto, coordenação ou admin); no drawer o responsável do cabeçalho é só leitura.
 - Horas úteis da ocorrência começam no 1º "Assumir" e pausam em Aguardando Cliente/Homologando; calendário do TeamOps no fuso do tenant.
+- POP.COR.GTD.003 é a referência da Operação Assistida. Entrar na raia exige os pré-requisitos do POP confirmados (`OA_PREREQS`, 7 itens; dados e integrações aceitam "não se aplica"), em `project_tasks.assisted_op_checklist`: 428 `assisted_ops_prereqs_required` (vem depois do 428 de devs) -> modal do PO/coordenação -> reenvio do movimento.
+- Duração da Operação Assistida: fim previsto até 15 dias (`OA_MAX_DIAS`), escolhido no modal ou hoje + 15 ao entrar. Depois de entrar, só muda por prorrogação com justificativa (`assisted_op_extensions` + comentário interno no card). Projeto que entrou antes do POP define a 1ª data sem justificativa. Vencido: aviso ao PO e à coordenação 1x por dia.
+- Criticidade (Crítica/Alta/Média/Baixa, guardada como P1-P4) e prazo-alvo de resolução só existem em correção (`is_correction`: a classificação do time manda; sem ela, tipo erro; etapas de melhoria nunca). Prazo em horas úteis desde a abertura, pausando com o cliente; valores em `SLA_RESOLUCAO_HORAS` "a calibrar" (front repete em `occurrenceUi.SLA_RESOLUCAO_HORAS`). Estouro avisa PO, devs e responsável uma vez (`sla_breach_alert_at`).
+- Correção só vai para Homologando/Finalizado com solução e causa raiz preenchidas (400).
 - Capacidade de Projetos conta só User Story; Operação Assistida e Chamados são fatias separadas (`reserves`), pela divisão da jornada em Pessoas.
 - Divisão da jornada (Pessoas): Projetos % + Operação Assistida % <= 100; Chamados = o resto. `project_hours_per_day` continua só a fatia de Projetos.
 

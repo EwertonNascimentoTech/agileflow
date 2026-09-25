@@ -88,7 +88,7 @@ const PRIORITY_CLASS: Record<OccurrencePrioridade, string> = {
   P4: "bg-slate-100 text-slate-600 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700",
 }
 
-/** Nome curto da prioridade (cartão de indicador). */
+/** Criticidade do POP.COR.GTD.003 (8.2.3). Guardada como P1–P4; só correção tem criticidade. */
 export const PRIORITY_LABEL: Record<OccurrencePrioridade, string> = {
   P1: "Crítica",
   P2: "Alta",
@@ -96,21 +96,54 @@ export const PRIORITY_LABEL: Record<OccurrencePrioridade, string> = {
   P4: "Baixa",
 }
 
-const PRIORITY_TITLE: Record<OccurrencePrioridade, string> = {
-  P1: "Prioridade 1 — crítica",
-  P2: "Prioridade 2 — alta",
-  P3: "Prioridade 3 — média",
-  P4: "Prioridade 4 — baixa",
+/** Prazo-alvo de resolução em horas úteis — mesmo valor do backend
+ *  (assisted_ops.SLA_RESOLUCAO_HORAS), "a calibrar" pelo SLA institucional. */
+export const SLA_RESOLUCAO_HORAS: Record<OccurrencePrioridade, number> = { P1: 4, P2: 8, P3: 24, P4: 40 }
+
+export function fmtHours(h: number | null | undefined): string {
+  if (h == null) return "—"
+  return `${h.toLocaleString("pt-BR", { maximumFractionDigits: h < 10 ? 1 : 0 })} h`
 }
 
-export function PriorityBadge({ value, withLabel = false }: { value: OccurrencePrioridade; withLabel?: boolean }) {
+export function PriorityBadge({ value }: { value: OccurrencePrioridade }) {
   return (
     <span
-      title={PRIORITY_TITLE[value]}
+      title={`Criticidade ${PRIORITY_LABEL[value].toLowerCase()} — prazo-alvo de ${fmtHours(SLA_RESOLUCAO_HORAS[value])} úteis`}
       className={`inline-flex items-center whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-semibold ring-1 ring-inset ${PRIORITY_CLASS[value]}`}
     >
-      {value}
-      {withLabel && <span className="ml-1 font-medium">· {PRIORITY_LABEL[value]}</span>}
+      {PRIORITY_LABEL[value]}
+    </span>
+  )
+}
+
+/** Criticidade da ocorrência: só correção tem (dúvida e melhoria ficam sem, como no POP). */
+export function CriticidadeCell({ o }: { o: { is_correction: boolean; prioridade: OccurrencePrioridade } }) {
+  if (!o.is_correction) return <span className="text-xs text-muted-foreground" title="Dúvida e melhoria não têm criticidade (POP)">—</span>
+  return <PriorityBadge value={o.prioridade} />
+}
+
+const SLA_CLASS: Record<"ok" | "risco" | "estourado", string> = {
+  ok: "text-muted-foreground",
+  risco: "text-amber-700 dark:text-amber-300",
+  estourado: "text-red-700 dark:text-red-300",
+}
+
+/** Horas úteis gastas × prazo-alvo da correção ("3 h de 4 h"). */
+export function SlaText({
+  o,
+  className = "",
+}: {
+  o: { sla_state: "ok" | "risco" | "estourado" | null; sla_elapsed_hours: number | null; sla_target_hours: number | null }
+  className?: string
+}) {
+  if (!o.sla_state || o.sla_target_hours == null) return null
+  const label = o.sla_state === "estourado" ? "prazo estourado" : o.sla_state === "risco" ? "perto do prazo" : "no prazo"
+  return (
+    <span
+      className={`whitespace-nowrap text-xs font-medium ${SLA_CLASS[o.sla_state]} ${className}`}
+      title="Horas úteis da abertura até a solução ir para validação; o tempo com o cliente não conta."
+    >
+      {fmtHours(o.sla_elapsed_hours)} de {fmtHours(o.sla_target_hours)} · {label}
     </span>
   )
 }

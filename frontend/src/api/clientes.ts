@@ -171,11 +171,12 @@ export type OccurrenceAbrangencia = "eu" | "setor" | "todos"
 export type OccurrencePrioridade = "P1" | "P2" | "P3" | "P4"
 export type OccurrenceClassificacao = "erro_confirmado" | "duvida" | "ajuste" | "melhoria" | "nao_procede"
 
+/** Tipos do POP.COR.GTD.003 (7): correção, dúvida e melhoria. */
 export const OCCURRENCE_TIPO_LABEL: Record<OccurrenceTipo, string> = {
-  erro: "Erro / Falha",
+  erro: "Correção (erro)",
   duvida: "Dúvida de uso",
   ajuste: "Ajuste (diferente do combinado)",
-  melhoria: "Sugestão de melhoria",
+  melhoria: "Melhoria",
 }
 /** Tipos oferecidos ao cliente na abertura (Portal). "Ajuste (diferente do combinado)" saiu
  *  a pedido; o rótulo segue em OCCURRENCE_TIPO_LABEL para exibir ocorrências antigas. */
@@ -239,7 +240,14 @@ export interface OccurrenceSummary {
   assumed_at: string | null
   /** Horas úteis gastas (pausa com o cliente). */
   worked_hours: number | null
+  /** Satisfação na homologação, de 1 a 5 (POP). */
   nps_score: number | null
+  /** POP: só correção tem criticidade e prazo-alvo de resolução (horas úteis). */
+  is_correction: boolean
+  criticidade: string | null
+  sla_target_hours: number | null
+  sla_elapsed_hours: number | null
+  sla_state: "ok" | "risco" | "estourado" | null
   created_at: string
   updated_at: string | null
 }
@@ -344,7 +352,40 @@ export interface AssistedOpsDev {
   tickets_allocation_pct: number
 }
 
+/** Entrada na Operação Assistida (POP.COR.GTD.003, 5 e 8.1.2): pré-requisitos e fim previsto. */
+export interface AssistedOpsPrereqItem {
+  key: string
+  label: string
+  allow_na: boolean
+  value: "sim" | "na" | null
+}
+
+export interface AssistedOpsExtension {
+  from: string | null
+  to: string
+  reason: string
+  by: string | null
+  at: string
+}
+
+export interface AssistedOpsEntryState {
+  items: AssistedOpsPrereqItem[]
+  complete: boolean
+  due_date: string | null
+  max_days: number
+  entered_at: string | null
+  extensions: AssistedOpsExtension[]
+  overdue: boolean
+  can_manage: boolean
+}
+
 export const teamOccurrencesApi = {
+  entry: (projectTaskId: string) =>
+    api.get<AssistedOpsEntryState>(`/projetos/tasks/${projectTaskId}/assisted-ops-entry`).then((r) => r.data),
+  setEntry: (projectTaskId: string, data: { checklist: Record<string, "sim" | "na">; due_date?: string | null }) =>
+    api.put<AssistedOpsEntryState>(`/projetos/tasks/${projectTaskId}/assisted-ops-entry`, data).then((r) => r.data),
+  extend: (projectTaskId: string, data: { new_due_date: string; reason: string }) =>
+    api.post<AssistedOpsEntryState>(`/projetos/tasks/${projectTaskId}/assisted-ops-entry/extend`, data).then((r) => r.data),
   get: (taskId: string) => api.get<OccurrenceDetail>(`/projetos/occurrences/${taskId}`).then((r) => r.data),
   update: (taskId: string, data: OccurrenceTeamUpdate) =>
     api.patch<OccurrenceDetail>(`/projetos/occurrences/${taskId}`, data).then((r) => r.data),

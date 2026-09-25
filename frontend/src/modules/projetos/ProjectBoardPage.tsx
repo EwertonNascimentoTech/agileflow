@@ -73,6 +73,7 @@ import { canEditTaskOnBoard, canMoveTaskOnBoard } from "@/modules/projetos/taskM
 import { AssistedOpSkipDialog, isAssistedOpSkipRequired } from "@/modules/projetos/AssistedOpSkipDialog"
 import { StageReasonDialog, stageReasonRequired, type StageReasonPrompt } from "@/modules/projetos/StageReasonDialog"
 import { AssistedOpsDevsDialog, isAssistedOpsDevsRequired } from "@/modules/projetos/AssistedOpsDevsDialog"
+import { AssistedOpsPrereqsDialog, isAssistedOpsPrereqsRequired } from "@/modules/projetos/AssistedOpsEntrySection"
 
 function personToUser(p: Person): User {
   return { id: p.id, full_name: p.full_name, email: p.email } as unknown as User
@@ -891,6 +892,7 @@ export default function ProjectBoardPage() {
   // Mover para a Operação Assistida sem devs de atendimento: o PO define no modal e o
   // movimento é reenviado ao salvar (o backend só aceita com os devs definidos).
   const [oaDevsPrompt, setOaDevsPrompt] = useState<{ task: ProjectTask; toStatusId: string } | null>(null)
+  const [oaPrereqsPrompt, setOaPrereqsPrompt] = useState<{ task: ProjectTask; toStatusId: string } | null>(null)
   const [conversionPrompt, setConversionPrompt] = useState<{
     task: ProjectTask
     toStatusId: string
@@ -1791,6 +1793,10 @@ export default function ProjectBoardPage() {
         setOaDevsPrompt({ task, toStatusId })
         return
       }
+      if (isAssistedOpsPrereqsRequired(err)) {
+        setOaPrereqsPrompt({ task, toStatusId })
+        return
+      }
       if (isAssistedOpSkipRequired(err)) {
         setOaSkipPrompt({ task, toStatusId })
         return
@@ -2529,6 +2535,18 @@ export default function ProjectBoardPage() {
           if (!oaDevsPrompt) return
           const { task, toStatusId } = oaDevsPrompt
           setOaDevsPrompt(null)
+          await performMove(task, toStatusId)
+        }}
+      />
+      <AssistedOpsPrereqsDialog
+        open={!!oaPrereqsPrompt}
+        projectTaskId={oaPrereqsPrompt?.task.id ?? null}
+        projectTitle={oaPrereqsPrompt?.task.title}
+        onCancel={() => setOaPrereqsPrompt(null)}
+        onSaved={async () => {
+          if (!oaPrereqsPrompt) return
+          const { task, toStatusId } = oaPrereqsPrompt
+          setOaPrereqsPrompt(null)
           await performMove(task, toStatusId)
         }}
       />

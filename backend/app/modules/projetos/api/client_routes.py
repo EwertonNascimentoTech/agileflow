@@ -20,6 +20,9 @@ from app.modules.projetos.clients import ProjectClientService
 from app.modules.projetos.portal_assistant import PortalAssistantService
 from app.modules.projetos.program_portal import PortalPortfolioService, ProgramAdminService
 from app.modules.projetos.schemas import (
+    AssistedOpsEntrySet,
+    AssistedOpsEntryState,
+    AssistedOpsExtend,
     PortalAssistantAnswer,
     PortalAssistantAsk,
     AiSolutionCancel,
@@ -485,6 +488,25 @@ async def list_assisted_ops_devs(task_id: uuid.UUID, ctx: ModuleContext = Depend
     """Desenvolvedores fixos de atendimento da Operação Assistida do projeto."""
     await _assert_task_in_scope(ctx, task_id)
     return await AssistedOpsService.list_devs(ctx.db, task_id)
+
+
+@router.get("/tasks/{task_id}/assisted-ops-entry", response_model=AssistedOpsEntryState)
+async def get_assisted_ops_entry(task_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+    """Pré-requisitos (POP 5), fim previsto e prorrogações da Operação Assistida do projeto."""
+    await _assert_task_in_scope(ctx, task_id)
+    return await AssistedOpsService.entry_state(ctx.db, task_id, ctx.user)
+
+
+@router.put("/tasks/{task_id}/assisted-ops-entry", response_model=AssistedOpsEntryState)
+async def set_assisted_ops_entry(task_id: uuid.UUID, data: AssistedOpsEntrySet, ctx: ModuleContext = Depends(_ctx)):
+    await _assert_task_in_scope(ctx, task_id)
+    return await AssistedOpsService.set_entry(ctx.db, task_id, data, ctx.user)
+
+
+@router.post("/tasks/{task_id}/assisted-ops-entry/extend", response_model=AssistedOpsEntryState)
+async def extend_assisted_ops(task_id: uuid.UUID, data: AssistedOpsExtend, ctx: ModuleContext = Depends(_ctx)):
+    await _assert_task_in_scope(ctx, task_id)
+    return await AssistedOpsService.extend(ctx.db, task_id, data, ctx.user)
 
 
 @router.put("/tasks/{task_id}/assisted-ops-devs", response_model=list[AssistedOpsDevResponse])

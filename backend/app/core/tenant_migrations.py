@@ -4592,6 +4592,20 @@ async def _step_140_portal_programas(conn: AsyncConnection, schema: str) -> None
                         "linked_program_id", columns=("linked_program_id",))
 
 
+async def _step_141_operacao_assistida_pop(conn: AsyncConnection, schema: str) -> None:
+    """POP.COR.GTD.003: pré-requisitos, fim previsto e prorrogações da Operação Assistida no
+    card-raiz; aviso de prazo de resolução estourado na ocorrência."""
+    await _add_columns(conn, schema, "project_tasks", {
+        "assisted_op_checklist": "JSONB",
+        "assisted_op_due_date": "DATE",
+        "assisted_op_extensions": "JSONB",
+        "assisted_op_due_alert_at": "TIMESTAMP",
+    })
+    await _add_columns(conn, schema, "project_occurrences", {
+        "sla_breach_alert_at": "TIMESTAMP",
+    })
+
+
 async def _step_129_projetos_agent_fail_to(conn: AsyncConnection, schema: str) -> None:
     """Raia de destino quando a triagem do backlog (review_and_route) não aprova."""
     await _add_columns(conn, schema, "project_stage_agent_bindings", {
@@ -4830,6 +4844,7 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("138_projetos_clientes_funcao", _step_138_projetos_clientes_funcao),
     ("139_projetos_solucoes_ia", _step_139_projetos_solucoes_ia),
     ("140_portal_programas", _step_140_portal_programas),
+    ("141_operacao_assistida_pop", _step_141_operacao_assistida_pop),
     ("123_reconcile_indexes", _step_123_reconcile_indexes),
 ]
 

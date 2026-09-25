@@ -14,6 +14,14 @@ Modelo:
 
 ---
 
+## 2026-09-25 — Operação Assistida no POP.COR.GTD.003 (Onda 1)
+
+- **Pedido:** o POP.COR.GTD.003 é o processo certo de Operação Assistida; avaliar e melhorar o nosso. Decisões: satisfação de 1 a 5; N1 passa pelos responsáveis de nível 1 do Produto (Onda 2); criticidade igual ao POP; prazos "pelo POP" (o POP não traz números: valores de referência a calibrar).
+- **Feito:** step 141 (`project_tasks.assisted_op_checklist/due_date/extensions/due_alert_at`, `project_occurrences.sla_breach_alert_at`). Pré-requisitos do POP para entrar na raia (428 `assisted_ops_prereqs_required` + modal), fim previsto até 15 dias e prorrogação com justificativa (bloco no card do projeto). Criticidade Crítica/Alta/Média/Baixa só para correção, com prazo-alvo em horas úteis (4/8/24/40) e estado ok/risco/estourado; correção exige solução e causa raiz antes da validação do cliente. Satisfação 1-5 no Portal. Abertura com triagem guiada (é dúvida? impede processo crítico? faz o que foi combinado? na dúvida, melhoria). Tipos renomeados para Correção (erro)/Dúvida de uso/Melhoria. Celery avisa prazo estourado e OA vencida.
+- **Não mexer:** prioridade continua gravada como P1-P4 (só o rótulo mudou); dúvida e melhoria não têm criticidade nem prazo-alvo.
+- **Pendente (Ondas 2 e 3):** N1 pelos responsáveis de nível 1 do Produto (nomes externos sem login precisam de decisão), papéis do POP, escalonamento N3/IE, fases e atas; painel de indicadores e encerramento formal.
+- **Arquivos:** `core/tenant_migrations.py`, `projetos/models.py`, `projetos/schemas.py`, `projetos/assisted_ops.py`, `projetos/service.py`, `projetos/api/client_routes.py`, `tasks/scheduled.py`; front `api/clientes.ts`, `portal/occurrenceUi.tsx`, `portal/ClientOccurrencesPage.tsx`, `portal/ClientOccurrenceDetailPage.tsx`, `portal/ClientNewOccurrencePage.tsx`, `projetos/OccurrenceTeamPanel.tsx`, `projetos/AssistedOpsEntrySection.tsx`, `projetos/ProjectBoardPage.tsx`, `projetos/ProjectTaskDrawer.tsx`.
+
 ## 2026-09-25 — Qualquer pessoa pede análise de Solução com IA
 
 - **Pedido:** todo mundo com acesso à plataforma deve poder solicitar o processo de análise de Soluções com IA.

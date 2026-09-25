@@ -37,7 +37,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { toast } from "@/lib/toast"
-import { PriorityBadge, apiErrorDetail, plural } from "@/modules/portal/occurrenceUi"
+import { PriorityBadge, SLA_RESOLUCAO_HORAS, apiErrorDetail, plural } from "@/modules/portal/occurrenceUi"
 import { Card, IconTile } from "@/modules/portal/portfolioUi"
 import {
   ChoiceCards,
@@ -53,10 +53,44 @@ import { usePortalBase } from "@/modules/portal/portfolioMeta"
 
 const NONE = "__none__"
 
+// Definições do POP.COR.GTD.003 (7).
 const TIPO_META: Record<OccurrenceTipoAbertura, { icon: LucideIcon; desc: string }> = {
-  erro: { icon: Bug, desc: "Algo não funciona como deveria." },
+  erro: { icon: Bug, desc: "O sistema não faz o que foi combinado na entrega." },
   duvida: { icon: CircleHelp, desc: "Não sei como fazer algo no sistema." },
-  melhoria: { icon: Lightbulb, desc: "Uma ideia para o sistema ficar melhor." },
+  melhoria: { icon: Lightbulb, desc: "Algo novo ou diferente do que foi combinado." },
+}
+
+/** Triagem em 3 passos do POP (8.2.4): é dúvida? bloqueia processo crítico? faz o que foi
+ *  acordado? Na dúvida, é melhoria — salvo bloqueio. */
+type TriageStep = "duvida" | "bloqueio" | "acordado"
+const TRIAGE_QUESTION: Record<TriageStep, string> = {
+  duvida: "Você quer saber como fazer algo no sistema?",
+  bloqueio: "Isso impede um processo crítico da sua área de acontecer?",
+  acordado: "O sistema deixou de fazer algo que foi combinado na entrega?",
+}
+
+function TriageHelper({ onResult }: { onResult: (tipo: OccurrenceTipoAbertura, bloqueio: boolean) => void }) {
+  const [step, setStep] = useState<TriageStep>("duvida")
+  const answer = (sim: boolean | null) => {
+    if (step === "duvida") return sim ? onResult("duvida", false) : setStep("bloqueio")
+    if (step === "bloqueio") return sim ? onResult("erro", true) : setStep("acordado")
+    // "Não sei" cai em melhoria, como manda o POP.
+    return onResult(sim ? "erro" : "melhoria", false)
+  }
+  const n = step === "duvida" ? 1 : step === "bloqueio" ? 2 : 3
+  return (
+    <div className="space-y-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-primary">Pergunta {n} de 3</p>
+      <p className="text-sm font-medium">{TRIAGE_QUESTION[step]}</p>
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" size="sm" variant="outline" onClick={() => answer(true)}>Sim</Button>
+        <Button type="button" size="sm" variant="outline" onClick={() => answer(false)}>Não</Button>
+        {step === "acordado" && (
+          <Button type="button" size="sm" variant="ghost" onClick={() => answer(null)}>Não sei</Button>
+        )}
+      </div>
+    </div>
+  )
 }
 const IMPACTO_META: Record<OccurrenceImpacto, { icon: LucideIcon; desc: string }> = {
   impede: { icon: Ban, desc: "Não consigo seguir com o trabalho." },
@@ -99,6 +133,7 @@ export default function ClientNewOccurrencePage() {
   const [impacto, setImpacto] = useState<OccurrenceImpacto | null>(null)
   const [abrangencia, setAbrangencia] = useState<OccurrenceAbrangencia | null>(null)
   const [anexos, setAnexos] = useState<Upload[]>([])
+  const [triage, setTriage] = useState<"off" | "on" | "done">("off")
   const [saving, setSaving] = useState(false)
   const [tried, setTried] = useState(false)
 
@@ -134,7 +169,8 @@ export default function ClientNewOccurrencePage() {
   ]
   const required = steps.filter((s) => !s.optional)
   const doneCount = required.filter((s) => s.done).length
-  const priority = impacto && abrangencia ? PRIORITY[impacto][abrangencia] : null
+  // Criticidade só para correção (POP 8.2.3); dúvida e melhoria não têm prazo-alvo.
+  const priority = tipo === "erro" && impacto && abrangencia ? PRIORITY[impacto][abrangencia] : null
 
   async function submit() {
     setTried(true)
@@ -244,8 +280,29 @@ export default function ClientNewOccurrencePage() {
                 Tipo
                 <Req />
               </Label>
-              <ChoiceCards name="Tipo" value={tipo} choices={choicesOf(OCCURRENCE_TIPO_ABERTURA, TIPO_META)} onChange={setTipo} invalid={show("tipo")} />
+              <ChoiceCards
+                name="Tipo" value={tipo} choices={choicesOf(OCCURRENCE_TIPO_ABERTURA, TIPO_META)}
+                onChange={(v) => { setTipo(v); setTriage("off") }} invalid={show("tipo")}
+              />
               <FieldError show={show("tipo")}>Escolha o tipo da ocorrência.</FieldError>
+              {triage === "on" ? (
+                <TriageHelper
+                  onResult={(t, bloqueio) => {
+                    setTipo(t)
+                    if (bloqueio) setImpacto("impede")
+                    setTriage("done")
+                  }}
+                />
+              ) : triage === "done" && tipo ? (
+                <p className="text-sm text-muted-foreground">
+                  Pelas suas respostas, é <span className="font-medium text-foreground">{OCCURRENCE_TIPO_ABERTURA[tipo]}</span>. Se não
+                  concordar, escolha outro tipo acima.
+                </p>
+              ) : (
+                <button type="button" className="text-sm font-medium text-primary hover:underline" onClick={() => setTriage("on")}>
+                  Não sabe qual escolher? Responda 3 perguntas
+                </button>
+              )}
               {tipo === "melhoria" && (
                 <p className="rounded-xl bg-muted/60 px-4 py-3 text-sm text-muted-foreground">
                   Melhorias são analisadas pelo PO e podem seguir para um projeto de Release, fora da Operação Assistida.
@@ -350,12 +407,18 @@ export default function ClientNewOccurrencePage() {
               />
               <FieldError show={show("abrangencia")}>Informe quem é afetado.</FieldError>
             </div>
-            {priority && (
+            {priority ? (
               <p className="flex flex-wrap items-center gap-2 rounded-xl bg-muted/60 px-4 py-3 text-sm">
-                Prioridade prevista: <PriorityBadge value={priority} withLabel />
-                <span className="text-muted-foreground">O PO do projeto pode ajustar.</span>
+                Criticidade prevista: <PriorityBadge value={priority} />
+                <span className="text-muted-foreground">
+                  Prazo-alvo de {SLA_RESOLUCAO_HORAS[priority]} h úteis. O PO do projeto pode ajustar.
+                </span>
               </p>
-            )}
+            ) : tipo && tipo !== "erro" && impacto && abrangencia ? (
+              <p className="rounded-xl bg-muted/60 px-4 py-3 text-sm text-muted-foreground">
+                {tipo === "duvida" ? "Dúvidas" : "Melhorias"} não têm criticidade nem prazo-alvo de resolução — isso vale só para correções.
+              </p>
+            ) : null}
           </FormSection>
 
           <FormSection
@@ -396,8 +459,12 @@ export default function ClientNewOccurrencePage() {
                 <SummaryRow label="Quem é afetado">
                   {abrangencia ? OCCURRENCE_ABRANGENCIA_LABEL[abrangencia] : <span className="font-normal text-muted-foreground">—</span>}
                 </SummaryRow>
-                <SummaryRow label="Prioridade prevista">
-                  {priority ? <PriorityBadge value={priority} withLabel /> : <span className="font-normal text-muted-foreground">—</span>}
+                <SummaryRow label="Criticidade prevista">
+                  {priority ? (
+                    <PriorityBadge value={priority} />
+                  ) : (
+                    <span className="font-normal text-muted-foreground">{tipo && tipo !== "erro" ? "Não se aplica" : "—"}</span>
+                  )}
                 </SummaryRow>
                 <SummaryRow label="Anexos">{anexos.length || <span className="font-normal text-muted-foreground">Nenhum</span>}</SummaryRow>
               </dl>

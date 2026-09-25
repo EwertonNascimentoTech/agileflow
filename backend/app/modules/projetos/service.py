@@ -2262,6 +2262,30 @@ class ProjectTaskService:
             )
 
     @staticmethod
+    async def _guard_assisted_op_prereqs(db: AsyncSession, task: ProjectTask, target_status) -> None:
+        """POP.COR.GTD.003 (5): a Operação Assistida só começa com os pré-requisitos confirmados.
+        428 com código → o front abre o checklist e reenvia o movimento."""
+        if task.parent_task_id is not None or target_status is None:
+            return
+        if not ProjectTaskService._is_assisted_operation_status(target_status):
+            return
+        funnel = await db.get(ProjectFunnel, target_status.funnel_id)
+        if funnel is None or not ProjectTaskService._is_planning_funnel_name(funnel.name):
+            return
+        from app.modules.projetos.assisted_ops import prereqs_missing
+
+        faltam = prereqs_missing(task.assisted_op_checklist)
+        if faltam:
+            raise HTTPException(
+                status_code=428,
+                detail={
+                    "code": "assisted_ops_prereqs_required",
+                    "missing": faltam,
+                    "message": "Confirme os pré-requisitos da Operação Assistida (POP) antes de mover o projeto para essa raia.",
+                },
+            )
+
+    @staticmethod
     async def _guard_assisted_op_skip(
         db: AsyncSession,
         task: ProjectTask,
@@ -4559,6 +4583,7 @@ class ProjectTaskService:
                     db, task, source_status, target_status, assisted_op_skip_reason, current_user,
                 )
                 await ProjectTaskService._guard_assisted_op_devs(db, task, target_status)
+                await ProjectTaskService._guard_assisted_op_prereqs(db, task, target_status)
                 # Motivo obrigatório ao entrar na etapa (entry_reason_required) ou ao voltar no
                 # kanban Soluções com IA — 428 stage_reason_required sem ele.
                 from app.modules.projetos.ai_solutions import AiSolutionsService

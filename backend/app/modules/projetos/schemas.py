@@ -2482,7 +2482,15 @@ class OccurrenceSummary(BaseModel):
     assumed_at: Optional[datetime] = None
     # Horas úteis gastas até agora (pausa com o cliente); fixas depois de encerrada.
     worked_hours: Optional[float] = None
+    # Satisfação do cliente na homologação (1 a 5, POP.COR.GTD.003).
     nps_score: Optional[int] = None
+    # POP: só correção tem criticidade (Crítica/Alta/Média/Baixa) e prazo de resolução.
+    is_correction: bool = False
+    criticidade: Optional[str] = None
+    sla_target_hours: Optional[float] = None
+    # Horas úteis da abertura até ir para homologação (pausa em Aguardando Cliente).
+    sla_elapsed_hours: Optional[float] = None
+    sla_state: Optional[Literal["ok", "risco", "estourado"]] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -2544,9 +2552,9 @@ class AssistedOpsDevsSet(BaseModel):
 
 
 class OccurrenceHomologation(BaseModel):
-    """Cliente aprova (com NPS 0–10) ou reprova (com motivo) na etapa Homologando."""
+    """Cliente aprova (com satisfação de 1 a 5, POP) ou reprova (com motivo) na etapa Homologando."""
     approve: bool
-    nps_score: Optional[int] = Field(None, ge=0, le=10)
+    nps_score: Optional[int] = Field(None, ge=1, le=5)
     comment: Optional[str] = Field(None, max_length=5000)
 
 
@@ -2673,3 +2681,33 @@ class PortalAssistantSource(BaseModel):
 class PortalAssistantAnswer(BaseModel):
     answer: str
     sources: list[PortalAssistantSource] = Field(default_factory=list)
+
+
+# ── Operação Assistida: entrada (POP.COR.GTD.003) ────────────────────────────
+
+class AssistedOpsPrereqItem(BaseModel):
+    key: str
+    label: str
+    allow_na: bool = False
+    value: Optional[Literal["sim", "na"]] = None
+
+
+class AssistedOpsEntryState(BaseModel):
+    items: list[AssistedOpsPrereqItem] = Field(default_factory=list)
+    complete: bool = False
+    due_date: Optional[date] = None
+    max_days: int = 15
+    entered_at: Optional[datetime] = None
+    extensions: list[dict] = Field(default_factory=list)
+    overdue: bool = False
+    can_manage: bool = False
+
+
+class AssistedOpsEntrySet(BaseModel):
+    checklist: dict[str, Literal["sim", "na"]] = Field(default_factory=dict)
+    due_date: Optional[date] = None
+
+
+class AssistedOpsExtend(BaseModel):
+    new_due_date: date
+    reason: str = Field(..., min_length=10, max_length=4000)

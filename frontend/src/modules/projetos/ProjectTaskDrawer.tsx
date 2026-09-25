@@ -38,6 +38,11 @@ import { isCoordination } from "@/lib/permissions"
 import { AssistedOpsDevsDialog, isAssistedOpsDevsRequired } from "@/modules/projetos/AssistedOpsDevsDialog"
 import { OccurrenceTeamPanel } from "@/modules/projetos/OccurrenceTeamPanel"
 import { AssistedOpsDevsSection } from "@/modules/projetos/AssistedOpsDevsSection"
+import {
+  AssistedOpsEntrySection,
+  AssistedOpsPrereqsDialog,
+  isAssistedOpsPrereqsRequired,
+} from "@/modules/projetos/AssistedOpsEntrySection"
 import { ProjectClientsSection } from "@/modules/projetos/ProjectClientsSection"
 import { AttachmentField, type Attachment } from "@/components/AttachmentField"
 import { fmtEstimatedHours, isFeatureOrUsKanbanFunnel, isPlanningRootTask, isProjectOrProgramKanbanFunnel, isUserStoryDemandType, isUserStoryKanbanFunnel } from "@/modules/projetos/kanbanDisplay"
@@ -181,6 +186,7 @@ export function ProjectTaskDrawer({
   // Operação Assistida sem devs de atendimento: modal do PO; ao salvar reenvia a etapa.
   const [oaDevsStatusId, setOaDevsStatusId] = useState<string | null>(null)
   const [oaDevsRefresh, setOaDevsRefresh] = useState(0)
+  const [oaPrereqsStatusId, setOaPrereqsStatusId] = useState<string | null>(null)
   const [classifyOpen, setClassifyOpen] = useState(false)
   const [statusConvPrompt, setStatusConvPrompt] = useState<{ newStatusId: string; typeName: string; name: string } | null>(null)
   const [assigneeMenuOpen, setAssigneeMenuOpen] = useState(false)
@@ -730,6 +736,10 @@ export function ProjectTaskDrawer({
       }
       if (isAssistedOpsDevsRequired(err)) {
         setOaDevsStatusId(newStatusId)
+        return
+      }
+      if (isAssistedOpsPrereqsRequired(err)) {
+        setOaPrereqsStatusId(newStatusId)
         return
       }
       if (isAssistedOpSkipRequired(err)) {
@@ -1628,6 +1638,10 @@ export function ProjectTaskDrawer({
               <AssistedOpsDevsSection projectTaskId={task.id} readOnly={readOnly} refreshKey={oaDevsRefresh} hideWhenEmpty />
             )}
 
+            {task && isPlanningRootTask(task.planning_kind) && isProjectOrProgramKanbanFunnel(taskFunnelName) && (
+              <AssistedOpsEntrySection projectTaskId={task.id} readOnly={readOnly} refreshKey={oaDevsRefresh} />
+            )}
+
             {!readOnly && task && isPlanningRootTask(task.planning_kind) && canImportScheduleInStatus(statusLabel) && (
               <div className="rounded-md border border-primary/20 bg-primary/5 p-3">
                 <ScheduleImportPanel
@@ -1910,6 +1924,18 @@ export function ProjectTaskDrawer({
       onSaved={async () => {
         const target = oaDevsStatusId
         setOaDevsStatusId(null)
+        setOaDevsRefresh((n) => n + 1)
+        if (target) await persistStatus(target)
+      }}
+    />
+    <AssistedOpsPrereqsDialog
+      open={!!oaPrereqsStatusId}
+      projectTaskId={task?.id ?? null}
+      projectTitle={task?.title}
+      onCancel={() => setOaPrereqsStatusId(null)}
+      onSaved={async () => {
+        const target = oaPrereqsStatusId
+        setOaPrereqsStatusId(null)
         setOaDevsRefresh((n) => n + 1)
         if (target) await persistStatus(target)
       }}

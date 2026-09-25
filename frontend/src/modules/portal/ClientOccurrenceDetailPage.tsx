@@ -38,6 +38,7 @@ import { formatApiDateTime } from "@/lib/utils"
 import { DetailHeader, KpiPerson, KpiRow, KpiText, type KpiTone, type MenuAction } from "@/modules/portal/DetailShell"
 import {
   PRIORITY_LABEL,
+  SlaText,
   StageBadge,
   StageStepper,
   apiErrorDetail,
@@ -128,9 +129,18 @@ function NextStep({
   )
 }
 
+/** Satisfação de 1 a 5 (POP.COR.GTD.003; meta: média de 4 ou mais). */
+const SATISFACAO: Array<{ n: number; label: string }> = [
+  { n: 1, label: "Muito insatisfeito" },
+  { n: 2, label: "Insatisfeito" },
+  { n: 3, label: "Neutro" },
+  { n: 4, label: "Satisfeito" },
+  { n: 5, label: "Muito satisfeito" },
+]
+
 function npsTone(n: number): string {
-  if (n <= 6) return "border-red-400 bg-red-500 text-white"
-  if (n <= 8) return "border-amber-400 bg-amber-500 text-white"
+  if (n <= 2) return "border-red-400 bg-red-500 text-white"
+  if (n === 3) return "border-amber-400 bg-amber-500 text-white"
   return "border-emerald-500 bg-emerald-600 text-white"
 }
 
@@ -192,7 +202,7 @@ export default function ClientOccurrenceDetailPage() {
 
   async function homologate() {
     if (!occ || !homologMode) return
-    if (homologMode === "approve" && nps === null) return toast.error("Escolha uma nota de 0 a 10.")
+    if (homologMode === "approve" && nps === null) return toast.error("Escolha uma nota de 1 a 5.")
     if (homologMode === "reject" && homologText.trim().length < 5) return toast.error("Conte o que ainda não está certo.")
     setHomologating(true)
     try {
@@ -294,7 +304,7 @@ export default function ClientOccurrenceDetailPage() {
       <NextStep tone="emerald" icon={<CheckCircle2 size={16} />}>
         {occ.nps_score != null ? (
           <p>
-            <span className="font-medium">Resolvida.</span> Homologada em {fmtDateTime(occ.homologated_at)} · nota {occ.nps_score}/10
+            <span className="font-medium">Resolvida.</span> Homologada em {fmtDateTime(occ.homologated_at)} · satisfação {occ.nps_score}/5
           </p>
         ) : (
           <p>
@@ -322,7 +332,7 @@ export default function ClientOccurrenceDetailPage() {
       <DetailHeader
         crumbs={[{ label: "Portfólio", to: base }, { label: "Ocorrências", to: `${base}/ocorrencias` }, { label: occ.code_label }]}
         icon="LifeBuoy"
-        color={PRIORITY_COLOR[occ.prioridade]}
+        color={occ.is_correction ? PRIORITY_COLOR[occ.prioridade] : "#2563EB"}
         title={occTitle(occ)}
         badge={<StageBadge stageKey={occ.stage_key} name={occ.stage_name} mine={mine} size="lg" />}
         description={<>{occ.project_title} · {OCCURRENCE_TIPO_LABEL[occ.tipo]}</>}
@@ -337,14 +347,30 @@ export default function ClientOccurrenceDetailPage() {
       />
 
       <KpiRow className="sm:grid-cols-2 lg:grid-cols-5">
-        <KpiText icon={Flag} tone={PRIORITY_TONE[occ.prioridade]} value={`${occ.prioridade} · ${PRIORITY_LABEL[occ.prioridade]}`} label="Prioridade" />
+        {occ.is_correction ? (
+          <KpiText
+            icon={Flag} tone={PRIORITY_TONE[occ.prioridade]} value={PRIORITY_LABEL[occ.prioridade]}
+            label={occ.sla_target_hours != null ? `Criticidade · prazo-alvo ${occ.sla_target_hours.toLocaleString("pt-BR")} h úteis` : "Criticidade"}
+          />
+        ) : (
+          <KpiText icon={Flag} tone="slate" value="Sem criticidade" label={occ.tipo === "duvida" ? "Dúvida de uso" : "Melhoria"} />
+        )}
         <KpiText icon={Zap} value={OCCURRENCE_IMPACTO_LABEL[occ.impacto]} label="Impacto" />
         <KpiText icon={Users} value={OCCURRENCE_ABRANGENCIA_LABEL[occ.abrangencia]} label="Quem é afetado" />
         <KpiPerson name={occ.assignee_name ?? "A definir"} role="Responsável no time" />
-        <KpiText
-          icon={Clock} tone="slate" label="Tempo de atendimento"
-          value={occ.assumed_at ? fmtHours(occ.worked_hours) : "Ainda não assumida"}
-        />
+        {occ.is_correction && occ.sla_state ? (
+          <KpiText
+            icon={Clock}
+            tone={occ.sla_state === "estourado" ? "red" : occ.sla_state === "risco" ? "amber" : "emerald"}
+            value={<SlaText o={occ} className="text-sm" />}
+            label="Prazo de resolução"
+          />
+        ) : (
+          <KpiText
+            icon={Clock} tone="slate" label="Tempo de atendimento"
+            value={occ.assumed_at ? fmtHours(occ.worked_hours) : "Ainda não assumida"}
+          />
+        )}
       </KpiRow>
 
       <Section title="Andamento da ocorrência" subtitle="Em que etapa a ocorrência está e o que acontece a seguir.">
@@ -391,23 +417,24 @@ export default function ClientOccurrenceDetailPage() {
           </div>
           {homologMode === "approve" && (
             <div className="space-y-2">
-              <p className="text-sm">De 0 a 10, o quanto você recomendaria este atendimento?</p>
+              <p className="text-sm">De 1 a 5, qual a sua satisfação com este atendimento?</p>
               <div className="flex flex-wrap gap-1.5">
-                {Array.from({ length: 11 }, (_, n) => (
+                {SATISFACAO.map(({ n, label }) => (
                   <button
                     key={n}
                     type="button"
                     onClick={() => setNps(n)}
                     aria-pressed={nps === n}
+                    title={label}
                     className={`h-10 w-10 rounded-lg border text-sm font-medium transition-colors ${nps === n ? npsTone(n) : "bg-background hover:bg-muted"}`}
                   >
                     {n}
                   </button>
                 ))}
               </div>
-              <div className="flex max-w-[30rem] justify-between text-xs text-muted-foreground">
-                <span>Nada provável</span>
-                <span>Muito provável</span>
+              <div className="flex max-w-[15rem] justify-between text-xs text-muted-foreground">
+                <span>Muito insatisfeito</span>
+                <span>Muito satisfeito</span>
               </div>
               <Textarea rows={2} placeholder="Comentário (opcional)" value={homologText} onChange={(e) => setHomologText(e.target.value)} />
             </div>
@@ -580,8 +607,9 @@ export default function ClientOccurrenceDetailPage() {
             )}
           </Section>
           <p className="px-1 text-xs leading-relaxed text-muted-foreground">
-            A prioridade é calculada pelo impacto e por quem é afetado; o PO do projeto pode ajustá-la. O tempo de atendimento conta
-            horas úteis a partir de quando alguém do time assumiu e pausa enquanto a ocorrência espera por você.
+            Só correção tem criticidade (Crítica, Alta, Média ou Baixa) e prazo-alvo de resolução. A sugestão vem do impacto e de quem
+            é afetado; o PO do projeto pode ajustá-la. O prazo conta horas úteis da abertura até a solução ir para a sua validação e
+            pausa enquanto a ocorrência espera por você. Dúvida e melhoria não têm prazo-alvo.
           </p>
         </aside>
       </div>

@@ -42,6 +42,10 @@ from app.modules.projetos.models import (
 )
 from app.modules.projetos.schemas import (
     AssistedOpsDevResponse,
+    AssistedOpsEntrySet,
+    AssistedOpsEntryState,
+    AssistedOpsExtend,
+    AssistedOpsPrereqItem,
     OccurrenceForwardRelease,
     OccurrenceHomologation,
     OccurrenceComment,
@@ -77,6 +81,41 @@ _PRIORITY = {
 # Com o cliente (não conta hora do dev) e encerradas (param a contagem).
 _PAUSED_KEYS = frozenset({"aguardando_cliente", "homologando"})
 _CLOSED_KEYS = frozenset({"finalizado", "encaminhada_release"})
+
+# POP.COR.GTD.003 (8.2.3): só correção tem criticidade e prazo-alvo de resolução. Os prazos
+# são valores de referência em horas úteis, "a calibrar" pelo SLA institucional.
+CRITICIDADE = {"P1": "Crítica", "P2": "Alta", "P3": "Média", "P4": "Baixa"}
+SLA_RESOLUCAO_HORAS = {"P1": 4.0, "P2": 8.0, "P3": 24.0, "P4": 40.0}
+_SLA_RISCO = 0.8
+_MELHORIA_KEYS = frozenset({"melhoria_analise", "encaminhada_release"})
+# POP 8.1.2: Operação Assistida de até 15 dias (prorrogável conforme a criticidade do projeto).
+OA_MAX_DIAS = 15
+# POP 5: pré-requisitos para iniciar (chave, rótulo, aceita "não se aplica").
+OA_PREREQS: list[tuple[str, str, bool]] = [
+    ("papeis", "Papéis e responsáveis nomeados", False),
+    ("dados", "Dados migrados e validados", True),
+    ("integracoes", "Integrações com legados testadas e ativas", True),
+    ("homologacao", "Solução homologada", False),
+    ("treinamento", "Treinamento dos usuários-chave concluído", False),
+    ("canais", "Canais de suporte e ferramenta de chamados configurados", False),
+    ("golive", "Go-live realizado e solução disponível em produção", False),
+]
+
+
+def is_correction(occ) -> bool:
+    """Correção = a solução não faz o que foi acordado (POP 7). Classificação do time manda;
+    sem ela, vale o tipo informado na abertura."""
+    if occ.classificacao:
+        return occ.classificacao == "erro_confirmado"
+    return occ.tipo == "erro"
+
+
+def prereqs_missing(checklist: Optional[dict]) -> list[str]:
+    done = checklist or {}
+    return [
+        label for key, label, allow_na in OA_PREREQS
+        if not (done.get(key) == "sim" or (allow_na and done.get(key) == "na"))
+    ]
 
 
 def _is_admin(user: Optional[User]) -> bool:
@@ -552,10 +591,18 @@ class AssistedOpsService:
         } if person_ids else {}
 
         out: list[OccurrenceSummary] = []
+        cal_tz = await AssistedOpsService._calendar(db) if any(is_correction(o) for o, _t in pairs) else None
         for o, t in pairs:
             st = statuses.get(t.status_id)
             mine = bool(viewer_client and o.opened_by_client_id == viewer_client.id)
             closed = bool(st and st.is_final)
+            # Em análise/encaminhada como melhoria já não é correção (vai para o backlog de evolução).
+            corr = is_correction(o) and (st.assisted_stage_key if st else None) not in _MELHORIA_KEYS
+            sla_target, sla_elapsed, sla_state = (
+                await AssistedOpsService._sla(db, t, o, *cal_tz) if corr and cal_tz else (None, None, None)
+            )
+            if closed and sla_state == "risco":
+                sla_state = "ok"  # encerrada: vale o resultado final (no prazo ou estourado)
             out.append(OccurrenceSummary(
                 task_id=t.id,
                 project_id=t.project_id,
@@ -578,10 +625,48 @@ class AssistedOpsService:
                 assumed_at=o.assumed_at,
                 worked_hours=float(o.worked_hours) if o.worked_hours is not None else None,
                 nps_score=o.nps_score,
+                is_correction=corr,
+                criticidade=CRITICIDADE.get(o.prioridade) if corr else None,
+                sla_target_hours=sla_target,
+                sla_elapsed_hours=sla_elapsed,
+                sla_state=sla_state,
                 created_at=o.created_at,
                 updated_at=t.updated_at,
             ))
         return out
+
+    @staticmethod
+    async def _sla(db: AsyncSession, task: ProjectTask, occ: ProjectOccurrence, cal, tz) -> tuple[Optional[float], Optional[float], Optional[str]]:
+        """Prazo de resolução da correção: horas úteis da abertura até encerrar, pausando com o
+        cliente (Aguardando Cliente/Homologando). Estado: risco a partir de 80% do prazo-alvo."""
+        target = SLA_RESOLUCAO_HORAS.get(occ.prioridade)
+        if target is None:
+            return None, None, None
+        hist = list((await db.execute(
+            select(ProjectTaskStatusHistory.moved_at, ProjectTaskStatusHistory.to_status_id)
+            .where(ProjectTaskStatusHistory.task_id == task.id)
+            .order_by(ProjectTaskStatusHistory.moved_at.asc())
+        )).all())
+        status_ids = {sid for _t, sid in hist if sid} | {task.status_id}
+        keys = {
+            s.id: s.assisted_stage_key for s in (await db.execute(
+                select(ProjectStatusConfig).where(ProjectStatusConfig.id.in_(status_ids))
+            )).scalars().all()
+        }
+        events = [(t, keys.get(sid)) for t, sid in hist if t is not None] or [(occ.created_at, keys.get(task.status_id))]
+        now = datetime.utcnow()
+        elapsed = 0.0
+        for i, (start, key) in enumerate(events):
+            if key in _CLOSED_KEYS:
+                break
+            end = events[i + 1][0] if i + 1 < len(events) else now
+            start = max(start, occ.created_at)
+            if key in _PAUSED_KEYS or end <= start:
+                continue
+            elapsed += cal.working_hours_between(_to_local(start, tz), _to_local(end, tz))
+        elapsed = round(elapsed, 2)
+        state = "estourado" if elapsed > target else ("risco" if elapsed >= _SLA_RISCO * target else "ok")
+        return target, elapsed, state
 
     @staticmethod
     async def _detail(
@@ -947,10 +1032,186 @@ class AssistedOpsService:
         await db.commit()
         return await AssistedOpsService.team_detail(db, task_id, user)
 
+    # ── Entrada na Operação Assistida (POP 5 e 8.1.2) ───────────────────────
+    @staticmethod
+    async def _can_manage_oa(db: AsyncSession, user: Optional[User], root_id: uuid.UUID) -> bool:
+        from app.modules.projetos.service import ProjectTaskService
+
+        return bool(
+            _is_admin(user)
+            or await AssistedOpsService._is_project_po(db, user, root_id)
+            or await ProjectTaskService._is_coordination(db, user)
+        )
+
+    @staticmethod
+    async def _root(db: AsyncSession, root_id: uuid.UUID) -> ProjectTask:
+        root = await db.get(ProjectTask, root_id)
+        if root is None or root.parent_task_id is not None:
+            raise HTTPException(status_code=404, detail="Projeto não encontrado.")
+        return root
+
+    @staticmethod
+    async def entry_state(db: AsyncSession, root_id: uuid.UUID, user: Optional[User]) -> AssistedOpsEntryState:
+        root = await AssistedOpsService._root(db, root_id)
+        done = root.assisted_op_checklist or {}
+        return AssistedOpsEntryState(
+            items=[
+                AssistedOpsPrereqItem(key=k, label=label, allow_na=na, value=done.get(k))
+                for k, label, na in OA_PREREQS
+            ],
+            complete=not prereqs_missing(done),
+            due_date=root.assisted_op_due_date,
+            max_days=OA_MAX_DIAS,
+            entered_at=root.assisted_op_entered_at,
+            extensions=list(root.assisted_op_extensions or []),
+            overdue=bool(
+                root.assisted_op_due_date and root.assisted_op_entered_at
+                and root.assisted_op_due_date < datetime.utcnow().date()
+            ),
+            can_manage=await AssistedOpsService._can_manage_oa(db, user, root_id),
+        )
+
+    @staticmethod
+    async def set_entry(db: AsyncSession, root_id: uuid.UUID, data: AssistedOpsEntrySet, user: User) -> AssistedOpsEntryState:
+        """Checklist de pré-requisitos e fim previsto (até 15 dias). Depois de entrar na raia,
+        mudar o fim previsto é prorrogação (com justificativa)."""
+        from datetime import timedelta
+
+        root = await AssistedOpsService._root(db, root_id)
+        if not await AssistedOpsService._can_manage_oa(db, user, root_id):
+            raise HTTPException(status_code=403, detail="Só o PO do projeto ou a coordenação preparam a Operação Assistida.")
+        valid = {k: na for k, _l, na in OA_PREREQS}
+        checklist = {}
+        for key, value in (data.checklist or {}).items():
+            if key not in valid:
+                continue
+            if value == "na" and not valid[key]:
+                raise HTTPException(status_code=400, detail="Este pré-requisito não aceita “não se aplica”.")
+            checklist[key] = value
+        root.assisted_op_checklist = checklist
+        if data.due_date is not None and data.due_date != root.assisted_op_due_date:
+            if root.assisted_op_entered_at is not None and root.assisted_op_due_date is not None:
+                raise HTTPException(status_code=400, detail="Já em Operação Assistida: use Prorrogar, com justificativa.")
+            today = datetime.utcnow().date()
+            if not (today <= data.due_date <= today + timedelta(days=OA_MAX_DIAS)):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"O fim previsto deve ficar entre hoje e {OA_MAX_DIAS} dias (POP); além disso, é prorrogação.",
+                )
+            root.assisted_op_due_date = data.due_date
+        root.updated_at = datetime.utcnow()
+        await db.commit()
+        return await AssistedOpsService.entry_state(db, root_id, user)
+
+    @staticmethod
+    async def extend(db: AsyncSession, root_id: uuid.UUID, data: AssistedOpsExtend, user: User) -> AssistedOpsEntryState:
+        """Prorrogação (POP 8.1.2): nova data com justificativa, registrada no card."""
+        root = await AssistedOpsService._root(db, root_id)
+        if not await AssistedOpsService._can_manage_oa(db, user, root_id):
+            raise HTTPException(status_code=403, detail="Só o PO do projeto ou a coordenação prorrogam a Operação Assistida.")
+        current = root.assisted_op_due_date
+        if current is not None and data.new_due_date <= current:
+            raise HTTPException(status_code=400, detail="A nova data precisa ser depois do fim previsto atual.")
+        reason = data.reason.strip()
+        root.assisted_op_extensions = [*(root.assisted_op_extensions or []), {
+            "from": current.isoformat() if current else None,
+            "to": data.new_due_date.isoformat(),
+            "reason": reason,
+            "by": user.full_name,
+            "at": datetime.utcnow().isoformat(),
+        }]
+        root.assisted_op_due_date = data.new_due_date
+        root.assisted_op_due_alert_at = None
+        root.updated_at = datetime.utcnow()
+        de = f"de {current:%d/%m/%Y} " if current else ""
+        db.add(ProjectTaskComment(
+            task_id=root.id, author_id=user.id, visibility="internal",
+            content=f"<p><strong>Operação Assistida prorrogada</strong> {de}para {data.new_due_date:%d/%m/%Y}.</p>"
+                    + _plain_to_html(reason),
+        ))
+        await db.commit()
+        return await AssistedOpsService.entry_state(db, root_id, user)
+
+    # ── Alertas do POP (rodam junto com o de "sem responsável") ──────────────
+    @staticmethod
+    async def scan_sla_breaches(db: AsyncSession) -> int:
+        """Correção que estourou o prazo de resolução: avisa PO, devs e responsável (uma vez)."""
+        rows = list((await db.execute(
+            select(ProjectOccurrence, ProjectTask)
+            .join(ProjectTask, ProjectTask.id == ProjectOccurrence.task_id)
+            .join(ProjectStatusConfig, ProjectStatusConfig.id == ProjectTask.status_id)
+            .where(ProjectOccurrence.sla_breach_alert_at.is_(None), ProjectStatusConfig.is_final == False)  # noqa: E712
+        )).all())
+        stage_keys = {
+            st.id: st.assisted_stage_key for st in (await db.execute(
+                select(ProjectStatusConfig).where(ProjectStatusConfig.id.in_({t.status_id for _o, t in rows}))
+            )).scalars().all()
+        } if rows else {}
+        rows = [(o, t) for o, t in rows if is_correction(o) and stage_keys.get(t.status_id) not in _MELHORIA_KEYS]
+        if not rows:
+            return 0
+        cal, tz = await AssistedOpsService._calendar(db)
+        alerted = 0
+        for occ, task in rows:
+            target, elapsed, state = await AssistedOpsService._sla(db, task, occ, cal, tz)
+            if state != "estourado":
+                continue
+            root = await db.get(ProjectTask, occ.project_task_id)
+            await notify_persons(
+                db, [task.assigned_to, root.assigned_to if root else None, *await AssistedOpsService._dev_person_ids(db, occ.project_task_id)],
+                f"{code_label(occ.code)}: prazo de resolução estourado ({CRITICIDADE.get(occ.prioridade)})",
+                f"“{task.title}” passou de {target:g}h úteis ({elapsed:g}h).",
+                "project_task", task.id,
+            )
+            occ.sla_breach_alert_at = datetime.utcnow()
+            alerted += 1
+        await db.commit()
+        return alerted
+
+    @staticmethod
+    async def scan_assisted_op_due(db: AsyncSession) -> int:
+        """Operação Assistida passou do fim previsto: avisa o PO e a coordenação (1x por dia)."""
+        from datetime import timedelta
+
+        from app.modules.projetos.ai_solutions import _COORD_SLUGS, AiSolutionsService
+
+        today = datetime.utcnow().date()
+        roots = list((await db.execute(
+            select(ProjectTask)
+            .join(ProjectStatusConfig, ProjectStatusConfig.id == ProjectTask.status_id)
+            .where(
+                ProjectStatusConfig.is_assisted_operation == True,  # noqa: E712
+                ProjectTask.parent_task_id.is_(None),
+                ProjectTask.assisted_op_due_date.isnot(None),
+                ProjectTask.assisted_op_due_date < today,
+            )
+        )).scalars().all())
+        now = datetime.utcnow()
+        coord = None
+        alerted = 0
+        for root in roots:
+            if root.assisted_op_due_alert_at and now - root.assisted_op_due_alert_at < timedelta(days=1):
+                continue
+            if coord is None:
+                coord = await AiSolutionsService._person_ids_by_cargo(db, slugs=_COORD_SLUGS)
+            await notify_persons(
+                db, [root.assigned_to, *coord],
+                "Operação Assistida passou do prazo",
+                f"{root.title}: fim previsto era {root.assisted_op_due_date:%d/%m/%Y}. Encerre ou prorrogue com justificativa.",
+                "project_task", root.id,
+            )
+            root.assisted_op_due_alert_at = now
+            alerted += 1
+        await db.commit()
+        return alerted
+
     # ── Ganchos chamados por ProjectTaskService / ProjectTaskCommentService ──
     @staticmethod
     async def on_project_enters_assisted_operation(db: AsyncSession, root: ProjectTask) -> None:
         await AssistedOpsService.ensure(db, root.project_id)
+        if root.assisted_op_due_date is None:
+            from datetime import timedelta
+            root.assisted_op_due_date = datetime.utcnow().date() + timedelta(days=OA_MAX_DIAS)
         await notify_users(
             db, await AssistedOpsService._client_user_ids_for_project(db, root.id),
             "Projeto em Operação Assistida",
@@ -998,6 +1259,14 @@ class AssistedOpsService:
                 status_code=400,
                 detail="Use “Encaminhar para Release” no card: o PO escolhe o projeto e a Feature/US é criada.",
             )
+        # POP 8.3.3: correção só vai para o aceite com solução e causa-raiz registradas.
+        if key in ("homologando", "finalizado") and is_correction(occ):
+            faltam = [n for n, v in (("a solução", occ.solucao), ("a causa-raiz", occ.causa_raiz)) if not (v or "").strip()]
+            if faltam:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Registre {' e '.join(faltam)} no card antes de enviar a correção para o aceite.",
+                )
         if key == "finalizado":
             if not (_is_admin(current_user) or await AssistedOpsService._is_project_po(db, current_user, occ.project_task_id)):
                 raise HTTPException(
@@ -1144,16 +1413,16 @@ class AssistedOpsService:
         label = code_label(occ.code)
         if data.approve:
             if data.nps_score is None:
-                raise HTTPException(status_code=400, detail="Dê uma nota de 0 a 10 para o atendimento.")
+                raise HTTPException(status_code=400, detail="Dê uma nota de 1 a 5 para o atendimento.")
             occ.nps_score = data.nps_score
             occ.nps_comment = comment or None
             occ.homologated_at = datetime.utcnow()
-            text_html = f"<p><strong>Homologação aprovada</strong> — nota {data.nps_score}/10.</p>"
+            text_html = f"<p><strong>Homologação aprovada</strong> — satisfação {data.nps_score}/5.</p>"
             if comment:
                 text_html += _plain_to_html(comment)
             db.add(ProjectTaskComment(task_id=task.id, author_id=user.id, content=text_html, visibility="public"))
             await AssistedOpsService._move(db, task, flow["stages"]["finalizado"], user.id, "client", notify=False)
-            title, body = f"{label}: homologada (NPS {data.nps_score})", f"{client.full_name} aprovou “{task.title}”."
+            title, body = f"{label}: homologada (satisfação {data.nps_score}/5)", f"{client.full_name} aprovou “{task.title}”."
         else:
             if len(comment) < 5:
                 raise HTTPException(status_code=400, detail="Conte o que ainda não está certo (mín. 5 caracteres).")
