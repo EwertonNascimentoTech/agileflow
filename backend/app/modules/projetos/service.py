@@ -4873,6 +4873,13 @@ class ProjectTaskService:
                 if task.assisted_op_entered_at is None:
                     task.assisted_op_entered_at = datetime.utcnow()
                 await AssistedOpsService.on_project_enters_assisted_operation(db, task)
+            if (
+                task.parent_task_id is None and task.assisted_op_entered_at is not None
+                and ProjectTaskService._is_concluded_planning_status(status_obj)
+            ):
+                from app.modules.projetos.assisted_ops_closure import AssistedOpsClosureService
+
+                await AssistedOpsClosureService.on_concluded(db, task, current_user.id if current_user else None)
             await AssistedOpsService.after_occurrence_move(
                 db, task, source_status, status_obj, current_user.id if current_user else None,
             )

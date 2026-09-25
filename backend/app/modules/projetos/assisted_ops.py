@@ -1709,6 +1709,10 @@ class AssistedOpsService:
                 detail=f"O projeto tem {open_count} ocorrência(s) aberta(s) na Operação Assistida. "
                        "Finalize-as antes de concluir.",
             )
+        # POP 8.4: encerramento formal (critérios, análise crítica e aceite do Dono do Processo).
+        from app.modules.projetos.assisted_ops_closure import AssistedOpsClosureService
+
+        await AssistedOpsClosureService.assert_ready(db, root)
 
     @staticmethod
     async def before_occurrence_move(

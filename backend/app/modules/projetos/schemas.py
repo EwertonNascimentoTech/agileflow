@@ -2742,6 +2742,124 @@ class AssistedOpsExtend(BaseModel):
     reason: str = Field(..., min_length=10, max_length=4000)
 
 
+# ── Operação Assistida: indicadores e encerramento (POP 8.1.3, 8.4 e 8.5) ─────
+
+class AssistedOpsIndicator(BaseModel):
+    key: str
+    label: str
+    value: Optional[float] = None
+    display: str = "—"
+    meta: Optional[str] = None
+    status: Literal["ok", "alerta", "sem_dado"] = "sem_dado"
+    detail: Optional[str] = None
+
+
+class AssistedOpsMeasureOut(BaseModel):
+    id: uuid.UUID
+    kind: str
+    period_start: date
+    period_end: date
+    value: Optional[float] = None
+    transactions: Optional[int] = None
+    incidents: Optional[int] = None
+    rate: Optional[float] = None
+    note: Optional[str] = None
+
+
+class AssistedOpsMeasureIn(BaseModel):
+    kind: Literal["taxa_erros", "disponibilidade"]
+    period_start: date
+    period_end: date
+    value: Optional[float] = Field(None, ge=0, le=100)
+    transactions: Optional[int] = Field(None, ge=1)
+    note: Optional[str] = Field(None, max_length=2000)
+
+
+class AssistedOpsTargets(BaseModel):
+    sla_pct: float = Field(90, ge=0, le=100)
+    disponibilidade_pct: float = Field(99, ge=0, le=100)
+    reincidencia_pct: float = Field(5, ge=0, le=100)
+    satisfacao: float = Field(4, ge=1, le=5)
+    justificativa: Optional[str] = Field(None, max_length=4000)
+
+
+class AssistedOpsIndicators(BaseModel):
+    items: list[AssistedOpsIndicator] = Field(default_factory=list)
+    weekly: list[dict] = Field(default_factory=list)       # [{week_start, total, correcoes}]
+    by_criticidade: dict[str, int] = Field(default_factory=dict)
+    by_tipo: dict[str, int] = Field(default_factory=dict)
+    n1: dict[str, int] = Field(default_factory=dict)       # {resolvidas, encaminhadas}
+    targets: AssistedOpsTargets = Field(default_factory=AssistedOpsTargets)
+    targets_calibrated: bool = False
+    measures: list[AssistedOpsMeasureOut] = Field(default_factory=list)
+    since: Optional[datetime] = None
+    can_manage: bool = False
+
+
+class AssistedOpsClosureItem(BaseModel):
+    key: str
+    label: str
+    done: bool = False
+    text: Optional[str] = None
+
+
+class AssistedOpsClosureAnswer(BaseModel):
+    name: str
+    has_login: bool = True
+    answered: bool = False
+    approved: Optional[bool] = None
+    comment: Optional[str] = None
+    at: Optional[str] = None
+
+
+class AssistedOpsClosureState(BaseModel):
+    criterios: list[AssistedOpsClosureItem] = Field(default_factory=list)
+    decisao_estrategica: bool = False
+    decisao_texto: Optional[str] = None
+    analise: list[AssistedOpsClosureItem] = Field(default_factory=list)
+    # Aceite do Dono do Processo (POP 8.4): None | pendente | aceito | recusado.
+    aceite_status: Optional[str] = None
+    aceite_requested_at: Optional[str] = None
+    aceite_requested_by: Optional[str] = None
+    donos: list[AssistedOpsClosureAnswer] = Field(default_factory=list)
+    override: Optional[dict] = None
+    open_occurrences: int = 0
+    missing: list[str] = Field(default_factory=list)
+    ready: bool = False
+    concluded: bool = False
+    can_manage: bool = False
+    can_override: bool = False
+    # Portal: quem vê é Dono do Processo e o aceite está pendente para ele.
+    can_accept: bool = False
+
+
+class AssistedOpsClosureSet(BaseModel):
+    criterios: dict[str, bool] = Field(default_factory=dict)
+    decisao_estrategica: bool = False
+    decisao_texto: Optional[str] = Field(None, max_length=8000)
+    analise: dict[str, str] = Field(default_factory=dict)
+
+
+class AssistedOpsClosureOverride(BaseModel):
+    justificativa: str = Field(..., min_length=10, max_length=4000)
+
+
+class AssistedOpsClosureAcceptance(BaseModel):
+    approve: bool
+    comment: Optional[str] = Field(None, max_length=4000)
+
+
+class PortalAssistedOps(BaseModel):
+    """Aba Operação Assistida do projeto no Portal: indicadores, encerramento e atas."""
+    indicators: AssistedOpsIndicators
+    closure: AssistedOpsClosureState
+    meetings: list["AssistedOpMeetingOut"] = Field(default_factory=list)
+    phase: Optional[int] = None
+    phase_label: Optional[str] = None
+    entered_at: Optional[datetime] = None
+    due_date: Optional[date] = None
+
+
 class AssistedOpsPhaseSet(BaseModel):
     phase: int = Field(..., ge=1, le=3)
 
@@ -2770,3 +2888,6 @@ class AssistedOpMeetingOut(BaseModel):
     created_by_name: Optional[str] = None
     created_at: Optional[datetime] = None
     can_edit: bool = False
+
+
+PortalAssistedOps.model_rebuild()

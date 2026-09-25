@@ -442,7 +442,122 @@ export interface AssistedOpMeetingInput {
   decisions?: string | null
 }
 
+// ── Operação Assistida: indicadores e encerramento (POP 8.1.3, 8.4 e 8.5) ─────
+
+export interface AssistedOpsIndicator {
+  key: string
+  label: string
+  value: number | null
+  display: string
+  meta: string | null
+  status: "ok" | "alerta" | "sem_dado"
+  detail: string | null
+}
+
+export interface AssistedOpsMeasure {
+  id: string
+  kind: "taxa_erros" | "disponibilidade"
+  period_start: string
+  period_end: string
+  value: number | null
+  transactions: number | null
+  incidents: number | null
+  rate: number | null
+  note: string | null
+}
+
+export interface AssistedOpsTargets {
+  sla_pct: number
+  disponibilidade_pct: number
+  reincidencia_pct: number
+  satisfacao: number
+  justificativa: string | null
+}
+
+export interface AssistedOpsIndicators {
+  items: AssistedOpsIndicator[]
+  weekly: Array<{ week_start: string; total: number; correcoes: number }>
+  by_criticidade: Record<string, number>
+  by_tipo: Record<string, number>
+  n1: Record<string, number>
+  targets: AssistedOpsTargets
+  targets_calibrated: boolean
+  measures: AssistedOpsMeasure[]
+  since: string | null
+  can_manage: boolean
+}
+
+export interface AssistedOpsClosureItem {
+  key: string
+  label: string
+  done: boolean
+  text: string | null
+}
+
+export interface AssistedOpsClosureState {
+  criterios: AssistedOpsClosureItem[]
+  decisao_estrategica: boolean
+  decisao_texto: string | null
+  analise: AssistedOpsClosureItem[]
+  aceite_status: "pendente" | "aceito" | "recusado" | null
+  aceite_requested_at: string | null
+  aceite_requested_by: string | null
+  donos: Array<{ name: string; has_login: boolean; answered: boolean; approved: boolean | null; comment: string | null; at: string | null }>
+  override: { by: string; at: string; justificativa: string } | null
+  open_occurrences: number
+  missing: string[]
+  ready: boolean
+  concluded: boolean
+  can_manage: boolean
+  can_override: boolean
+  can_accept: boolean
+}
+
+export interface AssistedOpsClosureInput {
+  criterios: Record<string, boolean>
+  decisao_estrategica: boolean
+  decisao_texto: string | null
+  analise: Record<string, string>
+}
+
+export interface PortalAssistedOps {
+  indicators: AssistedOpsIndicators
+  closure: AssistedOpsClosureState
+  meetings: AssistedOpMeeting[]
+  phase: number | null
+  phase_label: string | null
+  entered_at: string | null
+  due_date: string | null
+}
+
+export const portalAssistedOpsApi = {
+  get: (projectTaskId: string) =>
+    api.get<PortalAssistedOps>(`/projetos/portal/projects/${projectTaskId}/assisted-ops`).then((r) => r.data),
+  accept: (projectTaskId: string, data: { approve: boolean; comment?: string | null }) =>
+    api.post<PortalAssistedOps>(`/projetos/portal/projects/${projectTaskId}/assisted-ops/acceptance`, data).then((r) => r.data),
+}
+
 export const teamOccurrencesApi = {
+  indicators: (projectTaskId: string) =>
+    api.get<AssistedOpsIndicators>(`/projetos/tasks/${projectTaskId}/assisted-ops-indicators`).then((r) => r.data),
+  setTargets: (projectTaskId: string, data: AssistedOpsTargets) =>
+    api.put<AssistedOpsIndicators>(`/projetos/tasks/${projectTaskId}/assisted-ops-targets`, data).then((r) => r.data),
+  addMeasure: (
+    projectTaskId: string,
+    data: { kind: "taxa_erros" | "disponibilidade"; period_start: string; period_end: string; value?: number | null; transactions?: number | null; note?: string | null },
+  ) => api.post<AssistedOpsIndicators>(`/projetos/tasks/${projectTaskId}/assisted-ops-measures`, data).then((r) => r.data),
+  deleteMeasure: (projectTaskId: string, measureId: string) =>
+    api.delete<AssistedOpsIndicators>(`/projetos/tasks/${projectTaskId}/assisted-ops-measures/${measureId}`).then((r) => r.data),
+  closure: (projectTaskId: string) =>
+    api.get<AssistedOpsClosureState>(`/projetos/tasks/${projectTaskId}/assisted-ops-closure`).then((r) => r.data),
+  saveClosure: (projectTaskId: string, data: AssistedOpsClosureInput) =>
+    api.put<AssistedOpsClosureState>(`/projetos/tasks/${projectTaskId}/assisted-ops-closure`, data).then((r) => r.data),
+  closureDraft: (projectTaskId: string) =>
+    api.get<Record<string, string>>(`/projetos/tasks/${projectTaskId}/assisted-ops-closure/draft`).then((r) => r.data),
+  requestAcceptance: (projectTaskId: string) =>
+    api.post<AssistedOpsClosureState>(`/projetos/tasks/${projectTaskId}/assisted-ops-closure/request-acceptance`).then((r) => r.data),
+  overrideAcceptance: (projectTaskId: string, justificativa: string) =>
+    api.post<AssistedOpsClosureState>(`/projetos/tasks/${projectTaskId}/assisted-ops-closure/override`, { justificativa }).then((r) => r.data),
   entry: (projectTaskId: string) =>
     api.get<AssistedOpsEntryState>(`/projetos/tasks/${projectTaskId}/assisted-ops-entry`).then((r) => r.data),
   setEntry: (projectTaskId: string, data: { checklist: Record<string, "sim" | "na">; due_date?: string | null }) =>

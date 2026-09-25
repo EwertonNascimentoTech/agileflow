@@ -289,6 +289,11 @@ class ProjectTask(TenantBase):
     # Fase da Operação Assistida (POP 8.3.1): 1 Estabilização intensiva, 2 Acompanhamento
     # assistido, 3 Preparação para encerramento. Começa em 1 ao entrar na raia.
     assisted_op_phase: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # POP 8.1.3: metas calibradas do projeto ({sla_pct, disponibilidade_pct, reincidencia_pct,
+    # satisfacao, justificativa}); sem valor, vale a referência do POP.
+    assisted_op_targets: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    # POP 8.4/8.5: critérios de saída, decisão estratégica, análise crítica e aceite do Dono do Processo.
+    assisted_op_closure: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     # SLA: quando o card entrou na etapa atual + estado calculado pela rotina de SLA.
     status_entered_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     sla_state: Mapped[str] = mapped_column(String(12), nullable=False, default="none")  # none|ok|warning|breached
@@ -1266,6 +1271,26 @@ class ProjectAssistedOpMeeting(TenantBase):
     created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class ProjectAssistedOpMeasure(TenantBase):
+    """Medição manual de indicador da Operação Assistida (POP 8.1.3) que depende de dado de fora:
+    volume de transações do período (taxa de erros) ou disponibilidade do sistema (%)."""
+
+    __tablename__ = "project_assisted_op_measures"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("project_tasks.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)  # taxa_erros | disponibilidade
+    period_start: Mapped[date] = mapped_column(Date, nullable=False)
+    period_end: Mapped[date] = mapped_column(Date, nullable=False)
+    value: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4), nullable=True)  # disponibilidade (%)
+    transactions: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # taxa de erros
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class ProjectAssistedOpsDev(TenantBase):

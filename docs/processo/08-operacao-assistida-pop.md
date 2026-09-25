@@ -1,6 +1,6 @@
 # Operação Assistida — regras do POP.COR.GTD.003
 
-O **POP.COR.GTD.003** é o procedimento oficial da Operação Assistida. Esta página resume o que o AgileFlow já aplica (Ondas 1 e 2) e o que falta.
+O **POP.COR.GTD.003** é o procedimento oficial da Operação Assistida. Esta página resume o que o AgileFlow aplica e o que ainda falta.
 
 ## Papéis (POP 4)
 
@@ -99,6 +99,32 @@ Só **correção** tem criticidade. A sugestão vem do impacto e de quem é afet
 - O prazo conta horas úteis desde a abertura, pelo calendário do TeamOps. O tempo com o cliente (Aguardando Cliente e Homologando) não conta.
 - Estado do prazo: **no prazo**, **perto do prazo** (a partir de 80%) ou **estourado**. No estouro, o PO, os desenvolvedores de atendimento e o responsável recebem um aviso.
 
+## Indicadores (8.1.3)
+
+No card do projeto (bloco "Operação Assistida · indicadores") e no Portal (aba **Operação Assistida** do projeto):
+
+| Indicador | Como é calculado | Meta de referência |
+| :--- | :--- | :--- |
+| Volume de chamados | Ocorrências por semana; compara as duas últimas semanas fechadas | Redução sustentada |
+| % de atendimento no prazo | Correções encerradas dentro do prazo-alvo da criticidade | ≥ 90% |
+| Reincidência de falhas | Correções reprovadas na validação do cliente | ≤ 5% |
+| Satisfação dos usuários | Média das notas de 1 a 5 na homologação | ≥ 4 de 5 |
+| Taxa de erros | Correções abertas no período por mil transações (volume lançado no card) | Tendência de queda |
+| Disponibilidade do sistema | Percentual lançado no card por período | ≥ 99% |
+
+O PO ou a coordenação podem **calibrar as metas** do projeto, sempre com justificativa (histórico institucional). Transações e disponibilidade são lançadas pelo PO, pela coordenação ou pelos desenvolvedores de atendimento.
+
+## Encerramento da Operação Assistida (8.4 e 8.5)
+
+O projeto só sai da raia Operação Assistida para **Concluído** com:
+
+1. nenhuma ocorrência aberta;
+2. os **critérios de saída** confirmados: estabilização do processo crítico, redução dos erros de alta criticidade, integrações funcionando e operação sem suporte intensivo. A alternativa é a **decisão estratégica** da Instância Executiva, registrada com o texto da decisão;
+3. a **análise crítica** escrita: principais incidentes, riscos remanescentes, melhorias a avaliar, lições aprendidas e, quando houver, o plano de ações. O botão "Gerar rascunho" preenche os campos vazios com as ocorrências, os escalonamentos e as decisões das atas;
+4. o **aceite do Dono do Processo**: o PO pede o aceite, e o Dono do Processo lê a análise e aceita ou recusa na aba Operação Assistida do Portal. Se o Dono do Processo não tiver acesso, a coordenação registra o aceite com justificativa. Com decisão estratégica, o aceite não é exigido.
+
+Mudar os critérios ou a análise depois do pedido invalida o aceite. Ao concluir, o Dono do Processo, o Especialista, o Escritório de Processos, os Sponsors, o PO e a coordenação são avisados. O e-mail formal depende da integração com o Outlook.
+
 ## Encerramento da ocorrência
 
 - A correção só vai para a validação do cliente (ou para Finalizado) com **solução** e **causa raiz** preenchidas (8.3.3).
@@ -107,4 +133,4 @@ Só **correção** tem criticidade. A sugestão vem do impacto e de quem é afet
 ## Próximas ondas
 
 - **N1 com nomes sem cadastro:** trocar, na tela do Produto, os nomes digitados pelas pessoas cadastradas. A importação automática pelo Genus aguarda a liberação do servidor no Cloudflare.
-- **Onda 3:** painel de indicadores da Operação Assistida; encerramento formal (critérios, aceite do Dono do Processo e análise crítica).
+- **E-mail formal de encerramento:** depende da integração com o Outlook (Fase 6).

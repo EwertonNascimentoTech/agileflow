@@ -16,6 +16,7 @@ from app.modules.projetos.api.routes import (
 )
 from app.modules.projetos.assisted_ops import AssistedOpsService
 from app.modules.projetos.ai_solutions import AiSolutionsService
+from app.modules.projetos.assisted_ops_closure import AssistedOpsClosureService, AssistedOpsIndicatorsService
 from app.modules.projetos.clients import ProjectClientService
 from app.modules.projetos.portal_assistant import PortalAssistantService
 from app.modules.projetos.program_portal import PortalPortfolioService, ProgramAdminService
@@ -24,6 +25,14 @@ from app.modules.projetos.schemas import (
     AssistedOpsEntryState,
     AssistedOpsExtend,
     AssistedOpsPhaseSet,
+    AssistedOpsClosureAcceptance,
+    AssistedOpsClosureOverride,
+    AssistedOpsClosureSet,
+    AssistedOpsClosureState,
+    AssistedOpsIndicators,
+    AssistedOpsMeasureIn,
+    AssistedOpsTargets,
+    PortalAssistedOps,
     AssistedOpMeetingIn,
     AssistedOpMeetingOut,
     PortalAssistantAnswer,
@@ -399,6 +408,20 @@ async def portal_comment_occurrence(
     return await AssistedOpsService.portal_comment(ctx.db, ctx.user, task_id, data)
 
 
+@router.get("/portal/projects/{task_id}/assisted-ops", response_model=PortalAssistedOps)
+async def portal_project_assisted_ops(task_id: uuid.UUID, ctx: ModuleContext = Depends(_portal_ctx)):
+    """Aba Operação Assistida do projeto no Portal: indicadores, encerramento e atas."""
+    return await AssistedOpsClosureService.portal_view(ctx.db, ctx.user.id, task_id)
+
+
+@router.post("/portal/projects/{task_id}/assisted-ops/acceptance", response_model=PortalAssistedOps)
+async def portal_project_assisted_ops_accept(
+    task_id: uuid.UUID, data: AssistedOpsClosureAcceptance, ctx: ModuleContext = Depends(_portal_ctx),
+):
+    """Aceite (ou recusa) do encerramento pelo Dono do Processo (POP 8.4)."""
+    return await AssistedOpsClosureService.portal_accept(ctx.db, ctx.user, task_id, data)
+
+
 @router.post("/portal/occurrences/{task_id}/triage", response_model=OccurrenceDetail)
 async def portal_triage_occurrence(
     task_id: uuid.UUID,
@@ -521,6 +544,65 @@ async def set_assisted_ops_entry(task_id: uuid.UUID, data: AssistedOpsEntrySet, 
 async def extend_assisted_ops(task_id: uuid.UUID, data: AssistedOpsExtend, ctx: ModuleContext = Depends(_ctx)):
     await _assert_task_in_scope(ctx, task_id)
     return await AssistedOpsService.extend(ctx.db, task_id, data, ctx.user)
+
+
+# ── Indicadores e encerramento da Operação Assistida (POP 8.1.3, 8.4 e 8.5) ──
+
+@router.get("/tasks/{task_id}/assisted-ops-indicators", response_model=AssistedOpsIndicators)
+async def get_assisted_ops_indicators(task_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+    await _assert_task_in_scope(ctx, task_id)
+    return await AssistedOpsIndicatorsService.compute(ctx.db, task_id, ctx.user)
+
+
+@router.put("/tasks/{task_id}/assisted-ops-targets", response_model=AssistedOpsIndicators)
+async def set_assisted_ops_targets(task_id: uuid.UUID, data: AssistedOpsTargets, ctx: ModuleContext = Depends(_ctx)):
+    await _assert_task_in_scope(ctx, task_id)
+    return await AssistedOpsIndicatorsService.set_targets(ctx.db, task_id, data, ctx.user)
+
+
+@router.post("/tasks/{task_id}/assisted-ops-measures", response_model=AssistedOpsIndicators)
+async def add_assisted_ops_measure(task_id: uuid.UUID, data: AssistedOpsMeasureIn, ctx: ModuleContext = Depends(_ctx)):
+    await _assert_task_in_scope(ctx, task_id)
+    return await AssistedOpsIndicatorsService.add_measure(ctx.db, task_id, data, ctx.user)
+
+
+@router.delete("/tasks/{task_id}/assisted-ops-measures/{measure_id}", response_model=AssistedOpsIndicators)
+async def delete_assisted_ops_measure(task_id: uuid.UUID, measure_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+    await _assert_task_in_scope(ctx, task_id)
+    return await AssistedOpsIndicatorsService.delete_measure(ctx.db, task_id, measure_id, ctx.user)
+
+
+@router.get("/tasks/{task_id}/assisted-ops-closure", response_model=AssistedOpsClosureState)
+async def get_assisted_ops_closure(task_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+    await _assert_task_in_scope(ctx, task_id)
+    return await AssistedOpsClosureService.state(ctx.db, task_id, ctx.user)
+
+
+@router.put("/tasks/{task_id}/assisted-ops-closure", response_model=AssistedOpsClosureState)
+async def set_assisted_ops_closure(task_id: uuid.UUID, data: AssistedOpsClosureSet, ctx: ModuleContext = Depends(_ctx)):
+    await _assert_task_in_scope(ctx, task_id)
+    return await AssistedOpsClosureService.save(ctx.db, task_id, data, ctx.user)
+
+
+@router.get("/tasks/{task_id}/assisted-ops-closure/draft")
+async def draft_assisted_ops_closure(task_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)) -> dict[str, str]:
+    """Rascunho da análise crítica a partir das ocorrências, escalonamentos e atas."""
+    await _assert_task_in_scope(ctx, task_id)
+    return await AssistedOpsClosureService.draft(ctx.db, task_id, ctx.user)
+
+
+@router.post("/tasks/{task_id}/assisted-ops-closure/request-acceptance", response_model=AssistedOpsClosureState)
+async def request_assisted_ops_acceptance(task_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx)):
+    await _assert_task_in_scope(ctx, task_id)
+    return await AssistedOpsClosureService.request_acceptance(ctx.db, task_id, ctx.user)
+
+
+@router.post("/tasks/{task_id}/assisted-ops-closure/override", response_model=AssistedOpsClosureState)
+async def override_assisted_ops_acceptance(
+    task_id: uuid.UUID, data: AssistedOpsClosureOverride, ctx: ModuleContext = Depends(_ctx),
+):
+    await _assert_task_in_scope(ctx, task_id)
+    return await AssistedOpsClosureService.override(ctx.db, task_id, data, ctx.user)
 
 
 @router.put("/tasks/{task_id}/assisted-ops-phase", response_model=AssistedOpsEntryState)

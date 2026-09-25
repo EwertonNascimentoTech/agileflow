@@ -4645,6 +4645,34 @@ async def _step_143_ocorrencias_triagem_n1(conn: AsyncConnection, schema: str) -
     })
 
 
+async def _step_144_operacao_assistida_indicadores_encerramento(conn: AsyncConnection, schema: str) -> None:
+    """POP.COR.GTD.003 (Onda 3): metas calibradas e encerramento formal no card-raiz; medições
+    manuais dos indicadores que dependem de dado de fora (transações, disponibilidade)."""
+    await _add_columns(conn, schema, "project_tasks", {
+        "assisted_op_targets": "JSONB",
+        "assisted_op_closure": "JSONB",
+    })
+    if await _table_exists(conn, schema, "project_tasks") and not await _table_exists(
+        conn, schema, "project_assisted_op_measures"
+    ):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_assisted_op_measures (
+                id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                task_id      UUID NOT NULL REFERENCES {schema}.project_tasks(id) ON DELETE CASCADE,
+                kind         VARCHAR(20) NOT NULL,
+                period_start DATE NOT NULL,
+                period_end   DATE NOT NULL,
+                value        NUMERIC(12, 4),
+                transactions INTEGER,
+                note         TEXT,
+                created_by   UUID,
+                created_at   TIMESTAMP DEFAULT now()
+            )
+        """))
+    await _ensure_index(conn, schema, "assisted_op_measures_task", "project_assisted_op_measures",
+                        "task_id", columns=("task_id",))
+
+
 async def _step_129_projetos_agent_fail_to(conn: AsyncConnection, schema: str) -> None:
     """Raia de destino quando a triagem do backlog (review_and_route) não aprova."""
     await _add_columns(conn, schema, "project_stage_agent_bindings", {
@@ -4886,6 +4914,7 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("141_operacao_assistida_pop", _step_141_operacao_assistida_pop),
     ("142_operacao_assistida_governanca", _step_142_operacao_assistida_governanca),
     ("143_ocorrencias_triagem_n1", _step_143_ocorrencias_triagem_n1),
+    ("144_operacao_assistida_indicadores_encerramento", _step_144_operacao_assistida_indicadores_encerramento),
     ("123_reconcile_indexes", _step_123_reconcile_indexes),
 ]
 

@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-25 — Operação Assistida no POP.COR.GTD.003 (Onda 3: indicadores e encerramento formal)
+
+- **Pedido:** seguir para a Onda 3.
+- **Feito:** indicadores do quadro 3 por projeto (volume e tendência semanal, % no prazo, reincidência, satisfação, taxa de erros e disponibilidade com medições lançadas no card), metas do POP calibráveis com justificativa. Encerramento formal: critérios de saída (ou decisão estratégica da IE), análise crítica com rascunho gerado das ocorrências/escalonamentos/atas, pedido de aceite ao Dono do Processo, aceite/recusa no Portal e aceite pela coordenação com justificativa; Concluído barrado sem isso; aviso de encerramento às partes. Portal: aba "Operação Assistida" no projeto (indicadores, encerramento, atas dos ritos) e aviso de aceite pendente. Step 144 (`assisted_op_targets`, `assisted_op_closure`, `project_assisted_op_measures`).
+- **Não mexer:** projeto que pulou a Operação Assistida (com justificativa) não passa pela trava de encerramento; e-mail formal às partes depende da Fase 6 (Outlook).
+- **Arquivos:** `projetos/assisted_ops_closure.py` (novo), `projetos/assisted_ops.py`, `projetos/service.py`, `projetos/models.py`, `projetos/schemas.py`, `projetos/api/client_routes.py`, `core/tenant_migrations.py`; front `api/clientes.ts`, `portal/assistedOpsUi.tsx`, `portal/ProjectAssistedOpsTab.tsx`, `portal/ClientProjectPage.tsx`, `projetos/AssistedOpsIndicatorsSection.tsx`, `projetos/AssistedOpsClosureSection.tsx`, `projetos/ProjectTaskDrawer.tsx`, `projetos/ProjectBoardPage.tsx`, `components/NotificationBell.tsx`.
+
 ## 2026-09-25 — Triagem N1 com pessoas cadastradas (Pessoas e Clientes)
 
 - **Pedido:** usar as pessoas cadastradas no sistema para o nível 1, inclusive as que têm acesso de cliente.

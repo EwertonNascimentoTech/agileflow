@@ -1805,7 +1805,8 @@ export default function ProjectBoardPage() {
       // longa demais para um alert() do browser.
       const msg = getApiError(err) || "Não foi possível mover o card."
       toast.error(msg)
-      if (/commit|justificativa/i.test(msg)) setSelectedTask(task)
+      // Encerramento da Operação Assistida incompleto: o que falta está no card do projeto.
+      if (/commit|justificativa|encerramento da operação assistida/i.test(msg)) setSelectedTask(task)
     }
   }
 

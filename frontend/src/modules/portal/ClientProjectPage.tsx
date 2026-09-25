@@ -2,8 +2,11 @@ import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { Link, useParams, useSearchParams } from "react-router-dom"
 import {
   AlertTriangle, Box, CalendarDays, CalendarRange, FileText, FolderKanban, Headset, Layers, LifeBuoy, ListTree, PauseCircle,
-  Plus, XCircle,
+  Plus, ShieldCheck, XCircle,
 } from "lucide-react"
+
+import { portalAssistedOpsApi, type PortalAssistedOps } from "@/api/clientes"
+import { ProjectAssistedOpsTab } from "@/modules/portal/ProjectAssistedOpsTab"
 
 import {
   portalPortfolioApi,
@@ -34,11 +37,13 @@ import { WorkTree } from "@/modules/portal/WorkTree"
 import { Card } from "@/modules/portal/portfolioUi"
 import { HEALTH, ITEM_STATUS, PHASE, colorFor, fmtDate, parseDay, readFavorites, treeKeys, writeFavorites, usePortalBase } from "@/modules/portal/portfolioMeta"
 
-type Tab = "entregas" | "roadmap"
+type Tab = "entregas" | "roadmap" | "operacao"
 const TABS: TabDef<Tab>[] = [
   { value: "entregas", label: "Visão por Features", icon: ListTree },
   { value: "roadmap", label: "Roadmap", icon: CalendarRange },
 ]
+// Só para projeto que passou pela Operação Assistida (indicadores, encerramento e atas).
+const TAB_OA: TabDef<Tab> = { value: "operacao", label: "Operação Assistida", icon: Headset }
 
 /** Barra da Feature no roadmap: do início à previsão, na cor da fase dela. */
 function featureSegments(f: PortalFeature, today: number): RoadmapSegment[] {
@@ -64,7 +69,11 @@ export default function ClientProjectPage() {
   const base = usePortalBase()
   const { id } = useParams<{ id: string }>()
   const [params, setParams] = useSearchParams()
-  const tab = (TABS.some((t) => t.value === params.get("aba")) ? params.get("aba") : "entregas") as Tab
+  // Operação Assistida do projeto (aba própria): 404 = não passou pela raia.
+  const [oa, setOa] = useState<{ id: string; data: PortalAssistedOps | null } | null>(null)
+  const oaData = oa && oa.id === id ? oa.data : null
+  const tabs = oaData ? [...TABS, TAB_OA] : TABS
+  const tab = (tabs.some((t) => t.value === params.get("aba")) ? params.get("aba") : "entregas") as Tab
   // Resultado guardado com o id: trocar de projeto volta ao "carregando" sem setState no efeito.
   const [result, setResult] = useState<{ id: string; data: PortalProjectDetail | null; error: string | null } | null>(null)
   const [favorites, setFavorites] = useState<string[]>(readFavorites)
@@ -84,6 +93,16 @@ export default function ClientProjectPage() {
       .catch((err) => {
         if (alive) setResult({ id, data: null, error: apiErrorDetail(err, "Não foi possível carregar o projeto.") })
       })
+    return () => { alive = false }
+  }, [id])
+
+  useEffect(() => {
+    if (!id) return
+    let alive = true
+    portalAssistedOpsApi
+      .get(id)
+      .then((d) => { if (alive) setOa({ id, data: d }) })
+      .catch(() => { if (alive) setOa({ id, data: null }) })
     return () => { alive = false }
   }, [id])
 
@@ -220,8 +239,17 @@ export default function ClientProjectPage() {
         </Notice>
       )}
 
+      {oaData?.closure.can_accept && tab !== "operacao" && (
+        <Notice tone="amber" icon={ShieldCheck}>
+          <span className="flex-1">O encerramento da Operação Assistida aguarda o seu aceite como Dono do Processo.</span>
+          <Button size="sm" onClick={() => setParams((prev) => { const n = new URLSearchParams(prev); n.set("aba", "operacao"); return n }, { replace: true })}>
+            Ver e responder
+          </Button>
+        </Notice>
+      )}
+
       <DetailTabs
-        tabs={TABS}
+        tabs={tabs}
         value={tab}
         onChange={(v) => setParams((prev) => { const n = new URLSearchParams(prev); n.set("aba", v); return n }, { replace: true })}
         {...(tab === "entregas"
@@ -236,6 +264,9 @@ export default function ClientProjectPage() {
       />
 
       {tab === "entregas" && <WorkTree mode="project" projects={[p]} q={q} expanded={expanded} onToggle={toggle} />}
+      {tab === "operacao" && oaData && id && (
+        <ProjectAssistedOpsTab projectTaskId={id} data={oaData} onChange={(d) => setOa({ id, data: d })} />
+      )}
       {tab === "roadmap" && (
         <RoadmapGrid
           groups={[{ key: "projeto", rows: roadmapRows }]}
