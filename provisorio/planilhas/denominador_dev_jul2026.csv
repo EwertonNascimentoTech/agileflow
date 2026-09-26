@@ -1,0 +1,197 @@
+projeto,us,due,completed,resultado,status,funil,id
+API REST para Geração de Parcelas no TOTVS RM,Criar api de geração de parcela,2026-07-03,,no_prazo (homologacao),Homologação (PO),User Story,63d46a6a-92ce-4615-aeb6-9994f0da8dc3
+API REST para Geração de Parcelas no TOTVS RM,Apontar APIs de Criar Parcela no E-commerce EP,2026-07-06,,no_prazo (homologacao),Homologação (PO),User Story,a91e835d-3b56-4324-9a0c-3a473de5c617
+API REST para Geração de Parcelas no TOTVS RM,Apontar APIs de Gerar Parcela no E-commerce EP,2026-07-07,,no_prazo (homologacao),Homologação (PO),User Story,b9633b36-0d62-4b59-8b30-624e218f24ab
+API REST para Geração de Parcelas no TOTVS RM,Implementação de Pagamento em HML,2026-07-23,,no_prazo (homologacao),Homologando (Cliente),Projetos e Programas,afc6b998-747c-4d3b-a9f5-3d1025c9bea7
+FINTECH - SIPAG - QUALIFICAÇÃO FISCAL E FINANCEIRA,US 2 — Qualificação Fiscal: análise e registro de retenções,2026-07-03,,no_prazo (homologacao),Homologação (PO),User Story,2e616f50-53f8-4267-9abc-4819daf4cf93
+FINTECH - SIPAG - QUALIFICAÇÃO FISCAL E FINANCEIRA,US 3 — Qualificação Financeira: conferência campo a campo dos dados de pagamento,2026-07-14,,no_prazo (homologacao),Homologação (PO),User Story,9b2b9c07-e2a8-4072-a4cf-540cbeabcdb2
+FINTECH - SIPAG - QUALIFICAÇÃO FISCAL E FINANCEIRA,US 4 — Alerta de prazo de calendário financeiro (SLA de recepção x vencimento),2026-07-14,,no_prazo (homologacao),Homologação (PO),User Story,952a97e6-b9c6-438e-9beb-89e8ea4bcd31
+FINTECH - SIPAG - QUALIFICAÇÃO FISCAL E FINANCEIRA,US 5 — Registro de inconsistência e rejeição do processo,2026-07-15,,no_prazo (homologacao),Homologação (PO),User Story,7fa1b14f-b399-48f4-bc9f-c36d3c4e90da
+FINTECH - SIPAG - QUALIFICAÇÃO FISCAL E FINANCEIRA,US 6 — Correção do campo e nova conferência,2026-07-21,,no_prazo (homologacao),Homologação (PO),User Story,09eb0648-6f12-458c-9cb9-bd3a52ce0bb9
+FINTECH - SIPAG - QUALIFICAÇÃO FISCAL E FINANCEIRA,US 7 — Conferência e assinatura digital do Ordenador,2026-07-22,,no_prazo (homologacao),Homologação (PO),User Story,6a2ed9f1-9c71-4977-a7f1-0f5430b26089
+FINTECH - SIPAG - QUALIFICAÇÃO FISCAL E FINANCEIRA,US 8 — Aprovação final e encaminhamento para Integração com o Dynamics,2026-07-23,,no_prazo (homologacao),Homologação (PO),User Story,1ba517d3-fdfc-419c-99a5-ff4c7b4b2273
+FINTECH - SIPAG - QUALIFICAÇÃO FISCAL E FINANCEIRA,US 9 — Trilha de auditoria da qualificação,2026-07-27,,no_prazo (homologacao),Homologação (PO),User Story,3d95bcc6-6a14-4916-88cc-5297feb656e3
+Fintech - SIS - SI-Aprove,Consultar o aprovador responsável a partir do Centro de Custo e Nível de Alçada,2026-07-13,,no_prazo (homologacao),Homologação (PO),User Story,35108a64-b5ca-4c33-a524-7b4269180803
+Fintech - SIS - SI-Aprove,Visualizar a matriz de alçadas (somente leitura),2026-07-13,,no_prazo (homologacao),Homologação (PO),User Story,c9225883-834e-43c6-a8ff-1f43a7dc609c
+Fintech - SIS - SI-Aprove,Cancelar fluxo de aprovação a pedido do sistema de origem,2026-07-14,,no_prazo (homologacao),Homologação (PO),User Story,6e6d3268-a6b1-43d7-bb67-76ff71417bdf
+Fintech - SIS - SI-Aprove,Criar tarefa no IDigital para o(s) aprovador(es) responsável(eis),2026-07-14,,no_prazo (homologacao),Homologação (PO),User Story,3686481a-7bc7-4164-a38d-e39d1ec6b8e9
+Fintech - SIS - SI-Aprove,Receber solicitação de aprovação de alçada e iniciar fluxo,2026-07-14,,no_prazo (homologacao),Homologação (PO),User Story,77e85757-0a7f-4167-9787-8b867b3364d4
+Fintech - SIS - SI-Aprove,Acessar o SI-Aprove via SSO do IDigital ou login/senha,2026-07-15,,no_prazo (homologacao),Homologação (PO),User Story,fdbba680-5583-4131-ab61-65bb1f681cff
+Fintech - SIS - SI-Aprove,Configurar canal de notificação por aprovador,2026-07-15,,no_prazo (homologacao),Homologação (PO),User Story,0d388e29-a76f-469f-87ab-3377274a6880
+Fintech - SIS - SI-Aprove,Aprovar ou recusar solicitação (modelo de decisão em corrida),2026-07-17,,no_prazo (homologacao),Homologação (PO),User Story,ccbecaec-24a3-46cf-bf99-38f48955b081
+Fintech - SIS - SI-Aprove,Visualizar ficha completa da solicitação no painel,2026-07-17,,no_prazo (homologacao),Homologação (PO),User Story,4f0c95e1-a539-45c9-aec6-85dee28aa54a
+Fintech - SIS - SI-Aprove,Acompanhar todos os fluxos no painel gerencial,2026-07-20,,no_prazo (homologacao),Homologação (PO),User Story,150afd42-b28c-41aa-8c03-2bfbe8417565
+Fintech - SIS - SI-Aprove,Visualizar trocar mensagens durante o fluxo de aprovação,2026-07-20,,no_prazo (homologacao),Homologação (PO),User Story,144a9abe-9c7c-426a-b39d-86f3f8b56260
+Fintech - SIS - SI-Aprove,Exportar relatório de fluxos para auditoria,2026-07-21,,no_prazo (homologacao),Homologação (PO),User Story,6c4054eb-04a0-418f-9211-2423a3f228c8
+ID-Docs,Desenvolver Integração do ID-Docs no idigital,2026-07-17,2026-07-17,no_prazo,Concluído,User Story,54a168c0-95bc-4e8b-b011-0cdd1da5e69c
+ID-Docs,Emitir parecer técnico,2026-07-17,2026-07-17,no_prazo,Concluído,User Story,9a9f2dd6-5417-4484-94c3-2ebe5be07fe1
+ID-Docs,Solicitar parecer técnico sobre documento,2026-07-17,2026-07-17,no_prazo,Concluído,User Story,dab35066-65f6-4db4-8df5-2dda6f9a78bd
+ID-Docs,Assinar parecer técnico digitalmente,2026-07-20,2026-07-17,no_prazo,Concluído,User Story,a4e9320b-2d95-4811-99ba-af69c26460d1
+ID-Docs,Acompanhar solicitação de parecer técnico,2026-07-21,2026-07-17,no_prazo,Concluído,User Story,2c62aa41-75ef-489b-b1ca-ded4b53b5aa9
+ID-Docs,Devolver documento para ajustes,2026-07-21,2026-07-17,no_prazo,Concluído,User Story,c5c0f65e-f89a-4fda-afa6-59282cdd00bd
+ID-Docs,Consultar histórico do parecer técnico,2026-07-22,2026-07-17,no_prazo,Concluído,User Story,6dc752bd-1d90-44c4-b75f-a9d8bef5a046
+ID-Docs,Acompanhar status da assinatura,2026-07-23,2026-07-17,no_prazo,Concluído,User Story,458ef34c-d1d1-4f56-82e4-5bca8d64b67e
+ID-Docs,Definir signatários do documento,2026-07-23,2026-07-17,no_prazo,Concluído,User Story,3b1cf3b8-0b4e-42f6-b6f4-a92e38e62d3b
+ID-Docs,Enviar documento para assinatura,2026-07-24,2026-07-17,no_prazo,Concluído,User Story,72f8f7f0-39b3-4fd0-91c7-ee0c78c0e97f
+ID-Docs,Visualizar documento assinado,2026-07-24,2026-07-17,no_prazo,Concluído,User Story,1f1e3431-0428-42e9-b01e-adddee4a55b1
+ID-Docs,Cancelar solicitação de assinatura,2026-07-27,2026-07-17,no_prazo,Concluído,User Story,0449dc8c-8557-421f-ab4f-1d18e34048eb
+ID-Docs,Notificar conclusão de assinatura,2026-07-28,2026-07-17,no_prazo,Concluído,User Story,3583fe56-41c5-4460-9e6c-e7ff0d79d200
+ID-Docs,Notificar pendência de assinatura,2026-07-28,2026-07-17,no_prazo,Concluído,User Story,cfc963a3-1c07-4b0d-acbe-e1a326a8d00e
+ID-Docs,Notificar solicitação de parecer técnico,2026-07-29,2026-07-17,no_prazo,Concluído,User Story,0aec57a4-e4a0-4e09-912d-0d388e46accd
+MetroLIMS - Metrologia,US-070 — Endurecimento do backend,2026-07-20,2026-07-16,no_prazo,Concluído,User Story,48108336-db32-43be-9385-2fe9bce54a82
+Plataforma de Matrículas,US-001.1 — Iniciar Jornada de Matrícula,2026-07-30,,no_prazo (homologacao),Homologação (PO),User Story,ca4ef367-5bcb-498f-8f86-d274a4b68a78
+Plataforma de Matrículas,US-003.1 — Registrar Lead da Matrícula,2026-07-30,,no_prazo (homologacao),Homologação (PO),User Story,d6d6906c-a451-483c-9c91-8385254e632b
+Plataforma de Matrículas,US-021.1 — Criar APIs dos dados acadêmicos iniciais do aluno,2026-07-30,,no_prazo (homologacao),Homologação (PO),User Story,8b3db092-f709-4f71-a25f-eb2bd513a107
+Plataforma de Matrículas,US-022.1 — Criar API de Itinerário Formativo do Ensino Médio,2026-07-30,,no_prazo (homologacao),Homologação (PO),User Story,53871687-e2f4-444d-a33c-cd6464ae975a
+Plataforma de Matrículas,US-US-015.2 - Criar API para Listar unidade escolar.,2026-07-30,,no_prazo (homologacao),Homologação (PO),User Story,1daf2400-8189-4958-87e7-9e120231e387
+Plataforma de Matrículas,US-US-015.3 - Criar API para Listar selecionar série desejada.,2026-07-30,,no_prazo (homologacao),Homologação (PO),User Story,59ce89a9-dc48-4a07-947d-4a475b96aa9c
+Plataforma de Matrículas,US-025.1 — Criar endpoint para dados pessoais complementares do aluno,2026-07-31,,no_prazo (homologacao),Homologação (PO),User Story,77e06676-612e-4e53-bb2d-ccdd79d01bd3
+Plataforma de Matrículas,US-026.1 — Informar endereço do aluno,2026-07-31,,no_prazo (homologacao),Homologação (PO),User Story,d31f5860-1b8a-4bb4-a41c-021e08a70b9b
+API REST para Geração de Parcelas no TOTVS RM,Criar XML do processo de criar parcela,2026-07-02,2026-07-22,atrasado (+20d),Concluído,User Story,ea70c71d-2da0-4a45-a6b1-a1b9f480ba9e
+API REST para Geração de Parcelas no TOTVS RM,Criar XML do processo de gerar parcela,2026-07-02,2026-07-22,atrasado (+20d),Concluído,User Story,ce9a7700-19c2-43cb-bc27-18f7417e8fc7
+API REST para Geração de Parcelas no TOTVS RM,Criar api de criação de parcela,2026-07-02,,aberto,Code Review,User Story,6cb299ce-661f-4f89-be2a-812aa90ed85b
+CHATBOT - Educação Básica,US01 – Criar Agente Diana no Azure AI Foundry,2026-07-22,2026-07-27,atrasado (+5d),Concluído,User Story,bb43abfd-1dad-42ee-affc-42b0c40d9859
+CHATBOT - Educação Básica,US02 – Criar Agente Japson no Azure AI Foundry,2026-07-22,2026-07-27,atrasado (+5d),Concluído,User Story,156a819f-b2cc-496a-adc9-c880aef6d3b3
+CHATBOT - Educação Básica,US03 – Configurar Modelo de Linguagem dos Agentes,2026-07-22,2026-07-27,atrasado (+5d),Concluído,User Story,234a2bce-f95b-4592-a061-543ceac3c994
+CHATBOT - Educação Básica,US04 – Segregar Configurações dos Agentes,2026-07-22,2026-07-27,atrasado (+5d),Concluído,User Story,4c10a168-d35d-4faf-88d7-fb1a9817c8db
+CHATBOT - Educação Básica,US05 – Configurar Instruções de Sistema,2026-07-22,2026-07-27,atrasado (+5d),Concluído,User Story,db83de9c-f890-450c-97f5-2813644c060c
+CHATBOT - Educação Básica,US06 – Configurar Segurança dos Agentes,2026-07-22,2026-07-27,atrasado (+5d),Concluído,User Story,63d090bc-bcab-4098-8fb3-84c9dbed26de
+CHATBOT - Educação Básica,US07 – Habilitar Rastreabilidade das Respostas,2026-07-22,2026-07-27,atrasado (+5d),Concluído,User Story,0bab8bd6-fb9c-4751-b8f4-a241eda0d96e
+CHATBOT - Educação Básica,US08 – Preparar Ambiente para Treinamento,2026-07-22,2026-07-27,atrasado (+5d),Concluído,User Story,dcbcaeee-8e3f-4510-b13d-ae1c6e292502
+CHATBOT - Educação Básica,US09 – Gerenciar Configurações dos Agentes,2026-07-22,2026-07-27,atrasado (+5d),Concluído,User Story,339c1af8-62bf-445c-9d60-aad2271a168e
+CHATBOT - Educação Básica,US10 – Validar Implantação dos Agentes,2026-07-23,2026-07-27,atrasado (+4d),Concluído,User Story,adac0d90-4d92-4ffe-8747-08707ad12cd1
+CHATBOT - Educação Básica,US12 – Categorizar os Documentos por Tipo de Conhecimento,2026-07-23,2026-07-27,atrasado (+4d),Concluído,User Story,a48d0bf5-f679-461d-941d-73b50fe81905
+CHATBOT - Educação Básica,US13 – Indexar a Base de Conhecimento da Diana,2026-07-23,2026-07-27,atrasado (+4d),Concluído,User Story,74daea31-d104-4a2d-b45f-e3a00e0725e6
+CHATBOT - Educação Básica,US14 – Indexar a Base de Conhecimento do Japson,2026-07-23,2026-07-27,atrasado (+4d),Concluído,User Story,4cb32417-8136-4407-abc1-434a3bf91fc2
+CHATBOT - Educação Básica,US15 – Vincular Documentos ao Agente Diana,2026-07-23,2026-07-27,atrasado (+4d),Concluído,User Story,ddf43967-cc81-4300-a5fa-150d064eea0f
+CHATBOT - Educação Básica,US16 – Vincular Documentos ao Agente Japson,2026-07-23,2026-07-27,atrasado (+4d),Concluído,User Story,ca2c60a6-6cb2-4472-b022-f9a2b3621e05
+CHATBOT - Educação Básica,US17 – Treinar o Agente Diana com sua Base de Conhecimento,2026-07-23,2026-07-27,atrasado (+4d),Concluído,User Story,148a2432-3e41-4e91-bf0d-4176f7bdc684
+CHATBOT - Educação Básica,US18 – Treinar o Agente Japson com sua Base de Conhecimento,2026-07-23,2026-07-27,atrasado (+4d),Concluído,User Story,4227f61b-95aa-461f-9771-7ddac44b6e5d
+CHATBOT - Educação Básica,US19 – Atualizar Bases Sem Necessidade de Desenvolvimento,2026-07-24,2026-07-27,atrasado (+3d),Concluído,User Story,9725530f-01d6-41e8-a676-4209e47c958c
+Construtor de Jornadas Digitais,US-001 — Criar jornada,2026-07-15,2026-08-18,atrasado (+34d),Concluído,User Story,e18c0eda-0bcf-46e1-93bb-514bb70992c1
+Construtor de Jornadas Digitais,US-002 — Editar jornada em rascunho,2026-07-15,2026-08-18,atrasado (+34d),Concluído,User Story,b1023f32-3a92-4620-a5ab-92aa13b3dda5
+Construtor de Jornadas Digitais,US-003 — Duplicar jornada,2026-07-15,2026-08-18,atrasado (+34d),Concluído,User Story,eb2201e8-ad49-4794-9aee-8a197c5a3ca0
+Construtor de Jornadas Digitais,US-004 — Alterar status da jornada,2026-07-15,2026-08-18,atrasado (+34d),Concluído,User Story,5d73a9fd-3a79-4c74-b747-c800352e55d8
+Construtor de Jornadas Digitais,US-005 — Publicar jornada,2026-07-15,2026-08-18,atrasado (+34d),Concluído,User Story,009ac3af-765e-43b7-aa5c-a922b4d96efb
+Construtor de Jornadas Digitais,US-006 — Criar nova versão para edição,2026-07-15,2026-08-18,atrasado (+34d),Concluído,User Story,464f656f-40ee-4337-a415-5e23c40a2701
+Construtor de Jornadas Digitais,US-007 — Publicar nova versão,2026-07-16,2026-08-18,atrasado (+33d),Concluído,User Story,bc1d5b05-48bd-4916-ab4c-40e211a7d4bc
+Construtor de Jornadas Digitais,US-008 — Consultar histórico de versões,2026-07-16,2026-08-18,atrasado (+33d),Concluído,User Story,30f77a1b-dfbd-4610-a2ef-86e328451f51
+Construtor de Jornadas Digitais,US-009 — Pré-visualizar versão,2026-07-16,2026-08-18,atrasado (+33d),Concluído,User Story,5a77abc5-a1e9-4d22-82c6-4022926ba65c
+Construtor de Jornadas Digitais,US-010 — Adicionar etapa,2026-07-16,2026-08-18,atrasado (+33d),Concluído,User Story,477e4ab8-1724-4f8e-8b70-da17fa5f4106
+Construtor de Jornadas Digitais,US-011 — Ordenar etapas,2026-07-16,2026-08-18,atrasado (+33d),Concluído,User Story,72e10e33-a648-402b-b883-8ae3b00f8a9e
+Construtor de Jornadas Digitais,US-012 — Ativar ou inativar etapa,2026-07-16,2026-08-18,atrasado (+33d),Concluído,User Story,75334d42-e265-4e7e-8b4c-c1bd78858703
+Construtor de Jornadas Digitais,US-013 — Definir etapa inicial e final,2026-07-17,2026-08-18,atrasado (+32d),Concluído,User Story,e22f36f4-8bb7-4531-a5d1-80899fd417ae
+Construtor de Jornadas Digitais,US-014 — Criar formulário,2026-07-17,2026-08-18,atrasado (+32d),Concluído,User Story,f538e4f7-1c5d-40ef-84d1-2696a7954676
+Construtor de Jornadas Digitais,US-015 — Adicionar campo ao formulário,2026-07-17,2026-08-18,atrasado (+32d),Concluído,User Story,aef45d4f-c53b-4aaa-95a5-44d474d17517
+Construtor de Jornadas Digitais,US-016 — Configurar validações de campo,2026-07-17,2026-08-18,atrasado (+32d),Concluído,User Story,145d1d72-5105-4d91-a725-3d25417f0f82
+Construtor de Jornadas Digitais,US-017 — Configurar campo condicional,2026-07-17,2026-08-18,atrasado (+32d),Concluído,User Story,afc85a59-9b7f-4759-82b1-59a00ab8466e
+Construtor de Jornadas Digitais,US-018 — Configurar desvio entre etapas,2026-07-17,2026-08-18,atrasado (+32d),Concluído,User Story,50271452-3184-4a66-8ec4-143537154f81
+Construtor de Jornadas Digitais,US-019 — Bloquear avanço,2026-07-17,2026-08-18,atrasado (+32d),Concluído,User Story,83d3911d-fa0f-4596-9940-4b1324b587a5
+Construtor de Jornadas Digitais,US-020 — Gerar e enviar código,2026-07-20,2026-08-18,atrasado (+29d),Concluído,User Story,c8c05fa7-a578-4c85-8c7c-625e51e0d8e0
+Construtor de Jornadas Digitais,US-021 — Validar código,2026-07-20,2026-08-18,atrasado (+29d),Concluído,User Story,ef7ea92f-0e32-43c2-9af4-ffaaf6b213ae
+Construtor de Jornadas Digitais,US-022 — Reenviar código,2026-07-20,2026-08-18,atrasado (+29d),Concluído,User Story,97ff9964-c137-44c6-ae41-8256ba7aa05a
+Construtor de Jornadas Digitais,US-023 — Cadastrar integração,2026-07-20,2026-08-18,atrasado (+29d),Concluído,User Story,454a552c-feea-4847-ab0b-1b7c48c66c48
+Construtor de Jornadas Digitais,US-024 — Configurar ações da integração,2026-07-20,2026-08-18,atrasado (+29d),Concluído,User Story,5007e863-e406-4925-b92e-a581bb67e021
+Construtor de Jornadas Digitais,US-025 — Testar integração,2026-07-20,2026-08-18,atrasado (+29d),Concluído,User Story,956cc30a-56a7-4078-9c8f-cf12a6799677
+Construtor de Jornadas Digitais,US-026 — Configurar gatilho,2026-07-21,2026-08-18,atrasado (+28d),Concluído,User Story,2f95a37d-2dfb-4201-b549-f144b43f3b2a
+Construtor de Jornadas Digitais,US-027 — Configurar condição de gatilho,2026-07-21,2026-08-18,atrasado (+28d),Concluído,User Story,af3c112b-1b65-4c20-9ae9-03b15fc1fec7
+Construtor de Jornadas Digitais,US-028 — Configurar tratamento de falha,2026-07-21,2026-08-18,atrasado (+28d),Concluído,User Story,a0bd19b7-5c23-413b-97a8-95eddfd23e2a
+Construtor de Jornadas Digitais,US-029 — Mapear campos,2026-07-21,2026-08-18,atrasado (+28d),Concluído,User Story,5876c1a6-c137-4b20-a3dc-441caa9eaf7a
+Construtor de Jornadas Digitais,US-030 — Transformar dados,2026-07-21,2026-08-18,atrasado (+28d),Concluído,User Story,d9a577e1-07b9-48f7-b47d-0546b0180bfa
+Construtor de Jornadas Digitais,US-031 — Armazenar retorno da integração,2026-07-22,2026-08-18,atrasado (+27d),Concluído,User Story,4e6df732-cd62-4133-87f0-4b0616c2ea88
+Construtor de Jornadas Digitais,US-032 — Gerar cobrança,2026-07-22,2026-08-18,atrasado (+27d),Concluído,User Story,dfff6bce-7746-48ee-b51d-07e0cd77c7fe
+Construtor de Jornadas Digitais,US-033 — Confirmar pagamento,2026-07-22,2026-08-18,atrasado (+27d),Concluído,User Story,2f05f3c6-c9af-4424-b3ed-84a5499385a2
+Construtor de Jornadas Digitais,US-034 — Salvar progresso,2026-07-22,2026-08-18,atrasado (+27d),Concluído,User Story,51287295-1dd0-417c-aad8-325ab24df7b3
+Construtor de Jornadas Digitais,US-035 — Retomar jornada,2026-07-22,2026-08-18,atrasado (+27d),Concluído,User Story,1a14eae0-41eb-463d-9ac4-cb5058de0eae
+Construtor de Jornadas Digitais,US-036 — Consultar execuções de integração,2026-07-22,2026-08-18,atrasado (+27d),Concluído,User Story,9459e647-b6c8-46f8-8dff-18523fdc039c
+Construtor de Jornadas Digitais,US-037 — Reprocessar integração,2026-07-23,2026-08-18,atrasado (+26d),Concluído,User Story,d68658c3-31ee-40a3-9dba-32b99e879ff2
+Construtor de Jornadas Digitais,US-038 — Alertar falhas críticas,2026-07-23,2026-08-18,atrasado (+26d),Concluído,User Story,3dbfa807-aedb-4247-893c-1c42e3ecd574
+Construtor de Jornadas Digitais,US-039 — Consultar participantes,2026-07-23,2026-08-18,atrasado (+26d),Concluído,User Story,1752429f-b6a2-4c87-a39d-d0fbe46bc51e
+Construtor de Jornadas Digitais,US-040 — Consultar linha do tempo,2026-07-23,2026-08-18,atrasado (+26d),Concluído,User Story,1edab2c9-3a55-4625-8af5-a0a7d7394a90
+Construtor de Jornadas Digitais,US-041 — Encaminhar para análise manual,2026-07-23,2026-08-18,atrasado (+26d),Concluído,User Story,03d9e173-8268-40db-a3b3-7f66cd2a9eb4
+Construtor de Jornadas Digitais,US-042 — Visualizar funil por etapa,2026-07-24,2026-08-18,atrasado (+25d),Concluído,User Story,61303833-4ccf-4aa1-9ced-d9ae5deb2b4b
+Construtor de Jornadas Digitais,US-043 — Identificar pontos de abandono,2026-07-24,2026-08-18,atrasado (+25d),Concluído,User Story,94be3318-8adb-485d-920a-3ad303c7f079
+Construtor de Jornadas Digitais,US-044 — Acompanhar desempenho das integrações,2026-07-24,2026-08-18,atrasado (+25d),Concluído,User Story,f9a0a401-f8d7-435c-8817-73f03eb62f23
+Construtor de Jornadas Digitais,US-045 — Gerenciar perfis e permissões,2026-07-24,2026-08-18,atrasado (+25d),Concluído,User Story,6a708ed6-6d29-4578-ab4b-2c3ead444945
+Construtor de Jornadas Digitais,US-046 — Registrar auditoria administrativa,2026-07-24,2026-08-18,atrasado (+25d),Concluído,User Story,89912567-ffbc-4c3a-b10e-5a2787d0e170
+Construtor de Jornadas Digitais,US-047 — Gerenciar termos e consentimentos,2026-07-24,2026-08-18,atrasado (+25d),Concluído,User Story,4003d5ae-b977-4229-a123-5f3d2feba5bc
+FINTECH - CENTRAL DO CLIENTE - RECUPERAÇÃO DE CRÉDITO,U.S. 1.2 – Simulação de Parcelamento e Valor Mínimo,2026-07-08,,aberto,Backlog,User Story,f39f720c-a4f1-4284-9c61-a798bd02e77b
+FINTECH - CENTRAL DO CLIENTE - RECUPERAÇÃO DE CRÉDITO,U.S. 2.1 – Regras de Parcelamento e Limites por Porte,2026-07-15,,aberto,Backlog,User Story,11ff9fcb-6398-4c1c-9048-6db089e6956f
+FINTECH - CENTRAL DO CLIENTE - RECUPERAÇÃO DE CRÉDITO,U.S. 2.2 – Workflow de Aprovação de Descontos,2026-07-22,,aberto,Backlog,User Story,740cecc2-c974-4b4d-8214-40d24cc9102d
+FINTECH - SIFC - CADASTROS BÁSICOS,US-4.1 — Configurar parâmetros gerais do sistema,2026-07-02,2026-08-04,atrasado (+33d),Concluído,User Story,7337e21b-0cf8-4f98-9e63-9833a12287c4
+FINTECH - SIFC - CADASTROS BÁSICOS,US-4.2 — Configurar aparência visual,2026-07-06,2026-08-04,atrasado (+29d),Concluído,User Story,ad130c49-abce-4771-837c-871beff0d915
+FINTECH - SIFC - CADASTROS BÁSICOS,US-5.1 — Editar templates de e-mail,2026-07-07,2026-08-04,atrasado (+28d),Concluído,User Story,b4988848-516e-44c1-ba74-55050994fbf6
+FINTECH - SIFC - CADASTROS BÁSICOS,US-5.2 — Notificar criação de nova competência,2026-07-07,2026-08-04,atrasado (+28d),Concluído,User Story,7aea885e-6bc0-4a19-bf35-2af3485fcc4d
+FINTECH - SIFC - CADASTROS BÁSICOS,US-5.3 — Notificar nova atividade distribuída,2026-07-08,2026-08-04,atrasado (+27d),Concluído,User Story,b866ded0-b45e-46cc-89ef-108b02eabf5b
+FINTECH - SIFC - CADASTROS BÁSICOS,US-5.4 — Notificar entrega de atividade,2026-07-08,2026-08-04,atrasado (+27d),Concluído,User Story,d1fb6972-cf39-4754-990a-c4eba5c1443a
+FINTECH - SIFC - CADASTROS BÁSICOS,US-5.5 — Notificar aprovação de entrega,2026-07-08,2026-08-04,atrasado (+27d),Concluído,User Story,81671e85-154b-4a36-ad20-9b6647876464
+FINTECH - SIFC - CADASTROS BÁSICOS,US-5.6 — Notificar solicitação de revisão,2026-07-09,2026-08-04,atrasado (+26d),Concluído,User Story,305bd19e-e205-4916-bcf7-b24ab6acd817
+FINTECH - SIFC - CADASTROS BÁSICOS,US-5.7 — Notificar fechamento de competência,2026-07-10,2026-08-04,atrasado (+25d),Concluído,User Story,10669a3b-35a3-492f-a424-1f120bb10fcb
+FINTECH - SIFC - CADASTROS BÁSICOS,US-5.8 — Enviar lembretes de vencimento próximo,2026-07-13,2026-08-04,atrasado (+22d),Concluído,User Story,aa2f5e42-a765-4797-96d7-923a65af4ff0
+FINTECH - SIFC - CADASTROS BÁSICOS,US-5.9 — Enviar alertas de atraso,2026-07-13,2026-08-04,atrasado (+22d),Concluído,User Story,2386c4c9-6cf1-48a2-b421-4377cc5b1c09
+FINTECH - SIFC - CADASTROS BÁSICOS,US-5.10 — Consultar log de envio de e-mails,2026-07-14,2026-08-04,atrasado (+21d),Concluído,User Story,7f9ecb99-3410-46da-84be-5ff407129498
+FINTECH - SIFC - CADASTROS BÁSICOS,US-6.1 — Espelhar Plano Mestre entre entidades,2026-07-14,2026-08-04,atrasado (+21d),Concluído,User Story,9dbc1398-4ade-490d-8268-eb4925c06c4e
+FINTECH - SIFC - COMPETÊNCIA,US-1.1 — Abrir nova competência mensal para uma entidade,2026-07-20,2026-08-10,atrasado (+21d),Concluído,User Story,134e60f0-5dfc-452d-9cb6-8d58713157c3
+FINTECH - SIFC - COMPETÊNCIA,US-1.2 — Gerar competência com base no Plano Mestre,2026-07-21,2026-08-10,atrasado (+20d),Concluído,User Story,f2ea8ab6-7388-4384-95e9-b3d015c764d8
+FINTECH - SIFC - COMPETÊNCIA,US-1.3 — Validar e impedir duplicidade de competência,2026-07-22,2026-08-10,atrasado (+19d),Concluído,User Story,a61aed7d-9af5-4f36-935c-98c84f4d08e2
+FINTECH - SIFC - COMPETÊNCIA,US-1.4 — Listar e filtrar competências,2026-07-23,2026-08-10,atrasado (+18d),Concluído,User Story,487eadef-639b-40e1-a836-c06e4d379172
+FINTECH - SIFC - COMPETÊNCIA,US-2.1 — Abrir competência em modo ad hoc com justificativa,2026-07-24,2026-08-10,atrasado (+17d),Concluído,User Story,c8a93e4f-08af-4810-8c0d-401dbd238f0b
+FINTECH - SIFC - COMPETÊNCIA,US-2.2 — Identificar competências ad hoc na listagem e nos indicadores,2026-07-27,2026-08-10,atrasado (+14d),Concluído,User Story,894b4efa-a975-45bd-8d32-656c3da3acd1
+FINTECH - SIFC - COMPETÊNCIA,US-3.1 — Acompanhar e atualizar o status global da competência,2026-07-28,2026-08-10,atrasado (+13d),Concluído,User Story,e5149b09-e6da-4323-b329-1dda48bca78e
+FINTECH - SIFC - COMPETÊNCIA,US-3.2 — Fechar a competência,2026-07-29,2026-08-10,atrasado (+12d),Concluído,User Story,0ef62d1f-b645-435d-a8db-cfba828ba379
+FINTECH - SIFC - COMPETÊNCIA,US-4.1 — Registrar em Audit Trail as operações relevantes da competência,2026-07-30,2026-08-10,atrasado (+11d),Concluído,User Story,9755c490-022e-477b-be21-acc66155ac67
+FINTECH - SIFC - ENTREGA DE ATIVIDADES,US-1.1 — Listar minhas entregas (Operador),2026-07-27,2026-08-10,atrasado (+14d),Concluído,User Story,a6f04adb-004d-4822-b9a5-06d62da731db
+FINTECH - SIFC - ENTREGA DE ATIVIDADES,US-1.2 — Listar e filtrar entregas (Contador/Administrador),2026-07-28,2026-08-10,atrasado (+13d),Concluído,User Story,ae6f6f82-4ad5-4b61-842d-1c000ebd4a6f
+FINTECH - SIFC - ENTREGA DE ATIVIDADES,US-1.3 — Consultar detalhe da entrega/atividade,2026-07-29,2026-08-10,atrasado (+12d),Concluído,User Story,1b0788f8-8705-46ae-bcbb-ada6fd1d1ed6
+FINTECH - SIFC - ENTREGA DE ATIVIDADES,US-2.1 — Submeter entrega de uma atividade,2026-07-30,2026-08-10,atrasado (+11d),Concluído,User Story,6d30da79-75fb-49f8-b3fc-6e7247fe1eea
+FINTECH - SIFC - ENTREGA DE ATIVIDADES,US-2.2 — Anexar e remover arquivos antes da submissão,2026-07-31,2026-08-10,atrasado (+10d),Concluído,User Story,12d447aa-24d2-4ac0-accb-9f13c5a5e0b3
+FINTECH - SIPAG - QUALIFICAÇÃO FISCAL E FINANCEIRA,US 10 — Identificação da demanda como Adiantamento e criação do saldo,2026-07-29,,aberto,Impedimento,User Story,ff97283f-7339-4ed1-b7f4-b8572e859d6a
+Fintech - Relatorios de Auditoria,Validação e revisão,2026-07-17,,aberto,Em Desenvolvimento,Projetos e Programas,e5435ab5-64a0-4871-8a17-56a40276ad22
+ID-Docs,Listar documentos,2026-07-13,2026-07-17,atrasado (+4d),Concluído,User Story,f3f28e23-e4c0-4c7e-a50b-07f427978b2b
+ID-Docs,Visualizar detalhes do documento,2026-07-14,2026-07-17,atrasado (+3d),Concluído,User Story,9add2ac3-0da9-4218-92c6-6f735f1fd668
+ID-Docs,Enviar documento para o Autentique,2026-07-15,2026-07-17,atrasado (+2d),Concluído,User Story,1b93e970-fef0-43ad-be95-c1c630c79e5a
+ID-Docs,Filtrar documentos,2026-07-15,2026-07-17,atrasado (+2d),Concluído,User Story,d966b792-6005-4a5f-8759-f38104481c75
+ID-Docs,Status ID-Docs,2026-07-15,2026-07-20,atrasado (+5d),Concluído,User Story,d62e47c4-512e-4741-9c99-9c32afa1d822
+ID-Docs,Status iDigital,2026-07-15,2026-07-23,atrasado (+8d),Concluído,User Story,6228ac13-9f0e-484a-a69c-b0e9cb0d8ec9
+ID-Docs,Atualizar status da assinatura via integração,2026-07-16,2026-07-17,atrasado (+1d),Concluído,User Story,daea144b-3a30-456f-bdd0-0be84f6b5f0c
+ID-Docs,Configuração Ngrok,2026-07-16,2026-07-20,atrasado (+4d),Concluído,User Story,11001bcc-468f-48bf-8367-54addfb6ff09
+ID-Docs,Organização Autentique,2026-07-16,2026-07-20,atrasado (+4d),Concluído,User Story,12fc3899-a773-4c0e-b930-cea9c9c233b5
+Melhorias Simulador de Gratuidade,Conexão e leitura dos registros de Educação Básica (EBDR),2026-07-06,2026-07-14,atrasado (+8d),Concluído,User Story,ee8c3781-4da7-484c-aee0-dcf76e0dcf8c
+Melhorias Simulador de Gratuidade,Conexão e leitura dos registros de Educação Profissional (EPDR),2026-07-06,2026-07-14,atrasado (+8d),Concluído,User Story,6b66ffcf-25c4-446c-b219-3849a6989ae2
+Melhorias Simulador de Gratuidade,Inserção avulsa de dados de produção para simulação,2026-07-07,2026-07-14,atrasado (+7d),Concluído,User Story,64c04ef7-da21-446c-b43e-a545bdf4295a
+Melhorias Simulador de Gratuidade,Inserção avulsa de dados orçamentários para simulação,2026-07-07,2026-07-14,atrasado (+7d),Concluído,User Story,2fa86653-bd68-49cb-b309-3f6e853758b6
+Melhorias Simulador de Gratuidade,Visualização e exportação do resultado da simulação,2026-07-07,2026-07-14,atrasado (+7d),Concluído,User Story,a09fdd03-2551-4fb9-8987-8b2043d26a24
+MetroLIMS - Metrologia,US-084 — Aba Financeiro do Dashboard,2026-07-15,2026-08-18,atrasado (+34d),Concluído,User Story,b2988d7b-4430-4188-a375-bafc9f91f83f
+MetroLIMS - Metrologia,US-085 — Esforço por tipo de serviço,2026-07-16,2026-08-18,atrasado (+33d),Concluído,User Story,320d0b1a-bdc3-4cb1-86d3-14651c6e4bad
+MetroLIMS - Metrologia,US-089 — Responsável da OS a partir da equipe real da 360,2026-07-16,2026-08-18,atrasado (+33d),Concluído,User Story,5526d132-79d0-4172-972c-7cc5d9ab8a9b
+MetroLIMS - Metrologia,US-090 — Estado da fila de sincronização visível na OS,2026-07-16,2026-08-18,atrasado (+33d),Concluído,User Story,4072d8b2-4cdf-448f-83c9-f6df2e64c199
+MetroLIMS - Metrologia,US-091 — Saldo autorizado real da 360 no backlog,2026-07-16,2026-08-18,atrasado (+33d),Concluído,User Story,00458645-ded2-4eab-bb0d-ea9b310cbb33
+MetroLIMS - Metrologia,US-087 — Movimentação de cards entre MetroLIMS e 360,2026-07-17,2026-08-18,atrasado (+32d),Concluído,User Story,6c662a4b-0665-45d9-ac1d-60f082e08ad0
+MetroLIMS - Metrologia,US-088 — Conclusão remota da 360 refletida no MetroLIMS,2026-07-17,2026-08-18,atrasado (+32d),Concluído,User Story,2d117bf9-7493-45ac-bb8c-f7deecb0244d
+MetroLIMS - Metrologia,US-086 — Fan-out de calibração por item na 360,2026-07-18,2026-08-18,atrasado (+31d),Concluído,User Story,a1d5f529-7f2c-4f1f-9255-f9f9e479f5ca
+MetroLIMS - Metrologia,US-092 — Movimentação de card espelhado pelo painel,2026-07-18,2026-08-18,atrasado (+31d),Concluído,User Story,ecd091e8-2910-4443-a0b3-a9f50dc26a36
+MetroLIMS - Metrologia,US-104 — Captura dos identificadores da 360 em produção,2026-07-20,,aberto,Backlog,Features,f9c7794f-2ad2-4eb7-abf5-bb219b181f06
+MetroLIMS - Metrologia,US-105 — Guarda de ambiente no início do sistema,2026-07-20,,aberto,Backlog,Features,a06bbbb4-cb92-4bd0-bc5c-d38933c14cb6
+MetroLIMS - Metrologia,US-068 — Migrações versionadas de banco,2026-07-21,,aberto,Em Desenvolvimento,User Story,3fe3ce7c-74cc-45c0-b792-54769e90d096
+MetroLIMS - Metrologia,US-106 — Reset seletivo do espelho,2026-07-21,,aberto,Backlog,Features,9696168b-20b7-4870-a5b6-5141006e6ca9
+MetroLIMS - Metrologia,US-069 — Homologação em produção,2026-07-22,,aberto,Backlog,User Story,43b80fa6-6c14-45ff-a6a2-da319138501b
+MetroLIMS - Metrologia,US-072 — Provedor 360 do Dashboard de Gestão,2026-07-22,,aberto,Backlog,User Story,b0ef8ee5-4b00-43b3-8940-84848a9a5985
+MetroLIMS - Metrologia,US-107 — Token de serviço da Solução 360,2026-07-22,,aberto,Backlog,Features,778f2621-1e37-4570-90c8-6df4a2a85712
+MetroLIMS - Metrologia,US-108 — Ambiente de homologação do MetroLIMS,2026-07-22,,aberto,Backlog,Features,ac495f02-2334-4b3a-a247-f9dd49e3549f
+Plataforma de Matrículas,US-002 — Salvar Progresso Automaticamente,2026-07-30,,aberto,Backlog,User Story,e919f4cd-9ebb-4de3-b0a8-bfeb8794e151
+Plataforma de Matrículas,US-003 — Registrar Lead da Matrícula,2026-07-30,,aberto,Backlog,User Story,2f8fe5e8-9bd5-4498-807f-31c1ac39ba50
+Plataforma de Matrículas,US-004 — Retomar Matrícula em Andamento,2026-07-30,,aberto,Backlog,User Story,881b5b9f-426f-4752-ba21-93414d560810
+Plataforma de Matrículas,US-005 — Continuar Matrícula por Identificação Validada,2026-07-30,,aberto,Backlog,User Story,ea8e3015-0ee7-4c28-a411-54c05a3faac2
+Plataforma de Matrículas,US-001 — Iniciar Jornada de Matrícula,2026-07-31,,aberto,Backlog,User Story,cf640a66-e58a-4392-a022-9a60ef557d3a
+Plataforma de Matrículas,US-006 — Iniciar Nova Matrícula,2026-07-31,,aberto,Backlog,User Story,54046127-ccc5-4b64-9b3c-fcafa5680112
+Plataforma de Matrículas,US-007 — Enviar token de validação via WhatsApp,2026-07-31,,aberto,Backlog,User Story,cf6d5857-e403-43b9-b32a-c814bd2dacce
+Plataforma de Matrículas,US-008 — Validar código recebido,2026-07-31,,aberto,Backlog,User Story,70c830e0-65ac-4d9b-925c-8b15961d4efd
+Sistema de Gerenciamento de Absenteísmo (SGA),Inclusão de Licença Maternidade nos Fluxos de Consulta e Acolhimento,2026-07-01,2026-07-17,atrasado (+16d),Concluído,User Story,ba8ba4bc-f165-4284-95ca-9c73b5348832
+Sistema de Gerenciamento de Absenteísmo (SGA),Orientação de Ponto na Mensageria de Declaração,2026-07-01,2026-07-17,atrasado (+16d),Concluído,User Story,54d9ccd9-1f7d-4d5f-ba78-12b8c03575ca
+Sistema de Gerenciamento de Absenteísmo (SGA),Visibilidade de Detalhes de Afastamento na Mensageria do Gestor,2026-07-01,2026-07-17,atrasado (+16d),Concluído,User Story,e0d3f176-1751-48cb-af9c-dfcfb4c5933d
+Sistema de Gerenciamento de Absenteísmo (SGA),Mensageria Gestor,2026-07-02,,aberto,Impedimento,User Story,18ebc979-7943-4101-a980-b94ef04ad405
+Sistema de Gerenciamento de Absenteísmo (SGA),Relatório de etapas,2026-07-02,2026-07-17,atrasado (+15d),Concluído,User Story,dede109f-7e69-4e27-a0c0-aa3da777c770
+Sistema de Saúde,Módulo do Paciente (Portal/App),2026-07-01,2026-08-05,atrasado (+35d),Concluído,User Story,a27b1a90-42c5-4417-bfb3-b34c9947e446
+Sistema de Saúde,Painéis & Gestão de Filas,2026-07-08,2026-08-05,atrasado (+28d),Concluído,User Story,3ee3be7c-147d-444c-a174-e7e36b192674
+Sistema de Saúde,Atendimento & Triagem,2026-07-16,2026-08-05,atrasado (+20d),Concluído,User Story,c31e7e29-b50c-441f-846a-7f592093f654
+Sistema de Saúde,Prontuário Eletrônico do Paciente (PEP),2026-07-24,2026-08-05,atrasado (+12d),Concluído,User Story,8d1c099b-ecef-481c-b9c7-cbab95c433f7
