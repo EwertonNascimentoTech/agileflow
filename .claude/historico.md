@@ -14,6 +14,14 @@ Modelo:
 
 ---
 
+## 2026-09-26 — pgvector + embeddings bge-m3 (infra da busca semântica)
+
+- **Pedido:** preparar o banco para pgvector sem quebrar nada, com embedding gratuito compatível com a IA em uso (IDCortex); modelo escolhido: BAAI/bge-m3.
+- **Feito:** imagem `db/Dockerfile` (postgres:16-alpine + pgvector 0.8.0 compilado; mesmo SO/versão/collation, mesmo volume). Container `embeddings` (FastAPI + sentence-transformers, torch CPU, 1 worker, profile `ia`, modelo no volume `embeddings_models`). `VECTOR_ENABLED` (padrão false): startup cria a extensão em `public` só se disponível; step 145 cria `embeddings` (vector(1024), HNSW cosseno) só com a extensão. `EmbeddingService` (index com hash por pedaço, delete, search) e task Celery `embeddings.index_source` com retry. Ainda sem tela nem rota consumindo.
+- **Testado (ambiente isolado):** troca de imagem sobre o mesmo volume (50 usuários/103 tabelas intactos, 307 índices btree ok no amcheck); flag off = nada muda; flag on = extensão+tabela+índices, idempotente; flag on sem pgvector = só aviso; indexação e busca ponta a ponta com o bge-m3 (~1,5 GB de RAM, busca ~160 ms, 1º resultado certo nas 3 perguntas com outras palavras). torch fixado em 2.6.0 (2.5 recusa os pesos `.bin`); `mem_limit: 3g` no container depois que o teste sem limite esgotou a VM do Docker local.
+- **Não mexer:** ver invariantes "pgvector / embeddings".
+- **Arquivos:** `db/Dockerfile`, `embeddings/` (novo), `docker-compose.yml`, `backend/app/core/embeddings.py` (novo), `core/config.py`, `core/tenant_migrations.py`, `tasks/scheduled.py`, `tests/test_embeddings.py`, `.env.example`, `docs/técnico/10-pgvector-embeddings.md`.
+
 ## 2026-09-26 — nginx do frontend re-resolve `api`/`minio` (502 após recriar o saas_api)
 
 - **Pedido:** login pelo IDigital (e por senha) parou: `/api/*` dava 502 depois que o `saas_api` foi recriado.

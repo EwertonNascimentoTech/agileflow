@@ -155,6 +155,16 @@ class Settings(BaseSettings):
     # Quem entra pelo IDigital sem login e sem cadastro em Pessoas vira cliente (Portal) neste tenant (slug).
     SSO_CLIENT_TENANT: str = "ss"
 
+    # ── pgvector + embeddings (busca semântica) ──
+    # Desligado: nada muda no banco. Ligado: o startup cria a extensão `vector` (se a imagem do
+    # Postgres tiver — db/Dockerfile) e a tabela `embeddings` em cada tenant. Os vetores vêm do
+    # container `embeddings` (BAAI/bge-m3, 1024 dimensões; profile "ia" do Compose).
+    VECTOR_ENABLED: bool = False
+    EMBEDDINGS_URL: str = "http://embeddings:8000"
+    EMBEDDINGS_MODEL: str = "BAAI/bge-m3"
+    # 1º pedido depois de subir carrega o modelo (dezenas de segundos em CPU).
+    EMBEDDINGS_TIMEOUT: float = 180.0
+
     # ── Genus (folha de pagamento FIEA) ──
     # No 1º login pelo IDigital, busca o colaborador por e-mail em /api/payroll/users e guarda
     # matrícula, organização, departamento, cargo funcional e função de confiança (CPF não).

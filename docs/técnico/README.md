@@ -17,6 +17,7 @@ Público-alvo: equipa de desenvolvimento. Cada ficheiro descreve um processo der
 | 07 | [07-rtd-epa.md](07-rtd-epa.md) | Reuniões RTD + integração EPA / IA | Módulo `rtd` |
 | 08 | [08-uploads-minio-celery.md](08-uploads-minio-celery.md) | Storage MinIO e jobs Celery (SLA) | Uploads / worker |
 | 09 | [09-sso-idigital.md](09-sso-idigital.md) | Login pelo IDigital (SSO OIDC) | Botão no `/login` → `POST /api/v1/auth/sso/exchange` |
+| 10 | [10-pgvector-embeddings.md](10-pgvector-embeddings.md) | pgvector e embeddings (busca semântica) | `embeddings.index_source` → `EmbeddingService.search` |
 
 ## Módulos backend ativos (seed em `main.py`)
 

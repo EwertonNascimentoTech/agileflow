@@ -211,6 +211,33 @@ async def _run_stage_agent(schema: str, project_id: str, task_id: str, status_id
                 pass
 
 
+@celery_app.task(name="embeddings.index_source", bind=True, max_retries=5)
+def index_embeddings_task(self, schema: str, source_type: str, source_id: str, content: str):
+    """Indexa o texto de um registro para a busca semântica (ver app.core.embeddings).
+    Serviço de embeddings fora do ar: tenta de novo em 1, 5, 25 min, ~2 h e 6 h."""
+    from app.core.embeddings import EmbeddingService, EmbeddingsUnavailable
+
+    if not EmbeddingService.enabled():
+        return
+    try:
+        n = _run(_index_embeddings(schema, source_type, source_id, content))
+        logger.info("[embeddings] %s/%s/%s: %s pedaço(s) recalculado(s)", schema, source_type, source_id, n)
+    except EmbeddingsUnavailable as exc:
+        countdown = min(60 * 5 ** self.request.retries, 6 * 3600)
+        logger.warning("[embeddings] %s/%s: %s; nova tentativa em %ss", source_type, source_id, exc, countdown)
+        raise self.retry(exc=exc, countdown=countdown)
+
+
+async def _index_embeddings(schema: str, source_type: str, source_id: str, content: str) -> int:
+    import uuid
+
+    from app.core.database import AsyncSessionLocal
+    from app.core.embeddings import EmbeddingService
+
+    async with AsyncSessionLocal() as db:
+        return await EmbeddingService.index(db, schema, source_type, uuid.UUID(source_id), content)
+
+
 @celery_app.task(name="payroll.sync_user", bind=True, max_retries=6)
 def sync_payroll_user_task(self, user_id: str):
     """Dados da folha (Genus) do 1º login pelo IDigital (disparado por SsoService.exchange).

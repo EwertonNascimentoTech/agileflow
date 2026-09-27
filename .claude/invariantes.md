@@ -180,3 +180,11 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 - Client público (PKCE, sem `client_secret`): o IdP só aceita `none`. Nunca pedir nem guardar o `document` (CPF).
 - CSP `connect-src` precisa listar o host do IdP; chamadas do SSO no front não passam pelo interceptor do axios (401 da troca não é sessão vencida).
 - "Sair" de sessão aberta pelo SSO (`auth_via = sso`) encerra também no IdP; sessão por senha não.
+
+## pgvector / embeddings (busca semântica)
+
+- Postgres é `postgres:16-alpine` + pgvector compilado (`db/Dockerfile`). Não trocar por `pgvector/pgvector` (Debian/glibc): a collation `en_US.utf8` do musl muda de ordem no glibc e corrompe os índices de texto sem erro.
+- `VECTOR_ENABLED=false` não mexe no banco. Ligado: extensão `vector` em `public` e tabela `embeddings` por tenant (step 145) — só se a imagem tiver pgvector; sem ela, aviso e o startup segue.
+- Tabela `embeddings` e o tipo `vector` ficam **fora do TenantBase** (SQL cru em `app/core/embeddings.py`): o `create_all` de tenant novo quebraria num banco sem pgvector.
+- Modelo BAAI/bge-m3 (1024 dimensões) roda no container `embeddings` (profile `ia`, 1 worker, sem porta publicada) — nunca carregar o modelo na API nem no Celery. Trocar de modelo com outra dimensão = coluna nova e reindexar tudo.
+- O texto não sai do servidor para gerar o vetor; o que for ao IDCortex continua passando por `anonymize.py` (ele recebe trechos em texto, nunca vetores).

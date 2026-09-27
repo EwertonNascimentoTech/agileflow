@@ -4673,6 +4673,44 @@ async def _step_144_operacao_assistida_indicadores_encerramento(conn: AsyncConne
                         "task_id", columns=("task_id",))
 
 
+async def _vector_installed(conn: AsyncConnection) -> bool:
+    result = await conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vector'"))
+    return result.scalar() is not None
+
+
+async def _step_145_embeddings(conn: AsyncConnection, schema: str) -> None:
+    """Busca semântica: pedaços de texto + vetor do bge-m3 (1024) por registro de origem.
+    Só nasce com a extensão `vector` criada (VECTOR_ENABLED + imagem db/Dockerfile); sem ela,
+    o step não faz nada e roda de novo no próximo startup. Fora do TenantBase de propósito:
+    o create_all de tenant novo quebraria num banco sem pgvector."""
+    from app.core.embeddings import EMBEDDING_DIM
+
+    if not await _vector_installed(conn):
+        return
+    if not await _table_exists(conn, schema, "embeddings"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.embeddings (
+                id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                source_type  VARCHAR(50) NOT NULL,
+                source_id    UUID NOT NULL,
+                chunk_index  INTEGER NOT NULL DEFAULT 0,
+                content      TEXT NOT NULL,
+                content_hash VARCHAR(64) NOT NULL,
+                model        VARCHAR(100) NOT NULL,
+                embedding    public.vector({EMBEDDING_DIM}) NOT NULL,
+                created_at   TIMESTAMP DEFAULT now(),
+                updated_at   TIMESTAMP DEFAULT now(),
+                UNIQUE (source_type, source_id, chunk_index)
+            )
+        """))
+    await _ensure_index(conn, schema, "embeddings_source", "embeddings",
+                        "source_type, source_id", columns=("source_type", "source_id"))
+    await conn.execute(text(
+        f"CREATE INDEX IF NOT EXISTS ix_{schema}_embeddings_hnsw "
+        f"ON {schema}.embeddings USING hnsw (embedding public.vector_cosine_ops)"
+    ))
+
+
 async def _step_129_projetos_agent_fail_to(conn: AsyncConnection, schema: str) -> None:
     """Raia de destino quando a triagem do backlog (review_and_route) não aprova."""
     await _add_columns(conn, schema, "project_stage_agent_bindings", {
@@ -4915,6 +4953,7 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("142_operacao_assistida_governanca", _step_142_operacao_assistida_governanca),
     ("143_ocorrencias_triagem_n1", _step_143_ocorrencias_triagem_n1),
     ("144_operacao_assistida_indicadores_encerramento", _step_144_operacao_assistida_indicadores_encerramento),
+    ("145_embeddings", _step_145_embeddings),
     ("123_reconcile_indexes", _step_123_reconcile_indexes),
 ]
 
@@ -4944,11 +4983,33 @@ async def upgrade_tenant_schema(schema: str) -> None:
             print(f"[tenant_migrations] {schema}/{name} failed (pulando): {e}")
 
 
+async def ensure_vector_extension() -> None:
+    """VECTOR_ENABLED: cria a extensão `vector` em `public` (uma por banco; os tenants a veem
+    pelo search_path). Imagem do Postgres sem pgvector só gera aviso — o startup segue."""
+    from app.core.config import settings
+
+    if not settings.VECTOR_ENABLED:
+        return
+    try:
+        async with engine.begin() as conn:
+            available = (await conn.execute(
+                text("SELECT 1 FROM pg_available_extensions WHERE name = 'vector'")
+            )).scalar() is not None
+            if not available:
+                print("[tenant_migrations] VECTOR_ENABLED, mas a imagem do Postgres não tem pgvector (db/Dockerfile) — busca semântica desligada")
+                return
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public"))
+    except Exception as e:  # noqa: BLE001
+        print(f"[tenant_migrations] extensão vector não criada (pulando): {e}")
+
+
 async def upgrade_all_tenants() -> None:
     """Roda os steps para todos os tenants existentes (chamado no startup)."""
     from app.core.database import AsyncSessionLocal
     from app.modules.super_admin.models import Tenant
     from sqlalchemy import select as _select
+
+    await ensure_vector_extension()
 
     async with AsyncSessionLocal() as db:
         await db.execute(text("SET search_path TO public"))

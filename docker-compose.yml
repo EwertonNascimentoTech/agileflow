@@ -71,7 +71,11 @@ services:
 
   # ── POSTGRES ─────────────────────────────────────────────────────────
   postgres:
-    image: postgres:16-alpine
+    # postgres:16-alpine + pgvector (db/Dockerfile). Mesmo SO/versão/collation: o volume é o mesmo.
+    build:
+      context: ./db
+      dockerfile: Dockerfile
+    image: agileflow-postgres:16-pgvector
     container_name: saas_postgres
     restart: unless-stopped
     environment:
@@ -182,6 +186,25 @@ services:
       minio:
         condition: service_started
 
+  # ── EMBEDDINGS (BAAI/bge-m3 — busca semântica com pgvector) ──────────
+  # Só sobe com o profile "ia" (COMPOSE_PROFILES=ia no .env ou --profile ia) e só é usado com
+  # VECTOR_ENABLED=true. Sem porta publicada: só a API e o Celery o alcançam. Modelo (~3,6 GB em
+  # disco) baixado no 1º uso para o volume; carregado ocupa ~1,5 GB de RAM. O mem_limit segura o
+  # container: faltando memória cai só ele, não o Postgres e a API (no teste local, sem limite,
+  # a VM do Docker ficou sem memória e o banco caiu).
+  embeddings:
+    build:
+      context: ./embeddings
+      dockerfile: Dockerfile
+    container_name: saas_embeddings
+    restart: unless-stopped
+    profiles: ["ia"]
+    mem_limit: 3g
+    environment:
+      EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-BAAI/bge-m3}
+    volumes:
+      - embeddings_models:/models
+
   # ── FLOWER (monitor Celery) ──────────────────────────────────────────
   flower:
     image: mher/flower:2.0
@@ -198,6 +221,7 @@ services:
 
 volumes:
   postgres_data:
+  embeddings_models:
   redis_data:
   rabbitmq_data:
   minio_data:
