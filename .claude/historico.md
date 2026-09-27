@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-26 — nginx do frontend re-resolve `api`/`minio` (502 após recriar o saas_api)
+
+- **Pedido:** login pelo IDigital (e por senha) parou: `/api/*` dava 502 depois que o `saas_api` foi recriado.
+- **Feito:** o nginx resolvia `api` só no boot e ficava no IP antigo do container. Agora usa o DNS do Docker (`resolver 127.0.0.11 valid=10s`) com o host em variável (`$api_upstream`, `$minio_upstream`), então recriar a API ou o MinIO não exige reiniciar o frontend. Feito na `hml` (a `main` fica intacta).
+- **Não mexer:** com variável, `proxy_pass` não reescreve a URI: `/saas-storage/` vai sem URI (repassa o caminho como veio) e `/health` leva a URI completa.
+- **Arquivos:** `frontend/nginx.conf`.
+
 ## 2026-09-25 — Soluções com IA: ajustes no pedido (Base44, integração, classificação dos dados)
 
 - **Pedido:** classificação dos dados quando envolve dados pessoais (Público, Dados Pessoais, Interno, Confidencial); nome e e-mail de quem terá acesso ao Base44; "A solução precisará de integração?" com campo das integrações quando Sim; tirar o campo de ferramenta (é sempre Base44); reforçar que é o caminho institucional e que o protótipo pronto não é a solução disponível.
