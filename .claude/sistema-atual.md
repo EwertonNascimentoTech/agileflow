@@ -133,3 +133,5 @@ Reuni?o de comit? (mensal/trimestral): portf?lio, POs, indicadores, planos EPA, 
 | Rotas SPA | `frontend/src/App.tsx` |
 | Menu | `frontend/src/modules/crm/moduleNavConfig.ts` |
 | Migrations tenant | `backend/app/core/tenant_migrations.py` |
+
+Design system compartilhado: `frontend/src/components/ds` (visual do Portal do Cliente; usado pelo Portal e por todos os módulos ativos desde 2026-09-27).

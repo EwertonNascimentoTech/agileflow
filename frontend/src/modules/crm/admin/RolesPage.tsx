@@ -2,19 +2,18 @@ import { useEffect, useMemo, useState } from "react"
 import { useForm, type Resolver } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { ShieldCheck, Plus, Pencil, Trash2, Loader2, Users as UsersIcon, Check } from "lucide-react"
+import { ShieldCheck, Plus, Pencil, Trash2, Loader2, Users as UsersIcon, Check, Info, KeyRound } from "lucide-react"
 import { companyApi } from "@/api/crm"
 import type { Role, ModulePermission } from "@/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Badge } from "@/components/ui/badge"
-import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { EmptyState } from "@/components/EmptyState"
+import { KpiCount, KpiRow, Notice, Pill, SectionCard, TABLE } from "@/components/ds"
 
 const schema = z.object({
   name: z.string().min(2, "Mínimo 2 caracteres").max(100),
@@ -127,89 +126,122 @@ export default function RolesPage() {
     }
   }
 
+  // Indicadores do topo (só leitura).
+  const usersInRoles = roles.reduce((acc, r) => acc + r.user_count, 0)
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Funções</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {loading ? "Carregando…" : `${roles.length} função${roles.length !== 1 ? "es" : ""} cadastrada${roles.length !== 1 ? "s" : ""}`}
-          </p>
-        </div>
-        <Button onClick={openCreate} className="gap-1.5" disabled={permissions.length === 0}>
-          <Plus size={16} />
-          Nova Função
-        </Button>
-      </div>
-
-      <Alert>
-        <AlertDescription className="text-xs">
-          Funções definem o que cada usuário pode fazer dentro dos módulos. <strong>Admins</strong> têm acesso total e dispensam função.
-        </AlertDescription>
-      </Alert>
-
+    <div className="space-y-5">
       {loading ? (
-        <div className="space-y-3">
-          {[...Array(2)].map((_, i) => <Skeleton key={i} className="h-24 w-full rounded-lg" />)}
+        <div className="grid gap-3 sm:grid-cols-3">
+          {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-[74px] rounded-xl" />)}
         </div>
-      ) : roles.length === 0 ? (
-        <EmptyState
-          icon={ShieldCheck}
-          title="Nenhuma função criada"
-          description="Crie funções como Atendente, Gerente etc. e atribua permissões granulares por módulo."
-          action={{ label: "Nova Função", onClick: openCreate }}
-        />
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {roles.map((role) => (
-            <Card key={role.id}>
-              <CardContent className="p-4 space-y-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="font-semibold text-sm truncate">{role.name}</p>
-                      {role.is_system && (
-                        <Badge variant="outline" className="text-[10px] h-4 px-1.5">sistema</Badge>
-                      )}
-                    </div>
-                    {role.description && (
-                      <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{role.description}</p>
-                    )}
-                  </div>
-                  <div className="flex gap-1 shrink-0">
-                    <Button
-                      size="icon" variant="ghost" className="h-7 w-7"
-                      onClick={() => openEdit(role)}
-                      disabled={role.is_system}
-                    >
-                      <Pencil size={13} />
-                    </Button>
-                    <Button
-                      size="icon" variant="ghost"
-                      className="h-7 w-7 text-destructive hover:text-destructive"
-                      onClick={() => handleDelete(role)}
-                      disabled={role.is_system || deletingId === role.id}
-                    >
-                      {deletingId === role.id
-                        ? <Loader2 size={13} className="animate-spin" />
-                        : <Trash2 size={13} />}
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                  <span className="flex items-center gap-1">
-                    <UsersIcon size={11} /> {role.user_count} usuário{role.user_count !== 1 ? "s" : ""}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <ShieldCheck size={11} /> {role.permissions.length} permissão{role.permissions.length !== 1 ? "ões" : ""}
-                  </span>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        <KpiRow className="sm:grid-cols-3">
+          <KpiCount icon={ShieldCheck} value={roles.length} label="Funções cadastradas" />
+          <KpiCount icon={UsersIcon} value={usersInRoles} label="Usuários nessas funções" tone="emerald" />
+          <KpiCount icon={KeyRound} value={permissions.length} label="Permissões disponíveis" tone="violet" />
+        </KpiRow>
       )}
+
+      <Notice tone="blue" icon={Info}>
+        <span>
+          Funções definem o que cada usuário pode fazer dentro dos módulos. <strong>Admins</strong> têm acesso total e dispensam função.
+        </span>
+      </Notice>
+
+      <SectionCard
+        title="Funções"
+        subtitle={loading ? "Carregando…" : `${roles.length} função${roles.length !== 1 ? "es" : ""} cadastrada${roles.length !== 1 ? "s" : ""}`}
+        icon={ShieldCheck}
+        flush
+        right={
+          <Button onClick={openCreate} className="h-10 gap-1.5" disabled={permissions.length === 0}>
+            <Plus size={16} />
+            Nova Função
+          </Button>
+        }
+      >
+        {loading ? (
+          <div className="space-y-2 p-4">
+            {[...Array(2)].map((_, i) => <Skeleton key={i} className="h-12 w-full rounded-lg" />)}
+          </div>
+        ) : roles.length === 0 ? (
+          <EmptyState
+            icon={ShieldCheck}
+            title="Nenhuma função criada"
+            description="Crie funções como Atendente, Gerente etc. e atribua permissões granulares por módulo."
+            action={{ label: "Nova Função", onClick: openCreate }}
+            compact
+          />
+        ) : (
+          <div className={TABLE.wrap}>
+            <table className={`${TABLE.table} min-w-[640px]`}>
+              <thead className={TABLE.thead}>
+                <tr>
+                  <th className={TABLE.thFirst}>Função</th>
+                  <th className={`${TABLE.th} text-right`}>Usuários</th>
+                  <th className={`${TABLE.th} text-right`}>Permissões</th>
+                  <th className={`${TABLE.th} w-24`}><span className="sr-only">Ações</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {roles.map((role) => (
+                  <tr key={role.id} className={TABLE.tr}>
+                    <td className={TABLE.tdFirst}>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold truncate">{role.name}</p>
+                          {role.is_system && <Pill tone="slate">sistema</Pill>}
+                        </div>
+                        {role.description && (
+                          <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{role.description}</p>
+                        )}
+                      </div>
+                    </td>
+                    <td className={`${TABLE.td} text-right tabular-nums whitespace-nowrap`}>
+                      <span className="inline-flex items-center gap-1.5">
+                        <UsersIcon size={14} className="text-muted-foreground" />
+                        {role.user_count} usuário{role.user_count !== 1 ? "s" : ""}
+                      </span>
+                    </td>
+                    <td className={`${TABLE.td} text-right tabular-nums whitespace-nowrap`}>
+                      <span className="inline-flex items-center gap-1.5">
+                        <ShieldCheck size={14} className="text-muted-foreground" />
+                        {role.permissions.length} permissão{role.permissions.length !== 1 ? "ões" : ""}
+                      </span>
+                    </td>
+                    <td className={TABLE.td}>
+                      <div className="flex justify-end gap-0.5">
+                        <Button
+                          size="icon" variant="ghost" className="h-8 w-8"
+                          title="Editar função"
+                          aria-label={`Editar ${role.name}`}
+                          onClick={() => openEdit(role)}
+                          disabled={role.is_system}
+                        >
+                          <Pencil size={14} />
+                        </Button>
+                        <Button
+                          size="icon" variant="ghost"
+                          className="h-8 w-8 text-destructive hover:text-destructive"
+                          title="Excluir função"
+                          aria-label={`Excluir ${role.name}`}
+                          onClick={() => handleDelete(role)}
+                          disabled={role.is_system || deletingId === role.id}
+                        >
+                          {deletingId === role.id
+                            ? <Loader2 size={14} className="animate-spin" />
+                            : <Trash2 size={14} />}
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SectionCard>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">

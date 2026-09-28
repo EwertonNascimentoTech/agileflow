@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { ArrowLeft, Check, ChevronDown, ChevronUp, Eye, EyeOff, FileText, GripVertical, Loader2, Pencil, Plus, Trash2, X } from "lucide-react"
+import { ArrowLeft, Check, ChevronDown, ChevronUp, Eye, EyeOff, FileText, GripVertical, Layers, ListChecks, Loader2, Pencil, Plus, Trash2, X } from "lucide-react"
 import {
   DndContext,
   PointerSensor,
@@ -19,9 +19,8 @@ import {
   type ProjectDemandFormSection,
   type ProjectDemandType,
 } from "@/api/projetos"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, PageHeader, Pill, SectionCard } from "@/components/ds"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { EmptyState } from "@/components/EmptyState"
 import { Input } from "@/components/ui/input"
@@ -166,8 +165,8 @@ function FieldCard({
     <div
       ref={setRef}
       style={style}
-      className={`flex-1 min-w-0 rounded-md border p-2.5 space-y-2 transition bg-card ${
-        isOver && !isDragging ? "border-l-4 border-l-primary border-primary/40 ring-1 ring-primary/30" : "hover:shadow-sm"
+      className={`flex-1 min-w-0 rounded-xl border p-3 space-y-2 transition bg-card ${
+        isOver && !isDragging ? "border-l-4 border-l-primary border-primary/40 ring-1 ring-primary/30" : "hover:bg-muted/40 hover:shadow-sm"
       }`}
     >
       <div className="flex items-start gap-2 min-w-0">
@@ -182,13 +181,13 @@ function FieldCard({
         </button>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 flex-wrap">
-            <p className="text-sm font-medium truncate">{field.label}</p>
-            <Badge variant="outline" className="text-[10px] shrink-0">{fmeta.label}</Badge>
-            {field.is_required && <Badge variant="secondary" className="text-[10px] shrink-0">obrig.</Badge>}
-            {!field.is_active && <Badge variant="secondary" className="text-[10px] shrink-0">inativo</Badge>}
+            <p className="text-sm font-semibold truncate">{field.label}</p>
+            <Pill tone="blue" className="shrink-0">{fmeta.label}</Pill>
+            {field.is_required && <Pill tone="amber" className="shrink-0">obrig.</Pill>}
+            {!field.is_active && <Pill tone="slate" className="shrink-0">inativo</Pill>}
           </div>
-          <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
-            <span className="uppercase tracking-wide">{field.field_key}</span>
+          <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+            {field.field_key}
           </p>
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
@@ -219,11 +218,11 @@ function FieldCard({
       {fmeta.hasOptions && (
         <div className="flex flex-wrap gap-1 pl-5 min-w-0">
           {options.length === 0 ? (
-            <span className="text-[11px] text-muted-foreground italic">sem opções</span>
+            <span className="text-xs text-muted-foreground italic">sem opções</span>
           ) : options.slice(0, 3).map((opt) => (
             <span
               key={opt.value}
-              className="inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px]"
+              className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs"
               style={opt.color ? { borderColor: opt.color, color: opt.color } : undefined}
             >
               {opt.color && (
@@ -233,7 +232,7 @@ function FieldCard({
             </span>
           ))}
           {options.length > 3 && (
-            <span className="text-[10px] text-muted-foreground">+{options.length - 3}</span>
+            <span className="text-xs text-muted-foreground">+{options.length - 3}</span>
           )}
         </div>
       )}
@@ -246,7 +245,7 @@ function RowGapDropZone({ id, dragging }: { id: string; dragging: boolean }) {
   return (
     <div
       ref={setNodeRef}
-      className={`transition-all rounded ${
+      className={`transition-all rounded-lg ${
         dragging
           ? isOver
             ? "h-8 bg-primary/15 border-2 border-dashed border-primary"
@@ -571,15 +570,17 @@ export default function ProjectDemandTypeFormEditorPage() {
     }
   }
 
-  if (loading) return <Skeleton className="h-32 rounded-lg" />
+  if (loading) return <Skeleton className="h-32 rounded-2xl" />
 
   if (!demandTypeId || !selectedType) {
     return (
-      <EmptyState
-        icon={FileText}
-        title="Tipo de demanda não encontrado"
-        description="Volte para a lista e selecione um tipo válido."
-      />
+      <Card>
+        <EmptyState
+          icon={FileText}
+          title="Tipo de demanda não encontrado"
+          description="Volte para a lista e selecione um tipo válido."
+        />
+      </Card>
     )
   }
 
@@ -587,36 +588,44 @@ export default function ProjectDemandTypeFormEditorPage() {
   const showOptionsEditor = !!meta.hasOptions
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <Button variant="ghost" size="icon" onClick={() => navigate("/app/modules/projetos/config/demand-types")}>
-          <ArrowLeft size={16} />
-        </Button>
-        <div className="flex-1">
-          <h2 className="text-lg font-bold">Formulário · {selectedType.name}</h2>
-          <p className="text-sm text-muted-foreground">Organize as sessões e os campos do tipo de demanda.</p>
-        </div>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        crumbs={[{ label: "Configurações", to: "/app/modules/projetos/config" }, { label: "Tipos de Demanda", to: "/app/modules/projetos/config/demand-types" }, { label: "Formulário" }]}
+        icon={FileText}
+        color="#2563EB"
+        title={`Formulário · ${selectedType.name}`}
+        description="Organize as sessões e os campos do tipo de demanda."
+        actions={
+          <Button variant="outline" className="h-10 gap-1.5" onClick={() => navigate("/app/modules/projetos/config/demand-types")}>
+            <ArrowLeft size={16} />
+            Voltar aos Tipos de Demanda
+          </Button>
+        }
+      />
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-1">
-          <CardHeader>
-            <CardTitle className="text-base">Sessões</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
+      <div className="grid items-start gap-4 lg:grid-cols-3">
+        <SectionCard
+          className="lg:col-span-1"
+          title="Sessões"
+          subtitle="Clique numa sessão para ver os campos."
+          icon={Layers}
+        >
+          <div className="space-y-3">
             <div className="flex gap-2">
               <Input
+                className="h-10"
                 placeholder="Nova sessão"
+                aria-label="Título da nova sessão"
                 value={newSectionTitle}
                 onChange={(e) => setNewSectionTitle(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") void handleCreateSection() }}
               />
-              <Button type="button" onClick={handleCreateSection} disabled={!newSectionTitle.trim()}>
-                <Plus size={14} />
+              <Button type="button" className="h-10 w-10 shrink-0 p-0" title="Adicionar sessão" onClick={handleCreateSection} disabled={!newSectionTitle.trim()}>
+                <Plus size={16} />
               </Button>
             </div>
             {sections.length === 0 ? (
-              <p className="text-xs text-muted-foreground">Nenhuma sessão criada ainda.</p>
+              <p className="text-sm text-muted-foreground">Nenhuma sessão criada ainda.</p>
             ) : (
               <div className="space-y-1.5">
                 {sections.map((section, index) => {
@@ -624,7 +633,7 @@ export default function ProjectDemandTypeFormEditorPage() {
                   const isEditing = editingSectionId === section.id
                   if (isEditing) {
                     return (
-                      <div key={section.id} className="rounded-md border border-primary/40 bg-primary/5">
+                      <div key={section.id} className="rounded-xl border border-primary/40 bg-primary/5">
                         <div className="flex items-center gap-1 p-1.5">
                           <Input
                             autoFocus
@@ -634,13 +643,14 @@ export default function ProjectDemandTypeFormEditorPage() {
                               if (e.key === "Enter") { e.preventDefault(); void saveEditSection(section.id) }
                               if (e.key === "Escape") { e.preventDefault(); cancelEditSection() }
                             }}
-                            className="h-8"
+                            className="h-10"
+                            aria-label="Título da sessão"
                           />
                           <Button
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8 shrink-0 text-primary"
+                            className="h-10 w-10 shrink-0 text-primary"
                             onClick={() => void saveEditSection(section.id)}
                             disabled={!sectionDraftTitle.trim()}
                             title="Salvar"
@@ -651,7 +661,7 @@ export default function ProjectDemandTypeFormEditorPage() {
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8 shrink-0"
+                            className="h-10 w-10 shrink-0"
                             onClick={cancelEditSection}
                             title="Cancelar"
                           >
@@ -673,8 +683,9 @@ export default function ProjectDemandTypeFormEditorPage() {
                           setSelectedSectionId(section.id)
                         }
                       }}
-                      className={`group cursor-pointer rounded-md border transition ${
-                        isSelected ? "border-primary/40 bg-primary/5" : "hover:bg-muted/40"
+                      aria-current={isSelected ? "true" : undefined}
+                      className={`group cursor-pointer rounded-xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                        isSelected ? "border-primary/40 bg-primary/5 font-medium" : "hover:bg-muted/40"
                       }`}
                     >
                       <div className="flex items-center gap-1 p-2">
@@ -731,29 +742,27 @@ export default function ProjectDemandTypeFormEditorPage() {
                 })}
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </SectionCard>
 
-        <Card className="lg:col-span-2">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0">
-            <div>
-              <CardTitle className="text-base">
-                Campos {selectedSection && <span className="text-muted-foreground font-normal">· {selectedSection.title}</span>}
-              </CardTitle>
-              <p className="text-xs text-muted-foreground mt-1">
-                {selectedSection
-                  ? "Arraste ou edite cada campo. Para Seleção e Multi-seleção, configure as opções."
-                  : "Selecione uma sessão para gerenciar os campos."}
-              </p>
-            </div>
-            {selectedSection && (
-              <Button type="button" size="sm" className="gap-1.5" onClick={openCreateField}>
-                <Plus size={14} />
-                Novo Campo
-              </Button>
-            )}
-          </CardHeader>
-          <CardContent>
+        <SectionCard
+          className="lg:col-span-2"
+          title={
+            <span>
+              Campos {selectedSection && <span className="text-muted-foreground font-normal">· {selectedSection.title}</span>}
+            </span>
+          }
+          subtitle={selectedSection
+            ? "Arraste ou edite cada campo. Para Seleção e Multi-seleção, configure as opções."
+            : "Selecione uma sessão para gerenciar os campos."}
+          icon={ListChecks}
+          right={selectedSection ? (
+            <Button type="button" className="h-10 gap-1.5" onClick={openCreateField}>
+              <Plus size={16} />
+              Novo Campo
+            </Button>
+          ) : undefined}
+        >
             {!selectedSection ? (
               <p className="text-sm text-muted-foreground">Selecione uma sessão à esquerda.</p>
             ) : fields.length === 0 ? (
@@ -795,14 +804,13 @@ export default function ProjectDemandTypeFormEditorPage() {
                   })()}
                 </div>
                 {activeDragId && (
-                  <p className="text-[11px] text-muted-foreground mt-2 pl-1">
+                  <p className="text-xs text-muted-foreground mt-2 pl-1">
                     Solte sobre um campo para entrar na mesma linha, ou em uma faixa entre linhas para criar uma nova.
                   </p>
                 )}
               </DndContext>
             )}
-          </CardContent>
-        </Card>
+        </SectionCard>
       </div>
 
       <Dialog open={openField} onOpenChange={setOpenField}>
@@ -831,7 +839,7 @@ export default function ProjectDemandTypeFormEditorPage() {
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="text-[11px] text-muted-foreground">{meta.description}</p>
+                <p className="text-xs text-muted-foreground">{meta.description}</p>
               </div>
             </div>
 
@@ -843,7 +851,7 @@ export default function ProjectDemandTypeFormEditorPage() {
                   onChange={(e) => patchForm({ field_key: e.target.value })}
                   placeholder={form.label ? slugify(form.label) : "auto a partir do rótulo"}
                 />
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   Identificador estável. Deixe vazio para gerar automaticamente.
                 </p>
               </div>
@@ -869,7 +877,7 @@ export default function ProjectDemandTypeFormEditorPage() {
             </div>
 
             {showOptionsEditor && (
-              <div className="space-y-2 rounded-md border p-3">
+              <div className="space-y-2 rounded-xl border bg-muted/30 p-3">
                 <div className="flex items-center justify-between">
                   <Label className="text-sm">Opções</Label>
                   <Button type="button" size="sm" variant="outline" onClick={addOption} className="gap-1.5">

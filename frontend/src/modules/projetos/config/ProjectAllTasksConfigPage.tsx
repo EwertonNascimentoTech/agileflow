@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react"
-import { Loader2, Pencil, Search, Trash2 } from "lucide-react"
+import { ListChecks, Loader2, Pencil, Search, Trash2 } from "lucide-react"
 
 import { projetosApi, type Project, type ProjectTaskWithContext } from "@/api/projetos"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
+import { EmptyState } from "@/components/EmptyState"
+import { Card, FilterSelect, PageHeader, Pill, ProgressBar, TABLE } from "@/components/ds"
 import {
   Dialog,
   DialogContent,
@@ -14,7 +14,6 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 
@@ -123,98 +122,126 @@ export default function ProjectAllTasksConfigPage() {
     }
   }
 
+  const header = (
+    <PageHeader
+      icon={ListChecks}
+      color="#2563EB"
+      crumbs={[{ label: "Configurações", to: "/app/modules/projetos/config" }, { label: "Demandas / Cards" }]}
+      title="Demandas / Cards"
+      description="Todas as demandas criadas nos quadros. Edite ou exclua em um só lugar."
+    />
+  )
+
   if (loading) {
     return (
-      <div className="space-y-3">
-        <Skeleton className="h-9 w-64 rounded-md" />
-        <Skeleton className="h-40 rounded-lg" />
+      <div className="space-y-5">
+        {header}
+        <Skeleton className="h-24 rounded-2xl" />
+        <Skeleton className="h-80 rounded-2xl" />
       </div>
     )
   }
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold">Demandas / Cards</h1>
-        <p className="text-sm text-muted-foreground">
-          Todas as demandas criadas nos quadros. Edite ou exclua em um só lugar.
-        </p>
-      </div>
+    <div className="space-y-5">
+      {header}
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <div className="relative flex-1">
-          <Search size={15} className="absolute left-2.5 top-2.5 text-muted-foreground" />
-          <Input
-            className="pl-8"
-            placeholder="Buscar por título…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+      <Card className="p-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="block min-w-[240px] flex-1 space-y-1">
+            <span className="text-xs text-muted-foreground">Buscar</span>
+            <span className="relative block">
+              <Search size={15} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="search"
+                className="h-10 w-full rounded-md border bg-background pl-8 pr-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                placeholder="Buscar por título…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </span>
+          </label>
+          <FilterSelect
+            label="Processo"
+            value={projectFilter}
+            onChange={setProjectFilter}
+            options={[
+              { value: ALL_PROJECTS, label: "Todos os processos" },
+              ...projects.map((project) => ({ value: project.id, label: project.name })),
+            ]}
           />
+          <span className="ml-auto pb-2.5 text-sm text-muted-foreground">
+            <strong className="font-semibold text-foreground">{filtered.length}</strong> demanda{filtered.length !== 1 ? "s" : ""}
+          </span>
         </div>
-        <div className="sm:w-64">
-          <Select value={projectFilter} onValueChange={setProjectFilter}>
-            <SelectTrigger>
-              <SelectValue placeholder="Todos os processos" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_PROJECTS}>Todos os processos</SelectItem>
-              {projects.map((project) => (
-                <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+      </Card>
 
-      <p className="text-xs text-muted-foreground">
-        {filtered.length} demanda{filtered.length !== 1 ? "s" : ""}
-      </p>
-
-      {filtered.length === 0 ? (
-        <Card>
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            Nenhuma demanda encontrada.
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-2">
-          {filtered.map((task) => (
-            <Card key={task.id}>
-              <CardContent className="flex items-center gap-3 p-3">
-                <span
-                  className="h-2.5 w-2.5 shrink-0 rounded-full"
-                  style={{ backgroundColor: task.status?.color || "#6B7280" }}
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{task.title}</p>
-                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                    <Badge variant="outline">{task.project?.name ?? "—"}</Badge>
-                    <Badge variant="secondary">{task.status?.name ?? "—"}</Badge>
-                    {task.demand_type && <span>· {task.demand_type.name}</span>}
-                    <span>· Prazo {formatDate(task.due_date)}</span>
-                    <span>· {task.percent_complete}%</span>
-                  </div>
-                </div>
-                <div className="flex shrink-0 gap-1">
-                  <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => beginEdit(task)}>
-                    <Pencil size={14} />
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-destructive hover:text-destructive"
-                    onClick={() => void handleDelete(task)}
-                    disabled={deletingId === task.id}
-                  >
-                    {deletingId === task.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+      <Card className="overflow-hidden">
+        {filtered.length === 0 ? (
+          <EmptyState icon={ListChecks} title="Nenhuma demanda encontrada." compact />
+        ) : (
+          <div className={TABLE.wrap}>
+            <table className={`${TABLE.table} min-w-[900px]`}>
+              <thead className={TABLE.thead}>
+                <tr>
+                  <th className={TABLE.thFirst}>Demanda</th>
+                  <th className={TABLE.th}>Processo</th>
+                  <th className={TABLE.th}>Etapa</th>
+                  <th className={TABLE.th}>Tipo</th>
+                  <th className={`${TABLE.th} whitespace-nowrap`}>Prazo</th>
+                  <th className={`${TABLE.th} w-40`}>Progresso</th>
+                  <th className={`${TABLE.th} w-24`}><span className="sr-only">Ações</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((task) => (
+                  <tr key={task.id} className={TABLE.tr}>
+                    <td className={TABLE.tdFirst}>
+                      <p className="max-w-[360px] truncate font-semibold" title={task.title}>{task.title}</p>
+                    </td>
+                    <td className={TABLE.td}>
+                      <Pill tone="slate">{task.project?.name ?? "—"}</Pill>
+                    </td>
+                    <td className={TABLE.td}>
+                      <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: task.status?.color || "#6B7280" }}
+                          aria-hidden
+                        />
+                        {task.status?.name ?? "—"}
+                      </span>
+                    </td>
+                    <td className={`${TABLE.td} text-muted-foreground`}>{task.demand_type?.name ?? "—"}</td>
+                    <td className={`${TABLE.td} whitespace-nowrap tabular-nums text-muted-foreground`}>{formatDate(task.due_date)}</td>
+                    <td className={TABLE.td}>
+                      <ProgressBar value={task.percent_complete} />
+                    </td>
+                    <td className={TABLE.td}>
+                      <div className="flex justify-end gap-1">
+                        <Button type="button" variant="ghost" size="icon" className="h-8 w-8" title="Editar demanda" onClick={() => beginEdit(task)}>
+                          <Pencil size={14} />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-destructive hover:text-destructive"
+                          title="Excluir demanda"
+                          onClick={() => void handleDelete(task)}
+                          disabled={deletingId === task.id}
+                        >
+                          {deletingId === task.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
 
       <Dialog open={!!editing} onOpenChange={(open) => { if (!open) closeEdit() }}>
         <DialogContent className="sm:max-w-md">

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { Bot, GitBranch, Loader2, Pencil, Plus, ScrollText, Trash2 } from "lucide-react"
+import { Bot, BotOff, GitBranch, Link2, Loader2, Pencil, Plus, ScrollText, Trash2, Workflow } from "lucide-react"
 import { Link } from "react-router-dom"
 
 import {
@@ -11,9 +11,8 @@ import {
   type ProjectStageAgentKind,
   type ProjectStatus,
 } from "@/api/projetos"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
+import { Card, KpiCount, KpiRow, PageHeader, Pill, SectionCard } from "@/components/ds"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { EmptyState } from "@/components/EmptyState"
 import { Input } from "@/components/ui/input"
@@ -268,85 +267,106 @@ export default function ProjectAgentsConfigPage() {
     }
   }
 
-  if (loading && projects.length === 0) {
-    return <div className="p-1"><Skeleton className="h-96 rounded-lg" /></div>
-  }
-
-  const orderedFunnels = [...funnels].sort((a, b) => a.order - b.order)
-
-  return (
-    <div className="w-full space-y-4 p-1">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-xl font-bold">Agentes por etapa</h1>
-          <p className="text-sm text-muted-foreground">
-            Vincule um agente do Azure AI Foundry a uma raia do kanban. Quando um card entrar na
-            etapa, o sistema chama o agente (Azure) com o prompt configurado.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <Button type="button" variant="outline" size="sm" asChild>
+  const header = (
+    <PageHeader
+      icon={Bot}
+      color="#2563EB"
+      crumbs={[{ label: "Configurações", to: "/app/modules/projetos/config" }, { label: "Agentes" }]}
+      title="Agentes por etapa"
+      description={
+        <>
+          Vincule um agente do Azure AI Foundry a uma raia do kanban. Quando um card entrar na
+          etapa, o sistema chama o agente (Azure) com o prompt configurado.
+        </>
+      }
+      actions={
+        <>
+          <Button type="button" variant="outline" className="h-10 gap-1.5" asChild>
             <Link to="/app/modules/projetos/config/agentes/logs">
-              <ScrollText size={14} className="mr-1.5" />
+              <ScrollText size={16} />
               Ver logs
             </Link>
           </Button>
           {projects.length > 1 && (
           <Select value={projectId} onValueChange={setProjectId}>
-            <SelectTrigger className="w-48"><SelectValue placeholder="Projeto" /></SelectTrigger>
+            <SelectTrigger className="h-10 w-48 bg-background"><SelectValue placeholder="Projeto" /></SelectTrigger>
             <SelectContent>
               {projects.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
             </SelectContent>
           </Select>
           )}
-        </div>
+        </>
+      }
+    />
+  )
+
+  if (loading && projects.length === 0) {
+    return (
+      <div className="w-full space-y-5">
+        {header}
+        <Skeleton className="h-96 rounded-2xl" />
       </div>
+    )
+  }
+
+  const orderedFunnels = [...funnels].sort((a, b) => a.order - b.order)
+  // Resumo do topo (só leitura): etapas do projeto e agentes vinculados a elas.
+  const stagesWithAgent = statuses.filter((s) => agentsByStatus.has(s.id)).length
+  const activeAgents = agents.filter((a) => a.is_active).length
+
+  return (
+    <div className="w-full space-y-5">
+      {header}
 
       {loading ? (
-        <Skeleton className="h-64 rounded-lg" />
+        <Skeleton className="h-64 rounded-2xl" />
       ) : orderedFunnels.length === 0 ? (
-        <EmptyState
-          icon={GitBranch}
-          title="Nenhum fluxo configurado"
-          description="Crie fluxos e etapas em Configurações → Funis / Etapas Kanban."
-        />
+        <Card>
+          <EmptyState
+            icon={GitBranch}
+            title="Nenhum fluxo configurado"
+            description="Crie fluxos e etapas em Configurações → Funis / Etapas Kanban."
+          />
+        </Card>
       ) : (
         <div className="space-y-4">
+          <KpiRow className="sm:grid-cols-2 xl:grid-cols-4">
+            <KpiCount icon={Workflow} value={statuses.length} label="Etapas" tone="slate" />
+            <KpiCount icon={Link2} value={stagesWithAgent} label="Etapas com agente" />
+            <KpiCount icon={Bot} value={activeAgents} label="Agentes ativos" tone="emerald" />
+            <KpiCount icon={BotOff} value={agents.length - activeAgents} label="Agentes inativos" tone={agents.length - activeAgents > 0 ? "amber" : "slate"} />
+          </KpiRow>
+
           {orderedFunnels.map((f) => {
             const sts = statusesByFunnel.get(f.id) ?? []
             return (
-              <Card key={f.id}>
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <GitBranch size={16} className="text-muted-foreground" />
-                    <h2 className="font-semibold">{f.name}</h2>
-                  </div>
+              <SectionCard key={f.id} title={f.name} icon={GitBranch} flush>
                   {sts.length === 0 ? (
-                    <p className="text-sm text-muted-foreground italic">Nenhuma etapa neste fluxo.</p>
+                    <p className="px-5 py-4 text-sm italic text-muted-foreground">Nenhuma etapa neste fluxo.</p>
                   ) : (
-                    <div className="space-y-2">
+                    <ul className="divide-y">
                       {sts.map((s) => {
                         const agent = agentsByStatus.get(s.id)
                         return (
-                          <div
+                          <li
                             key={s.id}
-                            className="flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between"
+                            className="flex flex-col gap-2 px-5 py-3 transition-colors hover:bg-muted/40 sm:flex-row sm:items-center sm:justify-between"
                           >
                             <div className="min-w-0">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="font-medium">{s.name}</span>
                                 {agent ? (
                                   <>
-                                    <Badge variant="info" className="gap-1">
+                                    <Pill tone="blue">
                                       <Bot size={12} /> {agent.name}
-                                    </Badge>
-                                    <Badge variant="secondary" className="text-[10px]">
+                                    </Pill>
+                                    <Pill tone="violet">
                                       {AGENT_KIND_LABELS[agent.agent_kind ?? "ask"]}
-                                    </Badge>
-                                    {!agent.is_active && <Badge variant="secondary">inativo</Badge>}
+                                    </Pill>
+                                    {!agent.is_active && <Pill tone="slate">inativo</Pill>}
                                   </>
                                 ) : (
-                                  <span className="text-xs text-muted-foreground">Sem agente</span>
+                                  <span className="text-sm text-muted-foreground">Sem agente</span>
                                 )}
                               </div>
                               {agent && (
@@ -365,7 +385,8 @@ export default function ProjectAgentsConfigPage() {
                                     type="button"
                                     variant="ghost"
                                     size="icon"
-                                    className="h-8 w-8"
+                                    className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                    title="Remover agente"
                                     onClick={async () => {
                                       if (!confirm(`Remover o agente "${agent.name}" da etapa "${s.name}"?`)) return
                                       await projetosApi.deleteStageAgent(agent.id)
@@ -382,13 +403,12 @@ export default function ProjectAgentsConfigPage() {
                                 </Button>
                               )}
                             </div>
-                          </div>
+                          </li>
                         )
                       })}
-                    </div>
+                    </ul>
                   )}
-                </CardContent>
-              </Card>
+              </SectionCard>
             )
           })}
         </div>
@@ -430,12 +450,12 @@ export default function ProjectAgentsConfigPage() {
                 </SelectContent>
               </Select>
               {form.agent_kind === "classify_and_advance" && (
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   Lê todos os dados do card, classifica na matriz e move o card para a raia escolhida abaixo.
                 </p>
               )}
               {form.agent_kind === "review_and_route" && (
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   Avalia dados preenchidos, lacunas e duplicidade. Aprovado vai para Classificação; reprovado vai para Ajustes com comentário.
                 </p>
               )}
@@ -458,7 +478,7 @@ export default function ProjectAgentsConfigPage() {
                       .map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   {form.agent_kind === "review_and_route"
                     ? "Destino quando a triagem aprovar. No Prospectar, escolha Classificação (não use automático: a próxima raia é Ajustes)."
                     : "Para onde o card vai depois que o agente classifica. Padrão: a próxima etapa do funil."}
@@ -480,7 +500,7 @@ export default function ProjectAgentsConfigPage() {
                       .map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   Destino quando faltar informação ou houver duplicidade (ex.: Ajustes). Sempre adiciona um comentário com o que corrigir.
                 </p>
               </div>
@@ -491,7 +511,7 @@ export default function ProjectAgentsConfigPage() {
             </div>
             <div className="space-y-1">
               <Label>ID do agente (Azure AI Foundry)</Label>
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 ID do agente no Azure AI Foundry (ex.: asst_...). O endpoint e as credenciais
                 Entra ID (service principal) são globais e ficam no .env — <code>AZURE_AI_ENDPOINT</code>,
                 <code>AZURE_AI_TENANT_ID</code>, <code>AZURE_AI_CLIENT_ID</code>, <code>AZURE_AI_CLIENT_SECRET</code>.
@@ -507,7 +527,7 @@ export default function ProjectAgentsConfigPage() {
                 onChange={(e) => setForm((f) => ({ ...f, prompt_template: e.target.value }))}
                 className="font-mono text-xs"
               />
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 {form.agent_kind === "classify_and_advance"
                   ? "Placeholders: {{task_context}}, {{priority_rubric}}, {{title}}, {{description}}, {{task_id}}"
                   : form.agent_kind === "review_and_route"

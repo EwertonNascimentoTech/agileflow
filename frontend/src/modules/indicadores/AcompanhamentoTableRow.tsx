@@ -1,12 +1,17 @@
 import { useEffect, useState } from "react"
 import { Loader2, Lock, LockOpen, Paperclip, Pencil, RefreshCw } from "lucide-react"
 
-import { indicadoresApi, type Acompanhamento } from "@/api/indicadores"
-import { Badge } from "@/components/ui/badge"
+import { indicadoresApi, type Acompanhamento, type AcompStatus } from "@/api/indicadores"
+import { Pill, TABLE, type Tone } from "@/components/ds"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { toast } from "@/lib/toast"
-import { ACOMP_STATUS_COLOR, ACOMP_STATUS_LABEL, FONTE_LABEL } from "@/modules/indicadores/constants"
+import { ACOMP_STATUS_LABEL, FONTE_LABEL } from "@/modules/indicadores/constants"
+
+// Tom do selo de status do período (Pill do design system, com variante escura).
+const ACOMP_TONE: Record<AcompStatus, Tone> = {
+  pendente: "slate", atingido: "emerald", em_atencao: "amber", nao_atingido: "red",
+}
 
 const fmt = (n: number | null | undefined) => (n == null ? "—" : Number(n).toLocaleString("pt-BR"))
 const num = (s: string): number | null => (s.trim() === "" ? null : Number(s))
@@ -114,15 +119,15 @@ export function AcompanhamentoTableRow({
   const inputCls = "h-8 w-full min-w-[5rem] text-right tabular-nums"
 
   return (
-    <tr className={`border-t ${locked ? "bg-muted/40" : ""}`}>
-      <td className="px-3 py-2 font-medium">
-        <span className="inline-flex items-center gap-1.5">
+    <tr className={`${TABLE.tr} ${locked ? "bg-muted/40" : ""}`}>
+      <td className={`${TABLE.tdFirst} whitespace-nowrap font-medium`}>
+        <span className="inline-flex items-center gap-1.5" title={locked ? "Mês bloqueado (competência fechada)" : undefined}>
           {locked && <Lock size={12} className="text-muted-foreground" />}
           {acomp.competencia}
         </span>
       </td>
 
-      <td className="px-3 py-2">
+      <td className={TABLE.td}>
         <div className="relative flex items-center justify-end gap-1">
           <Input
             type="number"
@@ -138,7 +143,7 @@ export function AcompanhamentoTableRow({
         </div>
       </td>
 
-      <td className="px-3 py-2">
+      <td className={TABLE.td}>
         {isPortfolio ? (
           <div className="text-right tabular-nums">{fmt(acomp.realizado)}</div>
         ) : (
@@ -158,27 +163,24 @@ export function AcompanhamentoTableRow({
         )}
       </td>
 
-      <td className="px-3 py-2 text-right tabular-nums">
+      <td className={`${TABLE.td} text-right tabular-nums`}>
         {acomp.percentual_atingimento != null ? `${Number(acomp.percentual_atingimento).toFixed(1)}%` : "—"}
       </td>
-      <td className="px-3 py-2">
-        <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${ACOMP_STATUS_COLOR[acomp.status]}`}>
-          {ACOMP_STATUS_LABEL[acomp.status]}
-        </span>
+      <td className={TABLE.td}>
+        <Pill tone={ACOMP_TONE[acomp.status]} dot>{ACOMP_STATUS_LABEL[acomp.status]}</Pill>
       </td>
-      <td className="px-3 py-2">
-        <Badge variant={isPortfolio ? "secondary" : "outline"} className="text-[10px] font-normal">
-          {FONTE_LABEL[acomp.fonte]}
-        </Badge>
+      <td className={TABLE.td}>
+        <Pill tone={isPortfolio ? "teal" : "slate"}>{FONTE_LABEL[acomp.fonte]}</Pill>
       </td>
-      <td className="px-3 py-2 text-right">
+      <td className={`${TABLE.td} text-right`}>
         <div className="flex items-center justify-end gap-0.5">
           {isPortfolio && (
             <Button
               variant="ghost"
               size="icon"
-              className="text-muted-foreground hover:text-primary"
+              className="h-8 w-8 text-muted-foreground hover:text-primary"
               title="Atualizar do portfólio"
+              aria-label="Atualizar do portfólio"
               onClick={() => void refreshPortfolio()}
               disabled={refreshing || locked}
             >
@@ -188,8 +190,9 @@ export function AcompanhamentoTableRow({
           <Button
             variant="ghost"
             size="icon"
-            className={locked ? "text-amber-600 hover:text-amber-700" : "text-muted-foreground hover:text-primary"}
+            className={`h-8 w-8 ${locked ? "text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300" : "text-muted-foreground hover:text-primary"}`}
             title={locked ? "Desbloquear mês" : "Bloquear mês (fechar competência)"}
+            aria-label={locked ? "Desbloquear mês" : "Bloquear mês (fechar competência)"}
             onClick={() => void toggleLock()}
             disabled={togglingLock}
           >
@@ -198,8 +201,9 @@ export function AcompanhamentoTableRow({
           <Button
             variant="ghost"
             size="icon"
-            className="text-muted-foreground hover:text-primary"
+            className="h-8 w-8 text-muted-foreground hover:text-primary"
             title="Observação e origem"
+            aria-label="Observação e origem"
             onClick={onEditDetails}
           >
             <Pencil size={14} />
@@ -207,8 +211,9 @@ export function AcompanhamentoTableRow({
           <Button
             variant="ghost"
             size="icon"
-            className="text-muted-foreground hover:text-primary"
+            className="h-8 w-8 text-muted-foreground hover:text-primary"
             title="Evidências"
+            aria-label="Evidências"
             onClick={onEditEvidencias}
           >
             <Paperclip size={14} />

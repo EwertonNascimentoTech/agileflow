@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react"
-import { Gauge, Loader2, RotateCcw, Save } from "lucide-react"
+import { AlertTriangle, Gauge, Loader2, RotateCcw, Save, Settings2, SlidersHorizontal } from "lucide-react"
 
 import { produtosApi, type HealthConfigResponse } from "@/api/produtos"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Notice, PageHeader, Pill, SectionCard } from "@/components/ds"
 import { toast } from "@/lib/toast"
 
 export default function ProdutosConfigPage() {
@@ -51,70 +51,115 @@ export default function ProdutosConfigPage() {
     toast.info("Padrões restaurados — clique em Salvar para aplicar.")
   }
 
-  if (loading) return <Skeleton className="h-64 w-full" />
+  const header = (
+    <PageHeader
+      icon={Settings2}
+      color="#7C3AED"
+      title="Configurações"
+      description="Parâmetros do módulo de Produtos."
+    />
+  )
+
+  if (loading) {
+    return (
+      <div className="space-y-5">
+        {header}
+        <Skeleton className="h-80 rounded-2xl" />
+      </div>
+    )
+  }
+
+  // Faixas da régua de classificação (só para visualizar os limiares; 0–100).
+  const clamp = (v: number) => Math.max(0, Math.min(100, v))
+  const aten = clamp(limAten)
+  const saud = clamp(limSaud)
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h2 className="text-lg font-bold">Configurações</h2>
-        <p className="text-sm text-muted-foreground">Parâmetros do módulo de Produtos.</p>
-      </div>
+    <div className="space-y-5">
+      {header}
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-base"><Gauge size={18} /> Índice de Saúde — pesos e limiares</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground">
+      <div className="grid items-start gap-4 xl:grid-cols-[1.5fr_1fr]">
+        <SectionCard
+          title="Índice de Saúde — pesos"
+          subtitle="Peso de cada critério na nota do produto."
+          icon={Gauge}
+          right={cfg && !cfg.is_customizado ? <Pill tone="slate">usando valores padrão</Pill> : undefined}
+          flush
+        >
+          <p className="px-5 py-4 text-sm text-muted-foreground">
             Cada critério tem um peso. A nota de um produto é a soma dos pesos que ele atende ÷ soma dos pesos
             que se aplicam a ele × 100. Critérios que não se aplicam não entram na conta.
           </p>
-
-          {/* Pesos por critério */}
-          <div className="divide-y rounded-md border">
+          <ul className="divide-y border-t">
             {cfg?.checks.map((k) => (
-              <div key={k.code} className="flex items-center gap-3 p-3">
+              <li key={k.code} className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-muted/40">
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium">{k.label}</p>
-                  <p className="text-[11px] text-muted-foreground">{k.aplicabilidade} · padrão {k.default_weight}</p>
+                  <p className="text-xs text-muted-foreground">{k.aplicabilidade} · padrão {k.default_weight}</p>
                 </div>
-                <Input type="number" min={0} max={100} className="h-9 w-20 text-right"
+                <Input type="number" min={0} max={100} className="h-10 w-24 text-right tabular-nums"
+                  aria-label={`Peso de ${k.label}`}
                   value={weights[k.code] ?? 0}
                   onChange={(e) => setWeights((w) => ({ ...w, [k.code]: Math.max(0, Number(e.target.value) || 0) }))} />
-              </div>
+              </li>
             ))}
-            <div className="flex items-center justify-between bg-muted/40 px-3 py-2 text-sm">
-              <span className="font-medium text-muted-foreground">Soma dos pesos (todos os critérios)</span>
-              <span className="font-semibold tabular-nums">{totalPeso}</span>
-            </div>
+          </ul>
+          <div className="flex items-center justify-between gap-3 border-t bg-muted/40 px-5 py-3 text-sm">
+            <span className="font-medium text-muted-foreground">Soma dos pesos (todos os critérios)</span>
+            <span className="text-base font-semibold tabular-nums">{totalPeso}</span>
           </div>
+        </SectionCard>
 
-          {/* Limiares de classificação */}
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1">
-              <Label className="text-xs">Limiar "Saudável" (≥)</Label>
-              <Input type="number" min={1} max={100} className="h-9"
+        <SectionCard
+          title="Limiares de classificação"
+          subtitle="Faixas de score para Saudável, Atenção e Crítico."
+          icon={SlidersHorizontal}
+        >
+          <div className="space-y-5">
+            <div className="space-y-1.5">
+              <Label htmlFor="lim-saudavel" className="text-sm">Limiar "Saudável" (≥)</Label>
+              <Input id="lim-saudavel" type="number" min={1} max={100} className="h-10"
                 value={limSaud} onChange={(e) => setLimSaud(Number(e.target.value) || 0)} />
-              <p className="text-[11px] text-muted-foreground">Score ≥ este valor → <span className="font-medium text-green-600">Saudável</span>.</p>
+              <p className="text-xs text-muted-foreground">
+                Score ≥ este valor → <span className="font-medium text-emerald-600 dark:text-emerald-400">Saudável</span>.
+              </p>
             </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Limiar "Atenção" (≥)</Label>
-              <Input type="number" min={0} max={99} className="h-9"
+            <div className="space-y-1.5">
+              <Label htmlFor="lim-atencao" className="text-sm">Limiar "Atenção" (≥)</Label>
+              <Input id="lim-atencao" type="number" min={0} max={99} className="h-10"
                 value={limAten} onChange={(e) => setLimAten(Number(e.target.value) || 0)} />
-              <p className="text-[11px] text-muted-foreground">Entre os dois → <span className="font-medium text-amber-600">Atenção</span>; abaixo → <span className="font-medium text-red-600">Crítico</span>.</p>
+              <p className="text-xs text-muted-foreground">
+                Entre os dois → <span className="font-medium text-amber-600 dark:text-amber-400">Atenção</span>; abaixo →{" "}
+                <span className="font-medium text-red-600 dark:text-red-400">Crítico</span>.
+              </p>
             </div>
-          </div>
-          {limiarInvalido && <p className="text-xs text-destructive">O limiar de "Atenção" deve ser menor que o de "Saudável".</p>}
 
-          <div className="flex items-center gap-2 pt-1">
-            <Button onClick={() => void save()} disabled={saving || limiarInvalido} className="gap-1.5">
-              {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} Salvar
-            </Button>
-            <Button variant="outline" onClick={restaurarPadrao} className="gap-1.5"><RotateCcw size={15} /> Restaurar padrão</Button>
-            {cfg && !cfg.is_customizado && <span className="text-[11px] text-muted-foreground">usando valores padrão</span>}
+            {limiarInvalido ? (
+              <Notice tone="red" icon={AlertTriangle}>O limiar de "Atenção" deve ser menor que o de "Saudável".</Notice>
+            ) : (
+              <div className="space-y-1.5" aria-hidden>
+                <div className="flex h-2.5 overflow-hidden rounded-full">
+                  <div className="bg-red-500" style={{ width: `${aten}%` }} />
+                  <div className="bg-amber-500" style={{ width: `${saud - aten}%` }} />
+                  <div className="bg-emerald-500" style={{ width: `${100 - saud}%` }} />
+                </div>
+                <div className="flex justify-between text-xs tabular-nums text-muted-foreground">
+                  <span>0</span>
+                  <span>Crítico &lt; {limAten} ≤ Atenção &lt; {limSaud} ≤ Saudável</span>
+                  <span>100</span>
+                </div>
+              </div>
+            )}
           </div>
-        </CardContent>
-      </Card>
+        </SectionCard>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button onClick={() => void save()} disabled={saving || limiarInvalido} className="h-10 gap-1.5">
+          {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} Salvar
+        </Button>
+        <Button variant="outline" onClick={restaurarPadrao} className="h-10 gap-1.5"><RotateCcw size={15} /> Restaurar padrão</Button>
+      </div>
     </div>
   )
 }

@@ -2,6 +2,7 @@ import { FileText } from "lucide-react"
 
 import type { ProjectDemandFormField, ProjectDemandFormSection } from "@/api/projetos"
 import type { User } from "@/types"
+import { Pill } from "@/components/ds"
 import { Label } from "@/components/ui/label"
 import { CollapsibleFormSection } from "@/modules/projetos/CollapsibleFormSection"
 import { FormFieldRenderer, type FieldVisibilityMode } from "@/modules/projetos/FormFieldRenderer"
@@ -48,12 +49,8 @@ export function DemandFormSectionsPanel({
           icon={FileText}
           badges={
             <>
-              {secMode === "visible" && (
-                <span className="text-[10px] uppercase tracking-wide text-muted-foreground">somente leitura</span>
-              )}
-              {secMode === "required" && (
-                <span className="text-[10px] uppercase tracking-wide text-destructive">obrigatória</span>
-              )}
+              {secMode === "visible" && <Pill>Somente leitura</Pill>}
+              {secMode === "required" && <Pill tone="red">Obrigatória</Pill>}
             </>
           }
         >
@@ -70,9 +67,7 @@ export function DemandFormSectionsPanel({
                       {field.label}
                       {isRequired && <span className="ml-0.5 text-destructive">*</span>}
                       {isReadOnly && (
-                        <span className="ml-2 text-[10px] uppercase tracking-wide text-muted-foreground">
-                          só leitura
-                        </span>
+                        <span className="ml-2 text-xs font-normal text-muted-foreground">(só leitura)</span>
                       )}
                     </Label>
                     <div className={fieldError ? "rounded-md ring-2 ring-destructive/60" : ""}>
@@ -85,7 +80,7 @@ export function DemandFormSectionsPanel({
                       />
                     </div>
                     {fieldError && (
-                      <p className="text-[11px] text-destructive">{fieldError}</p>
+                      <p className="text-xs text-destructive">{fieldError}</p>
                     )}
                   </div>
                 )

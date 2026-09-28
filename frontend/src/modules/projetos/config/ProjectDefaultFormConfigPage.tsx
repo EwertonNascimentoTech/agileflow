@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { ArrowLeft, ClipboardList, GripVertical, Loader2 } from "lucide-react"
+import { ArrowLeft, ClipboardList, GripVertical, ListOrdered, Loader2, Save } from "lucide-react"
 
 import { projetosApi, type DefaultFormFieldKey, type ProjectDefaultFormField } from "@/api/projetos"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { PageHeader, SectionCard } from "@/components/ds"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -100,34 +100,29 @@ export default function ProjectDefaultFormConfigPage() {
   }
 
   return (
-    <div className="w-full space-y-4">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={() => navigate("/app/modules/projetos/config")}>
-          <ArrowLeft className="mr-2 h-4 w-4" /> Voltar
-        </Button>
-      </div>
+    <div className="w-full space-y-5">
+      <PageHeader
+        icon={ClipboardList}
+        color="#2563EB"
+        crumbs={[{ label: "Configurações", to: "/app/modules/projetos/config" }, { label: "Formulário padrão" }]}
+        title="Formulário padrão"
+        description="Configure rótulo, tipo, visibilidade e ordem dos campos. Arraste pelo ícone para reordenar — a ordem vale no card, na criação e na coluna Planejamento."
+        actions={
+          <Button variant="outline" className="h-10 gap-1.5" onClick={() => navigate("/app/modules/projetos/config")}>
+            <ArrowLeft size={16} /> Voltar
+          </Button>
+        }
+      />
 
-      <div>
-        <h2 className="text-lg font-bold flex items-center gap-2">
-          <ClipboardList size={20} className="text-primary" />
-          Formulário padrão
-        </h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          Configure rótulo, tipo, visibilidade e ordem dos campos. Arraste pelo ícone para reordenar — a ordem vale no card, na criação e na coluna Planejamento.
-        </p>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Campos do formulário</CardTitle>
-          <CardDescription>
-            Arraste os campos para definir a ordem de exibição. Tipos compatíveis com o dado salvo no card (ex.: responsável = usuário).
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
+      <SectionCard
+        title="Campos do formulário"
+        subtitle="Arraste os campos para definir a ordem de exibição. Tipos compatíveis com o dado salvo no card (ex.: responsável = usuário)."
+        icon={ListOrdered}
+      >
+        <div className="space-y-4">
           {loading ? (
             <div className="space-y-3">
-              {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-20" />)}
+              {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-20 rounded-xl" />)}
             </div>
           ) : (
             sortedFields.map((field, index) => {
@@ -152,7 +147,7 @@ export default function ProjectDefaultFormConfigPage() {
                   }}
                   onDrop={() => handleDropField(field.field_key)}
                   className={[
-                    "space-y-3 rounded-lg border border-border p-4 transition-all",
+                    "space-y-3 rounded-xl border border-border p-4 transition-all",
                     isDragging ? "opacity-50" : "",
                     isDropTarget ? "ring-2 ring-primary ring-offset-1" : "",
                   ].filter(Boolean).join(" ")}
@@ -170,9 +165,9 @@ export default function ProjectDefaultFormConfigPage() {
                   >
                     <GripVertical size={14} />
                   </span>
-                  <span className="font-medium text-foreground">{index + 1}.</span>
-                  <span>{field.label}</span>
-                  <span className="text-[10px] uppercase tracking-wide">({field.field_key})</span>
+                  <span className="text-sm font-semibold text-foreground">{index + 1}.</span>
+                  <span className="text-sm font-semibold text-foreground">{field.label}</span>
+                  <span className="font-mono">({field.field_key})</span>
                 </div>
                 <div className="grid gap-4 lg:grid-cols-[1fr_200px_auto_auto]"
                 >
@@ -240,13 +235,13 @@ export default function ProjectDefaultFormConfigPage() {
           )}
 
           <div className="flex justify-end pt-2">
-            <Button onClick={() => void handleSave()} disabled={saving || loading}>
-              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            <Button className="h-10 gap-1.5" onClick={() => void handleSave()} disabled={saving || loading}>
+              {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
               Salvar alterações
             </Button>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </SectionCard>
     </div>
   )
 }

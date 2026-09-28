@@ -17,11 +17,8 @@ import {
   type UsDeliveryReport,
 } from "@/api/projetos"
 import { EmptyState } from "@/components/EmptyState"
-import { KpiCard } from "@/components/KpiCard"
-import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Card, FilterSelect, KpiCount, KpiRow, Pill, SectionCard, TABLE } from "@/components/ds"
 
 const ALL = "__all__"
 
@@ -72,12 +69,9 @@ function LinkBadge({
     : undefined
   return (
     <span className="relative inline-flex group/link" title={titleText}>
-      <Badge
-        variant={ok ? "success" : "outline"}
-        className={`font-normal gap-1 ${hasItems ? "cursor-default" : ""}`}
-      >
+      <Pill tone={ok ? "emerald" : "slate"} className={hasItems ? "cursor-default" : ""}>
         {label} {count}
-      </Badge>
+      </Pill>
       {hasItems && (
         <span
           role="tooltip"
@@ -102,43 +96,41 @@ function LinkBadge({
 function ProjectDeliveriesTable({ items }: { items: ProjectDeliveryItem[] }) {
   if (items.length === 0) {
     return (
-      <p className="py-3 text-sm text-muted-foreground">
+      <p className="px-5 py-4 text-sm text-muted-foreground">
         Nenhum projeto/programa concluído neste período.
       </p>
     )
   }
   return (
-    <div className="overflow-x-auto rounded-md border">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
-            <th className="px-3 py-2 font-medium">Projeto / Programa</th>
-            <th className="px-3 py-2 font-medium">PO</th>
-            <th className="px-3 py-2 font-medium">Produto</th>
-            <th className="px-3 py-2 font-medium whitespace-nowrap">Entregue em</th>
-            <th className="px-3 py-2 font-medium">Vínculos</th>
+    <div className={TABLE.wrap}>
+      <table className={TABLE.table}>
+        <thead className={TABLE.thead}>
+          <tr>
+            <th className={TABLE.thFirst}>Projeto / Programa</th>
+            <th className={TABLE.th}>PO</th>
+            <th className={TABLE.th}>Produto</th>
+            <th className={`${TABLE.th} whitespace-nowrap`}>Entregue em</th>
+            <th className={`${TABLE.th} pr-4`}>Vínculos</th>
           </tr>
         </thead>
         <tbody>
           {items.map((it) => (
-            <tr key={it.id} className="border-b last:border-b-0 align-top">
-              <td className="px-3 py-2">
+            <tr key={it.id} className={`${TABLE.tr} align-top`}>
+              <td className={TABLE.tdFirst}>
                 <div className="font-medium">{it.title}</div>
                 {it.em_operacao_assistida && (
-                  <span className="mt-0.5 inline-block rounded-full bg-teal-100 px-1.5 py-0.5 text-[10px] font-medium text-teal-700">
-                    Em operação assistida
-                  </span>
+                  <Pill tone="teal" className="mt-0.5">Em operação assistida</Pill>
                 )}
                 {it.planning_kind && (
                   <div className="text-xs text-muted-foreground capitalize">{it.planning_kind}</div>
                 )}
               </td>
-              <td className="px-3 py-2 text-muted-foreground">{it.po_name ?? "—"}</td>
-              <td className="px-3 py-2 text-muted-foreground">{it.product_name ?? "—"}</td>
-              <td className="px-3 py-2 whitespace-nowrap tabular-nums text-muted-foreground">
+              <td className={`${TABLE.td} text-muted-foreground`}>{it.po_name ?? "—"}</td>
+              <td className={`${TABLE.td} text-muted-foreground`}>{it.product_name ?? "—"}</td>
+              <td className={`${TABLE.td} whitespace-nowrap tabular-nums text-muted-foreground`}>
                 {fmtDateTime(it.completed_at)}
               </td>
-              <td className="px-3 py-2">
+              <td className={`${TABLE.td} pr-4`}>
                 <div className="flex flex-wrap gap-1">
                   <LinkBadge
                     ok={it.has_servicos}
@@ -177,22 +169,22 @@ function UsTable({ items, mode }: { items: UsDeliveryItem[]; mode: "delivered" |
     )
   }
   return (
-    <div className="overflow-x-auto rounded-md border">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
-            <th className="px-3 py-2 font-medium">User Story</th>
-            <th className="px-3 py-2 font-medium whitespace-nowrap">Prazo</th>
-            <th className="px-3 py-2 font-medium whitespace-nowrap">Saiu do backlog</th>
-            <th className="px-3 py-2 font-medium whitespace-nowrap">
+    <div className={`${TABLE.wrap} rounded-xl border`}>
+      <table className={TABLE.table}>
+        <thead className={TABLE.thead}>
+          <tr>
+            <th className={TABLE.thFirst}>User Story</th>
+            <th className={`${TABLE.th} whitespace-nowrap`}>Prazo</th>
+            <th className={`${TABLE.th} whitespace-nowrap`}>Saiu do backlog</th>
+            <th className={`${TABLE.th} whitespace-nowrap pr-4`}>
               {mode === "delivered" ? "Concluída em" : "Concluída em"}
             </th>
           </tr>
         </thead>
         <tbody>
           {items.map((it) => (
-            <tr key={it.id} className="border-b last:border-b-0">
-              <td className="px-3 py-2">
+            <tr key={it.id} className={TABLE.tr}>
+              <td className={TABLE.tdFirst}>
                 <div className="flex items-start gap-2">
                   {it.is_overdue && mode === "overdue" && (
                     <AlertTriangle size={14} className="mt-0.5 shrink-0 text-destructive" />
@@ -200,13 +192,13 @@ function UsTable({ items, mode }: { items: UsDeliveryItem[]; mode: "delivered" |
                   <span className="font-medium">{it.title}</span>
                 </div>
               </td>
-              <td className={`px-3 py-2 whitespace-nowrap tabular-nums ${it.is_overdue && mode === "overdue" ? "text-destructive font-medium" : "text-muted-foreground"}`}>
+              <td className={`${TABLE.td} whitespace-nowrap tabular-nums ${it.is_overdue && mode === "overdue" ? "text-destructive font-medium" : "text-muted-foreground"}`}>
                 {fmtDate(it.due_date)}
               </td>
-              <td className="px-3 py-2 whitespace-nowrap tabular-nums text-muted-foreground">
+              <td className={`${TABLE.td} whitespace-nowrap tabular-nums text-muted-foreground`}>
                 {fmtDateTime(it.left_backlog_at)}
               </td>
-              <td className="px-3 py-2 whitespace-nowrap tabular-nums text-muted-foreground">
+              <td className={`${TABLE.td} whitespace-nowrap tabular-nums text-muted-foreground pr-4`}>
                 {fmtDateTime(it.completed_at)}
               </td>
             </tr>
@@ -219,38 +211,34 @@ function UsTable({ items, mode }: { items: UsDeliveryItem[]; mode: "delivered" |
 
 function AssigneeSection({ group }: { group: UsDeliveryAssigneeGroup }) {
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <CardTitle className="text-base">{group.assignee_name}</CardTitle>
-          <div className="flex gap-2">
-            <Badge variant="secondary" className="font-normal gap-1">
-              <CheckCircle2 size={12} /> {group.delivered_count} entregue{group.delivered_count !== 1 ? "s" : ""}
-            </Badge>
-            <Badge
-              variant={group.overdue_count > 0 ? "destructive" : "outline"}
-              className="font-normal gap-1"
-            >
-              <AlertTriangle size={12} /> {group.overdue_count} atrasada{group.overdue_count !== 1 ? "s" : ""}
-            </Badge>
-          </div>
+    <SectionCard
+      title={group.assignee_name}
+      right={
+        <div className="flex gap-2">
+          <Pill tone={group.delivered_count > 0 ? "emerald" : "slate"}>
+            <CheckCircle2 size={12} /> {group.delivered_count} entregue{group.delivered_count !== 1 ? "s" : ""}
+          </Pill>
+          <Pill tone={group.overdue_count > 0 ? "red" : "slate"}>
+            <AlertTriangle size={12} /> {group.overdue_count} atrasada{group.overdue_count !== 1 ? "s" : ""}
+          </Pill>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
+      }
+    >
+      <div className="space-y-4">
         <div>
-          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <h4 className="mb-2 text-sm font-semibold">
             US no período
           </h4>
           <UsTable items={group.delivered} mode="delivered" />
         </div>
         <div>
-          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <h4 className="mb-2 text-sm font-semibold">
             US atrasadas
           </h4>
           <UsTable items={group.overdue} mode="overdue" />
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </SectionCard>
   )
 }
 
@@ -309,55 +297,49 @@ export default function UsDeliveryReportPage() {
   }
   const projects = data?.project_deliveries ?? []
 
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h3 className="text-base font-semibold">Entregas</h3>
-          <p className="text-sm text-muted-foreground">
-            Projetos concluídos no período (com vínculos de produto) e User Stories por responsável.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">Período</label>
-            <Select value={period} onValueChange={(v) => setPeriod(v as UsDeliveryPeriod)}>
-              <SelectTrigger className="w-44">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PERIOD_OPTS.map((o) => (
-                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">Responsável (US)</label>
-            <Select value={assignee} onValueChange={setAssignee}>
-              <SelectTrigger className="w-52">
-                <SelectValue placeholder="Todos" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>Todos</SelectItem>
-                {(data?.available_assignees ?? []).map((a) => (
-                  <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-lg font-semibold">Entregas</h2>
+        <p className="text-sm text-muted-foreground">
+          Projetos concluídos no período (com vínculos de produto) e User Stories por responsável.
+        </p>
       </div>
+
+      <Card className="p-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <FilterSelect
+            label="Período"
+            value={period}
+            onChange={(v) => setPeriod(v as UsDeliveryPeriod)}
+            options={PERIOD_OPTS}
+          />
+          <FilterSelect
+            label="Responsável (US)"
+            value={assignee}
+            onChange={setAssignee}
+            options={[
+              { value: ALL, label: "Todos" },
+              ...(data?.available_assignees ?? []).map((a) => ({ value: a.id, label: a.name })),
+            ]}
+          />
+        </div>
+      </Card>
 
       {loading && (
         <div className="space-y-3">
-          <Skeleton className="h-20 w-full" />
-          <Skeleton className="h-40 w-full" />
+          <div className="grid gap-3 sm:grid-cols-3">
+            {Array.from({ length: 3 }, (_, i) => <Skeleton key={i} className="h-[74px] rounded-xl" />)}
+          </div>
+          <Skeleton className="h-40 w-full rounded-2xl" />
         </div>
       )}
 
       {!loading && error && (
-        <EmptyState icon={AlertTriangle} title="Erro ao carregar" description={error} />
+        <Card>
+          <EmptyState icon={AlertTriangle} title="Erro ao carregar" description={error} />
+        </Card>
       )}
 
       {!loading && !error && data && (
@@ -365,93 +347,80 @@ export default function UsDeliveryReportPage() {
           {/* ── Entregas = projetos ── */}
           <section className="space-y-3">
             <div>
-              <h4 className="text-sm font-semibold">Entregas (projetos)</h4>
-              <p className="text-xs text-muted-foreground">
+              <h3 className="text-base font-semibold">Entregas (projetos)</h3>
+              <p className="text-sm text-muted-foreground">
                 Só entra o card de Projetos e Programas na etapa Concluído. US/Features prontas com o projeto em Impedimento não contam.
               </p>
             </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <KpiCard
-                label="Projetos entregues"
-                value={kpis.total}
+            <KpiRow className="sm:grid-cols-3">
+              <KpiCount
                 icon={FolderKanban}
-                sub={`Período: ${periodLabel}`}
+                value={kpis.total}
+                label={`Projetos entregues · Período: ${periodLabel}`}
               />
-              <KpiCard
-                label="Com serviços vinculados"
-                value={kpis.com_servicos}
+              <KpiCount
                 icon={GitBranch}
-                sub={kpis.total > 0 ? `${Math.round((kpis.com_servicos / kpis.total) * 100)}% das entregas` : "sem entregas"}
+                value={kpis.com_servicos}
+                label={`Com serviços vinculados · ${kpis.total > 0 ? `${Math.round((kpis.com_servicos / kpis.total) * 100)}% das entregas` : "sem entregas"}`}
+                tone="emerald"
               />
-              <KpiCard
-                label="Com processos e documentos"
-                value={kpis.com_processos_e_documentos}
+              <KpiCount
                 icon={FileText}
-                sub={kpis.total > 0 ? `${Math.round((kpis.com_processos_e_documentos / kpis.total) * 100)}% das entregas` : "sem entregas"}
+                value={kpis.com_processos_e_documentos}
+                label={`Com processos e documentos · ${kpis.total > 0 ? `${Math.round((kpis.com_processos_e_documentos / kpis.total) * 100)}% das entregas` : "sem entregas"}`}
+                tone="violet"
               />
-            </div>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Lista de entregas</CardTitle>
-                <CardDescription>
-                  Tags = serviços, processos e documentos com data no mesmo mês da conclusão do projeto.
-                </CardDescription>
-                <div className="flex flex-wrap gap-1.5 pt-2">
-                  <Badge variant="success" className="font-normal">
-                    Serviços {kpis.servicos_no_mes}
-                  </Badge>
-                  <Badge variant="success" className="font-normal">
-                    Processos {kpis.processos_no_mes}
-                  </Badge>
-                  <Badge variant="success" className="font-normal">
-                    Docs {kpis.documentos_no_mes}
-                  </Badge>
-                  <span className="self-center text-[11px] text-muted-foreground">
-                    entregues no mês da conclusão (soma das linhas)
-                  </span>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <ProjectDeliveriesTable items={projects} />
-              </CardContent>
-            </Card>
+            </KpiRow>
+            <SectionCard
+              title="Lista de entregas"
+              subtitle="Tags = serviços, processos e documentos com data no mesmo mês da conclusão do projeto."
+              flush
+            >
+              <div className="flex flex-wrap items-center gap-1.5 border-b px-5 py-3">
+                <Pill tone="emerald">
+                  Serviços {kpis.servicos_no_mes}
+                </Pill>
+                <Pill tone="emerald">
+                  Processos {kpis.processos_no_mes}
+                </Pill>
+                <Pill tone="emerald">
+                  Docs {kpis.documentos_no_mes}
+                </Pill>
+                <span className="text-xs text-muted-foreground">
+                  entregues no mês da conclusão (soma das linhas)
+                </span>
+              </div>
+              <ProjectDeliveriesTable items={projects} />
+            </SectionCard>
           </section>
 
           {/* ── User Stories ── */}
           <section className="space-y-3">
             <div>
-              <h4 className="text-sm font-semibold">User Stories por responsável</h4>
-              <p className="text-xs text-muted-foreground">
+              <h3 className="text-base font-semibold">User Stories por responsável</h3>
+              <p className="text-sm text-muted-foreground">
                 O que foi concluído no período, US atrasadas, saída do backlog e conclusão.
               </p>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardDescription>US entregues</CardDescription>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <CheckCircle2 size={18} className="text-emerald-600" />
-                    {usTotals.delivered}
-                  </CardTitle>
-                </CardHeader>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardDescription>US atrasadas</CardDescription>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <AlertTriangle size={18} className={usTotals.overdue > 0 ? "text-destructive" : "text-muted-foreground"} />
-                    {usTotals.overdue}
-                  </CardTitle>
-                </CardHeader>
-              </Card>
-            </div>
+            <KpiRow className="sm:grid-cols-2">
+              <KpiCount icon={CheckCircle2} value={usTotals.delivered} label="US entregues" tone="emerald" />
+              <KpiCount
+                icon={AlertTriangle}
+                value={usTotals.overdue}
+                label="US atrasadas"
+                tone={usTotals.overdue > 0 ? "red" : "slate"}
+                highlight={usTotals.overdue > 0}
+              />
+            </KpiRow>
 
             {data.by_assignee.length === 0 ? (
-              <EmptyState
-                icon={PackageCheck}
-                title="Nenhuma US neste recorte"
-                description="Não há User Stories entregues neste período nem atrasadas para o filtro escolhido."
-              />
+              <Card>
+                <EmptyState
+                  icon={PackageCheck}
+                  title="Nenhuma US neste recorte"
+                  description="Não há User Stories entregues neste período nem atrasadas para o filtro escolhido."
+                />
+              </Card>
             ) : (
               <div className="space-y-4">
                 {data.by_assignee.map((g) => (

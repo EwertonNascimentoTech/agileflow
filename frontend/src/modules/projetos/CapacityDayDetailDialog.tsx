@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react"
 import { AlertTriangle, CalendarClock, Clock, Loader2 } from "lucide-react"
 
 import { projetosApi, type CapacityDayDetail, type CapacityDayTask } from "@/api/projetos"
-import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Pill } from "@/components/ds"
 
 const WEEKDAY = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"]
 
@@ -181,10 +181,10 @@ export function CapacityDayDetailDialog({
         {!loading && !error && data && (
           <div className="min-w-0 space-y-4">
             <div className="flex flex-wrap items-center gap-2 text-sm">
-              <Badge variant={data.overallocated ? "destructive" : "secondary"} className="gap-1 font-normal">
+              <Pill tone={data.overallocated ? "red" : "slate"}>
                 <Clock size={12} />
                 {fmtHours(data.allocated_hours)} / {fmtHours(data.capacity_hours)}
-              </Badge>
+              </Pill>
               {data.overallocated && (
                 <span className="text-xs font-medium text-destructive">
                   Superlotado — excesso de {fmtHours(Math.max(0, data.allocated_hours - data.capacity_hours))}
@@ -230,8 +230,8 @@ export function CapacityDayDetailDialog({
             )}
 
             <section className="min-w-0">
-              <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                <CalendarClock size={12} /> No dia ({data.items.length})
+              <p className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold">
+                <CalendarClock size={14} className="text-muted-foreground" /> No dia ({data.items.length})
               </p>
               {data.items.length === 0 ? (
                 <p className="rounded-md border border-dashed px-3 py-4 text-center text-sm text-muted-foreground">
@@ -247,8 +247,8 @@ export function CapacityDayDetailDialog({
             </section>
 
             <section className="min-w-0 border-t pt-3">
-              <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-destructive">
-                <AlertTriangle size={12} /> Atrasadas ({data.overdue.length})
+              <p className="mb-1 flex items-center gap-1.5 text-sm font-semibold text-destructive">
+                <AlertTriangle size={14} /> Atrasadas ({data.overdue.length})
               </p>
               <p className="mb-1.5 text-[11px] text-muted-foreground">
                 US em aberto com prazo vencido ou SLA estourado — snapshot de{" "}

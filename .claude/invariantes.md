@@ -188,3 +188,10 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 - Tabela `embeddings` e o tipo `vector` ficam **fora do TenantBase** (SQL cru em `app/core/embeddings.py`): o `create_all` de tenant novo quebraria num banco sem pgvector.
 - Modelo BAAI/bge-m3 (1024 dimensões) roda no container `embeddings` (profile `ia`, 1 worker, sem porta publicada) — nunca carregar o modelo na API nem no Celery. Trocar de modelo com outra dimensão = coluna nova e reindexar tudo.
 - O texto não sai do servidor para gerar o vetor; o que for ao IDCortex continua passando por `anonymize.py` (ele recebe trechos em texto, nunca vetores).
+
+## Design system do Portal (2026-09-27)
+
+- Padrão visual do Portal do Cliente vale para todos os módulos ativos (Processos, Times, Produtos, Indicadores, RTD, Empresa/Configurações, Documentação): telas importam de `@/components/ds` (reexporta `modules/portal/portfolioUi`, `DetailShell`, `portalForm` + `PageHeader`, `SectionCard`, `Notice`, `Pill`, `Field`, `TABLE`). Mudar um componente do Portal muda todas as áreas: conferir Portal e módulos.
+- Ícone por nome (`IconTile`, `DetailHeader`) só resolve nomes do mapa `ICONS` de `portfolioMeta.ts`, que é a lista oferecida no cadastro de Programas/Pilares: não crescer o mapa por causa de outras telas; `PageHeader` aceita o componente lucide direto.
+- Tons dos selos do Produtos (saúde, ciclo de vida, contrato, documentação) ficam em `produtos/constants.ts` (`*_TONE`), os mesmos na lista e na ficha.
+- Telas complexas migradas só no entorno: kanban (dnd-kit: `article.task-card` com attributes/listeners, classes `column/col-body/board*` do `agileflow.css`), Gantt (grade = fundo CSS; sobreposições com `!` por causa de `.afx .gantt-*`), heatmap de capacidade (células e cliques intactos). Documentos de impressão (`StatusReportDocument`, capa/molduras da RTD) mantêm layout próprio; as seções da RTD (indicadores/planos) aparecem no PDF e no link público com o visual novo.

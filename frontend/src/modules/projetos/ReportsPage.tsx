@@ -1,17 +1,14 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react"
-import { AlertTriangle, BarChart3, CheckCircle2, Clock, Filter, Layers, TrendingUp, X } from "lucide-react"
+import { AlertTriangle, BarChart3, CheckCircle2, CircleSlash, Clock, Layers, TrendingUp, X, XCircle } from "lucide-react"
 
 import { teamopsApi } from "@/api/teamops"
 import { projetosApi, type ProjectDefaultFormField, type ProjectReports } from "@/api/projetos"
 import type { User } from "@/types"
 import { parseDefaultFieldOptions } from "@/modules/projetos/defaultFormOptions"
-import { KpiCard } from "@/components/KpiCard"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyState } from "@/components/EmptyState"
+import { Card, FilterSelect, KpiCount, KpiRow, Pill, SectionCard } from "@/components/ds"
 
 const ALL = "__all__" // sentinela: sem filtro (Radix proíbe value="")
 
@@ -151,9 +148,10 @@ export default function ReportsPage() {
     [data],
   )
 
+
   const header = (
     <div>
-      <h2 className="text-lg font-bold">Relatórios</h2>
+      <h2 className="text-lg font-semibold">Relatórios</h2>
       <p className="text-sm text-muted-foreground">
         Visão consolidada do board: distribuição por etapa, carga do time, tipos, SLA e throughput.
       </p>
@@ -161,71 +159,66 @@ export default function ReportsPage() {
   )
 
   const filtersBar = (
-    <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-muted/30 p-3">
-      <div className="flex h-9 items-center gap-1.5 text-sm font-medium text-muted-foreground">
-        <Filter className="h-4 w-4" /> Filtros
+    <Card className="p-4">
+      <div className="flex flex-wrap items-end gap-3">
+        <FilterSelect
+          label="PO / Responsável"
+          value={po}
+          onChange={setPo}
+          options={[{ value: ALL, label: "Todos os POs" }, ...users.map((u) => ({ value: u.id, label: u.full_name }))]}
+        />
+        <FilterSelect
+          label="Diretoria"
+          value={diretoria}
+          onChange={setDiretoria}
+          options={[
+            { value: ALL, label: "Todas as diretorias" },
+            ...diretoriaOptions.map((v) => ({ value: v, label: labelMaps.diretoria.get(v) ?? v })),
+          ]}
+        />
+        <FilterSelect
+          label="Área"
+          value={area}
+          onChange={setArea}
+          options={[
+            { value: ALL, label: "Todas as áreas" },
+            ...areaOptions.map((v) => ({ value: v, label: labelMaps.area.get(v) ?? v })),
+          ]}
+        />
+        {hasFilters && (
+          <Button variant="ghost" className="h-10 gap-1" onClick={clearFilters}>
+            <X size={15} /> Limpar
+          </Button>
+        )}
       </div>
-      <div className="min-w-[180px] flex-1 sm:max-w-[220px]">
-        <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">PO / Responsável</label>
-        <Select value={po} onValueChange={setPo}>
-          <SelectTrigger><SelectValue placeholder="Todos" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>Todos os POs</SelectItem>
-            {users.map((u) => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="min-w-[180px] flex-1 sm:max-w-[220px]">
-        <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Diretoria</label>
-        <Select value={diretoria} onValueChange={setDiretoria}>
-          <SelectTrigger><SelectValue placeholder="Todas" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>Todas as diretorias</SelectItem>
-            {diretoriaOptions.map((v) => <SelectItem key={v} value={v}>{labelMaps.diretoria.get(v) ?? v}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="min-w-[180px] flex-1 sm:max-w-[220px]">
-        <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Área</label>
-        <Select value={area} onValueChange={setArea}>
-          <SelectTrigger><SelectValue placeholder="Todas" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>Todas as áreas</SelectItem>
-            {areaOptions.map((v) => <SelectItem key={v} value={v}>{labelMaps.area.get(v) ?? v}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
-      {hasFilters && (
-        <Button variant="ghost" size="sm" className="h-9 gap-1" onClick={clearFilters}>
-          <X className="h-3.5 w-3.5" /> Limpar
-        </Button>
-      )}
-    </div>
+    </Card>
   )
 
   if (loading) {
     return (
-      <div className="w-full space-y-6 p-1">
+      <div className="w-full space-y-5 p-1">
         {header}
         {filtersBar}
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
-          {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-28" />)}
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-[74px] rounded-xl" />)}
         </div>
-        <Skeleton className="h-80 rounded-lg" />
+        <Skeleton className="h-80 rounded-2xl" />
       </div>
     )
   }
 
   if (!data) {
     return (
-      <div className="w-full space-y-6 p-1">
+      <div className="w-full space-y-5 p-1">
         {header}
         {filtersBar}
-        <EmptyState
-          icon={BarChart3}
-          title="Sem dados para relatórios"
-          description="Crie cards no board para visualizar as métricas."
-        />
+        <Card>
+          <EmptyState
+            icon={BarChart3}
+            title="Sem dados para relatórios"
+            description="Crie cards no board para visualizar as métricas."
+          />
+        </Card>
       </div>
     )
   }
@@ -235,59 +228,59 @@ export default function ReportsPage() {
 
   if (isEmpty) {
     return (
-      <div className="w-full space-y-6 p-1">
+      <div className="w-full space-y-5 p-1">
         {header}
         {filtersBar}
-        <EmptyState
-          icon={BarChart3}
-          title={hasFilters ? "Nenhum card para os filtros selecionados" : "Sem dados para relatórios"}
-          description={hasFilters ? "Ajuste ou limpe os filtros para ver as métricas." : "Crie cards no board para visualizar as métricas."}
-        />
+        <Card>
+          <EmptyState
+            icon={BarChart3}
+            title={hasFilters ? "Nenhum card para os filtros selecionados" : "Sem dados para relatórios"}
+            description={hasFilters ? "Ajuste ou limpe os filtros para ver as métricas." : "Crie cards no board para visualizar as métricas."}
+          />
+        </Card>
       </div>
     )
   }
 
   return (
-    <div className="w-full space-y-6 p-1" style={{ opacity: refreshing ? 0.6 : 1, transition: "opacity .15s" }}>
+    <div className="w-full space-y-5 p-1" style={{ opacity: refreshing ? 0.6 : 1, transition: "opacity .15s" }}>
       {header}
       {filtersBar}
 
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
-        <KpiCard label="Cards ativos" value={data.total_active} icon={Layers} />
-        <KpiCard label="Concluídos" value={data.total_completed} icon={CheckCircle2} />
-        <KpiCard
-          label="SLA estourado"
-          value={sla.breached}
+      <KpiRow className="sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <KpiCount icon={Layers} value={data.total_active} label="Cards ativos" />
+        <KpiCount icon={CheckCircle2} value={data.total_completed} label="Concluídos" tone="emerald" />
+        <KpiCount
           icon={AlertTriangle}
-          deltaTone={sla.breached > 0 ? "down" : "up"}
+          value={sla.breached}
+          label="SLA estourado"
+          tone={sla.breached > 0 ? "red" : "slate"}
+          highlight={sla.breached > 0}
         />
-        <KpiCard
-          label="Atrasados"
-          value={sla.overdue}
+        <KpiCount
           icon={Clock}
-          deltaTone={sla.overdue > 0 ? "down" : "up"}
+          value={sla.overdue}
+          label="Atrasados"
+          tone={sla.overdue > 0 ? "red" : "slate"}
+          highlight={sla.overdue > 0}
         />
-        <KpiCard
-          label="Lead time médio"
-          value={data.throughput.avg_lead_time_days != null ? `${data.throughput.avg_lead_time_days} d` : "—"}
+        <KpiCount
           icon={TrendingUp}
-          sub={`${data.throughput.completed_total} concluídos`}
+          value={data.throughput.avg_lead_time_days != null ? `${data.throughput.avg_lead_time_days} d` : "—"}
+          label={`Lead time médio · ${data.throughput.completed_total} concluídos`}
+          tone="violet"
         />
-      </div>
+      </KpiRow>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Cards por etapa e funil</CardTitle>
-            <CardDescription>Distribuição dos cards ativos em cada kanban.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-5">
+        <SectionCard title="Cards por etapa e funil" subtitle="Distribuição dos cards ativos em cada kanban.">
+          <div className="space-y-5">
             {stageGroups.length === 0 ? (
               <p className="text-sm text-muted-foreground">Nenhum card ativo.</p>
             ) : (
               stageGroups.map((g) => (
                 <div key={g.funnel} className="space-y-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{g.funnel}</p>
+                  <p className="text-sm font-semibold">{g.funnel}</p>
                   {g.rows.map((r) => (
                     <BarRow
                       key={`${r.funnel_id}-${r.status_id}`}
@@ -300,15 +293,11 @@ export default function ReportsPage() {
                 </div>
               ))
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </SectionCard>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Carga por responsável</CardTitle>
-            <CardDescription>Cards ativos por pessoa (e quantos estão atrasados).</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
+        <SectionCard title="Carga por responsável" subtitle="Cards ativos por pessoa (e quantos estão atrasados).">
+          <div className="space-y-3">
             {data.by_assignee.length === 0 ? (
               <p className="text-sm text-muted-foreground">Nenhum card ativo.</p>
             ) : (
@@ -321,9 +310,9 @@ export default function ReportsPage() {
                   right={
                     <span className="flex items-center gap-2">
                       {a.overdue > 0 && (
-                        <Badge variant="destructive" className="px-1.5 py-0 text-[10px]">
+                        <Pill tone="red">
                           {a.overdue} atrasado{a.overdue > 1 ? "s" : ""}
-                        </Badge>
+                        </Pill>
                       )}
                       <span className="tabular-nums">{a.active}</span>
                     </span>
@@ -331,15 +320,11 @@ export default function ReportsPage() {
                 />
               ))
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </SectionCard>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Volume por tipo de demanda</CardTitle>
-            <CardDescription>Total de cards por tipo (ativos e concluídos).</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
+        <SectionCard title="Volume por tipo de demanda" subtitle="Total de cards por tipo (ativos e concluídos).">
+          <div className="space-y-3">
             {data.by_type.length === 0 ? (
               <p className="text-sm text-muted-foreground">Nenhum card cadastrado.</p>
             ) : (
@@ -347,69 +332,50 @@ export default function ReportsPage() {
                 <BarRow key={t.type_id ?? "none"} label={t.type_name} value={t.count} max={maxType} />
               ))
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </SectionCard>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">SLA e prazos</CardTitle>
-            <CardDescription>Estado de SLA dos cards ativos.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div className="rounded-md border p-3 text-center">
-                <p className="text-2xl font-bold text-success">{sla.ok}</p>
-                <p className="text-xs text-muted-foreground">No prazo</p>
-              </div>
-              <div className="rounded-md border p-3 text-center">
-                <p className="text-2xl font-bold text-warning">{sla.warning}</p>
-                <p className="text-xs text-muted-foreground">Em alerta</p>
-              </div>
-              <div className="rounded-md border p-3 text-center">
-                <p className="text-2xl font-bold text-destructive">{sla.breached}</p>
-                <p className="text-xs text-muted-foreground">Estourado</p>
-              </div>
-              <div className="rounded-md border p-3 text-center">
-                <p className="text-2xl font-bold text-muted-foreground">{sla.none}</p>
-                <p className="text-xs text-muted-foreground">Sem SLA</p>
-              </div>
-            </div>
-            <p className="mt-4 flex items-center gap-2 text-sm">
-              <Clock size={15} className="text-destructive" />
-              <span className="font-medium">{sla.overdue}</span>
-              <span className="text-muted-foreground">card(s) atrasado(s) (SLA estourado ou prazo vencido).</span>
-            </p>
-          </CardContent>
-        </Card>
+        <SectionCard title="SLA e prazos" subtitle="Estado de SLA dos cards ativos.">
+          <KpiRow className="grid-cols-1 sm:grid-cols-2">
+            <KpiCount icon={CheckCircle2} value={sla.ok} label="No prazo" tone="emerald" />
+            <KpiCount icon={Clock} value={sla.warning} label="Em alerta" tone="amber" />
+            <KpiCount icon={XCircle} value={sla.breached} label="Estourado" tone="red" />
+            <KpiCount icon={CircleSlash} value={sla.none} label="Sem SLA" tone="slate" />
+          </KpiRow>
+          <p className="mt-4 flex items-center gap-2 text-sm">
+            <Clock size={15} className="text-destructive" />
+            <span className="font-medium">{sla.overdue}</span>
+            <span className="text-muted-foreground">card(s) atrasado(s) (SLA estourado ou prazo vencido).</span>
+          </p>
+        </SectionCard>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Throughput — concluídos por mês</CardTitle>
-          <CardDescription>
+      <SectionCard
+        title="Throughput — concluídos por mês"
+        subtitle={
+          <>
             Cards finalizados a cada mês. Lead time médio:{" "}
             {data.throughput.avg_lead_time_days != null ? `${data.throughput.avg_lead_time_days} dias` : "sem dados"}.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {data.throughput.by_month.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nenhum card concluído ainda.</p>
-          ) : (
-            <div className="flex items-end gap-3 overflow-x-auto pb-2" style={{ minHeight: 160 }}>
-              {data.throughput.by_month.map((m) => {
-                const h = Math.max(6, Math.round((m.count / maxMonth) * 130))
-                return (
-                  <div key={m.month} className="flex w-12 shrink-0 flex-col items-center gap-1">
-                    <span className="text-xs font-medium tabular-nums">{m.count}</span>
-                    <div className="w-full rounded-t bg-primary" style={{ height: h }} />
-                    <span className="text-[10px] capitalize text-muted-foreground">{monthLabel(m.month)}</span>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+          </>
+        }
+      >
+        {data.throughput.by_month.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Nenhum card concluído ainda.</p>
+        ) : (
+          <div className="flex items-end gap-3 overflow-x-auto pb-2" style={{ minHeight: 160 }}>
+            {data.throughput.by_month.map((m) => {
+              const h = Math.max(6, Math.round((m.count / maxMonth) * 130))
+              return (
+                <div key={m.month} className="flex w-12 shrink-0 flex-col items-center gap-1">
+                  <span className="text-xs font-medium tabular-nums">{m.count}</span>
+                  <div className="w-full rounded-t bg-primary" style={{ height: h }} />
+                  <span className="text-[10px] capitalize text-muted-foreground">{monthLabel(m.month)}</span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </SectionCard>
     </div>
   )
 }

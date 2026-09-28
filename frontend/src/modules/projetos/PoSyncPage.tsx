@@ -4,7 +4,6 @@ import {
   CalendarX,
   CheckCircle2,
   Clock,
-  Filter,
   FolderKanban,
   HeartPulse,
   HelpCircle,
@@ -30,12 +29,12 @@ import {
   type PoSyncSaudeProdutosFaixa,
   type PoSyncSaudeProdutosPo,
 } from "@/api/projetos"
-import { KpiCard } from "@/components/KpiCard"
-import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyState } from "@/components/EmptyState"
+import {
+  Card, FilterSelect, KpiCount, KpiRow, Notice, Pill, SectionCard, TABLE, type Tone,
+} from "@/components/ds"
 
 const ALL = "__all__" // sentinela: sem filtro (Radix proíbe value="")
 
@@ -51,24 +50,15 @@ const FASE_LABEL: Record<PoSyncFase, string> = {
   concluido: "Concluído",
   impedimento: "Impedimento",
 }
-type BadgeVariant = "warning" | "default" | "success" | "secondary" | "outline" | "destructive"
-const FASE_VARIANT: Record<PoSyncFase, BadgeVariant> = {
-  planejamento: "warning",
-  desenvolvimento: "default",
-  homologacao: "secondary",
-  producao: "outline",
-  concluido: "success",
-  impedimento: "destructive",
-}
-// Impedimento = VERMELHO de verdade. O "destructive" do tema é o laranja da marca (#E84E0F),
-// então forçamos um vermelho explícito (o twMerge do Badge sobrepõe o bg da variante).
-const FASE_CLASS: Record<PoSyncFase, string> = {
-  planejamento: "",
-  desenvolvimento: "",
-  homologacao: "",
-  producao: "",
-  concluido: "",
-  impedimento: "border-transparent bg-red-600 text-white hover:bg-red-600",
+// Tom do selo (Pill) de cada fase. Impedimento = VERMELHO de verdade (o "destructive" do tema é o
+// laranja da marca, #E84E0F); Operação Assistida usa teal, como no Portal.
+const FASE_TONE: Record<PoSyncFase, Tone> = {
+  planejamento: "slate",
+  desenvolvimento: "blue",
+  homologacao: "violet",
+  producao: "teal",
+  concluido: "emerald",
+  impedimento: "red",
 }
 const MESES_NOME = ["", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
   "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
@@ -114,17 +104,17 @@ function FaseChips({
   return (
     <div className="flex flex-wrap items-center gap-1">
       {items.map((f) => (
-        <Badge key={f} variant={FASE_VARIANT[f]} className={`font-normal ${FASE_CLASS[f]}`} title={FASE_LABEL[f]}>
-          {FASE_ABBR[f]} {fases[f]}
-        </Badge>
+        <span key={f} title={FASE_LABEL[f]} className="inline-flex">
+          <Pill tone={FASE_TONE[f]}>{FASE_ABBR[f]} {fases[f]}</Pill>
+        </span>
       ))}
       {bloqueados > 0 && (
         <>
           {items.length > 0 && <span aria-hidden className="mx-0.5 h-4 w-px bg-border" />}
           <span className="group/bl relative inline-flex">
-            <Badge variant="destructive" className="cursor-help gap-1 font-normal">
+            <Pill tone="red" className="cursor-help">
               <Lock className="h-3 w-3" />{bloqueados}
-            </Badge>
+            </Pill>
             <span className="pointer-events-none absolute bottom-full left-1/2 z-[60] mb-1.5 hidden w-max max-w-[280px] -translate-x-1/2 rounded-md border bg-popover px-2.5 py-1.5 text-left text-[11px] leading-snug text-popover-foreground shadow-md group-hover/bl:block">
               {bloqueados} projeto(s) bloqueado(s): {FORA_DA_REGRA_TIP}
             </span>
@@ -142,15 +132,15 @@ function fmtScore(score: number | null | undefined): string {
 
 function scoreTone(score: number | null | undefined): string {
   if (score == null) return "text-muted-foreground"
-  if (score >= 75) return "text-emerald-600 font-semibold"
-  if (score >= 40) return "text-amber-600 font-semibold"
-  return "text-red-600 font-semibold"
+  if (score >= 75) return "text-emerald-600 font-semibold dark:text-emerald-400"
+  if (score >= 40) return "text-amber-600 font-semibold dark:text-amber-400"
+  return "text-red-600 font-semibold dark:text-red-400"
 }
 
 function classeScoreTone(classe: string): string {
-  if (classe === "saudavel") return "text-emerald-600"
-  if (classe === "atencao") return "text-amber-600"
-  if (classe === "critico") return "text-red-600"
+  if (classe === "saudavel") return "text-emerald-600 dark:text-emerald-400"
+  if (classe === "atencao") return "text-amber-600 dark:text-amber-400"
+  if (classe === "critico") return "text-red-600 dark:text-red-400"
   return "text-muted-foreground"
 }
 
@@ -215,11 +205,11 @@ function ProdutosTip({
 
 function FaixaScoreCell({ faixa, label, titulo }: { faixa: PoSyncSaudeProdutosFaixa; label: string; titulo: string }) {
   return (
-    <td className="py-2.5 px-2 align-top">
+    <td className={`${TABLE.td} align-top`}>
       <ProdutosTip produtos={faixa.produtos} titulo={titulo}>
         <div>
           <div className={`tabular-nums ${scoreTone(faixa.score_medio)}`}>{fmtScore(faixa.score_medio)}</div>
-          <div className="mt-0.5 text-[10px] text-muted-foreground">{faixa.total} {label}</div>
+          <div className="mt-0.5 text-xs text-muted-foreground">{faixa.total} {label}</div>
         </div>
       </ProdutosTip>
     </td>
@@ -248,7 +238,7 @@ function CriticosTip({
           <span key={`${c.name}-${i}`} className="block">
             <span className="flex items-center justify-between gap-3">
               <span className="truncate font-medium">{c.name || "—"}</span>
-              <span className="tabular-nums font-semibold text-red-600">{c.score}</span>
+              <span className="tabular-nums font-semibold text-red-600 dark:text-red-400">{c.score}</span>
             </span>
             {c.motivos.length > 0 && (
               <span className="mt-0.5 block text-muted-foreground">Falhou: {c.motivos.join(" · ")}</span>
@@ -270,7 +260,7 @@ const CLASSE_DOT: Record<PoSyncSaudeProdutoStatus["classe"], string> = {
   critico: "bg-red-500", atencao: "bg-amber-500", saudavel: "bg-emerald-500",
 }
 const CLASSE_TEXT: Record<PoSyncSaudeProdutoStatus["classe"], string> = {
-  critico: "text-red-600", atencao: "text-amber-600", saudavel: "text-emerald-600",
+  critico: "text-red-600 dark:text-red-400", atencao: "text-amber-600 dark:text-amber-400", saudavel: "text-emerald-600 dark:text-emerald-400",
 }
 
 /** Tooltip único da barra de saúde: produtos por classe (crítico → atenção → ok), com o porquê. */
@@ -328,10 +318,10 @@ function SaudeDistribuicaoBar({ itens }: { itens: PoSyncSaudeProdutoStatus[] }) 
           {atencao > 0 && <div className="h-full bg-amber-500" style={{ width: `${pct(atencao)}%` }} />}
           {critico > 0 && <div className="h-full bg-red-500" style={{ width: `${pct(critico)}%` }} />}
         </div>
-        <div className="flex gap-2 text-[10px] text-muted-foreground">
-          <span className="text-emerald-600">{saudavel} ok</span>
-          <span className="text-amber-600">{atencao} aten.</span>
-          <span className="text-red-600">{critico} crít.</span>
+        <div className="flex gap-2 text-xs text-muted-foreground">
+          <span className="text-emerald-600 dark:text-emerald-400">{saudavel} ok</span>
+          <span className="text-amber-600 dark:text-amber-400">{atencao} aten.</span>
+          <span className="text-red-600 dark:text-red-400">{critico} crít.</span>
         </div>
       </div>
     </SaudeDistTip>
@@ -340,23 +330,23 @@ function SaudeDistribuicaoBar({ itens }: { itens: PoSyncSaudeProdutoStatus[] }) 
 
 function SaudeProdutosPoRow({ po }: { po: PoSyncSaudeProdutosPo }) {
   return (
-    <tr className="border-b last:border-0 hover:bg-muted/30">
-      <td className="py-2.5 pr-3 font-medium">
+    <tr className={TABLE.tr}>
+      <td className={`${TABLE.tdFirst} font-medium`}>
         {po.po_id === null ? (
           <span className="italic text-muted-foreground">{po.full_name}</span>
         ) : (
           po.full_name
         )}
       </td>
-      <td className="py-2.5 px-2 tabular-nums text-center">{po.total}</td>
+      <td className={`${TABLE.td} tabular-nums text-center`}>{po.total}</td>
       <FaixaScoreCell faixa={po.producao} label="em prod." titulo="Produção" />
       <FaixaScoreCell faixa={po.desenvolvimento} label="em dev." titulo="Desenvolvimento" />
-      <td className="py-2.5 px-2 tabular-nums text-center text-muted-foreground">
+      <td className={`${TABLE.td} tabular-nums text-center text-muted-foreground`}>
         <ProdutosTip produtos={po.outros.produtos} titulo="Outros">
           <span>{po.outros.total || "—"}</span>
         </ProdutosTip>
       </td>
-      <td className="py-2.5 px-2 min-w-[140px]">
+      <td className={`${TABLE.td} min-w-[140px] pr-4`}>
         <SaudeDistribuicaoBar itens={po.itens} />
       </td>
     </tr>
@@ -412,15 +402,12 @@ function PrazoBadge({ p }: { p: PoSyncProjeto }) {
   if (p.completed_at) {
     if (p.prazo_status === "atrasado") {
       return (
-        <Badge
-          variant="destructive"
-          title={`Projeto entregue com atraso de ${p.atraso_dias}d em relação ao prazo planejado`}
-        >
-          +{p.atraso_dias}d
-        </Badge>
+        <span className="inline-flex" title={`Projeto entregue com atraso de ${p.atraso_dias}d em relação ao prazo planejado`}>
+          <Pill tone="red">+{p.atraso_dias}d</Pill>
+        </span>
       )
     }
-    return <Badge variant="success" title="Concluído dentro do prazo planejado">No prazo</Badge>
+    return <span className="inline-flex" title="Concluído dentro do prazo planejado"><Pill tone="emerald" dot>No prazo</Pill></span>
   }
   // Em andamento: atraso corrente vem do backend; fallback calcula pela data planejada.
   const diasCorrente =
@@ -428,15 +415,15 @@ function PrazoBadge({ p }: { p: PoSyncProjeto }) {
     Math.max(0, Math.floor((Date.now() - new Date(p.due_date).getTime()) / 86_400_000))
   if (diasCorrente > 0) {
     return (
-      <Badge
-        variant="destructive"
+      <span
+        className="inline-flex"
         title={`Em andamento com prazo estourado há ${diasCorrente}d (hoje − planejada) — o atraso cresce até a entrega`}
       >
-        +{diasCorrente}d
-      </Badge>
+        <Pill tone="red">+{diasCorrente}d</Pill>
+      </span>
     )
   }
-  return <Badge variant="success" title="Em andamento com prazo planejado ainda no futuro">No prazo</Badge>
+  return <span className="inline-flex" title="Em andamento com prazo planejado ainda no futuro"><Pill tone="emerald" dot>No prazo</Pill></span>
 }
 
 type RiskIcon = {
@@ -482,7 +469,7 @@ function projectRiskIcons(p: PoSyncProjeto): RiskIcon[] {
       key: "backlog",
       Icon: Layers,
       tip: "Backlog montado, execução ainda não iniciada",
-      className: "text-amber-600",
+      className: "text-amber-600 dark:text-amber-400",
     })
   }
   if (p.sem_datas_planejadas) {
@@ -490,7 +477,7 @@ function projectRiskIcons(p: PoSyncProjeto): RiskIcon[] {
       key: "sem-datas",
       Icon: CalendarX,
       tip: "Sem datas planejadas (início e fim) — saúde de prazo não avaliável",
-      className: "text-amber-600",
+      className: "text-amber-600 dark:text-amber-400",
     })
   }
   if (p.baseline_inconsistente) {
@@ -498,7 +485,7 @@ function projectRiskIcons(p: PoSyncProjeto): RiskIcon[] {
       key: "baseline",
       Icon: AlertTriangle,
       tip: "Baseline inconsistente (fim antes do início ou data inválida)",
-      className: "text-amber-600",
+      className: "text-amber-600 dark:text-amber-400",
     })
   }
   if (p.sem_diretoria) {
@@ -563,7 +550,7 @@ function ThTip({
   className?: string
 }) {
   return (
-    <th className={`py-2 font-medium ${className ?? ""}`}>
+    <th className={className}>
       <span className="group/th relative inline-flex cursor-help items-center gap-1">
         {label}
         <HelpCircle className="h-3 w-3 opacity-50" />
@@ -578,23 +565,23 @@ function ThTip({
 /** Tabela com TODOS os projetos de um recorte (PO). Nunca trunca em "+N". */
 function ProjetosTable({ projetos }: { projetos: PoSyncProjeto[] }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
-            <ThTip label="Projeto" tip={COLUNA_TIPS.projeto} className="pr-3" />
-            <ThTip label="Fase" tip={COLUNA_TIPS.fase} className="px-2" />
-            <ThTip label="Execução" tip={COLUNA_TIPS.execucao} className="px-2" />
-            <ThTip label="Conclusão" tip={COLUNA_TIPS.conclusao} className="px-2" />
-            <ThTip label="Diretoria" tip={COLUNA_TIPS.diretoria} className="px-2" />
-            <ThTip label="Prazo plan." tip={COLUNA_TIPS.prazo_plan} className="px-2" />
-            <ThTip label="Prazo" tip={COLUNA_TIPS.prazo} className="pl-2" />
+    <div className={TABLE.wrap}>
+      <table className={TABLE.table}>
+        <thead className={TABLE.thead}>
+          <tr>
+            <ThTip label="Projeto" tip={COLUNA_TIPS.projeto} className={TABLE.thFirst} />
+            <ThTip label="Fase" tip={COLUNA_TIPS.fase} className={TABLE.th} />
+            <ThTip label="Execução" tip={COLUNA_TIPS.execucao} className={TABLE.th} />
+            <ThTip label="Conclusão" tip={COLUNA_TIPS.conclusao} className={TABLE.th} />
+            <ThTip label="Diretoria" tip={COLUNA_TIPS.diretoria} className={TABLE.th} />
+            <ThTip label="Prazo plan." tip={COLUNA_TIPS.prazo_plan} className={TABLE.th} />
+            <ThTip label="Prazo" tip={COLUNA_TIPS.prazo} className={`${TABLE.th} pr-4`} />
           </tr>
         </thead>
         <tbody>
           {projetos.map((p) => (
-            <tr key={p.task_id} className="border-b last:border-0 align-top">
-              <td className="py-2 pr-3">
+            <tr key={p.task_id} className={`${TABLE.tr} align-top`}>
+              <td className={TABLE.tdFirst}>
                 <div className="flex items-center gap-1.5">
                   <span className="font-medium" title={p.title}>{p.title}</span>
                   <ProjectRiskIcons p={p} />
@@ -603,21 +590,21 @@ function ProjetosTable({ projetos }: { projetos: PoSyncProjeto[] }) {
                   <span className="text-xs text-muted-foreground">{p.stage_name}</span>
                 )}
               </td>
-              <td className="py-2 px-2">
-                <Badge variant={FASE_VARIANT[p.fase]} className={FASE_CLASS[p.fase]}>{FASE_LABEL[p.fase]}</Badge>
-                {p.em_operacao_assistida && (
-                  <Badge variant="outline" className="ml-1 border-teal-500/40 text-teal-700 dark:text-teal-400">Operação Assistida</Badge>
-                )}
+              <td className={TABLE.td}>
+                <div className="flex flex-wrap items-center gap-1">
+                  <Pill tone={FASE_TONE[p.fase]} dot>{FASE_LABEL[p.fase]}</Pill>
+                  {p.em_operacao_assistida && <Pill tone="teal">Operação Assistida</Pill>}
+                </div>
               </td>
-              <td className="py-2 px-2">
-                <div className="flex items-center gap-2">
+              <td className={TABLE.td}>
+                <div className="flex min-w-[110px] items-center gap-2">
                   <span className="tabular-nums w-9 shrink-0">{execLabel(p)}</span>
                   {p.exec_pct !== null && <MiniBar value={p.exec_pct} max={100} />}
                 </div>
               </td>
-              <td className="py-2 px-2">
+              <td className={TABLE.td}>
                 <div
-                  className="flex items-center gap-2"
+                  className="flex min-w-[110px] items-center gap-2"
                   title={`${p.subtree_completed} de ${p.subtree_total} itens concluídos`}
                 >
                   <span className="tabular-nums w-9 shrink-0">{conclLabel(p)}</span>
@@ -626,13 +613,13 @@ function ProjetosTable({ projetos }: { projetos: PoSyncProjeto[] }) {
                   )}
                 </div>
               </td>
-              <td className="py-2 px-2">
+              <td className={TABLE.td}>
                 <span className="text-xs" title={p.diretoria_label ?? "Sem diretoria cadastrada"}>
                   {p.diretoria_label ?? <span className="text-muted-foreground italic">sem diretoria</span>}
                 </span>
               </td>
-              <td className="py-2 px-2 tabular-nums text-xs text-muted-foreground">{fmtDate(p.due_date)}</td>
-              <td className="py-2 pl-2"><PrazoBadge p={p} /></td>
+              <td className={`${TABLE.td} tabular-nums text-xs text-muted-foreground`}>{fmtDate(p.due_date)}</td>
+              <td className={`${TABLE.td} pr-4`}><PrazoBadge p={p} /></td>
             </tr>
           ))}
         </tbody>
@@ -653,7 +640,7 @@ function EmRiscoBadge({ count }: { count: number }) {
   if (count <= 0) return <span className="text-muted-foreground">0</span>
   return (
     <span className="group/er relative inline-flex">
-      <Badge variant="destructive" className="cursor-help">{count}</Badge>
+      <Pill tone="red" dot className="cursor-help">{count}</Pill>
       <span className="pointer-events-none absolute bottom-full left-0 z-[60] mb-1.5 hidden w-max max-w-[260px] rounded-md border bg-popover px-2.5 py-1.5 text-left text-[11px] leading-snug text-popover-foreground shadow-md group-hover/er:block">
         {EM_RISCO_TIP}
       </span>
@@ -663,21 +650,21 @@ function EmRiscoBadge({ count }: { count: number }) {
 
 function PoKpiStrip({ kpis }: { kpis: PoSyncKpis }) {
   return (
-    <div className="flex flex-wrap gap-2 text-xs">
-      <Badge variant="secondary">{kpis.total} projeto(s)</Badge>
+    <div className="flex flex-wrap gap-1.5">
+      <Pill tone="slate">{kpis.total} projeto(s)</Pill>
       {FASES.filter((f) => (kpis.fases[f] ?? 0) > 0).map((f) => (
-        <Badge key={f} variant={FASE_VARIANT[f]} className={FASE_CLASS[f]}>
+        <Pill key={f} tone={FASE_TONE[f]} dot>
           {kpis.fases[f]} {FASE_KPI_LABEL[f]}
-        </Badge>
+        </Pill>
       ))}
-      <Badge variant="secondary">
+      <Pill tone="slate">
         exec. média {kpis.avg_exec_pct === null ? "—" : `${kpis.avg_exec_pct}%`}
-      </Badge>
+      </Pill>
       {kpis.fora_da_regra > 0 && (
         <span className="group/fr relative inline-flex">
-          <Badge variant="destructive" className="cursor-help gap-1">
+          <Pill tone="red" className="cursor-help">
             <Lock className="h-3 w-3" />{kpis.fora_da_regra} fora da regra
-          </Badge>
+          </Pill>
           <span className="pointer-events-none absolute bottom-full left-0 z-[60] mb-1.5 hidden w-max max-w-[280px] rounded-md border bg-popover px-2.5 py-1.5 text-left text-[11px] leading-snug text-popover-foreground shadow-md group-hover/fr:block">
             {FORA_DA_REGRA_TIP}
           </span>
@@ -685,7 +672,7 @@ function PoKpiStrip({ kpis }: { kpis: PoSyncKpis }) {
       )}
       {kpis.em_risco > 0 && (
         <span className="group/er relative inline-flex">
-          <Badge variant="destructive" className="cursor-help">{kpis.em_risco} em risco</Badge>
+          <Pill tone="red" className="cursor-help">{kpis.em_risco} em risco</Pill>
           <span className="pointer-events-none absolute bottom-full left-0 z-[60] mb-1.5 hidden w-max max-w-[260px] rounded-md border bg-popover px-2.5 py-1.5 text-left text-[11px] leading-snug text-popover-foreground shadow-md group-hover/er:block">
             {EM_RISCO_TIP}
           </span>
@@ -748,7 +735,7 @@ function PrazoResumo({
           {escopo} atrasados ({totalAtrasados}/{denomComb} avaliáveis)
         </span>
         <span
-          className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+          className="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium text-muted-foreground"
           title="Polaridade do indicador: mede atraso, então o objetivo é REDUZIR o percentual — 0% seria o ideal."
         >
           <TrendingDown className="h-3 w-3 text-destructive" /> quanto menor, melhor
@@ -786,10 +773,10 @@ function PrazoResumo({
           <b>{block.em_andamento_no_prazo}</b>
         </div>
       </div>
-      <div className="space-y-2 rounded-md border border-dashed p-2.5">
+      <div className="space-y-2 rounded-xl border border-dashed p-3">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-          <span className="inline-flex items-center gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            <Target className="h-3.5 w-3.5" /> Metas
+          <span className="inline-flex items-center gap-1 font-semibold">
+            <Target className="h-3.5 w-3.5 text-muted-foreground" /> Metas
           </span>
           <span title="Melhor cenário possível neste recorte: os atrasados de hoje não têm mais volta — este é o % se TODOS os itens em andamento no prazo forem entregues sem atrasar.">
             <span className="text-muted-foreground">Recorte: </span>
@@ -906,120 +893,120 @@ export default function PoSyncPage() {
 
   if (loading && !data) {
     return (
-      <div className="space-y-4">
-        <Skeleton className="h-24 w-full" />
-        <Skeleton className="h-48 w-full" />
-        <Skeleton className="h-48 w-full" />
+      <div className="space-y-5">
+        <Skeleton className="h-20 rounded-2xl" />
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          {Array.from({ length: 5 }, (_, i) => <Skeleton key={i} className="h-[74px] rounded-xl" />)}
+        </div>
+        <Skeleton className="h-48 rounded-2xl" />
+        <Skeleton className="h-48 rounded-2xl" />
       </div>
     )
   }
 
   if (!data) {
     return (
-      <EmptyState
-        icon={Users}
-        title="Sem projetos para a PO Sync"
-        description="Nenhum projeto/programa atribuído a um PO neste recorte. Ajuste os filtros ou cadastre o portfólio."
-      />
+      <Card>
+        <EmptyState
+          icon={Users}
+          title="Sem projetos para a PO Sync"
+          description="Nenhum projeto/programa atribuído a um PO neste recorte. Ajuste os filtros ou cadastre o portfólio."
+        />
+      </Card>
     )
   }
 
   const hasFilter = diretoria !== ALL || area !== ALL
 
   const filters = (
-    <div className="flex flex-wrap items-center gap-2">
-      <Filter className="h-4 w-4 text-muted-foreground" />
-      <Select value={diretoria} onValueChange={setDiretoria}>
-        <SelectTrigger className="h-8 w-[260px] text-sm"><SelectValue placeholder="Diretoria" /></SelectTrigger>
-        <SelectContent>
-          <SelectItem value={ALL}>Todas as diretorias</SelectItem>
-          {data.available_diretorias.map((o) => (
-            <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <Select value={area} onValueChange={setArea}>
-        <SelectTrigger className="h-8 w-[220px] text-sm"><SelectValue placeholder="Área" /></SelectTrigger>
-        <SelectContent>
-          <SelectItem value={ALL}>Todas as áreas</SelectItem>
-          {data.available_areas.map((o) => (
-            <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      {hasFilter && (
-        <button
-          className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-          onClick={() => { setDiretoria(ALL); setArea(ALL) }}
-        >
-          <X className="h-3 w-3" /> limpar
-        </button>
-      )}
-    </div>
+    <Card className="p-4">
+      <div className="flex flex-wrap items-end gap-3">
+        <FilterSelect
+          label="Diretoria"
+          value={diretoria}
+          onChange={setDiretoria}
+          options={[{ value: ALL, label: "Todas as diretorias" }, ...data.available_diretorias]}
+        />
+        <FilterSelect
+          label="Área"
+          value={area}
+          onChange={setArea}
+          options={[{ value: ALL, label: "Todas as áreas" }, ...data.available_areas]}
+        />
+        {hasFilter && (
+          <Button variant="ghost" className="h-10 gap-1" onClick={() => { setDiretoria(ALL); setArea(ALL) }}>
+            <X size={15} /> Limpar filtros
+          </Button>
+        )}
+      </div>
+    </Card>
   )
 
   // Recorte sem projetos: os filtros continuam na tela — sem eles não havia como desfazer.
   if (data.capa.total_projetos === 0) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-5">
         {filters}
-        <EmptyState
-          icon={Users}
-          title="Sem projetos para a PO Sync"
-          description={
-            hasFilter
-              ? "Nenhum projeto/programa neste recorte de diretoria/área."
-              : "Nenhum projeto/programa atribuído a um PO. Cadastre o portfólio."
-          }
-          {...(hasFilter ? { action: { label: "Limpar filtros", onClick: () => { setDiretoria(ALL); setArea(ALL) } } } : {})}
-        />
+        <Card>
+          <EmptyState
+            icon={Users}
+            title="Sem projetos para a PO Sync"
+            description={
+              hasFilter
+                ? "Nenhum projeto/programa neste recorte de diretoria/área."
+                : "Nenhum projeto/programa atribuído a um PO. Cadastre o portfólio."
+            }
+            {...(hasFilter ? { action: { label: "Limpar filtros", onClick: () => { setDiretoria(ALL); setArea(ALL) } } } : {})}
+          />
+        </Card>
       </div>
     )
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Filtros */}
       {filters}
 
       {/* 1. Capa */}
-      <section className="space-y-2">
+      <section className="space-y-3">
         <div>
-          <h3 className="text-base font-semibold">PO Sync — Portfólio</h3>
+          <h2 className="text-lg font-semibold">PO Sync — Portfólio</h2>
           <p className="text-sm text-muted-foreground">
             Visão consolidada para a cerimônia, liderada por Product Owner. Fase derivada da situação
             real dos itens; execução desconta itens despriorizados.
           </p>
         </div>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          <KpiCard label="Projetos" value={data.capa.total_projetos} icon={FolderKanban} />
-          <KpiCard label="Product Owners" value={data.capa.total_pos} icon={Users} />
-          <KpiCard label="Itens analisados" value={data.capa.total_itens} icon={Layers} />
-          <KpiCard label="Concluídos" value={data.capa.total_concluidos} icon={CheckCircle2} />
-          <KpiCard
-            label="Execução média"
-            value={data.panorama.avg_exec_pct === null ? "—" : `${data.panorama.avg_exec_pct}%`}
+        <KpiRow className="sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          <KpiCount icon={FolderKanban} value={data.capa.total_projetos} label="Projetos" />
+          <KpiCount icon={Users} value={data.capa.total_pos} label="Product Owners" />
+          <KpiCount icon={Layers} value={data.capa.total_itens} label="Itens analisados" tone="slate" />
+          <KpiCount icon={CheckCircle2} value={data.capa.total_concluidos} label="Concluídos" tone="emerald" />
+          <KpiCount
             icon={ListChecks}
-            sub="projetos em execução/encerramento"
+            value={data.panorama.avg_exec_pct === null ? "—" : `${data.panorama.avg_exec_pct}%`}
+            label="Execução média · projetos em execução/encerramento"
+            tone="violet"
           />
-        </div>
+        </KpiRow>
       </section>
 
       {/* 2. Panorama (fases granulares) */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Panorama por fase</CardTitle>
-          <CardDescription>
+      <SectionCard
+        title="Panorama por fase"
+        subtitle={
+          <>
             Fase de cada projeto pela <b>etapa atual do card-raiz no Kanban</b>: Planejamento → Desenvolvimento →
             Homologação → Produção → Concluído, com <b>Impedimento</b> à parte.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
+          </>
+        }
+      >
+        <div className="space-y-4">
           <div className="flex flex-wrap gap-3">
             {FASES.filter((f) => (data.panorama.fases[f] ?? 0) > 0).map((f) => (
-              <div key={f} className="grow basis-[150px] space-y-1.5 rounded-lg border p-3">
+              <div key={f} className="grow basis-[150px] space-y-2 rounded-xl border p-3">
                 <div className="flex items-center justify-between gap-1">
-                  <Badge variant={FASE_VARIANT[f]} className={FASE_CLASS[f]}>{FASE_LABEL[f]}</Badge>
+                  <Pill tone={FASE_TONE[f]} dot>{FASE_LABEL[f]}</Pill>
                   <span className="text-2xl font-bold tabular-nums">{data.panorama.fases[f] ?? 0}</span>
                 </div>
                 <MiniBar value={data.panorama.fases[f] ?? 0} max={fasesMax} />
@@ -1030,13 +1017,12 @@ export default function PoSyncPage() {
             <HoverPanel
               className="block"
               trigger={
-                <div className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+                <Notice tone="amber" icon={AlertTriangle}>
                   <span>
                     <b>{data.panorama.backlog_sem_execucao}</b> projeto(s) com <b>backlog montado mas execução não iniciada</b> —
                     achado próprio: há escopo priorizado parado, esperando arranque.
                   </span>
-                </div>
+                </Notice>
               }
             >
               <span className="mb-1.5 block font-medium normal-case">
@@ -1059,171 +1045,154 @@ export default function PoSyncPage() {
               </span>
             </HoverPanel>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </SectionCard>
 
       {/* 2b. Panorama por tipo de projeto (classificação) */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Panorama por tipo de projeto</CardTitle>
-          <CardDescription>
+      <SectionCard
+        title="Panorama por tipo de projeto"
+        subtitle={
+          <>
             Classificação do card-raiz: <b>Implantação</b>, <b>Desenvolvimento</b> ou <b>Melhoria</b>.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {(() => {
-            const cl = data.panorama.classificacoes
-            const clIa = data.panorama.classificacoes_ia
-            const clMax = Math.max(cl.implantacao, cl.desenvolvimento, cl.melhoria, cl.sem_classificacao, 1)
-            const tiles = [
-              ...CLASS_TILES,
-              ...(cl.sem_classificacao > 0
-                ? [{ key: "sem_classificacao" as const, label: "Sem classificação" }] : []),
-            ]
-            return (
-              <div className="flex flex-wrap gap-3">
-                {tiles.map((t) => {
-                  const ia = clIa?.[t.key]
-                  const tile = (
-                    <div className="w-full space-y-1.5 rounded-lg border p-3">
-                      <div className="flex items-center justify-between gap-1">
-                        <span className="text-sm font-medium">{t.label}</span>
-                        <span className="text-2xl font-bold tabular-nums">{cl[t.key]}</span>
-                      </div>
-                      <MiniBar value={cl[t.key]} max={clMax} />
+          </>
+        }
+      >
+        {(() => {
+          const cl = data.panorama.classificacoes
+          const clIa = data.panorama.classificacoes_ia
+          const clMax = Math.max(cl.implantacao, cl.desenvolvimento, cl.melhoria, cl.sem_classificacao, 1)
+          const tiles = [
+            ...CLASS_TILES,
+            ...(cl.sem_classificacao > 0
+              ? [{ key: "sem_classificacao" as const, label: "Sem classificação" }] : []),
+          ]
+          return (
+            <div className="flex flex-wrap gap-3">
+              {tiles.map((t) => {
+                const ia = clIa?.[t.key]
+                const tile = (
+                  <div className="w-full space-y-2 rounded-xl border p-3">
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-sm font-medium">{t.label}</span>
+                      <span className="text-2xl font-bold tabular-nums">{cl[t.key]}</span>
                     </div>
-                  )
-                  if (!ia) return <div key={t.key} className="grow basis-[160px]">{tile}</div>
-                  return (
-                    <HoverPanel key={t.key} className="block grow basis-[160px]" trigger={tile}>
-                      <p className="mb-1.5 font-semibold">{t.label} — uso de IA</p>
-                      <ul className="space-y-0.5">
-                        <li className="flex justify-between gap-4"><span>Com auxílio de IA</span><b className="tabular-nums">{ia.com_ia}</b></li>
-                        <li className="flex justify-between gap-4"><span>Sem auxílio de IA</span><b className="tabular-nums">{ia.sem_ia}</b></li>
-                        <li className="flex justify-between gap-4"><span>Não informado</span><b className="tabular-nums">{ia.nao_informado}</b></li>
-                      </ul>
-                    </HoverPanel>
-                  )
-                })}
-              </div>
-            )
-          })()}
-        </CardContent>
-      </Card>
+                    <MiniBar value={cl[t.key]} max={clMax} />
+                  </div>
+                )
+                if (!ia) return <div key={t.key} className="grow basis-[160px]">{tile}</div>
+                return (
+                  <HoverPanel key={t.key} className="block grow basis-[160px]" trigger={tile}>
+                    <p className="mb-1.5 font-semibold">{t.label} — uso de IA</p>
+                    <ul className="space-y-0.5">
+                      <li className="flex justify-between gap-4"><span>Com auxílio de IA</span><b className="tabular-nums">{ia.com_ia}</b></li>
+                      <li className="flex justify-between gap-4"><span>Sem auxílio de IA</span><b className="tabular-nums">{ia.sem_ia}</b></li>
+                      <li className="flex justify-between gap-4"><span>Não informado</span><b className="tabular-nums">{ia.nao_informado}</b></li>
+                    </ul>
+                  </HoverPanel>
+                )
+              })}
+            </div>
+          )
+        })()}
+      </SectionCard>
 
       {/* 2c. Entregas a nível de projeto (com filtro de mês) */}
-      <Card>
-        <CardHeader className="flex-col items-start gap-3 space-y-0 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <CardTitle>Entregas por projeto</CardTitle>
-            <CardDescription>
-              Concluídas no mês selecionado · previstas para o mês seguinte · impedimentos — a nível de projeto (card-raiz).
-            </CardDescription>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <span className="text-xs text-muted-foreground">Mês</span>
-            <Select value={monthValue} onValueChange={setMonthValue}>
-              <SelectTrigger className="h-8 w-[150px] text-sm"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {monthOpts.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-4 lg:grid-cols-3">
-            {/* Concluídas no mês */}
-            <div className="rounded-lg border p-3">
-              <p className="mb-2 flex items-center gap-1.5 text-sm font-medium">
-                <CheckCircle2 className="h-4 w-4 text-emerald-600" /> Concluídas — {data.entregas_projeto.mes_label}
-                <span className="text-xs text-muted-foreground">({data.entregas_projeto.concluidas.length})</span>
-              </p>
-              <div className="max-h-72 space-y-1.5 overflow-y-auto pr-1">
-                {data.entregas_projeto.concluidas.length === 0
-                  ? <p className="text-xs text-muted-foreground">Nenhum projeto concluído no mês.</p>
-                  : data.entregas_projeto.concluidas.map((p) => (
-                    <div key={p.task_id} className="border-b pb-1.5 text-xs last:border-0">
-                      <div className="font-medium">{p.title}</div>
-                      <div className="text-muted-foreground">
-                        {p.po ?? "—"} · {fmtDate(p.completed_at)}
-                        {p.em_operacao_assistida && <span className="ml-1 text-teal-600">· em operação assistida</span>}
-                        {p.prazo_status === "atrasado" && <Badge variant="destructive" className="ml-1">+{p.atraso_dias}d</Badge>}
-                        {p.prazo_status === "no_prazo" && <span className="ml-1 text-emerald-600">no prazo</span>}
-                      </div>
+      <SectionCard
+        title="Entregas por projeto"
+        subtitle="Concluídas no mês selecionado · previstas para o mês seguinte · impedimentos — a nível de projeto (card-raiz)."
+        right={<FilterSelect label="Mês" value={monthValue} onChange={setMonthValue} options={monthOpts} />}
+      >
+        <div className="grid gap-4 lg:grid-cols-3">
+          {/* Concluídas no mês */}
+          <div className="rounded-xl border p-3">
+            <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+              <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" /> Concluídas — {data.entregas_projeto.mes_label}
+              <span className="text-xs font-normal text-muted-foreground">({data.entregas_projeto.concluidas.length})</span>
+            </p>
+            <div className="max-h-72 space-y-1.5 overflow-y-auto pr-1">
+              {data.entregas_projeto.concluidas.length === 0
+                ? <p className="text-xs text-muted-foreground">Nenhum projeto concluído no mês.</p>
+                : data.entregas_projeto.concluidas.map((p) => (
+                  <div key={p.task_id} className="border-b pb-1.5 text-xs last:border-0">
+                    <div className="font-medium">{p.title}</div>
+                    <div className="text-muted-foreground">
+                      {p.po ?? "—"} · {fmtDate(p.completed_at)}
+                      {p.em_operacao_assistida && <span className="ml-1 text-teal-600 dark:text-teal-400">· em operação assistida</span>}
+                      {p.prazo_status === "atrasado" && <Pill tone="red" className="ml-1">+{p.atraso_dias}d</Pill>}
+                      {p.prazo_status === "no_prazo" && <span className="ml-1 text-emerald-600 dark:text-emerald-400">no prazo</span>}
                     </div>
-                  ))}
-              </div>
-            </div>
-            {/* Previstas para o próximo mês */}
-            <div className="rounded-lg border p-3">
-              <p className="mb-2 flex items-center gap-1.5 text-sm font-medium">
-                <Clock className="h-4 w-4 text-sky-600" /> Previstas — {data.entregas_projeto.proximo_mes_label}
-                <span className="text-xs text-muted-foreground">({data.entregas_projeto.previstas.length})</span>
-              </p>
-              <div className="max-h-72 space-y-1.5 overflow-y-auto pr-1">
-                {data.entregas_projeto.previstas.length === 0
-                  ? <p className="text-xs text-muted-foreground">Nada previsto para o próximo mês.</p>
-                  : data.entregas_projeto.previstas.map((p) => (
-                    <div key={p.task_id} className="border-b pb-1.5 text-xs last:border-0">
-                      <div className="font-medium">{p.title}</div>
-                      <div className="text-muted-foreground">{p.po ?? "—"} · prazo {fmtDate(p.due_date)}</div>
-                    </div>
-                  ))}
-              </div>
-            </div>
-            {/* Impedimentos (atraso/SLA aparece como badge extra do projeto impedido) */}
-            <div className="rounded-lg border border-destructive/30 p-3">
-              <p className="mb-2 flex items-center gap-1.5 text-sm font-medium">
-                <AlertTriangle className="h-4 w-4 text-destructive" /> Impedimentos
-                <span className="text-xs text-muted-foreground">({data.entregas_projeto.riscos.length})</span>
-              </p>
-              <div className="max-h-72 space-y-1.5 overflow-y-auto pr-1">
-                {data.entregas_projeto.riscos.length === 0
-                  ? <p className="text-xs text-muted-foreground">Sem impedimentos.</p>
-                  : data.entregas_projeto.riscos.map((p) => (
-                    <div key={p.task_id} className="border-b pb-1.5 text-xs last:border-0">
-                      <div className="font-medium">{p.title}</div>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-1">
-                        <span className="text-muted-foreground">{p.po ?? "—"}</span>
-                        {p.motivos.map((m, i) => (
-                          <Badge key={i} variant="warning"
-                            className={m.startsWith("Impedimento") ? "border-transparent bg-red-600 text-white hover:bg-red-600" : ""}>
-                            {m}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-              </div>
+                  </div>
+                ))}
             </div>
           </div>
-        </CardContent>
-      </Card>
+          {/* Previstas para o próximo mês */}
+          <div className="rounded-xl border p-3">
+            <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+              <Clock className="h-4 w-4 text-sky-600 dark:text-sky-400" /> Previstas — {data.entregas_projeto.proximo_mes_label}
+              <span className="text-xs font-normal text-muted-foreground">({data.entregas_projeto.previstas.length})</span>
+            </p>
+            <div className="max-h-72 space-y-1.5 overflow-y-auto pr-1">
+              {data.entregas_projeto.previstas.length === 0
+                ? <p className="text-xs text-muted-foreground">Nada previsto para o próximo mês.</p>
+                : data.entregas_projeto.previstas.map((p) => (
+                  <div key={p.task_id} className="border-b pb-1.5 text-xs last:border-0">
+                    <div className="font-medium">{p.title}</div>
+                    <div className="text-muted-foreground">{p.po ?? "—"} · prazo {fmtDate(p.due_date)}</div>
+                  </div>
+                ))}
+            </div>
+          </div>
+          {/* Impedimentos (atraso/SLA aparece como badge extra do projeto impedido) */}
+          <div className="rounded-xl border border-red-200 p-3 dark:border-red-900">
+            <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+              <AlertTriangle className="h-4 w-4 text-red-600 dark:text-red-400" /> Impedimentos
+              <span className="text-xs font-normal text-muted-foreground">({data.entregas_projeto.riscos.length})</span>
+            </p>
+            <div className="max-h-72 space-y-1.5 overflow-y-auto pr-1">
+              {data.entregas_projeto.riscos.length === 0
+                ? <p className="text-xs text-muted-foreground">Sem impedimentos.</p>
+                : data.entregas_projeto.riscos.map((p) => (
+                  <div key={p.task_id} className="border-b pb-1.5 text-xs last:border-0">
+                    <div className="font-medium">{p.title}</div>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                      <span className="text-muted-foreground">{p.po ?? "—"}</span>
+                      {p.motivos.map((m, i) => (
+                        <Pill key={i} tone={m.startsWith("Impedimento") ? "red" : "amber"}>
+                          {m}
+                        </Pill>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </div>
+        </div>
+      </SectionCard>
 
       {/* 3. Saúde de prazo */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Saúde de prazo — {data.entregas_projeto.mes_label}</CardTitle>
-          <CardDescription>
+      <SectionCard
+        title={`Saúde de prazo — ${data.entregas_projeto.mes_label}`}
+        subtitle={
+          <>
             <b>Foto do mês selecionado</b>: entregas concluídas dentro do mês (Data Fim Real vs
             Planejada) + situação de quem estava em andamento no fim do mês — prazo estourado
             conta como <b>atraso corrente</b>. Considera somente projetos em{" "}
             <b>desenvolvimento ou além</b> (exclui planejamento e impedimento). Use o filtro de
             mês no topo para navegar entre ciclos e acompanhar a evolução rumo à meta.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
+          </>
+        }
+      >
+        <div className="space-y-4">
           {data.prazo.sem_datas_comparaveis > 0 && (
             <HoverPanel
               className="block"
               trigger={
-                <div className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm">
-                  <CalendarX className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+                <Notice tone="amber" icon={CalendarX}>
                   <span>
                     <b>{data.prazo.sem_datas_comparaveis}</b> projeto(s) sem <b>Data Fim Planejada</b> —
                     impossível avaliar prazo. Registrar o prazo planejado nos cards para entrarem no indicador.
                   </span>
-                </div>
+                </Notice>
               }
             >
               <span className="mb-1.5 block font-medium normal-case">
@@ -1247,282 +1216,267 @@ export default function PoSyncPage() {
             </HoverPanel>
           )}
           <div className="grid gap-4 lg:grid-cols-2">
-            <div className="rounded-lg border p-3">
-              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Nível projeto</p>
+            <div className="rounded-xl border p-4">
+              <p className="mb-2 text-sm font-semibold">Nível projeto</p>
               <PrazoResumo
                 block={data.prazo.projetos}
                 escopo="projetos"
                 semBaseline={data.prazo.sem_datas_comparaveis}
               />
             </div>
-            <div className="rounded-lg border p-3">
-              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Nível entrega (itens)</p>
+            <div className="rounded-xl border p-4">
+              <p className="mb-2 text-sm font-semibold">Nível entrega (itens)</p>
               <PrazoResumo block={data.prazo.itens} escopo="entregas" />
             </div>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </SectionCard>
 
       {/* 4. Ranking por PO */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Ranking por PO</CardTitle>
-          <CardDescription>Todos os POs com portfólio, do maior para o menor.</CardDescription>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
-                <th className="py-2 pr-3 font-medium">Product Owner</th>
-                <th className="py-2 px-2 font-medium">Projetos</th>
-                <th className="py-2 px-2 font-medium">Distribuição por fase</th>
-                <th className="py-2 px-2 font-medium">Exec. média</th>
-                <th className="py-2 pl-2 font-medium">Em risco</th>
+      <SectionCard title="Ranking por PO" subtitle="Todos os POs com portfólio, do maior para o menor." flush>
+        <div className={TABLE.wrap}>
+          <table className={TABLE.table}>
+            <thead className={TABLE.thead}>
+              <tr>
+                <th className={TABLE.thFirst}>Product Owner</th>
+                <th className={TABLE.th}>Projetos</th>
+                <th className={TABLE.th}>Distribuição por fase</th>
+                <th className={TABLE.th}>Exec. média</th>
+                <th className={`${TABLE.th} pr-4`}>Em risco</th>
               </tr>
             </thead>
             <tbody>
               {data.ranking_pos.map((po) => (
-                <tr key={po.po_id ?? po.full_name} className="border-b last:border-0 align-top">
-                  <td className="py-2 pr-3 font-medium">{po.full_name ?? "—"}</td>
-                  <td className="py-2 px-2 tabular-nums">{po.total}</td>
-                  <td className="py-2 px-2"><FaseChips fases={po.fases} bloqueados={po.fora_da_regra} /></td>
-                  <td className="py-2 px-2 tabular-nums">{po.avg_exec_pct === null ? "—" : `${po.avg_exec_pct}%`}</td>
-                  <td className="py-2 pl-2">
+                <tr key={po.po_id ?? po.full_name} className={`${TABLE.tr} align-top`}>
+                  <td className={`${TABLE.tdFirst} font-medium`}>{po.full_name ?? "—"}</td>
+                  <td className={`${TABLE.td} tabular-nums`}>{po.total}</td>
+                  <td className={TABLE.td}><FaseChips fases={po.fases} bloqueados={po.fora_da_regra} /></td>
+                  <td className={`${TABLE.td} tabular-nums`}>{po.avg_exec_pct === null ? "—" : `${po.avg_exec_pct}%`}</td>
+                  <td className={`${TABLE.td} pr-4`}>
                     <EmRiscoBadge count={po.em_risco} />
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </CardContent>
-      </Card>
+        </div>
+      </SectionCard>
 
       {/* 4b. Saúde do portfólio de PRODUTOS por PO */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2"><Package className="h-4 w-4" /> Saúde do portfólio de produtos por PO</CardTitle>
-          <CardDescription>
+      <SectionCard
+        title="Saúde do portfólio de produtos por PO"
+        icon={Package}
+        subtitle={
+          <>
             Índice de Saúde agregado por Responsável (PO). Scores de <strong>produção</strong> consideram produtos em
             Produção, Sustentação ou Evolução; scores de <strong>desenvolvimento</strong> consideram Ideia, Discovery,
             Desenvolvimento ou Homologação. Produtos corporativos contam para cada PO dos serviços. Visão de todo o portfólio.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {data.saude_produtos.resumo.total_produtos === 0 ? (
-            <p className="text-sm text-muted-foreground">Nenhum produto ativo cadastrado.</p>
-          ) : (
-            <>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="rounded-lg border p-3">
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Portfólio</p>
-                  <p className="mt-1 text-2xl font-bold tabular-nums">{data.saude_produtos.resumo.total_produtos}</p>
-                  <p className="text-xs text-muted-foreground">produtos ativos</p>
-                </div>
-                <div className="rounded-lg border p-3">
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Score — Produção</p>
-                  <ProdutosTip produtos={data.saude_produtos.resumo.producao.produtos} titulo="Produção">
-                    <div>
-                      <p className={`mt-1 text-2xl tabular-nums ${scoreTone(data.saude_produtos.resumo.producao.score_medio)}`}>
-                        {fmtScore(data.saude_produtos.resumo.producao.score_medio)}
-                      </p>
-                      <p className="text-xs text-muted-foreground">{data.saude_produtos.resumo.producao.total} em produção</p>
-                    </div>
-                  </ProdutosTip>
-                </div>
-                <div className="rounded-lg border p-3">
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Score — Desenvolvimento</p>
-                  <ProdutosTip produtos={data.saude_produtos.resumo.desenvolvimento.produtos} titulo="Desenvolvimento">
-                    <div>
-                      <p className={`mt-1 text-2xl tabular-nums ${scoreTone(data.saude_produtos.resumo.desenvolvimento.score_medio)}`}>
-                        {fmtScore(data.saude_produtos.resumo.desenvolvimento.score_medio)}
-                      </p>
-                      <p className="text-xs text-muted-foreground">{data.saude_produtos.resumo.desenvolvimento.total} em desenvolvimento</p>
-                    </div>
-                  </ProdutosTip>
-                </div>
-                <div className="rounded-lg border p-3">
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Distribuição geral</p>
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    <Badge variant="success">{data.saude_produtos.resumo.distribuicao.saudavel} saudável</Badge>
-                    <Badge variant="warning">{data.saude_produtos.resumo.distribuicao.atencao} atenção</Badge>
-                    <CriticosTip criticos={data.saude_produtos.resumo.criticos}>
-                      <Badge variant="destructive">{data.saude_produtos.resumo.distribuicao.critico} crítico</Badge>
-                    </CriticosTip>
+          </>
+        }
+      >
+        {data.saude_produtos.resumo.total_produtos === 0 ? (
+          <p className="text-sm text-muted-foreground">Nenhum produto ativo cadastrado.</p>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-xl border p-3">
+                <p className="text-sm text-muted-foreground">Portfólio</p>
+                <p className="mt-1 text-2xl font-bold tabular-nums">{data.saude_produtos.resumo.total_produtos}</p>
+                <p className="text-xs text-muted-foreground">produtos ativos</p>
+              </div>
+              <div className="rounded-xl border p-3">
+                <p className="text-sm text-muted-foreground">Score — Produção</p>
+                <ProdutosTip produtos={data.saude_produtos.resumo.producao.produtos} titulo="Produção">
+                  <div>
+                    <p className={`mt-1 text-2xl tabular-nums ${scoreTone(data.saude_produtos.resumo.producao.score_medio)}`}>
+                      {fmtScore(data.saude_produtos.resumo.producao.score_medio)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">{data.saude_produtos.resumo.producao.total} em produção</p>
                   </div>
-                  <p className="mt-1 text-xs text-muted-foreground">Média geral {data.saude_produtos.resumo.media_score}</p>
+                </ProdutosTip>
+              </div>
+              <div className="rounded-xl border p-3">
+                <p className="text-sm text-muted-foreground">Score — Desenvolvimento</p>
+                <ProdutosTip produtos={data.saude_produtos.resumo.desenvolvimento.produtos} titulo="Desenvolvimento">
+                  <div>
+                    <p className={`mt-1 text-2xl tabular-nums ${scoreTone(data.saude_produtos.resumo.desenvolvimento.score_medio)}`}>
+                      {fmtScore(data.saude_produtos.resumo.desenvolvimento.score_medio)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">{data.saude_produtos.resumo.desenvolvimento.total} em desenvolvimento</p>
+                  </div>
+                </ProdutosTip>
+              </div>
+              <div className="rounded-xl border p-3">
+                <p className="text-sm text-muted-foreground">Distribuição geral</p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <Pill tone="emerald" dot>{data.saude_produtos.resumo.distribuicao.saudavel} saudável</Pill>
+                  <Pill tone="amber" dot>{data.saude_produtos.resumo.distribuicao.atencao} atenção</Pill>
+                  <CriticosTip criticos={data.saude_produtos.resumo.criticos}>
+                    <Pill tone="red" dot>{data.saude_produtos.resumo.distribuicao.critico} crítico</Pill>
+                  </CriticosTip>
                 </div>
+                <p className="mt-1 text-xs text-muted-foreground">Média geral {data.saude_produtos.resumo.media_score}</p>
               </div>
-              <div className="overflow-x-auto rounded-lg border">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
-                      <th className="py-2.5 pr-3 pl-3 font-medium">Product Owner</th>
-                      <th className="py-2.5 px-2 font-medium text-center">Total</th>
-                      <th className="py-2.5 px-2 font-medium">Score produção</th>
-                      <th className="py-2.5 px-2 font-medium">Score desenvolvimento</th>
-                      <th className="py-2.5 px-2 font-medium text-center">Outros</th>
-                      <th className="py-2.5 px-2 pr-3 font-medium min-w-[140px]">Distribuição</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.saude_produtos.por_po.map((po) => (
-                      <SaudeProdutosPoRow key={po.po_id ?? po.full_name} po={po} />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
+            </div>
+            <div className={`${TABLE.wrap} rounded-xl border`}>
+              <table className={TABLE.table}>
+                <thead className={TABLE.thead}>
+                  <tr>
+                    <th className={TABLE.thFirst}>Product Owner</th>
+                    <th className={`${TABLE.th} text-center`}>Total</th>
+                    <th className={TABLE.th}>Score produção</th>
+                    <th className={TABLE.th}>Score desenvolvimento</th>
+                    <th className={`${TABLE.th} text-center`}>Outros</th>
+                    <th className={`${TABLE.th} min-w-[140px] pr-4`}>Distribuição</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.saude_produtos.por_po.map((po) => (
+                    <SaudeProdutosPoRow key={po.po_id ?? po.full_name} po={po} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </SectionCard>
 
       {/* 4c. Saúde dos PROJETOS por PO */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2"><HeartPulse className="h-4 w-4" /> Saúde dos projetos por PO</CardTitle>
-          <CardDescription>Saúde de prazo dos projetos deste recorte por Product Owner — saudável (verde) vs. em risco/atrasado (vermelho).</CardDescription>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
-                <th className="py-2 pr-3 font-medium">Product Owner</th>
-                <th className="py-2 px-2 font-medium">Projetos</th>
-                <th className="py-2 px-2 font-medium">Saudáveis</th>
-                <th className="py-2 px-2 font-medium">Em risco</th>
-                <th className="py-2 pl-2 font-medium">Atrasados</th>
+      <SectionCard
+        title="Saúde dos projetos por PO"
+        icon={HeartPulse}
+        subtitle="Saúde de prazo dos projetos deste recorte por Product Owner — saudável (verde) vs. em risco/atrasado (vermelho)."
+        flush
+      >
+        <div className={TABLE.wrap}>
+          <table className={TABLE.table}>
+            <thead className={TABLE.thead}>
+              <tr>
+                <th className={TABLE.thFirst}>Product Owner</th>
+                <th className={TABLE.th}>Projetos</th>
+                <th className={TABLE.th}>Saudáveis</th>
+                <th className={TABLE.th}>Em risco</th>
+                <th className={`${TABLE.th} pr-4`}>Atrasados</th>
               </tr>
             </thead>
             <tbody>
               {data.ranking_pos.map((po) => (
-                <tr key={po.po_id ?? po.full_name} className="border-b last:border-0">
-                  <td className="py-2 pr-3 font-medium">{po.full_name ?? "—"}</td>
-                  <td className="py-2 px-2 tabular-nums">{po.total}</td>
-                  <td className="py-2 px-2 tabular-nums">{po.total - po.em_risco}</td>
-                  <td className="py-2 px-2">
+                <tr key={po.po_id ?? po.full_name} className={TABLE.tr}>
+                  <td className={`${TABLE.tdFirst} font-medium`}>{po.full_name ?? "—"}</td>
+                  <td className={`${TABLE.td} tabular-nums`}>{po.total}</td>
+                  <td className={`${TABLE.td} tabular-nums`}>{po.total - po.em_risco}</td>
+                  <td className={TABLE.td}>
                     <EmRiscoBadge count={po.em_risco} />
                   </td>
-                  <td className="py-2 pl-2 tabular-nums">{po.atrasados}</td>
+                  <td className={`${TABLE.td} pr-4 tabular-nums`}>{po.atrasados}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </CardContent>
-      </Card>
+        </div>
+      </SectionCard>
 
       {/* 5. Uma "página" por PO */}
       <section className="space-y-4">
-        <h3 className="text-base font-semibold">Detalhe por PO</h3>
+        <h2 className="text-lg font-semibold">Detalhe por PO</h2>
         {data.por_po.map((po) => (
-          <Card key={po.po_id ?? po.full_name}>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Users className="h-4 w-4" /> {po.full_name ?? "—"}
-              </CardTitle>
-              <div className="pt-1"><PoKpiStrip kpis={po.kpis} /></div>
-            </CardHeader>
-            <CardContent>
-              <ProjetosTable projetos={po.projetos} />
-            </CardContent>
-          </Card>
+          <SectionCard key={po.po_id ?? po.full_name} title={po.full_name ?? "—"} icon={Users} flush>
+            <div className="border-b px-5 py-3"><PoKpiStrip kpis={po.kpis} /></div>
+            <ProjetosTable projetos={po.projetos} />
+          </SectionCard>
         ))}
       </section>
 
       {/* 6. Visão por Diretoria */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Visão por Diretoria</CardTitle>
-          <CardDescription>Concentração do portfólio e quais diretorias puxam a execução para baixo.</CardDescription>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
-                <th className="py-2 pr-3 font-medium">Diretoria</th>
-                <th className="py-2 px-2 font-medium">Projetos</th>
-                <th className="py-2 px-2 font-medium">Distribuição por fase</th>
-                <th className="py-2 px-2 font-medium">Exec. média</th>
-                <th className="py-2 pl-2 font-medium">Em risco</th>
+      <SectionCard
+        title="Visão por Diretoria"
+        subtitle="Concentração do portfólio e quais diretorias puxam a execução para baixo."
+        flush
+      >
+        <div className={TABLE.wrap}>
+          <table className={TABLE.table}>
+            <thead className={TABLE.thead}>
+              <tr>
+                <th className={TABLE.thFirst}>Diretoria</th>
+                <th className={TABLE.th}>Projetos</th>
+                <th className={TABLE.th}>Distribuição por fase</th>
+                <th className={TABLE.th}>Exec. média</th>
+                <th className={`${TABLE.th} pr-4`}>Em risco</th>
               </tr>
             </thead>
             <tbody>
               {data.por_diretoria.map((d) => (
-                <tr key={d.diretoria_label} className="border-b last:border-0 align-top">
-                  <td className="py-2 pr-3 font-medium">
+                <tr key={d.diretoria_label} className={`${TABLE.tr} align-top`}>
+                  <td className={`${TABLE.tdFirst} font-medium`}>
                     {d.sem_baseline ? <span className="italic text-muted-foreground">{d.diretoria_label}</span> : d.diretoria_label}
                   </td>
-                  <td className="py-2 px-2 tabular-nums">{d.total}</td>
-                  <td className="py-2 px-2"><FaseChips fases={d.fases} /></td>
-                  <td className="py-2 px-2 tabular-nums">{d.avg_exec_pct === null ? "—" : `${d.avg_exec_pct}%`}</td>
-                  <td className="py-2 pl-2">
+                  <td className={`${TABLE.td} tabular-nums`}>{d.total}</td>
+                  <td className={TABLE.td}><FaseChips fases={d.fases} /></td>
+                  <td className={`${TABLE.td} tabular-nums`}>{d.avg_exec_pct === null ? "—" : `${d.avg_exec_pct}%`}</td>
+                  <td className={`${TABLE.td} pr-4`}>
                     <EmRiscoBadge count={d.em_risco} />
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </CardContent>
-      </Card>
+        </div>
+      </SectionCard>
 
       {/* 7. Maiores atrasos */}
       {data.maiores_atrasos.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2"><Clock className="h-4 w-4" /> Maiores atrasos</CardTitle>
-            <CardDescription>A média esconde casos extremos — estes são os outliers que precisam de ação.</CardDescription>
-          </CardHeader>
-          <CardContent className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
-                  <th className="py-2 pr-3 font-medium">Entrega / Projeto</th>
-                  <th className="py-2 px-2 font-medium">Nível</th>
-                  <th className="py-2 px-2 font-medium">PO</th>
-                  <th className="py-2 px-2 font-medium">Planejada</th>
-                  <th className="py-2 px-2 font-medium">Real</th>
-                  <th className="py-2 pl-2 font-medium">Atraso</th>
+        <SectionCard
+          title="Maiores atrasos"
+          icon={Clock}
+          subtitle="A média esconde casos extremos — estes são os outliers que precisam de ação."
+          flush
+        >
+          <div className={TABLE.wrap}>
+            <table className={TABLE.table}>
+              <thead className={TABLE.thead}>
+                <tr>
+                  <th className={TABLE.thFirst}>Entrega / Projeto</th>
+                  <th className={TABLE.th}>Nível</th>
+                  <th className={TABLE.th}>PO</th>
+                  <th className={TABLE.th}>Planejada</th>
+                  <th className={TABLE.th}>Real</th>
+                  <th className={`${TABLE.th} pr-4`}>Atraso</th>
                 </tr>
               </thead>
               <tbody>
                 {data.maiores_atrasos.map((o, i) => (
-                  <tr key={`${o.title}-${i}`} className="border-b last:border-0">
-                    <td className="py-2 pr-3">
+                  <tr key={`${o.title}-${i}`} className={TABLE.tr}>
+                    <td className={TABLE.tdFirst}>
                       <span className="font-medium">{o.title}</span>
                       {o.nivel === "item" && o.projeto !== o.title && (
                         <span className="block text-xs text-muted-foreground">{o.projeto}</span>
                       )}
                     </td>
-                    <td className="py-2 px-2"><Badge variant="secondary">{o.nivel}</Badge></td>
-                    <td className="py-2 px-2 text-xs">{o.po ?? "—"}</td>
-                    <td className="py-2 px-2 tabular-nums text-xs text-muted-foreground">{fmtDate(o.planejada)}</td>
-                    <td className="py-2 px-2 tabular-nums text-xs text-muted-foreground">{fmtDate(o.real)}</td>
-                    <td className="py-2 pl-2"><Badge variant="destructive">+{o.atraso_dias}d</Badge></td>
+                    <td className={TABLE.td}><Pill tone="slate">{o.nivel}</Pill></td>
+                    <td className={`${TABLE.td} text-xs`}>{o.po ?? "—"}</td>
+                    <td className={`${TABLE.td} tabular-nums text-xs text-muted-foreground`}>{fmtDate(o.planejada)}</td>
+                    <td className={`${TABLE.td} tabular-nums text-xs text-muted-foreground`}>{fmtDate(o.real)}</td>
+                    <td className={`${TABLE.td} pr-4`}><Pill tone="red">+{o.atraso_dias}d</Pill></td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </CardContent>
-        </Card>
+          </div>
+        </SectionCard>
       )}
 
       {/* 8. Próximos passos */}
       {data.proximos_passos.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Próximos passos</CardTitle>
-            <CardDescription>Ações sugeridas a partir dos achados acima.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ul className="space-y-2 text-sm">
-              {data.proximos_passos.map((s, i) => (
-                <li key={i} className="flex items-start gap-2">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                  <span>{s}</span>
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
+        <SectionCard title="Próximos passos" subtitle="Ações sugeridas a partir dos achados acima.">
+          <ul className="space-y-2 text-sm">
+            {data.proximos_passos.map((s, i) => (
+              <li key={i} className="flex items-start gap-2">
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                <span>{s}</span>
+              </li>
+            ))}
+          </ul>
+        </SectionCard>
       )}
 
       {data.meta.generated_at && (

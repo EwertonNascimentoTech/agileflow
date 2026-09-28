@@ -1,3 +1,4 @@
+import type { Tone } from "@/components/ds"
 import type {
   ClassificacaoInformacao,
   ContratoStatus,
@@ -7,6 +8,7 @@ import type {
   DocumentoEspecie,
   DocumentoFormato,
   NivelDadosPessoais,
+  ProcessItemStatus,
   ProductCategoria,
   ProductCriticidade,
   ProductLifecycle,
@@ -14,12 +16,12 @@ import type {
   ProductOrigem,
   ProductStatus,
   ProductTipoDev,
-  ProcessItemStatus,
   ProductUnidade,
   ReleaseAmbiente,
   ReleaseImpacto,
   ReleaseStatus,
   ReleaseTipo,
+  SaudeClasse,
   ServicoStatus,
   ServicoSuporte,
   Sustentacao,
@@ -218,3 +220,17 @@ export const PROCESS_ITEM_STATUS_COLOR: Record<ProcessItemStatus, string> = {
   planejado: "#6B7280", em_andamento: "#2563EB", concluido: "#16A34A",
 }
 export const PROCESS_ITEM_STATUS_OPTS: ProcessItemStatus[] = ["planejado", "em_andamento", "concluido"]
+
+// Tons dos selos (Pill, design system do Portal) — os mesmos na lista e na ficha do produto.
+// Saúde segue a classe calculada pelo backend (os mesmos limiares de antes).
+export const SAUDE_TONE: Record<SaudeClasse, Tone> = { saudavel: "emerald", atencao: "amber", critico: "red" }
+export const LIFECYCLE_TONE: Record<ProductLifecycle, Tone> = {
+  concepcao: "slate", desenvolvimento: "violet", producao: "emerald", descontinuado: "slate",
+}
+export const CONTRATO_TONE: Record<ContratoStatus, Tone> = {
+  sem_contrato: "slate", em_formalizacao: "amber", vigente: "emerald", a_vencer: "amber",
+  vencido: "red", em_renovacao: "blue", encerrado: "slate",
+}
+export const DOC_TONE: Record<DocumentacaoStatus, Tone> = {
+  nao_iniciada: "slate", em_elaboracao: "amber", publicada: "emerald", necessita_atualizacao: "amber", obsoleta: "red",
+}

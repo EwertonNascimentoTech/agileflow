@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from "react"
-import { ExternalLink, GitCommitHorizontal, Loader2, Plus, Search, Trash2 } from "lucide-react"
+import { AlertTriangle, ExternalLink, GitCommitHorizontal, Loader2, Plus, Search, Trash2 } from "lucide-react"
 
 import type { UsCommitEvidenceState, UsCommitItem } from "@/api/projetos"
 import { projetosApi } from "@/api/projetos"
+import { Notice, Pill, type Tone } from "@/components/ds"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { toast } from "@/lib/toast"
+import { DrawerSection } from "@/modules/projetos/CollapsibleFormSection"
 
 /** Mesma extração usada no drawer: o backend manda a causa em `detail`. */
 function erroDaApi(err: unknown): string {
@@ -15,18 +17,18 @@ function erroDaApi(err: unknown): string {
   return typeof d === "string" ? d : ""
 }
 
-const ENV_LABEL: Record<string, { texto: string; classe: string }> = {
-  prod: { texto: "PROD", classe: "bg-emerald-100 text-emerald-800" },
-  hml: { texto: "HML", classe: "bg-amber-100 text-amber-800" },
-  dev: { texto: "DEV", classe: "bg-slate-100 text-slate-700" },
+const ENV_LABEL: Record<string, { texto: string; tom: Tone }> = {
+  prod: { texto: "PROD", tom: "emerald" },
+  hml: { texto: "HML", tom: "amber" },
+  dev: { texto: "DEV", tom: "slate" },
 }
 
 function EnvChip({ env }: { env: string | null }) {
-  const cfg = ENV_LABEL[env ?? ""] ?? { texto: "—", classe: "bg-slate-100 text-slate-500" }
+  const cfg = ENV_LABEL[env ?? ""] ?? { texto: "—", tom: "slate" as Tone }
   return (
-    <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold ${cfg.classe}`}>
+    <Pill tone={cfg.tom} className="shrink-0">
       {cfg.texto}
-    </span>
+    </Pill>
   )
 }
 
@@ -38,11 +40,11 @@ function CommitRow({
   action: React.ReactNode
 }) {
   return (
-    <div className="flex items-start gap-2 rounded-md border px-2 py-1.5">
+    <div className="flex items-start gap-2 rounded-lg border bg-card px-3 py-2">
       <EnvChip env={commit.environment} />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-xs font-medium">{commit.comment ?? "(sem mensagem)"}</p>
-        <p className="truncate text-[11px] text-muted-foreground">
+        <p className="truncate text-sm font-medium">{commit.comment ?? "(sem mensagem)"}</p>
+        <p className="truncate text-xs text-muted-foreground">
           <code>{commit.short_id}</code>
           {commit.repository ? ` · ${commit.repository}` : ""}
           {commit.author_name ? ` · ${commit.author_name}` : ""}
@@ -164,33 +166,33 @@ export function UsCommitsSection({
   const justificativaMudou = rascunho.trim() !== (justificativa ?? "").trim()
 
   return (
-    <div className="space-y-3 border-t border-border pt-4">
-      <div className="flex items-center gap-2">
-        <span className="h-4 w-1 rounded-full bg-primary" />
-        <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">
-          Evidência de código
-        </p>
-        {state && (
-          <span className="text-[11px] text-muted-foreground">
+    <DrawerSection
+      title="Evidência de código"
+      icon={GitCommitHorizontal}
+      badges={
+        state && (
+          <Pill tone={state.commits_vinculados > 0 ? "emerald" : "slate"}>
             {state.commits_vinculados > 0
               ? `${state.commits_vinculados} commit(s) vinculado(s)`
               : `${state.commits_disponiveis} disponível(is) no produto`}
-          </span>
-        )}
-      </div>
-
+          </Pill>
+        )
+      }
+    >
       {semProduto && (
-        <p className="rounded-md border border-destructive/40 bg-destructive/5 px-2.5 py-2 text-xs text-destructive">
-          Este card não está sob um projeto com produto vinculado. Vincule o produto ao card do
-          projeto para poder anexar commits e concluir a User Story.
-        </p>
+        <Notice tone="red" icon={AlertTriangle}>
+          <span className="min-w-0 flex-1">
+            Este card não está sob um projeto com produto vinculado. Vincule o produto ao card do
+            projeto para poder anexar commits e concluir a User Story.
+          </span>
+        </Notice>
       )}
 
       {!semProduto && (
         <>
           <div className="space-y-1.5">
             {linked.length === 0 ? (
-              <p className="text-xs text-muted-foreground">Nenhum commit vinculado.</p>
+              <p className="text-sm text-muted-foreground">Nenhum commit vinculado.</p>
             ) : (
               linked.map((c) => (
                 <CommitRow
@@ -220,15 +222,16 @@ export function UsCommitsSection({
                   type="button"
                   variant="outline"
                   size="sm"
+                  className="gap-1.5"
                   onClick={() => {
                     setAbrirBusca(true)
                     void buscar("")
                   }}
                 >
-                  <GitCommitHorizontal size={14} className="mr-1" /> Vincular commit
+                  <GitCommitHorizontal size={14} /> Vincular commit
                 </Button>
               ) : (
-                <div className="space-y-2 rounded-md border p-2">
+                <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
                   <div className="flex items-center gap-2">
                     <Search size={14} className="text-muted-foreground" />
                     <Input
@@ -237,7 +240,7 @@ export function UsCommitsSection({
                       onChange={(e) => setTermo(e.target.value)}
                       onKeyDown={(e) => e.key === "Enter" && void buscar(termo)}
                       placeholder="Buscar por mensagem, autor ou hash"
-                      className="h-8 text-xs"
+                      className="h-8 bg-background text-sm"
                     />
                     <Button type="button" size="sm" variant="ghost" onClick={() => void buscar(termo)}>
                       {buscando ? <Loader2 size={14} className="animate-spin" /> : "Buscar"}
@@ -245,7 +248,7 @@ export function UsCommitsSection({
                   </div>
                   <div className="max-h-56 space-y-1.5 overflow-y-auto">
                     {opcoes.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-sm text-muted-foreground">
                         {buscando ? "Buscando…" : "Nenhum commit encontrado."}
                       </p>
                     ) : (
@@ -275,7 +278,7 @@ export function UsCommitsSection({
 
           {(semCommitsNoProduto || linked.length === 0) && (
             <div className="space-y-1.5">
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 {semCommitsNoProduto
                   ? "O produto deste projeto ainda não tem commits importados — justifique para concluir a User Story."
                   : "Sem commit para vincular? Justifique antes de concluir a User Story."}
@@ -287,7 +290,7 @@ export function UsCommitsSection({
                 rows={2}
                 maxLength={2000}
                 placeholder="Ex.: ajuste apenas de configuração, sem alteração de código."
-                className="text-xs"
+                className="text-sm"
               />
               {!readOnly && justificativaMudou && (
                 <Button type="button" size="sm" onClick={() => void salvarJustificativa()} disabled={salvando}>
@@ -299,6 +302,6 @@ export function UsCommitsSection({
           )}
         </>
       )}
-    </div>
+    </DrawerSection>
   )
 }

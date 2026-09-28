@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react"
-import { ChevronDown, ChevronRight, MessageSquareText, RefreshCw, Settings2 } from "lucide-react"
+import { AlertTriangle, Camera, ChevronDown, ChevronRight, MessageSquareText, RefreshCw, Settings2 } from "lucide-react"
 
 import { rtdApi, type PlanoEpa, type PlanoEpaAcao, type PlanoEpaAcomp, type PlanosEpaResponse } from "@/api/rtd"
-import { Badge } from "@/components/ui/badge"
+import { Notice, Pill, TABLE, type Tone } from "@/components/ds"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -13,13 +13,13 @@ import { toast } from "@/lib/toast"
 const NAVY = "#0d3c78"
 const LIGHT = "#35b3e7"
 
-const STATUS_LABEL: Record<PlanoEpaAcao["status"], { label: string; cls: string }> = {
-  concluido: { label: "Concluído", cls: "text-emerald-600" },
-  em_andamento: { label: "Em andamento", cls: "text-amber-600" },
-  planejado: { label: "Planejado", cls: "text-blue-900" },
-  atrasado: { label: "Atrasado", cls: "text-destructive" },
-  suspenso: { label: "Suspenso", cls: "text-muted-foreground" },
-  outro: { label: "—", cls: "text-muted-foreground" },
+const STATUS_LABEL: Record<PlanoEpaAcao["status"], { label: string; tone: Tone }> = {
+  concluido: { label: "Concluído", tone: "emerald" },
+  em_andamento: { label: "Em andamento", tone: "amber" },
+  planejado: { label: "Planejado", tone: "blue" },
+  atrasado: { label: "Atrasado", tone: "red" },
+  suspenso: { label: "Suspenso", tone: "slate" },
+  outro: { label: "—", tone: "slate" },
 }
 
 function fmtData(iso: string | null): string {
@@ -33,9 +33,9 @@ function BarraExecucao({ label, cor, done, total, pct }: {
 }) {
   return (
     <div className="flex items-center gap-2">
-      <div className="relative h-9 flex-1 overflow-hidden rounded bg-slate-100">
+      <div className="relative h-9 flex-1 overflow-hidden rounded-md bg-muted dark:bg-white/10">
         <div
-          className="flex h-full items-center justify-between rounded px-2 text-[11px] font-bold text-white"
+          className="flex h-full items-center justify-between rounded-md px-2 text-xs font-semibold text-white"
           style={{ width: `${Math.max(pct ?? 0, 8)}%`, background: cor }}
           title={label}
         >
@@ -61,18 +61,19 @@ function PlanoCard({
   if (plano.erro) {
     if (hideEmpty) return null
     return (
-      <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-        <b>Plano {plano.codigo}:</b> {plano.erro}
-      </div>
+      <Notice tone="amber" icon={AlertTriangle}>
+        <span><b className="font-semibold">Plano {plano.codigo}:</b> {plano.erro}</span>
+      </Notice>
     )
   }
   return (
-    <div className="overflow-hidden rounded-xl border bg-background shadow-sm">
+    <div className="overflow-hidden rounded-2xl border bg-card shadow-sm">
       <button
         type="button"
         onClick={() => setExpandido((v) => !v)}
-        className="grid w-full gap-4 p-4 text-left transition-colors hover:bg-slate-50 md:grid-cols-[240px_1fr]"
+        className="grid w-full gap-4 p-4 text-left transition-colors hover:bg-muted/40 md:grid-cols-[240px_1fr]"
         title={expandido ? "Minimizar ações" : `Expandir ações (${plano.acoes.length})`}
+        aria-expanded={expandido}
       >
         {/* Identificação do plano (coluna esquerda, padrão EPA) */}
         <div className="flex items-start gap-1.5">
@@ -80,20 +81,20 @@ function PlanoCard({
             ? <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
             : <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />}
           <div>
-            <p className="text-[11px] font-black uppercase tracking-wide text-blue-900">
+            <p className="text-xs text-muted-foreground">
               Plano {plano.codigo}:
             </p>
-            <p className="mt-0.5 text-xs font-semibold uppercase leading-snug text-sky-600">
+            <p className="mt-0.5 font-semibold leading-snug">
               {plano.titulo}
             </p>
             {(!hideEmpty || plano.acoes.length > 0) && (
-              <p className="mt-1 text-[10px] text-muted-foreground">{plano.acoes.length} ação(ões)</p>
+              <p className="mt-1 text-xs text-muted-foreground">{plano.acoes.length} ação(ões)</p>
             )}
           </div>
         </div>
         {/* Barras de execução */}
         <div className="space-y-2">
-          <div className="flex flex-wrap gap-4 text-[11px] font-semibold text-muted-foreground">
+          <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1.5">
               <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: NAVY }} />
               Execução até o período
@@ -118,23 +119,23 @@ function PlanoCard({
 
       {/* Tabela de ações (padrão do quadro EPA) — só quando expandido */}
       {expandido && plano.acoes.length > 0 && (
-        <div className="overflow-x-auto border-t">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-left uppercase tracking-wide text-white" style={{ background: LIGHT }}>
-                <th className="px-3 py-2 font-bold">{plano.codigo}: {plano.titulo}</th>
-                <th className="px-3 py-2 text-center font-bold">Status</th>
-                <th className="px-3 py-2 text-center font-bold">Responsável</th>
-                <th className="px-3 py-2 text-center font-bold">Prazo</th>
-                <th className="px-3 py-2 text-center font-bold">Acomp.</th>
+        <div className={`${TABLE.wrap} border-t`}>
+          <table className={TABLE.table}>
+            <thead className={TABLE.thead}>
+              <tr>
+                <th className={TABLE.thFirst}>{plano.codigo}: {plano.titulo}</th>
+                <th className={`${TABLE.th} text-center`}>Status</th>
+                <th className={`${TABLE.th} text-center`}>Responsável</th>
+                <th className={`${TABLE.th} text-center`}>Prazo</th>
+                <th className={`${TABLE.th} text-center`}>Acomp.</th>
               </tr>
             </thead>
             <tbody>
               {plano.acoes.map((a, i) => (
                 <tr key={i}
-                  className={`border-t ${a.status === "suspenso" ? "bg-slate-100/70 opacity-70" : i % 2 === 0 ? "bg-sky-50/40" : "bg-background"}`}>
-                  <td className="px-3 py-2 font-medium text-blue-950">{a.titulo}</td>
-                  <td className={`px-3 py-2 text-center font-semibold ${STATUS_LABEL[a.status].cls}`}
+                  className={`${TABLE.tr} ${a.status === "suspenso" ? "bg-muted/60 opacity-70" : ""}`}>
+                  <td className={`${TABLE.tdFirst} font-medium`}>{a.titulo}</td>
+                  <td className={`${TABLE.td} text-center`}
                     title={
                       a.status === "suspenso"
                         ? "Suspensa — fora do cálculo de execução"
@@ -142,15 +143,15 @@ function PlanoCard({
                           ? `${a.status_raw} no EPA — prazo anterior à data atual`
                           : a.status_raw ?? undefined
                     }>
-                    {STATUS_LABEL[a.status].label}
+                    <Pill tone={STATUS_LABEL[a.status].tone} dot>{STATUS_LABEL[a.status].label}</Pill>
                   </td>
-                  <td className="px-3 py-2 text-center">
+                  <td className={`${TABLE.td} text-center`}>
                     {a.responsavel || (hideEmpty ? "" : "—")}
                   </td>
-                  <td className="px-3 py-2 text-center tabular-nums">
+                  <td className={`${TABLE.td} whitespace-nowrap text-center tabular-nums`}>
                     {a.prazo ? fmtData(a.prazo) : (hideEmpty ? "" : "—")}
                   </td>
-                  <td className="px-3 py-2 text-center">
+                  <td className={`${TABLE.td} text-center`}>
                     {(!hideEmpty || a.acompanhamentos.length > 0) && (
                     <span
                       className="inline-flex cursor-help items-center gap-1"
@@ -158,9 +159,9 @@ function PlanoCard({
                       onMouseLeave={() => setAcompAtivo(null)}
                     >
                       <MessageSquareText
-                        className={`h-4 w-4 ${a.acompanhamentos.length ? "text-sky-600" : "text-slate-300"}`} />
+                        className={`h-4 w-4 ${a.acompanhamentos.length ? "text-sky-600 dark:text-sky-400" : "text-muted-foreground/40"}`} />
                       {a.acompanhamentos.length > 0 && (
-                        <span className="text-[10px] font-bold text-sky-700">{a.acompanhamentos.length}</span>
+                        <span className="text-xs font-semibold text-sky-700 dark:text-sky-400">{a.acompanhamentos.length}</span>
                       )}
                     </span>
                     )}
@@ -175,8 +176,8 @@ function PlanoCard({
       {/* Tooltip grande e centralizado com os acompanhamentos */}
       {acompAtivo && (
         <div className="pointer-events-none fixed inset-0 z-[120] flex items-center justify-center bg-black/20 p-4">
-          <div className="max-h-[70vh] w-[min(680px,92vw)] overflow-y-auto rounded-xl border bg-background p-5 shadow-2xl">
-            <p className="mb-3 border-b pb-2 text-sm font-bold text-blue-950">
+          <div className="max-h-[70vh] w-[min(680px,92vw)] overflow-y-auto rounded-2xl border bg-background p-5 shadow-2xl">
+            <p className="mb-3 border-b pb-2 text-sm font-semibold">
               Acompanhamentos — {acompAtivo.titulo}
             </p>
             {acompAtivo.itens.length === 0 ? (
@@ -184,8 +185,8 @@ function PlanoCard({
             ) : (
               <div className="space-y-3">
                 {acompAtivo.itens.map((ac, i) => (
-                  <div key={i} className="rounded-lg border bg-sky-50/40 p-3">
-                    <p className="mb-1 flex flex-wrap items-center gap-x-2 text-[11px] font-semibold text-sky-800">
+                  <div key={i} className="rounded-xl border bg-muted/40 p-3">
+                    <p className="mb-1 flex flex-wrap items-center gap-x-2 text-xs font-semibold text-sky-800 dark:text-sky-300">
                       <span>{ac.colaborador ?? "—"}</span>
                       <span className="text-muted-foreground">·</span>
                       <span className="tabular-nums text-muted-foreground">{ac.data ?? "—"}</span>
@@ -278,16 +279,16 @@ export function RtdPlanosEpaSection({
       <div className="flex items-center justify-between gap-2">
         <div>
           {data?.snapshot_at && (
-            <Badge variant="secondary">📸 Foto congelada em {new Date(data.snapshot_at).toLocaleString("pt-BR")}</Badge>
+            <Pill tone="blue"><Camera size={12} /> Foto congelada em {new Date(data.snapshot_at).toLocaleString("pt-BR")}</Pill>
           )}
         </div>
         {!readOnly && (
           <div className="flex gap-1.5">
             <Button size="sm" variant="ghost" onClick={() => setConfigAberta((v) => !v)}
-              title="Configurar códigos dos planos">
+              title="Configurar códigos dos planos" aria-label="Configurar códigos dos planos" aria-expanded={configAberta}>
               <Settings2 className="h-4 w-4 text-muted-foreground" />
             </Button>
-            <Button size="sm" variant="ghost" onClick={carregar} disabled={loading} title="Atualizar do EPA">
+            <Button size="sm" variant="ghost" onClick={carregar} disabled={loading} title="Atualizar do EPA" aria-label="Atualizar do EPA">
               <RefreshCw className={`h-4 w-4 text-muted-foreground ${loading ? "animate-spin" : ""}`} />
             </Button>
           </div>
@@ -296,14 +297,13 @@ export function RtdPlanosEpaSection({
 
       {/* Configuração dos códigos — escondida por padrão (planos padrão vêm do .env) */}
       {!readOnly && configAberta && (
-        <div className="flex flex-wrap items-end gap-2 rounded-lg border border-dashed p-3">
+        <div className="flex flex-wrap items-end gap-2 rounded-xl border border-dashed p-3">
           <div className="min-w-64 flex-1 space-y-1">
             <Label className="text-xs">Códigos dos planos no EPA (separados por vírgula)</Label>
             <Input value={codigosInput} onChange={(e) => setCodigosInput(e.target.value)}
               placeholder="Ex.: 26742, 26743" className="h-9" />
           </div>
-          <Button size="sm" onClick={salvarCodigos} disabled={salvando || loading}
-            className="bg-blue-800 hover:bg-blue-900">
+          <Button size="sm" onClick={salvarCodigos} disabled={salvando || loading}>
             {salvando ? "Salvando…" : "Salvar e buscar"}
           </Button>
           {data?.origem !== "desligado" && (
@@ -323,10 +323,10 @@ export function RtdPlanosEpaSection({
       )}
 
       {loading ? (
-        <div className="space-y-3"><Skeleton className="h-40 w-full" /><Skeleton className="h-40 w-full" /></div>
+        <div className="space-y-3"><Skeleton className="h-40 w-full rounded-2xl" /><Skeleton className="h-40 w-full rounded-2xl" /></div>
       ) : data?.erro ? (
         hideEmpty ? null : (
-          <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{data.erro}</div>
+          <Notice tone="amber" icon={AlertTriangle}>{data.erro}</Notice>
         )
       ) : data?.origem === "desligado" ? (
         hideEmpty ? null : (

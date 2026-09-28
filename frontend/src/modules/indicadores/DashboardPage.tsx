@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { BarChart3 } from "lucide-react"
+import { AlertTriangle, BarChart3, CheckCircle2, Gauge, ListChecks, Target, XCircle } from "lucide-react"
 import {
   Bar, BarChart, CartesianGrid, Cell, LabelList, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts"
@@ -18,10 +18,8 @@ import {
 } from "@/api/indicadores"
 import { EmptyState } from "@/components/EmptyState"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
-import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Card, FilterSelect, KpiCount, KpiRow, PageHeader, Pill, type Tone } from "@/components/ds"
 import {
   ACOMP_STATUS_LABEL,
   ANOS, CATEGORIA_LABEL, CATEGORIA_OPTS, GRANULARIDADE_LABEL, GRANULARIDADE_OPTS, MESES,
@@ -175,106 +173,153 @@ export default function IndicadoresDashboardPage() {
     indicadoresApi.getDashboardGraficos(filters).then(setData).catch(() => setData(null)).finally(() => setLoading(false))
   }, [filters])
 
+  // Faixa de indicadores do topo: conta sobre o que o painel mostra (filtros aplicados).
+  const counts = useMemo(() => {
+    const inds = data?.indicadores ?? []
+    const periodos = inds.flatMap((i) => i.periodos)
+    return {
+      total: inds.length,
+      estrategicos: inds.filter((i) => i.categoria === "estrategico").length,
+      taticos: inds.filter((i) => i.categoria === "tatico").length,
+      atingidos: periodos.filter((p) => p.status === "atingido").length,
+      atencao: periodos.filter((p) => p.status === "em_atencao").length,
+      naoAtingidos: periodos.filter((p) => p.status === "nao_atingido").length,
+    }
+  }, [data])
+
+  const todos = { value: ALL, label: "Todos" }
+
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h2 className="text-lg font-bold">Painel de Indicadores</h2>
-          <p className="text-sm text-muted-foreground">Meta vs. realizado por período.</p>
-        </div>
-        <Button onClick={() => navigate("/app/modules/indicadores/indicadores")}>Ver indicadores</Button>
-      </div>
+      <PageHeader
+        icon={Gauge}
+        color="#16A34A"
+        title="Painel de Indicadores"
+        description="Meta vs. realizado por período."
+        actions={
+          <Button className="h-10 gap-1.5" onClick={() => navigate("/app/modules/indicadores/indicadores")}>
+            <ListChecks size={16} /> Ver indicadores
+          </Button>
+        }
+      />
 
-      <Card className="p-3">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+      <Card className="p-4">
+        <div className="flex flex-wrap items-end gap-3">
           <FilterSelect label="Ano" value={String(ano)} onChange={(v) => setAno(Number(v))}
-            options={ANOS.map((y) => [String(y), String(y)])} allowAll={false} />
+            options={ANOS.map((y) => ({ value: String(y), label: String(y) }))} />
           <FilterSelect label="Categoria" value={categoria} onChange={setCategoria}
-            options={CATEGORIA_OPTS.map((c) => [c, CATEGORIA_LABEL[c]])} />
+            options={[todos, ...CATEGORIA_OPTS.map((c) => ({ value: c, label: CATEGORIA_LABEL[c] }))]} />
           <FilterSelect label="Área" value={areaId} onChange={setAreaId}
-            options={areas.map((a) => [a.id, a.name])} />
+            options={[todos, ...areas.map((a) => ({ value: a.id, label: a.name }))]} />
           <FilterSelect label="Responsável" value={responsavelId} onChange={setResponsavelId}
-            options={persons.map((p) => [p.id, p.full_name])} />
+            options={[todos, ...persons.map((p) => ({ value: p.id, label: p.full_name }))]} />
           <FilterSelect label="Granularidade" value={granularidade} onChange={setGranularidade}
-            options={GRANULARIDADE_OPTS.map((g) => [g, GRANULARIDADE_LABEL[g]])} />
+            options={[todos, ...GRANULARIDADE_OPTS.map((g) => ({ value: g, label: GRANULARIDADE_LABEL[g] }))]} />
           <FilterSelect label="Status" value={status} onChange={setStatus}
-            options={STATUS_OPTS.map((s) => [s, STATUS_LABEL[s]])} />
+            options={[todos, ...STATUS_OPTS.map((s) => ({ value: s, label: STATUS_LABEL[s] }))]} />
         </div>
       </Card>
 
       {loading ? (
-        <div className="grid gap-4 xl:grid-cols-2">
-          <Skeleton className="h-72 w-full" />
-          <Skeleton className="h-72 w-full" />
-          <Skeleton className="h-72 w-full" />
-          <Skeleton className="h-72 w-full" />
-        </div>
+        <>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+            {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-[74px] rounded-xl" />)}
+          </div>
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Skeleton className="h-72 w-full rounded-2xl" />
+            <Skeleton className="h-72 w-full rounded-2xl" />
+            <Skeleton className="h-72 w-full rounded-2xl" />
+            <Skeleton className="h-72 w-full rounded-2xl" />
+          </div>
+        </>
       ) : !data || data.indicadores.length === 0 ? (
-        <EmptyState icon={BarChart3} title="Nenhum indicador encontrado" description="Ajuste os filtros ou cadastre indicadores para o ano selecionado." />
+        <Card>
+          <EmptyState icon={BarChart3} title="Nenhum indicador encontrado" description="Ajuste os filtros ou cadastre indicadores para o ano selecionado." />
+        </Card>
       ) : (
-        <div className="space-y-7">
-          {(["estrategico", "tatico"] as const).map((cat) => {
-            const inds = data.indicadores.filter((i) => i.categoria === cat)
-            if (inds.length === 0) return null
-            return (
-              <section key={cat} className="space-y-3">
-                <div className="flex items-center gap-2 border-b pb-2">
-                  <BarChart3 className="h-4 w-4 text-muted-foreground" />
-                  <h3 className="text-sm font-bold uppercase tracking-wide">
-                    Indicadores {cat === "estrategico" ? "Estratégicos" : "Táticos"}
-                  </h3>
-                  <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                    {inds.length}
-                  </span>
-                </div>
-                {cat === "estrategico" ? (
-                  <div className="grid gap-4 xl:grid-cols-2">
-                    {inds.map((ind) => (
-                      <IndicadorChartCard key={ind.id} ind={ind} onOpen={() => navigate(`/app/modules/indicadores/indicadores/${ind.id}`)} />
-                    ))}
+        <>
+          {/* Estratégicos/Táticos ligam e desligam o mesmo filtro de Categoria da barra acima. */}
+          <KpiRow className="sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+            <KpiCount icon={BarChart3} value={counts.total} label="Indicadores" />
+            <KpiCount
+              icon={Target} value={counts.estrategicos} label="Estratégicos" tone="violet"
+              onClick={() => setCategoria((c) => (c === "estrategico" ? ALL : "estrategico"))} active={categoria === "estrategico"}
+            />
+            <KpiCount
+              icon={ListChecks} value={counts.taticos} label="Táticos"
+              onClick={() => setCategoria((c) => (c === "tatico" ? ALL : "tatico"))} active={categoria === "tatico"}
+            />
+            <KpiCount icon={CheckCircle2} value={counts.atingidos} label={`Períodos com meta atingida (${ano})`} tone="emerald" />
+            <KpiCount
+              icon={AlertTriangle} value={counts.atencao} label="Períodos em atenção" tone={counts.atencao > 0 ? "amber" : "slate"}
+            />
+            <KpiCount
+              icon={XCircle} value={counts.naoAtingidos} label="Períodos com meta não atingida" tone={counts.naoAtingidos > 0 ? "red" : "slate"}
+              highlight={counts.naoAtingidos > 0}
+            />
+          </KpiRow>
+
+          <div className="space-y-7">
+            {(["estrategico", "tatico"] as const).map((cat) => {
+              const inds = data.indicadores.filter((i) => i.categoria === cat)
+              if (inds.length === 0) return null
+              return (
+                <section key={cat} className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <BarChart3 size={18} className="text-muted-foreground" />
+                    <h2 className="text-lg font-semibold">
+                      Indicadores {cat === "estrategico" ? "Estratégicos" : "Táticos"}
+                    </h2>
+                    <Pill>{inds.length}</Pill>
                   </div>
-                ) : (
-                  // Táticos agrupados por sub-processo do portfólio (ordem canônica primeiro).
-                  (() => {
-                    const groups = new Map<string, DashboardChartIndicador[]>()
-                    for (const i of inds) {
-                      const k = i.sub_processo?.trim() || "Sem sub-processo vinculado"
-                      groups.set(k, [...(groups.get(k) ?? []), i])
-                    }
-                    const ordered = [
-                      ...SUB_PROCESSOS_PORTFOLIO.filter((sp) => groups.has(sp)),
-                      ...[...groups.keys()].filter((k) => !SUB_PROCESSOS_PORTFOLIO.includes(k)),
-                    ]
-                    return ordered.map((sp) => (
-                      <div key={sp} className="space-y-3">
-                        <h4 className="border-l-4 border-primary pl-2 text-xs font-semibold uppercase tracking-wide text-primary">
-                          Sub. Processo: {sp}
-                          <span className="ml-2 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium normal-case text-muted-foreground">
-                            {groups.get(sp)!.length}
-                          </span>
-                        </h4>
-                        <div className="grid gap-4 xl:grid-cols-2">
-                          {groups.get(sp)!.map((ind) => (
-                            <IndicadorChartCard key={ind.id} ind={ind} onOpen={() => navigate(`/app/modules/indicadores/indicadores/${ind.id}`)} />
-                          ))}
+                  {cat === "estrategico" ? (
+                    <div className="grid gap-4 xl:grid-cols-2">
+                      {inds.map((ind) => (
+                        <IndicadorChartCard key={ind.id} ind={ind} onOpen={() => navigate(`/app/modules/indicadores/indicadores/${ind.id}`)} />
+                      ))}
+                    </div>
+                  ) : (
+                    // Táticos agrupados por sub-processo do portfólio (ordem canônica primeiro).
+                    (() => {
+                      const groups = new Map<string, DashboardChartIndicador[]>()
+                      for (const i of inds) {
+                        const k = i.sub_processo?.trim() || "Sem sub-processo vinculado"
+                        groups.set(k, [...(groups.get(k) ?? []), i])
+                      }
+                      const ordered = [
+                        ...SUB_PROCESSOS_PORTFOLIO.filter((sp) => groups.has(sp)),
+                        ...[...groups.keys()].filter((k) => !SUB_PROCESSOS_PORTFOLIO.includes(k)),
+                      ]
+                      return ordered.map((sp) => (
+                        <div key={sp} className="space-y-3">
+                          <h3 className="flex flex-wrap items-center gap-2 border-l-4 border-primary pl-2 text-sm font-semibold">
+                            <span><span className="font-normal text-muted-foreground">Sub. Processo:</span> {sp}</span>
+                            <Pill>{groups.get(sp)!.length}</Pill>
+                          </h3>
+                          <div className="grid gap-4 xl:grid-cols-2">
+                            {groups.get(sp)!.map((ind) => (
+                              <IndicadorChartCard key={ind.id} ind={ind} onOpen={() => navigate(`/app/modules/indicadores/indicadores/${ind.id}`)} />
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    ))
-                  })()
-                )}
-              </section>
-            )
-          })}
-        </div>
+                      ))
+                    })()
+                  )}
+                </section>
+              )
+            })}
+          </div>
+        </>
       )}
     </div>
   )
 }
 
-const SENTIDO_BADGE: Record<Sentido, { arrow: string; cls: string }> = {
-  maior_melhor: { arrow: "▲", cls: "border-emerald-300 bg-emerald-50 text-emerald-700" },
-  menor_melhor: { arrow: "▼", cls: "border-red-300 bg-red-50 text-red-700" },
-  faixa_ideal: { arrow: "↔", cls: "border-sky-300 bg-sky-50 text-sky-700" },
+// Polaridade do indicador (selo do cartão).
+const SENTIDO_BADGE: Record<Sentido, { arrow: string; tone: Tone }> = {
+  maior_melhor: { arrow: "▲", tone: "emerald" },
+  menor_melhor: { arrow: "▼", tone: "red" },
+  faixa_ideal: { arrow: "↔", tone: "blue" },
 }
 
 function IndicadorChartCard({ ind, onOpen }: { ind: DashboardChartIndicador; onOpen: () => void }) {
@@ -283,18 +328,15 @@ function IndicadorChartCard({ ind, onOpen }: { ind: DashboardChartIndicador; onO
   const sentido = ind.sentido ? SENTIDO_BADGE[ind.sentido] : null
 
   return (
-    <Card className="flex flex-col p-4">
+    <Card className="flex flex-col p-5">
       <div className="mb-3 min-w-0">
         <div className="flex items-start justify-between gap-2">
           <button type="button" onClick={onOpen} className="min-w-0 text-left hover:text-primary">
-            <p className="line-clamp-2 text-sm font-bold leading-tight">{ind.nome}</p>
+            <p className="line-clamp-2 font-semibold leading-tight">{ind.nome}</p>
           </button>
           {sentido && ind.sentido && (
-            <span
-              className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${sentido.cls}`}
-              title={`Polaridade: ${SENTIDO_LABEL[ind.sentido].toLowerCase()}`}
-            >
-              {sentido.arrow} {SENTIDO_LABEL[ind.sentido]}
+            <span className="shrink-0" title={`Polaridade: ${SENTIDO_LABEL[ind.sentido].toLowerCase()}`}>
+              <Pill tone={sentido.tone}>{sentido.arrow} {SENTIDO_LABEL[ind.sentido]}</Pill>
             </span>
           )}
         </div>
@@ -309,8 +351,8 @@ function IndicadorChartCard({ ind, onOpen }: { ind: DashboardChartIndicador; onO
           {unit ? ` · ${unit}` : ""}
         </p>
         {ind.formula_calculo && (
-          <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-muted-foreground" title={ind.formula_calculo}>
-            <span className="font-semibold text-foreground/70">Fórmula:</span> {ind.formula_calculo}
+          <p className="mt-1 line-clamp-2 text-xs leading-snug text-muted-foreground" title={ind.formula_calculo}>
+            <span className="font-medium text-foreground/80">Fórmula:</span> {ind.formula_calculo}
           </p>
         )}
       </div>
@@ -345,22 +387,5 @@ function IndicadorChartCard({ ind, onOpen }: { ind: DashboardChartIndicador; onO
         </div>
       )}
     </Card>
-  )
-}
-
-function FilterSelect({ label, value, onChange, options, allowAll = true }: {
-  label: string; value: string; onChange: (v: string) => void; options: [string, string][]; allowAll?: boolean
-}) {
-  return (
-    <div className="space-y-1">
-      <Label className="text-xs">{label}</Label>
-      <Select value={value} onValueChange={onChange}>
-        <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-        <SelectContent>
-          {allowAll && <SelectItem value={ALL}>Todos</SelectItem>}
-          {options.map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
-        </SelectContent>
-      </Select>
-    </div>
   )
 }

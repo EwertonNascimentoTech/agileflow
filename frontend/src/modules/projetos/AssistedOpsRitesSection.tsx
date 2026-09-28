@@ -8,11 +8,13 @@ import {
   type AssistedOpMeetingKind,
   type AssistedOpsEntryState,
 } from "@/api/clientes"
+import { Pill, Segmented } from "@/components/ds"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { toast } from "@/lib/toast"
+import { DrawerSection } from "@/modules/projetos/CollapsibleFormSection"
 
 function apiError(err: unknown, fallback: string): string {
   const d = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
@@ -105,25 +107,22 @@ export function AssistedOpsRitesSection({
   }
 
   return (
-    <div className="space-y-2 rounded-md border border-teal-500/30 bg-teal-50/40 p-3 dark:bg-teal-950/20">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <NotebookPen size={14} className="text-teal-600" />
-          <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-teal-700 dark:text-teal-400">
-            Operação Assistida · ritos e atas
-          </p>
-        </div>
-        {canRecord && !draft && (
+    <DrawerSection
+      title="Operação Assistida · ritos e atas"
+      icon={NotebookPen}
+      iconClassName="text-teal-600 dark:text-teal-400"
+      right={
+        canRecord && !draft && (
           <Button
-            variant="ghost" size="sm" className="h-7 gap-1 text-xs"
+            variant="outline" size="sm" className="h-8 gap-1"
             onClick={() => setDraft(EMPTY(entry.phase === 1 ? "diaria" : "semanal"))}
           >
-            <Plus size={12} /> Registrar ata
+            <Plus size={14} /> Registrar ata
           </Button>
-        )}
-      </div>
-
-      <div className="space-y-0.5 rounded-md bg-background/70 px-2 py-1.5 text-xs">
+        )
+      }
+    >
+      <div className="space-y-0.5 rounded-lg bg-muted/40 px-3 py-2 text-xs">
         {entry.phase && <p>{CADENCE[entry.phase]} Comitê sob demanda, para escalonamento à Instância Executiva.</p>}
         <p className="text-muted-foreground">
           Última diária: <span className="font-medium text-foreground">{fmtDay(last("diaria"))}</span> · última semanal:{" "}
@@ -132,30 +131,26 @@ export function AssistedOpsRitesSection({
       </div>
 
       {draft && (
-        <div className="space-y-2 rounded-md border bg-background p-2">
+        <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
           <div className="grid gap-2 sm:grid-cols-[1fr_10rem]">
             <div className="space-y-1">
               <Label className="text-xs">Rito</Label>
-              <div className="flex flex-wrap gap-1">
-                {(Object.keys(ASSISTED_OP_MEETING_KIND_LABEL) as AssistedOpMeetingKind[]).map((k) => (
-                  <button
-                    key={k}
-                    type="button"
-                    onClick={() => setDraft({ ...draft, kind: k })}
-                    aria-pressed={draft.kind === k}
-                    className={`rounded-md border px-2 py-1 text-xs font-medium transition-colors ${
-                      draft.kind === k ? "border-primary bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"
-                    }`}
-                  >
-                    {ASSISTED_OP_MEETING_KIND_LABEL[k]}
-                  </button>
-                ))}
+              <div>
+                <Segmented
+                  size="sm"
+                  value={draft.kind}
+                  onChange={(k) => setDraft({ ...draft, kind: k })}
+                  options={(Object.keys(ASSISTED_OP_MEETING_KIND_LABEL) as AssistedOpMeetingKind[]).map((k) => ({
+                    value: k,
+                    label: ASSISTED_OP_MEETING_KIND_LABEL[k],
+                  }))}
+                />
               </div>
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Data</Label>
               <Input
-                type="date" className="h-8" value={draft.held_on} max={today()}
+                type="date" className="h-8 bg-background" value={draft.held_on} max={today()}
                 onChange={(e) => setDraft({ ...draft, held_on: e.target.value })}
               />
             </div>
@@ -163,7 +158,7 @@ export function AssistedOpsRitesSection({
           <div className="space-y-1">
             <Label className="text-xs">Participantes</Label>
             <Input
-              className="h-8" value={draft.participants} placeholder="Ex.: Dono do Processo, EP, TD"
+              className="h-8 bg-background" value={draft.participants} placeholder="Ex.: Dono do Processo, EP, TD"
               onChange={(e) => setDraft({ ...draft, participants: e.target.value })}
             />
           </div>
@@ -190,14 +185,14 @@ export function AssistedOpsRitesSection({
       )}
 
       {meetings.length === 0 ? (
-        !draft && <p className="text-xs text-muted-foreground">Nenhuma ata registrada ainda.</p>
+        !draft && <p className="text-sm text-muted-foreground">Nenhuma ata registrada ainda.</p>
       ) : (
         <ul className="space-y-1.5">
           {meetings.map((m) => (
-            <li key={m.id} className="rounded-md bg-background px-2 py-1.5 text-xs shadow-sm">
+            <li key={m.id} className="rounded-lg border bg-card px-3 py-2 text-sm">
               <div className="flex flex-wrap items-center gap-2">
                 <button type="button" className="flex flex-1 flex-wrap items-center gap-2 text-left" onClick={() => setOpen(open === m.id ? null : m.id)}>
-                  <span className="rounded bg-teal-100 px-1.5 py-0.5 font-semibold text-teal-800 dark:bg-teal-900/50 dark:text-teal-200">{m.kind_label}</span>
+                  <Pill tone="teal">{m.kind_label}</Pill>
                   <span className="font-medium">{fmtDay(m.held_on)}</span>
                   {m.phase && <span className="text-muted-foreground">Fase {m.phase}</span>}
                   {m.created_by_name && <span className="text-muted-foreground">· {m.created_by_name}</span>}
@@ -205,7 +200,7 @@ export function AssistedOpsRitesSection({
                 {m.can_edit && !readOnly && (
                   <span className="flex gap-0.5">
                     <Button
-                      variant="ghost" size="icon" className="h-6 w-6" title="Editar"
+                      variant="ghost" size="icon" className="h-7 w-7" title="Editar"
                       onClick={() => setDraft({
                         id: m.id, kind: m.kind, held_on: m.held_on, participants: m.participants ?? "",
                         summary: m.summary, decisions: m.decisions ?? "",
@@ -213,13 +208,13 @@ export function AssistedOpsRitesSection({
                     >
                       <Pencil size={12} />
                     </Button>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" title="Excluir" onClick={() => void remove(m)}>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 hover:text-destructive" title="Excluir" onClick={() => void remove(m)}>
                       <Trash2 size={12} />
                     </Button>
                   </span>
                 )}
               </div>
-              <p className={`mt-1 whitespace-pre-wrap ${open === m.id ? "" : "line-clamp-2"}`}>{m.summary}</p>
+              <p className={`mt-1.5 whitespace-pre-wrap ${open === m.id ? "" : "line-clamp-2"}`}>{m.summary}</p>
               {open === m.id && (
                 <>
                   {m.participants && <p className="mt-1 text-muted-foreground">Participantes: {m.participants}</p>}
@@ -234,6 +229,6 @@ export function AssistedOpsRitesSection({
           ))}
         </ul>
       )}
-    </div>
+    </DrawerSection>
   )
 }

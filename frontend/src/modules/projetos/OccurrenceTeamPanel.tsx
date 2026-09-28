@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Hand, LifeBuoy, Loader2, Send } from "lucide-react"
+import { Hand, Info as InfoIcon, LifeBuoy, Loader2, Send, Users } from "lucide-react"
 
 import {
   OCCURRENCE_ABRANGENCIA_LABEL,
@@ -12,6 +12,7 @@ import {
   type OccurrencePrioridade,
   type ReleaseCandidate,
 } from "@/api/clientes"
+import { Field, Notice, Pill } from "@/components/ds"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -20,6 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "@/lib/toast"
 import { AttachmentField, type Attachment } from "@/components/AttachmentField"
 import { PRIORITY_LABEL, SLA_RESOLUCAO_HORAS, SlaText } from "@/modules/portal/occurrenceUi"
+import { DrawerSection } from "@/modules/projetos/CollapsibleFormSection"
 
 const NONE = "__none__"
 
@@ -27,8 +29,8 @@ function Info({ label, value }: { label: string; value: string | null | undefine
   if (!value) return null
   return (
     <div>
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</div>
-      <p className="whitespace-pre-wrap text-sm">{value}</p>
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <p className="mt-0.5 whitespace-pre-wrap text-sm">{value}</p>
     </div>
   )
 }
@@ -150,56 +152,58 @@ export function OccurrenceTeamPanel({
   }
 
   return (
-    <div className="space-y-3 rounded-md border border-teal-500/30 bg-teal-50/40 p-3 dark:bg-teal-950/20">
-      <div className="flex items-center gap-2">
-        <LifeBuoy size={14} className="text-teal-600" />
-        <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-teal-700 dark:text-teal-400">
-          Ocorrência {occ.code_label} · Operação Assistida
-        </p>
-      </div>
-      {/* Do projeto, só o essencial para quem atende: nome, PO e produto. */}
-      <div className="grid gap-x-4 gap-y-1 rounded-md bg-background/70 px-2 py-1.5 text-xs sm:grid-cols-3">
-        <span>Projeto: <span className="font-medium">{occ.project_title ?? "—"}</span></span>
-        <span>PO: <span className="font-medium">{occ.project_po_name ?? "—"}</span></span>
-        <span>Produto: <span className="font-medium">{occ.product_name ?? "—"}</span></span>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        {occ.opened_by_name && <>Aberta por <span className="font-medium text-foreground">{occ.opened_by_name}</span> · </>}
-        {OCCURRENCE_TIPO_LABEL[occ.tipo]} · {OCCURRENCE_IMPACTO_LABEL[occ.impacto]} · {OCCURRENCE_ABRANGENCIA_LABEL[occ.abrangencia]}
-      </p>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md bg-background/70 px-2 py-1.5 text-xs">
-        <span>
-          Responsável: <span className="font-medium">{occ.assignee_name ?? "ninguém assumiu"}</span>
-        </span>
-        <span>
-          Horas úteis: <span className="font-medium tabular-nums">{occ.worked_hours != null ? `${occ.worked_hours.toFixed(1)}h` : "—"}</span>
-        </span>
-        {occ.nps_score != null && (
-          <span>
-            Satisfação: <span className="font-medium">{occ.nps_score}/5</span>
-            {occ.nps_comment && <span className="text-muted-foreground"> — {occ.nps_comment}</span>}
-          </span>
-        )}
-        {occ.is_correction && occ.sla_state && (
-          <span>
-            Prazo: <SlaText o={occ} />
-          </span>
-        )}
-        {occ.rejection_count > 0 && <span className="text-amber-700">Reprovada {occ.rejection_count}x</span>}
-        {occ.finalized_by_team && <span className="text-muted-foreground">Finalizada pelo PO</span>}
-        {occ.can_assume && !readOnly && occ.assignee_name && (
-          <Button size="sm" variant="outline" className="ml-auto h-7 gap-1 text-xs" onClick={() => void assume()} disabled={assuming}>
-            {assuming ? <Loader2 className="h-3 w-3 animate-spin" /> : <Hand size={12} />}
-            Assumir no lugar
-          </Button>
+    <DrawerSection
+      title={`Ocorrência ${occ.code_label} · Operação Assistida`}
+      icon={LifeBuoy}
+      iconClassName="text-teal-600 dark:text-teal-400"
+      subtitle={
+        <>
+          {occ.opened_by_name && <>Aberta por <span className="font-medium text-foreground">{occ.opened_by_name}</span> · </>}
+          {OCCURRENCE_TIPO_LABEL[occ.tipo]} · {OCCURRENCE_IMPACTO_LABEL[occ.impacto]} · {OCCURRENCE_ABRANGENCIA_LABEL[occ.abrangencia]}
+        </>
+      }
+    >
+      <div className="space-y-3 rounded-lg bg-muted/40 p-3">
+        {/* Do projeto, só o essencial para quem atende: nome, PO e produto. */}
+        <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-3">
+          <Field label="Projeto">{occ.project_title ?? "—"}</Field>
+          <Field label="PO">{occ.project_po_name ?? "—"}</Field>
+          <Field label="Produto">{occ.product_name ?? "—"}</Field>
+          <Field label="Responsável">{occ.assignee_name ?? "ninguém assumiu"}</Field>
+          <Field label="Horas úteis">
+            <span className="tabular-nums">{occ.worked_hours != null ? `${occ.worked_hours.toFixed(1)}h` : "—"}</span>
+          </Field>
+          {occ.nps_score != null && (
+            <Field label="Satisfação">
+              {occ.nps_score}/5
+              {occ.nps_comment && <span className="font-normal text-muted-foreground"> — {occ.nps_comment}</span>}
+            </Field>
+          )}
+          {occ.is_correction && occ.sla_state && (
+            <Field label="Prazo">
+              <SlaText o={occ} />
+            </Field>
+          )}
+        </dl>
+        {(occ.rejection_count > 0 || occ.finalized_by_team || (occ.can_assume && !readOnly && occ.assignee_name)) && (
+          <div className="flex flex-wrap items-center gap-2">
+            {occ.rejection_count > 0 && <Pill tone="amber">Reprovada {occ.rejection_count}x</Pill>}
+            {occ.finalized_by_team && <Pill>Finalizada pelo PO</Pill>}
+            {occ.can_assume && !readOnly && occ.assignee_name && (
+              <Button size="sm" variant="outline" className="ml-auto h-8 gap-1" onClick={() => void assume()} disabled={assuming}>
+                {assuming ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Hand size={13} />}
+                Assumir no lugar
+              </Button>
+            )}
+          </div>
         )}
       </div>
       {/* Ninguém assumiu: chamada clara para quem pode (dev de atendimento, PO, coordenação) e,
           para os demais, quem pode assumir. Assumir define o responsável e inicia as horas úteis. */}
       {!occ.assignee_name && !occ.is_closed && (
         occ.can_assume && !readOnly ? (
-          <div className="flex flex-wrap items-center gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 dark:border-amber-700 dark:bg-amber-950/30">
-            <p className="flex-1 text-xs text-amber-900 dark:text-amber-200">
+          <Notice tone="amber" icon={Hand}>
+            <p className="min-w-0 flex-1">
               <span className="font-semibold">Ninguém assumiu esta ocorrência.</span> Ao assumir, você vira o responsável,
               ela vai para <span className="font-medium">Ajustando</span>, as horas úteis começam a contar e o cliente é avisado.
             </p>
@@ -207,26 +211,30 @@ export function OccurrenceTeamPanel({
               {assuming ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Hand size={14} />}
               Assumir
             </Button>
-          </div>
+          </Notice>
         ) : (
-          <p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
-            Ninguém assumiu ainda. Podem assumir:{" "}
-            <span className="font-medium text-foreground">
-              {[
-                ...(occ.assisted_ops_dev_names ?? []),
-                ...(occ.project_po_name ? [`${occ.project_po_name} (PO)`] : []),
-              ].join(", ") || "os desenvolvedores de atendimento do projeto e o PO"}
-            </span>{" "}
-            — e a coordenação.
-          </p>
+          <Notice tone="slate" icon={Users}>
+            <p className="min-w-0 flex-1">
+              Ninguém assumiu ainda. Podem assumir:{" "}
+              <span className="font-medium text-foreground">
+                {[
+                  ...(occ.assisted_ops_dev_names ?? []),
+                  ...(occ.project_po_name ? [`${occ.project_po_name} (PO)`] : []),
+                ].join(", ") || "os desenvolvedores de atendimento do projeto e o PO"}
+              </span>{" "}
+              — e a coordenação.
+            </p>
+          </Notice>
         )
       )}
       {/* Triagem N1 (POP 8.2.1): quem tria e o resultado. */}
       {occ.stage_key === "triagem_n1" ? (
-        <p className="rounded-md border border-sky-300 bg-sky-50 px-3 py-2 text-xs text-sky-900 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-200">
-          <span className="font-semibold">Em triagem no N1</span> ({occ.n1_names.join(", ") || "responsáveis do Produto e Dono do Processo"}). A TI
-          recebe quando o N1 encaminhar pelo Portal.
-        </p>
+        <Notice tone="blue" icon={InfoIcon}>
+          <p className="min-w-0 flex-1">
+            <span className="font-semibold">Em triagem no N1</span> ({occ.n1_names.join(", ") || "responsáveis do Produto e Dono do Processo"}). A TI
+            recebe quando o N1 encaminhar pelo Portal.
+          </p>
+        </Notice>
       ) : occ.n1_outcome ? (
         <p className="text-xs text-muted-foreground">
           Triagem N1: {occ.n1_outcome === "resolvida" ? "resolvida no N1" : "encaminhada à TI"}
@@ -235,7 +243,7 @@ export function OccurrenceTeamPanel({
         </p>
       ) : null}
       {occ.release_project_title && (
-        <p className="text-xs">
+        <p className="text-sm">
           Encaminhada para <span className="font-medium">{occ.release_project_title}</span>
           {occ.release_item_title && <> como “{occ.release_item_title}”</>}.
         </p>
@@ -246,9 +254,7 @@ export function OccurrenceTeamPanel({
       <Info label="Tela / funcionalidade" value={occ.funcionalidade} />
       {(occ.anexos?.length ?? 0) > 0 && (
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Anexos enviados na abertura
-          </div>
+          <div className="mb-1 text-xs text-muted-foreground">Anexos enviados na abertura</div>
           <AttachmentField value={occ.anexos as Attachment[]} onChange={() => {}} disabled />
         </div>
       )}
@@ -291,7 +297,7 @@ export function OccurrenceTeamPanel({
             </SelectContent>
           </Select>
           {classificacao === "melhoria" && (
-            <p className="text-[11px] text-muted-foreground">Mova o card para “Melhoria – Análise PO”.</p>
+            <p className="text-xs text-muted-foreground">Mova o card para “Melhoria – Análise PO”.</p>
           )}
         </div>
       </div>
@@ -303,14 +309,14 @@ export function OccurrenceTeamPanel({
         <Label className="text-xs">Causa raiz (interna){isCorrection && <span className="text-destructive"> *</span>}</Label>
         <Textarea rows={2} value={causaRaiz} onChange={(e) => setCausaRaiz(e.target.value)} disabled={readOnly} />
         {isCorrection && (
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             Na correção, solução e causa raiz são obrigatórias antes de enviar para a validação do cliente (POP).
           </p>
         )}
       </div>
       {occ.stage_key === "melhoria_analise" && !readOnly && (
-        <div className="space-y-2 rounded-md border bg-background/70 p-2">
-          <p className="text-xs font-semibold">Encaminhar para Release (PO)</p>
+        <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+          <p className="text-sm font-semibold">Encaminhar para Release (PO)</p>
           <Select value={releaseId} onValueChange={(v) => { setReleaseId(v); setParentFeatureId(NONE) }}>
             <SelectTrigger className="h-8">
               <SelectValue placeholder="Projeto de Release" />
@@ -359,7 +365,7 @@ export function OccurrenceTeamPanel({
               </SelectContent>
             </Select>
           )}
-          <p className="text-[11px] text-muted-foreground">O cliente é avisado de que a melhoria não será atendida na Operação Assistida.</p>
+          <p className="text-xs text-muted-foreground">O cliente é avisado de que a melhoria não será atendida na Operação Assistida.</p>
           <div className="flex justify-end">
             <Button size="sm" className="gap-1" onClick={() => void forward()} disabled={forwarding}>
               {forwarding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send size={13} />}
@@ -376,6 +382,6 @@ export function OccurrenceTeamPanel({
           </Button>
         </div>
       )}
-    </div>
+    </DrawerSection>
   )
 }

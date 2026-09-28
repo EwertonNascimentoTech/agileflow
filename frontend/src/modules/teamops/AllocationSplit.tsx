@@ -47,21 +47,21 @@ export function AllocationSplitBar({ split, compact = false }: { split: Allocati
   ]
   const title = parts.map((p) => `${p.label} ${p.pct}%${p.h != null ? ` (${p.h}h/dia)` : ""}`).join(" · ")
   return (
-    <div className={compact ? "w-32" : "space-y-1.5"} title={title}>
-      <div className="flex h-2 w-full overflow-hidden rounded-full bg-muted">
+    <div className={compact ? "w-32" : "space-y-2"} title={title}>
+      <div className="flex h-2 w-full overflow-hidden rounded-full bg-muted dark:bg-white/10">
         {parts.map((p) => (p.pct > 0 ? <div key={p.key} className={p.cls} style={{ width: `${p.pct}%` }} /> : null))}
       </div>
       {compact ? (
-        <div className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">
+        <div className="mt-1 text-xs tabular-nums text-muted-foreground">
           {split.projectsPct}/{split.assistedOpsPct}/{split.ticketsPct}%
         </div>
       ) : (
-        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
           {parts.map((p) => (
-            <span key={p.key} className="inline-flex items-center gap-1">
-              <span className={`h-2 w-2 rounded-full ${p.cls}`} />
-              {p.label} <span className="font-medium tabular-nums">{p.pct}%</span>
-              {p.h != null && <span className="text-muted-foreground">({p.h}h/dia)</span>}
+            <span key={p.key} className="inline-flex items-center gap-1.5">
+              <span className={`h-2.5 w-2.5 rounded-full ${p.cls}`} aria-hidden />
+              {p.label} <span className="font-semibold tabular-nums text-foreground">{p.pct}%</span>
+              {p.h != null && <span>({p.h}h/dia)</span>}
             </span>
           ))}
         </div>

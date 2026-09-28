@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react"
-import { Building2, Loader2, Pencil, Plus, Trash2 } from "lucide-react"
+import { Building2, Loader2, Mail, Pencil, Phone, Plus, Trash2, UserRound } from "lucide-react"
 
 import { produtosApi, type Fornecedor } from "@/api/produtos"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
+import { Card, IconTile, PageHeader } from "@/components/ds"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -31,38 +31,67 @@ export default function FornecedoresPage() {
     void reload()
   }
 
-  if (loading) return <Skeleton className="h-64 w-full" />
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div><h2 className="text-lg font-bold">Fornecedores</h2><p className="text-sm text-muted-foreground">Fornecedores de software para vincular a produtos e contratos.</p></div>
-        <Button className="gap-1.5" onClick={openNew}><Plus size={15} /> Novo fornecedor</Button>
+  if (loading) {
+    return (
+      <div className="space-y-5">
+        <Skeleton className="h-16 w-2/3 rounded-xl" />
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-36 rounded-2xl" />)}
+        </div>
       </div>
+    )
+  }
+  return (
+    <div className="space-y-5">
+      <PageHeader
+        icon={Building2}
+        color="#7C3AED"
+        title="Fornecedores"
+        description="Fornecedores de software para vincular a produtos e contratos."
+        actions={<Button className="h-10 gap-1.5" onClick={openNew}><Plus size={16} /> Novo fornecedor</Button>}
+      />
       {items.length === 0 ? (
-        <EmptyState icon={Building2} title="Nenhum fornecedor" description="Cadastre fornecedores para usar em contratos." action={{ label: "Novo fornecedor", onClick: openNew }} />
+        <Card>
+          <EmptyState icon={Building2} title="Nenhum fornecedor" description="Cadastre fornecedores para usar em contratos." action={{ label: "Novo fornecedor", onClick: openNew }} />
+        </Card>
       ) : (
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((f) => (
-            <Card key={f.id}>
-              <CardContent className="flex items-start justify-between gap-2 p-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold">{f.nome}</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    {f.cnpj || "—"}
-                    {f.email ? ` · ${f.email}` : ""}
-                    {f.telefone ? ` · ${f.telefone}` : ""}
-                  </p>
-                  {f.contato && <p className="text-[11px] text-muted-foreground">Contato: {f.contato}</p>}
+            <Card key={f.id} className="p-5">
+              <div className="flex items-start gap-3">
+                <IconTile icon="Building2" color="#7C3AED" size={40} />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-semibold" title={f.nome}>{f.nome}</p>
+                  <p className="text-sm text-muted-foreground">CNPJ <span className="tabular-nums">{f.cnpj || "—"}</span></p>
                 </div>
-                <div className="flex shrink-0 items-center gap-0.5">
-                  <Button variant="ghost" size="icon" title="Editar fornecedor" onClick={() => openEdit(f)}>
-                    <Pencil size={14} />
+                <div className="-mr-2 -mt-1 flex shrink-0 items-center gap-0.5">
+                  <Button variant="ghost" size="icon" className="h-8 w-8" title="Editar fornecedor" onClick={() => openEdit(f)}>
+                    <Pencil size={15} />
                   </Button>
-                  <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" title="Inativar fornecedor" onClick={() => void del(f)}>
-                    <Trash2 size={14} />
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" title="Inativar fornecedor" onClick={() => void del(f)}>
+                    <Trash2 size={15} />
                   </Button>
                 </div>
-              </CardContent>
+              </div>
+              {(f.contato || f.email || f.telefone) && (
+                <div className="mt-4 space-y-1.5 border-t pt-3 text-sm text-muted-foreground">
+                  {f.contato && (
+                    <p className="flex items-center gap-2" title="Contato">
+                      <UserRound size={14} className="shrink-0" /> <span className="truncate">Contato: {f.contato}</span>
+                    </p>
+                  )}
+                  {f.email && (
+                    <p className="flex items-center gap-2" title="E-mail">
+                      <Mail size={14} className="shrink-0" /> <span className="truncate">{f.email}</span>
+                    </p>
+                  )}
+                  {f.telefone && (
+                    <p className="flex items-center gap-2" title="Telefone">
+                      <Phone size={14} className="shrink-0" /> <span className="truncate tabular-nums">{f.telefone}</span>
+                    </p>
+                  )}
+                </div>
+              )}
             </Card>
           ))}
         </div>

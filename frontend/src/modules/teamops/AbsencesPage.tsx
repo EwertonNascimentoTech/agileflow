@@ -1,19 +1,25 @@
 import { useEffect, useMemo, useState } from "react"
 import {
   AlertTriangle,
+  CalendarDays,
+  CalendarOff,
   Check,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  ClipboardCheck,
   FolderKanban,
+  List,
   Plus,
   Users,
   X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { EmptyState } from "@/components/EmptyState"
+import {
+  Card, DetailTabs, KpiCount, KpiRow, Notice, PageHeader, Pill, SectionCard, TABLE, type TabDef, type Tone,
+} from "@/components/ds"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
@@ -29,6 +35,7 @@ import {
   type Absence,
   type AbsenceCalendar,
   type AbsenceImpact,
+  type AbsenceStatus,
   type AbsenceType,
   type Person,
 } from "@/api/teamops"
@@ -36,6 +43,12 @@ import { useAuth } from "@/contexts/AuthContext"
 import { hasPermission } from "@/lib/permissions"
 
 const NONE = "__none__"
+
+type AbsencesTab = "calendar" | "list" | "approvals" | "impact"
+
+// Selo do status da ausência (Pill do design system do Portal).
+const ABSENCE_TONE: Record<AbsenceStatus, Tone> = { aprovada: "emerald", recusada: "red", pendente: "amber", cancelada: "slate" }
+const RISK_TONE: Record<"low" | "medium" | "high", Tone> = { high: "red", medium: "amber", low: "slate" }
 
 function ymd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
@@ -69,50 +82,40 @@ export default function AbsencesPage() {
   const canApprove = hasPermission(user?.permissions, "teamops.absence.approve")
   const [creating, setCreating] = useState(false)
   const [refreshTick, setRefreshTick] = useState(0)
+  const [tab, setTab] = useState<AbsencesTab>("calendar")
   const triggerRefresh = () => setRefreshTick((t) => t + 1)
 
+  const tabs: TabDef<AbsencesTab>[] = [
+    { value: "calendar", label: "Calendário", icon: CalendarDays },
+    { value: "list", label: "Lista", icon: List },
+    ...(canApprove
+      ? [
+          { value: "approvals" as const, label: "Aprovações pendentes", icon: ClipboardCheck },
+          { value: "impact" as const, label: "Análise de impacto", icon: AlertTriangle },
+        ]
+      : []),
+  ]
+
   return (
-    <div className="space-y-4 p-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Ausências e férias</h1>
-          <p className="text-sm text-muted-foreground">
-            Calendário, listagem e aprovações pendentes.
-          </p>
-        </div>
-        <Button onClick={() => setCreating(true)}>
-          <Plus className="mr-2 h-4 w-4" /> Registrar ausência
-        </Button>
-      </header>
+    <div className="space-y-5 p-4">
+      <PageHeader
+        icon={CalendarOff}
+        color="#0891B2"
+        title="Ausências e férias"
+        description="Calendário, listagem e aprovações pendentes."
+        actions={
+          <Button className="h-10 gap-1.5" onClick={() => setCreating(true)}>
+            <Plus size={16} /> Registrar ausência
+          </Button>
+        }
+      />
 
-      <Tabs defaultValue="calendar">
-        <TabsList>
-          <TabsTrigger value="calendar">Calendário</TabsTrigger>
-          <TabsTrigger value="list">Lista</TabsTrigger>
-          {canApprove && <TabsTrigger value="approvals">Aprovações pendentes</TabsTrigger>}
-          {canApprove && <TabsTrigger value="impact">Análise de impacto</TabsTrigger>}
-        </TabsList>
+      <DetailTabs tabs={tabs} value={tab} onChange={setTab} />
 
-        <TabsContent value="calendar" className="mt-4">
-          <CalendarView key={`cal-${refreshTick}`} />
-        </TabsContent>
-
-        <TabsContent value="list" className="mt-4">
-          <ListView key={`list-${refreshTick}`} onChange={triggerRefresh} />
-        </TabsContent>
-
-        {canApprove && (
-          <TabsContent value="approvals" className="mt-4">
-            <ApprovalsView key={`appr-${refreshTick}`} onChange={triggerRefresh} />
-          </TabsContent>
-        )}
-
-        {canApprove && (
-          <TabsContent value="impact" className="mt-4">
-            <ImpactAnalysisView key={`impact-${refreshTick}`} />
-          </TabsContent>
-        )}
-      </Tabs>
+      {tab === "calendar" && <CalendarView key={`cal-${refreshTick}`} />}
+      {tab === "list" && <ListView key={`list-${refreshTick}`} onChange={triggerRefresh} />}
+      {canApprove && tab === "approvals" && <ApprovalsView key={`appr-${refreshTick}`} onChange={triggerRefresh} />}
+      {canApprove && tab === "impact" && <ImpactAnalysisView key={`impact-${refreshTick}`} />}
 
       {creating && (
         <CreateAbsenceDialog
@@ -141,73 +144,84 @@ function CalendarView() {
   const firstWeekday = useMemo(() => monthStart(month).getDay(), [month])
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between pb-2">
-        <CardTitle className="text-base">
-          {monthStart(month).toLocaleString("pt-BR", { month: "long", year: "numeric" })}
-        </CardTitle>
+    <SectionCard
+      title={<span className="capitalize">{monthStart(month).toLocaleString("pt-BR", { month: "long", year: "numeric" })}</span>}
+      icon={CalendarDays}
+      subtitle="Ausências pendentes e aprovadas do mês."
+      right={
         <div className="flex gap-1">
-          <Button variant="outline" size="sm" onClick={() => setMonth(addMonth(month, -1))}>
+          <Button variant="outline" size="icon" className="h-9 w-9" aria-label="Mês anterior" onClick={() => setMonth(addMonth(month, -1))}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setMonth(currentMonth())}>Hoje</Button>
-          <Button variant="outline" size="sm" onClick={() => setMonth(addMonth(month, 1))}>
+          <Button variant="outline" className="h-9" onClick={() => setMonth(currentMonth())}>Hoje</Button>
+          <Button variant="outline" size="icon" className="h-9 w-9" aria-label="Próximo mês" onClick={() => setMonth(addMonth(month, 1))}>
             <ChevronRight className="h-4 w-4" />
           </Button>
         </div>
-      </CardHeader>
-      <CardContent>
-        {loading || !data ? (
-          <Skeleton className="h-96" />
-        ) : (
-          <>
-            <div className="mb-2 grid grid-cols-7 gap-1 text-center text-xs font-medium text-muted-foreground">
-              {weekdays.map((d, i) => <div key={i}>{d}</div>)}
-            </div>
-            <div className="grid grid-cols-7 gap-1">
-              {Array.from({ length: firstWeekday }).map((_, i) => (
-                <div key={`empty-${i}`} />
-              ))}
-              {data.days.map((d) => {
-                const isToday = d.day === today
-                const count = d.absences.length
-                const hasConflict = d.conflict_flags.length > 0
-                return (
-                  <div
-                    key={d.day}
-                    className={
-                      "min-h-[64px] rounded-md border p-1 text-xs " +
-                      (isToday ? "border-primary bg-primary/5 " : "") +
-                      (hasConflict ? "bg-amber-50 dark:bg-amber-950/30 " : "")
-                    }
-                    title={d.absences.map((a) => a.person?.full_name).join(", ")}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium">{Number(d.day.slice(-2))}</span>
-                      {count > 0 && <Badge variant="secondary" className="h-4 px-1.5 text-[10px]">{count}</Badge>}
-                    </div>
-                    <div className="mt-1 space-y-0.5">
-                      {d.absences.slice(0, 2).map((a) => (
-                        <div
-                          key={a.id}
-                          className="truncate rounded px-1 text-[10px]"
-                          style={{ background: a.absence_type?.color ?? "#8B5CF6", color: "white" }}
-                        >
-                          {a.person?.full_name?.split(" ")[0]}
-                        </div>
-                      ))}
-                      {count > 2 && (
-                        <div className="text-[10px] text-muted-foreground">+{count - 2}</div>
-                      )}
-                    </div>
+      }
+    >
+      {loading || !data ? (
+        <Skeleton className="h-96 rounded-xl" />
+      ) : (
+        <>
+          <div className="mb-2 grid grid-cols-7 gap-1.5 text-center text-xs font-medium text-muted-foreground">
+            {weekdays.map((d, i) => <div key={i}>{d}</div>)}
+          </div>
+          <div className="grid grid-cols-7 gap-1.5">
+            {Array.from({ length: firstWeekday }).map((_, i) => (
+              <div key={`empty-${i}`} />
+            ))}
+            {data.days.map((d) => {
+              const isToday = d.day === today
+              const count = d.absences.length
+              const hasConflict = d.conflict_flags.length > 0
+              return (
+                <div
+                  key={d.day}
+                  className={
+                    "min-h-[76px] rounded-lg border p-1.5 text-xs " +
+                    (isToday ? "border-primary bg-primary/5 ring-1 ring-primary/30 " : "bg-background ") +
+                    (hasConflict ? "border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 " : "")
+                  }
+                  title={d.absences.map((a) => a.person?.full_name).join(", ")}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className={`font-medium tabular-nums ${isToday ? "text-primary" : ""}`}>{Number(d.day.slice(-2))}</span>
+                    {count > 0 && (
+                      <span className="rounded-full bg-muted px-1.5 text-xs font-medium tabular-nums text-muted-foreground">{count}</span>
+                    )}
                   </div>
-                )
-              })}
-            </div>
-          </>
-        )}
-      </CardContent>
-    </Card>
+                  <div className="mt-1 space-y-0.5">
+                    {d.absences.slice(0, 2).map((a) => (
+                      <div
+                        key={a.id}
+                        className="truncate rounded px-1 text-xs leading-4"
+                        style={{ background: a.absence_type?.color ?? "#8B5CF6", color: "white" }}
+                      >
+                        {a.person?.full_name?.split(" ")[0]}
+                      </div>
+                    ))}
+                    {count > 2 && (
+                      <div className="text-xs text-muted-foreground">+{count - 2}</div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+            <span className="font-semibold text-foreground">Legenda</span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block h-3 w-3 rounded border border-primary bg-primary/5" aria-hidden /> Hoje
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block h-3 w-3 rounded border border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30" aria-hidden /> Dia com conflito
+            </span>
+            <span>Cor da etiqueta = tipo de ausência; passe o mouse no dia para ver todos os nomes.</span>
+          </div>
+        </>
+      )}
+    </SectionCard>
   )
 }
 
@@ -219,53 +233,63 @@ function ListView({ onChange }: { onChange: () => void }) {
     teamopsApi.listAbsences().then(setAbsences).finally(() => setLoading(false))
   }, [])
 
-  if (loading) return <Skeleton className="h-96" />
+  if (loading) return <Skeleton className="h-96 rounded-2xl" />
   if (absences.length === 0) {
-    return <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">
-      Nenhuma ausência registrada.
-    </CardContent></Card>
+    return (
+      <Card>
+        <EmptyState icon={CalendarOff} title="Nenhuma ausência registrada." compact />
+      </Card>
+    )
   }
   return (
-    <Card><CardContent className="p-0">
-      <table className="w-full text-sm">
-        <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
-          <tr>
-            <th className="px-4 py-2 text-left">Pessoa</th>
-            <th className="px-4 py-2 text-left">Tipo</th>
-            <th className="px-4 py-2 text-left">Período</th>
-            <th className="px-4 py-2 text-left">Status</th>
-            <th className="px-4 py-2"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {absences.map((a) => (
-            <tr key={a.id} className="border-t">
-              <td className="px-4 py-2 font-medium">{a.person?.full_name ?? "—"}</td>
-              <td className="px-4 py-2">
-                <span className="inline-block h-2 w-2 rounded-full" style={{ background: a.absence_type?.color }} />{" "}
-                {a.absence_type?.name}
-              </td>
-              <td className="px-4 py-2">{a.start_date} → {a.end_date}</td>
-              <td className="px-4 py-2">
-                <Badge variant={a.status === "aprovada" ? "success" : a.status === "recusada" ? "destructive" : "secondary"}>
-                  {ABSENCE_STATUS_LABELS[a.status]}
-                </Badge>
-              </td>
-              <td className="px-4 py-2 text-right">
-                <Button
-                  variant="ghost" size="sm"
-                  onClick={async () => {
-                    if (!confirm("Remover esta ausência?")) return
-                    await teamopsApi.deleteAbsence(a.id)
-                    onChange()
-                  }}
-                >Remover</Button>
-              </td>
+    <SectionCard
+      title="Ausências registradas"
+      icon={List}
+      right={<span className="text-sm tabular-nums text-muted-foreground">{absences.length} registro{absences.length === 1 ? "" : "s"}</span>}
+      flush
+    >
+      <div className={TABLE.wrap}>
+        <table className={`${TABLE.table} min-w-[640px]`}>
+          <thead className={TABLE.thead}>
+            <tr>
+              <th className={TABLE.thFirst}>Pessoa</th>
+              <th className={TABLE.th}>Tipo</th>
+              <th className={TABLE.th}>Período</th>
+              <th className={TABLE.th}>Status</th>
+              <th className={TABLE.th}><span className="sr-only">Ações</span></th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </CardContent></Card>
+          </thead>
+          <tbody>
+            {absences.map((a) => (
+              <tr key={a.id} className={TABLE.tr}>
+                <td className={`${TABLE.tdFirst} font-medium`}>{a.person?.full_name ?? "—"}</td>
+                <td className={TABLE.td}>
+                  <span className="inline-flex items-center gap-2">
+                    <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: a.absence_type?.color }} aria-hidden />
+                    {a.absence_type?.name}
+                  </span>
+                </td>
+                <td className={`${TABLE.td} whitespace-nowrap tabular-nums`}>{formatDate(a.start_date)} → {formatDate(a.end_date)}</td>
+                <td className={TABLE.td}>
+                  <Pill tone={ABSENCE_TONE[a.status]} dot>{ABSENCE_STATUS_LABELS[a.status]}</Pill>
+                </td>
+                <td className={`${TABLE.td} text-right`}>
+                  <Button
+                    variant="ghost" size="sm"
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={async () => {
+                      if (!confirm("Remover esta ausência?")) return
+                      await teamopsApi.deleteAbsence(a.id)
+                      onChange()
+                    }}
+                  >Remover</Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </SectionCard>
   )
 }
 
@@ -282,50 +306,63 @@ function ApprovalsView({ onChange }: { onChange: () => void }) {
 
   useEffect(() => { refresh() }, [])
 
-  if (loading) return <Skeleton className="h-64" />
+  if (loading) return <Skeleton className="h-64 rounded-2xl" />
   if (absences.length === 0) {
-    return <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">
-      Nenhuma aprovação pendente. ✨
-    </CardContent></Card>
+    return (
+      <Card>
+        <EmptyState icon={CheckCircle2} title="Nenhuma aprovação pendente. ✨" compact />
+      </Card>
+    )
   }
   return (
-    <div className="space-y-3">
-      {absences.map((a) => (
-        <Card key={a.id}>
-          <CardContent className="flex items-center justify-between gap-4 p-4">
-            <div className="flex-1">
-              <p className="font-medium">{a.person?.full_name}</p>
+    <SectionCard
+      title={`Aprovações pendentes (${absences.length})`}
+      icon={ClipboardCheck}
+      subtitle="Aprove ou recuse cada pedido de ausência."
+      flush
+    >
+      <ul className="divide-y">
+        {absences.map((a) => (
+          <li key={a.id} className="flex flex-wrap items-center justify-between gap-4 px-5 py-4 transition-colors hover:bg-muted/40">
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold">{a.person?.full_name}</p>
               <p className="text-sm text-muted-foreground">
-                {a.absence_type?.name} · {a.start_date} → {a.end_date}
+                <span className="inline-flex items-center gap-1.5">
+                  {a.absence_type?.color && (
+                    <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: a.absence_type.color }} aria-hidden />
+                  )}
+                  {a.absence_type?.name}
+                </span>
+                {" "}· <span className="tabular-nums">{formatDate(a.start_date)} → {formatDate(a.end_date)}</span>
               </p>
-              {a.notes && <p className="mt-1 text-xs text-muted-foreground">{a.notes}</p>}
+              {a.notes && <p className="mt-1 text-sm text-muted-foreground">{a.notes}</p>}
             </div>
             <div className="flex gap-2">
               <Button
-                size="sm" variant="outline"
+                variant="outline" className="h-9 gap-1.5"
                 onClick={async () => {
                   await teamopsApi.rejectAbsence(a.id)
                   refresh()
                   onChange()
                 }}
               >
-                <X className="mr-1 h-4 w-4" /> Recusar
+                <X size={15} /> Recusar
               </Button>
               <Button
-                size="sm"
+                className="h-9 gap-1.5"
                 onClick={async () => {
                   await teamopsApi.approveAbsence(a.id)
                   refresh()
                   onChange()
                 }}
               >
-                <Check className="mr-1 h-4 w-4" /> Aprovar
+                <Check size={15} /> Aprovar
               </Button>
             </div>
-          </CardContent>
-        </Card>
-      ))}
-    </div>
+          </li>
+        ))}
+      </ul>
+    </SectionCard>
   )
 }
 
@@ -341,71 +378,62 @@ function ImpactAnalysisView() {
       .finally(() => setLoading(false))
   }, [])
 
-  if (loading) return <Skeleton className="h-96" />
+  if (loading) return <Skeleton className="h-96 rounded-2xl" />
   if (error) {
-    return <Card><CardContent className="p-8 text-center text-sm text-destructive">{error}</CardContent></Card>
+    return <Notice tone="red" icon={AlertTriangle}>{error}</Notice>
   }
   if (!data) return null
 
-  const summaryCards = [
-    { label: "Ausências analisadas", value: data.summary.analyzed_absences, icon: Users },
-    { label: "Pessoas em risco", value: data.summary.people_at_risk, icon: AlertTriangle },
-    { label: "Conflitos no time", value: data.summary.team_conflicts, icon: Users },
-    { label: "Projetos impactados", value: data.summary.impacted_projects, icon: FolderKanban },
-  ]
+  const s = data.summary
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {summaryCards.map(({ label, value, icon: Icon }) => (
-          <Card key={label}>
-            <CardContent className="flex items-center justify-between p-4">
-              <div>
-                <p className="text-xs text-muted-foreground">{label}</p>
-                <p className="text-2xl font-semibold">{value}</p>
-              </div>
-              <Icon className="h-5 w-5 text-muted-foreground" />
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      <KpiRow className="sm:grid-cols-2 xl:grid-cols-4">
+        <KpiCount icon={Users} value={s.analyzed_absences} label="Ausências analisadas" />
+        <KpiCount
+          icon={AlertTriangle} value={s.people_at_risk} label="Pessoas em risco"
+          tone={s.people_at_risk > 0 ? "red" : "slate"} highlight={s.people_at_risk > 0}
+        />
+        <KpiCount icon={Users} value={s.team_conflicts} label="Conflitos no time" tone={s.team_conflicts > 0 ? "amber" : "slate"} />
+        <KpiCount icon={FolderKanban} value={s.impacted_projects} label="Projetos impactados" tone={s.impacted_projects > 0 ? "violet" : "slate"} />
+      </KpiRow>
 
       {data.items.length === 0 ? (
         <Card>
-          <CardContent className="p-8 text-center text-sm text-muted-foreground">
-            Nenhuma ausência pendente ou aprovada com impacto futuro.
-          </CardContent>
+          <EmptyState icon={CheckCircle2} title="Nenhuma ausência pendente ou aprovada com impacto futuro." compact />
         </Card>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {data.items.map((item) => (
-            <Card key={item.absence_id} className={
-              item.risk_level === "high"
-                ? "border-destructive/50"
-                : item.risk_level === "medium" ? "border-amber-400/60" : ""
-            }>
-              <CardHeader className="pb-3">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
-                    <CardTitle className="text-base">{item.person.full_name}</CardTitle>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {item.absence_type.name} · {formatDate(item.start_date)} a {formatDate(item.end_date)}
-                    </p>
-                  </div>
-                  <div className="flex gap-2">
-                    <Badge variant={item.status === "aprovada" ? "success" : "secondary"}>
-                      {ABSENCE_STATUS_LABELS[item.status]}
-                    </Badge>
-                    <Badge variant={item.risk_level === "high" ? "destructive" : "outline"}>
-                      Risco {item.risk_level === "high" ? "alto" : item.risk_level === "medium" ? "médio" : "baixo"}
-                    </Badge>
-                  </div>
+            <Card
+              key={item.absence_id}
+              className={
+                item.risk_level === "high"
+                  ? "border-red-300 dark:border-red-900"
+                  : item.risk_level === "medium" ? "border-amber-300 dark:border-amber-800" : ""
+              }
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3 border-b px-5 py-4">
+                <div className="min-w-0">
+                  <h2 className="text-lg font-semibold">{item.person.full_name}</h2>
+                  <p className="text-sm text-muted-foreground">
+                    {item.absence_type.name} · {formatDate(item.start_date)} a {formatDate(item.end_date)}
+                  </p>
                 </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid gap-4 lg:grid-cols-2">
+                <div className="flex flex-wrap gap-2">
+                  <Pill tone={ABSENCE_TONE[item.status]} dot>{ABSENCE_STATUS_LABELS[item.status]}</Pill>
+                  <Pill tone={RISK_TONE[item.risk_level]}>
+                    {item.risk_level === "high" && <AlertTriangle size={12} />}
+                    Risco {item.risk_level === "high" ? "alto" : item.risk_level === "medium" ? "médio" : "baixo"}
+                  </Pill>
+                </div>
+              </div>
+              <div className="space-y-4 p-5">
+                <div className="grid gap-5 lg:grid-cols-2">
                   <div>
-                    <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Impacto no time</p>
+                    <p className="mb-2 flex items-center gap-2 text-sm font-semibold">
+                      <Users size={15} className="text-muted-foreground" /> Impacto no time
+                    </p>
                     {item.overlapping_people.length > 0 ? (
                       <div className="space-y-2">
                         <p className="text-sm">
@@ -423,13 +451,15 @@ function ImpactAnalysisView() {
                     )}
                   </div>
                   <div>
-                    <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Impacto nos projetos</p>
+                    <p className="mb-2 flex items-center gap-2 text-sm font-semibold">
+                      <FolderKanban size={15} className="text-muted-foreground" /> Impacto nos projetos
+                    </p>
                     {item.impacted_projects.length > 0 ? (
                       <div className="space-y-2">
                         {item.impacted_projects.map((project) => (
-                          <div key={project.id} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
-                            <span className="font-medium">{project.name}</span>
-                            <span className="text-xs text-muted-foreground">
+                          <div key={project.id} className="flex items-center justify-between gap-3 rounded-xl border bg-background px-3 py-2 text-sm">
+                            <span className="min-w-0 truncate font-medium" title={project.name}>{project.name}</span>
+                            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
                               {project.overlapping_tasks} sobreposta(s) / {project.open_tasks} aberta(s)
                             </span>
                           </div>
@@ -440,12 +470,12 @@ function ImpactAnalysisView() {
                     )}
                   </div>
                 </div>
-                <div className="rounded-md bg-muted/50 p-3">
+                <div className="rounded-xl bg-muted/50 p-3">
                   {item.reasons.map((reason) => (
                     <p key={reason} className="text-sm">• {reason}</p>
                   ))}
                 </div>
-              </CardContent>
+              </div>
             </Card>
           ))}
         </div>

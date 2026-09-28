@@ -2,12 +2,14 @@ import { useEffect, useState } from "react"
 import { CalendarClock, ClipboardCheck, Loader2, Pencil } from "lucide-react"
 
 import { ASSISTED_OP_PHASES, teamOccurrencesApi, type AssistedOpsEntryState } from "@/api/clientes"
+import { Field, Pill } from "@/components/ds"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { toast } from "@/lib/toast"
+import { DrawerSection } from "@/modules/projetos/CollapsibleFormSection"
 
 /** O backend responde 428 com este código quando o projeto vai para a Operação Assistida sem
  *  os pré-requisitos do POP.COR.GTD.003 (5) confirmados. */
@@ -59,9 +61,9 @@ function ChecklistEditor({
     onChange(next)
   }
   return (
-    <div className="divide-y rounded-md border bg-background">
+    <div className="divide-y rounded-lg border bg-background">
       {state.items.map((item) => (
-        <div key={item.key} className="flex flex-wrap items-center gap-2 px-2 py-1.5 text-sm">
+        <div key={item.key} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
           <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-2">
             <input
               type="checkbox"
@@ -73,7 +75,7 @@ function ChecklistEditor({
             />
             <span className="min-w-0">
               <span className={marks[item.key] === "na" ? "text-muted-foreground line-through" : ""}>{item.label}</span>
-              {item.hint && <span className="block text-[11px] text-amber-700 dark:text-amber-300">{item.hint}</span>}
+              {item.hint && <span className="block text-xs text-amber-700 dark:text-amber-300">{item.hint}</span>}
             </span>
           </label>
           {item.allow_na && (
@@ -81,7 +83,7 @@ function ChecklistEditor({
               type="button"
               onClick={() => toggle(item.key, "na")}
               disabled={disabled}
-              className={`rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+              className={`rounded-md border px-2 py-0.5 text-xs font-medium transition-colors ${
                 marks[item.key] === "na" ? "border-slate-400 bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200" : "text-muted-foreground hover:bg-muted"
               }`}
             >
@@ -172,50 +174,48 @@ export function AssistedOpsEntrySection({
   }
 
   return (
-    <div className="space-y-2 rounded-md border border-teal-500/30 bg-teal-50/40 p-3 dark:bg-teal-950/20">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <ClipboardCheck size={14} className="text-teal-600" />
-          <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-teal-700 dark:text-teal-400">
-            Operação Assistida · preparação, prazo e fase
-          </p>
-        </div>
-        {canManage && !editing && !extending && (
-          <div className="flex gap-1">
-            <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={() => { setMarks(marksOf(state)); setEditing(true) }}>
-              <Pencil size={12} /> Pré-requisitos
+    <DrawerSection
+      title="Operação Assistida · preparação, prazo e fase"
+      icon={ClipboardCheck}
+      iconClassName="text-teal-600 dark:text-teal-400"
+      right={
+        canManage && !editing && !extending && (
+          <>
+            <Button variant="outline" size="sm" className="h-8 gap-1" onClick={() => { setMarks(marksOf(state)); setEditing(true) }}>
+              <Pencil size={13} /> Pré-requisitos
             </Button>
             {state.entered_at && (
               <Button
-                variant="ghost" size="sm" className="h-7 gap-1 text-xs"
+                variant="outline" size="sm" className="h-8 gap-1"
                 onClick={() => { setNewDate(""); setReason(""); setExtending(true) }}
               >
-                <CalendarClock size={12} /> {firstDue ? "Definir fim previsto" : "Prorrogar"}
+                <CalendarClock size={13} /> {firstDue ? "Definir fim previsto" : "Prorrogar"}
               </Button>
             )}
-          </div>
-        )}
-      </div>
-
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md bg-background/70 px-2 py-1.5 text-xs">
-        <span>
-          Pré-requisitos:{" "}
-          <span className={`font-medium ${state.complete ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-300"}`}>
+          </>
+        )
+      }
+    >
+      <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+        <Field label="Pré-requisitos">
+          <Pill tone={state.complete ? "emerald" : "amber"} dot>
             {state.complete ? "todos confirmados" : `${filled} de ${state.items.length}`}
+          </Pill>
+        </Field>
+        {state.entered_at && <Field label="Em Operação Assistida desde">{fmtDay(state.entered_at)}</Field>}
+        <Field label="Fim previsto">
+          <span className="inline-flex flex-wrap items-center gap-1.5">
+            {fmtDay(state.due_date)}
+            {state.overdue && <Pill tone="red">vencido</Pill>}
           </span>
-        </span>
-        {state.entered_at && <span>Em Operação Assistida desde <span className="font-medium">{fmtDay(state.entered_at)}</span></span>}
-        <span>
-          Fim previsto: <span className="font-medium">{fmtDay(state.due_date)}</span>
-          {state.overdue && <span className="ml-1 font-semibold text-red-700 dark:text-red-400">· vencido</span>}
-        </span>
-        {state.extensions.length > 0 && <span>{state.extensions.length} prorrogação(ões)</span>}
+        </Field>
+        {state.extensions.length > 0 && <Field label="Prorrogações">{state.extensions.length} prorrogação(ões)</Field>}
         {state.missing_roles.length > 0 && (
-          <span className="text-amber-700 dark:text-amber-300">
-            Falta nos Clientes do projeto: <span className="font-medium">{state.missing_roles.join(", ")}</span>
-          </span>
+          <Field label="Falta nos Clientes do projeto">
+            <span className="text-amber-700 dark:text-amber-300">{state.missing_roles.join(", ")}</span>
+          </Field>
         )}
-      </div>
+      </dl>
 
       {/* Fases do POP (8.3.1): a cadência dos ritos acompanha a fase. */}
       {state.entered_at && (
@@ -230,14 +230,14 @@ export function AssistedOpsEntrySection({
                 onClick={() => void changePhase(n)}
                 disabled={savingPhase}
                 aria-pressed={active}
-                className={`rounded-md border px-2 py-0.5 font-medium transition-colors ${
+                className={`rounded-md border px-2.5 py-1 font-medium transition-colors ${
                   active ? "border-teal-600 bg-teal-600 text-white" : "bg-background text-muted-foreground hover:bg-muted"
                 }`}
               >
                 {n} · {ASSISTED_OP_PHASES[n]}
               </button>
             ) : active ? (
-              <span key={n} className="rounded-md border border-teal-600 bg-teal-600 px-2 py-0.5 font-medium text-white">
+              <span key={n} className="rounded-md border border-teal-600 bg-teal-600 px-2.5 py-1 font-medium text-white">
                 {n} · {ASSISTED_OP_PHASES[n]}
               </span>
             ) : null
@@ -260,7 +260,7 @@ export function AssistedOpsEntrySection({
       )}
 
       {extending && (
-        <div className="space-y-2 rounded-md border bg-background p-2">
+        <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
           <p className="text-xs text-muted-foreground">
             {firstDue
               ? `O POP prevê até ${state.max_days} dias de Operação Assistida.`
@@ -270,7 +270,7 @@ export function AssistedOpsEntrySection({
             <div className="space-y-1">
               <Label className="text-xs">{firstDue ? "Fim previsto" : "Nova data"}</Label>
               <Input
-                type="date" className="h-8 w-40" value={newDate} min={state.due_date ?? isoDay()}
+                type="date" className="h-8 w-40 bg-background" value={newDate} min={state.due_date ?? isoDay()}
                 max={firstDue ? isoDay(state.max_days) : undefined}
                 onChange={(e) => setNewDate(e.target.value)}
               />
@@ -293,9 +293,9 @@ export function AssistedOpsEntrySection({
       )}
 
       {!editing && state.extensions.length > 0 && (
-        <ul className="space-y-1 text-xs">
+        <ul className="space-y-1.5 text-sm">
           {state.extensions.map((x, i) => (
-            <li key={i} className="rounded-md bg-background/70 px-2 py-1">
+            <li key={i} className="rounded-lg border bg-muted/30 px-3 py-2">
               <span className="font-medium">{x.from ? `${fmtDay(x.from)} → ` : ""}{fmtDay(x.to)}</span>
               {x.by && <span className="text-muted-foreground"> · {x.by}</span>}
               <span className="block text-muted-foreground">{x.reason}</span>
@@ -303,7 +303,7 @@ export function AssistedOpsEntrySection({
           ))}
         </ul>
       )}
-    </div>
+    </DrawerSection>
   )
 }
 
@@ -373,7 +373,7 @@ export function AssistedOpsPrereqsDialog({
                 type="date" className="h-9 w-44" value={due} min={isoDay()} max={isoDay(state.max_days)}
                 onChange={(e) => setDue(e.target.value)} disabled={saving || (!!state.entered_at && !!state.due_date)}
               />
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 Até {state.max_days} dias a partir de hoje. Depois de entrar na raia, mudar a data é prorrogação, com justificativa.
               </p>
             </div>

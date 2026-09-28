@@ -1,27 +1,42 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { useNavigate, useParams } from "react-router-dom"
-import { ArrowLeft, Loader2, Pencil, RefreshCw } from "lucide-react"
+import { useParams } from "react-router-dom"
+import {
+  AlertTriangle, BarChart3, CalendarPlus, CheckCircle2, CircleDashed, ClipboardList, FileText, Gauge, Loader2, Pencil, RefreshCw,
+  XCircle,
+} from "lucide-react"
 
-import { indicadoresApi, type Acompanhamento, type Indicador } from "@/api/indicadores"
-import { Badge } from "@/components/ui/badge"
+import { indicadoresApi, type Acompanhamento, type AcompStatus, type Indicador } from "@/api/indicadores"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
-import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { EmptyState } from "@/components/EmptyState"
+import {
+  Card, DetailHeader, Field, FilterSelect, KpiCount, KpiPerson, KpiRow, KpiText, Pill, SectionCard, TABLE,
+  type KpiTone, type MenuAction, type Tone,
+} from "@/components/ds"
 import { toast } from "@/lib/toast"
 import { AcompanhamentoEditDialog } from "@/modules/indicadores/AcompanhamentoEditDialog"
 import { AcompanhamentoEvidenciasDialog } from "@/modules/indicadores/AcompanhamentoEvidenciasDialog"
 import { AcompanhamentoTableRow } from "@/modules/indicadores/AcompanhamentoTableRow"
 import { IndicadorFormDialog } from "@/modules/indicadores/IndicadorFormDialog"
 import {
-  ANOS, CATEGORIA_LABEL, FONTE_LABEL, GRANULARIDADE_LABEL, METRICA_LABEL,
+  ACOMP_STATUS_LABEL, ANOS, CATEGORIA_LABEL, FONTE_LABEL, GRANULARIDADE_LABEL, METRICA_LABEL,
   SENTIDO_LABEL, STATUS_LABEL,
 } from "@/modules/indicadores/constants"
 
+// Tons do cartão "Último período apurado" (KpiText do design system).
+const ACOMP_KPI: Record<AcompStatus, KpiTone> = {
+  pendente: "slate", atingido: "emerald", em_atencao: "amber", nao_atingido: "red",
+}
+const ACOMP_TEXT: Record<AcompStatus, string> = {
+  pendente: "text-muted-foreground",
+  atingido: "text-emerald-600 dark:text-emerald-400",
+  em_atencao: "text-amber-600 dark:text-amber-400",
+  nao_atingido: "text-red-600 dark:text-red-400",
+}
+const SENTIDO_TONE: Record<Indicador["sentido"], Tone> = { maior_melhor: "emerald", menor_melhor: "red", faixa_ideal: "blue" }
+
 export default function IndicadorDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const navigate = useNavigate()
   const [ind, setInd] = useState<Indicador | null>(null)
   const [loading, setLoading] = useState(true)
   const [ano, setAno] = useState<number>(new Date().getFullYear())
@@ -80,116 +95,169 @@ export default function IndicadorDetailPage() {
     }
   }
 
-  if (loading || !ind) {
-    return <Skeleton className="h-60 w-full" />
+  if (loading) {
+    return (
+      <div className="space-y-5">
+        <Skeleton className="h-20 w-2/3 rounded-xl" />
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+          {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-[74px] rounded-xl" />)}
+        </div>
+        <Skeleton className="h-60 w-full rounded-2xl" />
+      </div>
+    )
+  }
+  if (!ind) {
+    return (
+      <Card>
+        <EmptyState icon={BarChart3} title="Indicador não encontrado" description="Volte para a lista de indicadores." />
+      </Card>
+    )
   }
 
   const unit = ind.unidade_medida?.trim() || "%"
+  const contagem = {
+    atingidos: acomps.filter((a) => a.status === "atingido").length,
+    atencao: acomps.filter((a) => a.status === "em_atencao").length,
+    naoAtingidos: acomps.filter((a) => a.status === "nao_atingido").length,
+    pendentes: acomps.filter((a) => a.status === "pendente").length,
+  }
+  // Último período do ano com realizado lançado (o mais recente na ordem da tabela).
+  const ultimo = [...acomps].reverse().find((a) => a.realizado != null) ?? null
+
+  const actions: MenuAction[] = [
+    { label: "Editar indicador", icon: Pencil, onClick: () => setFormOpen(true) },
+  ]
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-start gap-2">
-        <Button variant="ghost" size="icon" onClick={() => navigate("/app/modules/indicadores/indicadores")}>
-          <ArrowLeft size={16} />
-        </Button>
-        <div className="flex-1 min-w-0">
-          <h2 className="text-lg font-bold truncate">{ind.nome}</h2>
-          <div className="flex flex-wrap items-center gap-1.5 mt-1">
-            <Badge variant="outline" className="text-[10px]">{CATEGORIA_LABEL[ind.categoria]}</Badge>
-            <Badge variant="outline" className="text-[10px]">{GRANULARIDADE_LABEL[ind.granularidade]}</Badge>
-            <Badge variant="outline" className="text-[10px]">{SENTIDO_LABEL[ind.sentido]}</Badge>
-            <Badge variant="outline" className="text-[10px]">{STATUS_LABEL[ind.status]}</Badge>
-            <Badge variant={ind.fonte === "portfolio" ? "secondary" : "outline"} className="text-[10px]">
-              {FONTE_LABEL[ind.fonte]}
-            </Badge>
+    <div className="space-y-5">
+      <DetailHeader
+        crumbs={[{ label: "Indicadores", to: "/app/modules/indicadores/indicadores" }, { label: ind.nome }]}
+        icon="BarChart3"
+        color="#16A34A"
+        title={ind.nome}
+        badge={
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Pill tone={ind.categoria === "estrategico" ? "violet" : "blue"}>{CATEGORIA_LABEL[ind.categoria]}</Pill>
+            <Pill>{GRANULARIDADE_LABEL[ind.granularidade]}</Pill>
+            <Pill tone={SENTIDO_TONE[ind.sentido]}>{SENTIDO_LABEL[ind.sentido]}</Pill>
+            <Pill tone={ind.status === "ativo" ? "emerald" : "slate"} dot>{STATUS_LABEL[ind.status]}</Pill>
+            <Pill tone={ind.fonte === "portfolio" ? "teal" : "slate"}>{FONTE_LABEL[ind.fonte]}</Pill>
           </div>
-        </div>
-        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setFormOpen(true)}>
-          <Pencil size={13} /> Editar
-        </Button>
-        {ind.fonte === "portfolio" && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            onClick={() => void atualizarPortfolio()}
-            disabled={atualizandoPortfolio}
-          >
-            <RefreshCw size={13} className={atualizandoPortfolio ? "animate-spin" : ""} />
-            Atualizar portfólio
-          </Button>
-        )}
-      </div>
+        }
+        meta={<>Código: <span className="font-mono text-foreground">{ind.codigo}</span></>}
+        updatedAt={ind.updated_at ?? null}
+        actions={actions}
+      />
 
-      <Card className="p-4 grid gap-3 md:grid-cols-2 lg:grid-cols-3 text-sm">
-        <MetaItem label="Área" value={ind.area?.name ?? "—"} />
-        <MetaItem label="Responsável" value={ind.responsavel?.full_name ?? "—"} />
-        <MetaItem label="Unidade" value={ind.unidade_medida ?? "—"} />
-        <MetaItem label="Periodicidade" value={ind.periodicidade_atualizacao ?? "—"} />
-        <MetaItem label="Fonte de dados" value={ind.fonte_dados ?? "—"} />
-        <MetaItem label="Sub-processo do portfólio" value={ind.sub_processo ?? "—"} />
-        {ind.fonte === "portfolio" && (
-          <>
-            <MetaItem label="Métrica" value={ind.fonte_metrica ? METRICA_LABEL[ind.fonte_metrica] : "—"} />
-            <MetaItem label="Corte portfólio" value={ind.fonte_corte ?? "—"} />
-            <MetaItem
-              label="Snapshot portfólio (hoje)"
-              value={
-                ind.fonte_portfolio_pct != null
+      <KpiRow className="sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+        <KpiPerson name={ind.responsavel?.full_name} role="Responsável" />
+        {ultimo ? (
+          <KpiText
+            icon={Gauge}
+            tone={ACOMP_KPI[ultimo.status]}
+            label={`Último período apurado (${ultimo.competencia})`}
+            value={
+              <span className={ACOMP_TEXT[ultimo.status]}>
+                {ultimo.percentual_atingimento != null ? `${Number(ultimo.percentual_atingimento).toFixed(1)}%` : "—"}
+                {" · "}{ACOMP_STATUS_LABEL[ultimo.status]}
+              </span>
+            }
+          />
+        ) : (
+          <KpiText icon={Gauge} tone="slate" label={`Último período apurado (${ano})`} value="Sem realizado" />
+        )}
+        <KpiCount icon={CheckCircle2} value={contagem.atingidos} label={`Atingidos em ${ano}`} tone="emerald" />
+        <KpiCount icon={AlertTriangle} value={contagem.atencao} label="Em atenção" tone={contagem.atencao > 0 ? "amber" : "slate"} />
+        <KpiCount
+          icon={XCircle} value={contagem.naoAtingidos} label="Não atingidos" tone={contagem.naoAtingidos > 0 ? "red" : "slate"}
+          highlight={contagem.naoAtingidos > 0}
+        />
+        <KpiCount icon={CircleDashed} value={contagem.pendentes} label="Pendentes" tone="slate" />
+      </KpiRow>
+
+      <SectionCard title="Ficha do indicador" icon={FileText}>
+        <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+          <Field label="Área">{ind.area?.name ?? "—"}</Field>
+          <Field label="Responsável">{ind.responsavel?.full_name ?? "—"}</Field>
+          <Field label="Unidade">{ind.unidade_medida ?? "—"}</Field>
+          <Field label="Periodicidade">{ind.periodicidade_atualizacao ?? "—"}</Field>
+          <Field label="Fonte de dados">{ind.fonte_dados ?? "—"}</Field>
+          <Field label="Sub-processo do portfólio">{ind.sub_processo ?? "—"}</Field>
+          {ind.fonte === "portfolio" && (
+            <>
+              <Field label="Métrica">{ind.fonte_metrica ? METRICA_LABEL[ind.fonte_metrica] : "—"}</Field>
+              <Field label="Corte portfólio">{ind.fonte_corte ?? "—"}</Field>
+              <Field label="Snapshot portfólio (hoje)">
+                {ind.fonte_portfolio_pct != null
                   ? `${ind.fonte_portfolio_pct}% (${ind.fonte_portfolio_num ?? 0}/${ind.fonte_portfolio_den ?? 0})`
-                  : "—"
-              }
+                  : "—"}
+              </Field>
+            </>
+          )}
+          {ind.formula_calculo && (
+            <Field label="Fórmula de cálculo" className="sm:col-span-2 lg:col-span-3">
+              <span className="font-normal text-muted-foreground">{ind.formula_calculo}</span>
+            </Field>
+          )}
+          {ind.descricao && (
+            <Field label="Descrição" className="sm:col-span-2 lg:col-span-3">
+              <span className="whitespace-pre-line font-normal text-muted-foreground">{ind.descricao}</span>
+            </Field>
+          )}
+          {ind.objetivo_estrategico && (
+            <Field label="Objetivo estratégico" className="sm:col-span-2 lg:col-span-3">
+              <span className="whitespace-pre-line font-normal text-muted-foreground">{ind.objetivo_estrategico}</span>
+            </Field>
+          )}
+        </dl>
+      </SectionCard>
+
+      <SectionCard
+        title="Acompanhamentos"
+        subtitle={`Meta e realizado por competência em ${ano}. Edite direto na tabela; Enter ou sair do campo salva.`}
+        icon={ClipboardList}
+        flush
+        right={
+          <div className="flex flex-wrap items-end gap-2">
+            <FilterSelect
+              label="Ano de referência" value={String(ano)} onChange={(v) => setAno(Number(v))}
+              options={ANOS.map((y) => ({ value: String(y), label: String(y) }))}
             />
-          </>
-        )}
-        {ind.descricao && (
-          <div className="md:col-span-2 lg:col-span-3">
-            <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Descrição</p>
-            <p className="mt-1 text-muted-foreground">{ind.descricao}</p>
+            <Button variant="outline" className="h-10 gap-1.5" onClick={() => void gerarAno()} disabled={gerando}>
+              {gerando ? <Loader2 size={16} className="animate-spin" /> : <CalendarPlus size={16} />}
+              Gerar períodos de {ano}
+            </Button>
+            {ind.fonte === "portfolio" && (
+              <Button
+                variant="outline"
+                className="h-10 gap-1.5"
+                onClick={() => void atualizarPortfolio()}
+                disabled={atualizandoPortfolio}
+              >
+                <RefreshCw size={16} className={atualizandoPortfolio ? "animate-spin" : ""} />
+                Atualizar portfólio
+              </Button>
+            )}
           </div>
-        )}
-        {ind.objetivo_estrategico && (
-          <div className="md:col-span-2 lg:col-span-3">
-            <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Objetivo estratégico</p>
-            <p className="mt-1 text-muted-foreground">{ind.objetivo_estrategico}</p>
-          </div>
-        )}
-      </Card>
-
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="space-y-1">
-          <Label className="text-xs">Ano de referência</Label>
-          <Select value={String(ano)} onValueChange={(v) => setAno(Number(v))}>
-            <SelectTrigger className="h-9 w-32"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {ANOS.map((y) => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-        <Button variant="outline" size="sm" onClick={() => void gerarAno()} disabled={gerando}>
-          {gerando && <Loader2 size={14} className="mr-1.5 animate-spin" />}
-          Gerar períodos de {ano}
-        </Button>
-      </div>
-
-      <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+        }
+      >
+        <div className={TABLE.wrap}>
+          <table className={TABLE.table}>
+            <thead className={TABLE.thead}>
               <tr>
-                <th className="px-3 py-2 font-semibold">Competência</th>
-                <th className="px-3 py-2 font-semibold text-right">Meta ({unit})</th>
-                <th className="px-3 py-2 font-semibold text-right">Realizado ({unit})</th>
-                <th className="px-3 py-2 font-semibold text-right">Atingimento</th>
-                <th className="px-3 py-2 font-semibold">Status</th>
-                <th className="px-3 py-2 font-semibold">Origem</th>
-                <th className="px-3 py-2"></th>
+                <th className={TABLE.thFirst}>Competência</th>
+                <th className={`${TABLE.th} whitespace-nowrap text-right`}>Meta ({unit})</th>
+                <th className={`${TABLE.th} whitespace-nowrap text-right`}>Realizado ({unit})</th>
+                <th className={`${TABLE.th} text-right`}>Atingimento</th>
+                <th className={TABLE.th}>Status</th>
+                <th className={TABLE.th}>Origem</th>
+                <th className={TABLE.th}><span className="sr-only">Ações</span></th>
               </tr>
             </thead>
             <tbody>
               {acomps.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-3 py-6 text-center text-muted-foreground">
+                  <td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">
                     Nenhum período gerado para {ano}.
                   </td>
                 </tr>
@@ -205,7 +273,7 @@ export default function IndicadorDetailPage() {
             </tbody>
           </table>
         </div>
-      </Card>
+      </SectionCard>
 
       <IndicadorFormDialog
         open={formOpen}
@@ -234,15 +302,6 @@ export default function IndicadorDetailPage() {
           }}
         />
       )}
-    </div>
-  )
-}
-
-function MetaItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className="mt-0.5">{value}</p>
     </div>
   )
 }

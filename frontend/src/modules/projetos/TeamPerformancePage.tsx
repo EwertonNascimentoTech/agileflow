@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
-  Activity, AlertTriangle, CheckCircle2, Clock, Filter, Gauge, Layers, PackageCheck,
+  Activity, AlertTriangle, CheckCircle2, Clock, Gauge, Layers, PackageCheck,
   TrendingUp, Users, X, Zap,
 } from "lucide-react"
 import {
@@ -23,15 +23,11 @@ import {
   type TeamPerformance,
 } from "@/api/projetos"
 import { EmptyState } from "@/components/EmptyState"
-import { KpiCard } from "@/components/KpiCard"
-import { SectionCard } from "@/components/SectionCard"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+  Card, DetailTabs, FilterSelect, KpiCount, KpiRow, Pill, SectionCard, TABLE, type TabDef, type Tone,
+} from "@/components/ds"
 import { CapacityDayDetailDialog } from "@/modules/projetos/CapacityDayDetailDialog"
 import { parseDefaultFieldOptions } from "@/modules/projetos/defaultFormOptions"
 import { WorkloadView } from "@/modules/projetos/WorkloadView"
@@ -51,6 +47,21 @@ const STATUS_LABEL: Record<DevLoadStatus, string> = {
   sobrecarregado: "Sobrecarregado",
   sem_dados: "Sem dados",
 }
+
+// Selo de status na tabela (Pill do DS); os gráficos seguem com STATUS_COLOR.
+const STATUS_TONE: Record<DevLoadStatus, Tone> = {
+  livre: "emerald",
+  equilibrado: "blue",
+  sobrecarregado: "red",
+  sem_dados: "slate",
+}
+
+type PerfTab = "devs" | "pos" | "carga"
+const PERF_TABS: TabDef<PerfTab>[] = [
+  { value: "devs", label: "Devs", icon: Users },
+  { value: "pos", label: "POs", icon: Gauge },
+  { value: "carga", label: "Carga & Capacidade", icon: Activity },
+]
 
 type WindowPreset = "30d" | "60d" | "90d" | "month" | "quarter"
 const WINDOW_OPTS: { value: WindowPreset; label: string }[] = [
@@ -256,15 +267,7 @@ function UsBreakdownTooltip({
 }
 
 function StatusBadge({ status }: { status: DevLoadStatus }) {
-  return (
-    <span
-      className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium"
-      style={{ background: `${STATUS_COLOR[status]}22`, color: STATUS_COLOR[status] }}
-    >
-      <span className="h-1.5 w-1.5 rounded-full" style={{ background: STATUS_COLOR[status] }} />
-      {STATUS_LABEL[status]}
-    </span>
-  )
+  return <Pill tone={STATUS_TONE[status]} dot>{STATUS_LABEL[status]}</Pill>
 }
 
 const LOAD_STATUS_ORDER: DevLoadStatus[] = ["livre", "equilibrado", "sobrecarregado", "sem_dados"]
@@ -277,7 +280,7 @@ function LoadStatusLegend({ present }: { present?: Set<DevLoadStatus> }) {
   if (items.length === 0) return null
   return (
     <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-      <span className="font-medium text-foreground/80">Cor = carga atual:</span>
+      <span className="font-semibold text-foreground">Cor = carga atual:</span>
       {items.map((s) => (
         <span key={s} className="inline-flex items-center gap-1.5">
           <span className="h-2.5 w-2.5 rounded-sm" style={{ background: STATUS_COLOR[s] }} />
@@ -424,7 +427,7 @@ function TeamFilterMultiSelect({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-background px-3 text-sm ring-offset-background hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 text-sm ring-offset-background hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         title={selected.length === 1 ? byId.get(selected[0])?.label : undefined}
       >
         <span className="truncate text-left">{triggerLabel}</span>
@@ -523,7 +526,7 @@ function FilterMultiSelect({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-background px-3 text-sm ring-offset-background hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 text-sm ring-offset-background hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <span className="truncate text-left">{triggerLabel}</span>
         <span className="ml-2 shrink-0 text-xs text-muted-foreground">{open ? "▲" : "▼"}</span>
@@ -566,6 +569,7 @@ function FilterMultiSelect({
 
 export default function TeamPerformancePage() {
   const [preset, setPreset] = useState<WindowPreset>("90d")
+  const [tab, setTab] = useState<PerfTab>("devs")
   const [diretoria, setDiretoria] = useState(ALL)
   const [area, setArea] = useState(ALL)
   const [positions, setPositions] = useState<string[]>([])
@@ -729,87 +733,77 @@ export default function TeamPerformancePage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h3 className="text-base font-semibold">Desempenho do time</h3>
-          <p className="text-sm text-muted-foreground">
-            Fluxo de entregas, atrasos e carga por dev e por PO. Janela temporal (não por sprint).
-          </p>
-        </div>
-        <div className="space-y-1">
-          <label className="text-xs text-muted-foreground">Período</label>
-          <Select value={preset} onValueChange={(v) => setPreset(v as WindowPreset)}>
-            <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {WINDOW_OPTS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
+      {/* Aba do PMO: título de seção (o cabeçalho de página é o do PMO). */}
+      <div>
+        <h2 className="flex items-center gap-2 text-lg font-semibold">
+          <Gauge size={18} className="text-primary" /> Desempenho do time
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          Fluxo de entregas, atrasos e carga por dev e por PO. Janela temporal (não por sprint).
+        </p>
       </div>
 
-      <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-muted/30 p-3">
-        <div className="flex h-9 items-center gap-1.5 text-sm font-medium text-muted-foreground">
-          <Filter className="h-4 w-4" /> Filtros
-        </div>
-        <div className="min-w-[160px] flex-1 sm:max-w-[200px]">
-          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Diretoria</label>
-          <Select
+      <Card className="p-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <FilterSelect
+            label="Período"
+            value={preset}
+            onChange={(v) => setPreset(v as WindowPreset)}
+            options={WINDOW_OPTS}
+          />
+          <FilterSelect
+            label="Diretoria"
             value={diretoria}
-            onValueChange={(v) => {
+            onChange={(v) => {
               setDiretoria(v)
               setArea(ALL)
             }}
-          >
-            <SelectTrigger><SelectValue placeholder="Todas" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>Todas as diretorias</SelectItem>
-              {availableDiretorias.map((v) => (
-                <SelectItem key={v} value={v}>{labelMaps.diretoria.get(v) ?? v}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="min-w-[160px] flex-1 sm:max-w-[200px]">
-          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Área (card)</label>
-          <Select value={area} onValueChange={setArea}>
-            <SelectTrigger><SelectValue placeholder="Todas" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>Todas as áreas</SelectItem>
-              {availableAreas.map((v) => (
-                <SelectItem key={v} value={v}>{labelMaps.area.get(v) ?? v}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="min-w-[200px] flex-1 sm:max-w-[280px]">
-          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Time</label>
-          <TeamFilterMultiSelect
-            options={availableTeams}
-            selected={teams}
-            onChange={setTeams}
+            options={[
+              { value: ALL, label: "Todas as diretorias" },
+              ...availableDiretorias.map((v) => ({ value: v, label: labelMaps.diretoria.get(v) ?? v })),
+            ]}
           />
-        </div>
-        <div className="min-w-[180px] flex-1 sm:max-w-[240px]">
-          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Cargo</label>
-          <FilterMultiSelect
-            options={availablePositions}
-            selected={positions}
-            onChange={setPositions}
-            emptyLabel="Todos os cargos"
-            noneMessage="Nenhum cargo com pessoas."
+          <FilterSelect
+            label="Área (card)"
+            value={area}
+            onChange={setArea}
+            options={[
+              { value: ALL, label: "Todas as áreas" },
+              ...availableAreas.map((v) => ({ value: v, label: labelMaps.area.get(v) ?? v })),
+            ]}
           />
+          <div className="min-w-[200px] flex-1 space-y-1 sm:max-w-[280px]">
+            <span className="block text-xs text-muted-foreground">Time</span>
+            <TeamFilterMultiSelect
+              options={availableTeams}
+              selected={teams}
+              onChange={setTeams}
+            />
+          </div>
+          <div className="min-w-[180px] flex-1 space-y-1 sm:max-w-[240px]">
+            <span className="block text-xs text-muted-foreground">Cargo</span>
+            <FilterMultiSelect
+              options={availablePositions}
+              selected={positions}
+              onChange={setPositions}
+              emptyLabel="Todos os cargos"
+              noneMessage="Nenhum cargo com pessoas."
+            />
+          </div>
+          {hasFilters && (
+            <Button variant="ghost" className="h-10 gap-1.5" onClick={clearFilters}>
+              <X className="h-4 w-4" /> Limpar
+            </Button>
+          )}
         </div>
-        {hasFilters && (
-          <Button variant="ghost" size="sm" className="h-9 gap-1" onClick={clearFilters}>
-            <X className="h-3.5 w-3.5" /> Limpar
-          </Button>
-        )}
-      </div>
+      </Card>
 
       {loading && (
         <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4"><Skeleton className="h-24" /><Skeleton className="h-24" /><Skeleton className="h-24" /><Skeleton className="h-24" /></div>
-          <Skeleton className="h-64 w-full" />
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+            {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-[74px] rounded-xl" />)}
+          </div>
+          <Skeleton className="h-64 w-full rounded-2xl" />
         </div>
       )}
 
@@ -818,26 +812,26 @@ export default function TeamPerformancePage() {
       {!loading && !error && data && (
         <>
           {/* ── KPIs de topo ── */}
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-            <KpiCard label="Entregas (throughput)" value={data.kpis.throughput_total} icon={PackageCheck} />
-            <KpiCard
-              label="On-time delivery" value={pct(data.kpis.on_time_delivery_pct)} icon={CheckCircle2}
-              deltaTone={data.kpis.on_time_delivery_pct != null && data.kpis.on_time_delivery_pct >= 80 ? "up" : "down"}
-              delta={data.kpis.on_time_delivery_pct != null ? `${data.kpis.on_time_delivery_pct.toFixed(0)}%` : undefined}
+          <KpiRow className="sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+            <KpiCount icon={PackageCheck} value={data.kpis.throughput_total} label="Entregas (throughput)" />
+            <KpiCount
+              icon={CheckCircle2} value={pct(data.kpis.on_time_delivery_pct)} label="On-time delivery"
+              tone={data.kpis.on_time_delivery_pct == null ? "slate" : data.kpis.on_time_delivery_pct >= 80 ? "emerald" : "amber"}
+              highlight={data.kpis.on_time_delivery_pct != null && data.kpis.on_time_delivery_pct < 80}
             />
-            <KpiCard label="Lead time médio" value={`${fmt(data.kpis.avg_lead_time_days)}d`} icon={Clock}
-              sub={`Cycle: ${fmt(data.kpis.avg_cycle_time_days)}d`} />
-            <KpiCard label="WIP em aberto" value={data.kpis.wip_total} icon={Layers}
-              sub={`Aging médio ${fmt(data.kpis.avg_aging_days)}d`} />
-            <KpiCard label="Atrasadas" value={data.kpis.overdue_total} icon={AlertTriangle}
-              deltaTone={data.kpis.overdue_total > 0 ? "down" : "up"} />
-            <KpiCard label="Say/Do" value={data.kpis.say_do_ratio != null ? `${(data.kpis.say_do_ratio * 100).toFixed(0)}%` : "—"} icon={Zap}
-              sub={`${data.kpis.devs_livres} livre(s) · ${data.kpis.devs_sobrecarregados} sobrec.`} />
-          </div>
+            <KpiCount icon={Clock} value={`${fmt(data.kpis.avg_lead_time_days)}d`}
+              label={`Lead time médio · Cycle: ${fmt(data.kpis.avg_cycle_time_days)}d`} />
+            <KpiCount icon={Layers} value={data.kpis.wip_total}
+              label={`WIP em aberto · Aging médio ${fmt(data.kpis.avg_aging_days)}d`} tone="violet" />
+            <KpiCount icon={AlertTriangle} value={data.kpis.overdue_total} label="Atrasadas"
+              tone={data.kpis.overdue_total > 0 ? "red" : "emerald"} highlight={data.kpis.overdue_total > 0} />
+            <KpiCount icon={Zap} value={data.kpis.say_do_ratio != null ? `${(data.kpis.say_do_ratio * 100).toFixed(0)}%` : "—"}
+              label={`Say/Do · ${data.kpis.devs_livres} livre(s) · ${data.kpis.devs_sobrecarregados} sobrec.`} />
+          </KpiRow>
 
           {/* ── Tendências (time todo) ── */}
           <div className="grid gap-4 lg:grid-cols-2">
-            <SectionCard title={<span className="flex items-center gap-2"><TrendingUp size={16} /> Throughput por mês</span>}>
+            <SectionCard title="Throughput por mês" icon={TrendingUp}>
               {data.series.throughput_by_month.length === 0 ? (
                 <p className="py-8 text-center text-sm text-muted-foreground">Sem entregas concluídas na janela.</p>
               ) : (
@@ -854,7 +848,7 @@ export default function TeamPerformancePage() {
               )}
             </SectionCard>
 
-            <SectionCard title={<span className="flex items-center gap-2"><Clock size={16} /> Lead time médio por mês</span>}>
+            <SectionCard title="Lead time médio por mês" icon={Clock}>
               {data.series.lead_time_trend.length === 0 ? (
                 <p className="py-8 text-center text-sm text-muted-foreground">Sem dados de lead time na janela.</p>
               ) : (
@@ -873,23 +867,19 @@ export default function TeamPerformancePage() {
           </div>
 
           {/* ── Abas ── */}
-          <Tabs defaultValue="devs">
-            <TabsList>
-              <TabsTrigger value="devs" className="gap-1.5"><Users className="h-4 w-4" /> Devs</TabsTrigger>
-              <TabsTrigger value="pos" className="gap-1.5"><Gauge className="h-4 w-4" /> POs</TabsTrigger>
-              <TabsTrigger value="carga" className="gap-1.5"><Activity className="h-4 w-4" /> Carga & Capacidade</TabsTrigger>
-            </TabsList>
+          <DetailTabs tabs={PERF_TABS} value={tab} onChange={setTab} />
 
-            <TabsContent value="devs" className="mt-4 space-y-4">
+          {tab === "devs" && (
+            <div className="space-y-4">
               <DevsTab devs={data.devs} scatter={data.series.load_vs_delivery} />
-            </TabsContent>
+            </div>
+          )}
 
-            <TabsContent value="pos" className="mt-4">
-              <PosTab pos={data.pos} />
-            </TabsContent>
+          {tab === "pos" && <PosTab pos={data.pos} />}
 
-            <TabsContent value="carga" className="mt-4 space-y-4">
-              <SectionCard title="Carga × Capacidade (pessoa × semana)">
+          {tab === "carga" && (
+            <div className="space-y-4">
+              <SectionCard title="Carga × Capacidade (pessoa × semana)" icon={Activity}>
                 {capLoading ? (
                   <Skeleton className="h-40 w-full" />
                 ) : scopedHeatmap && scopedHeatmap.cells.length > 0 ? (
@@ -908,8 +898,8 @@ export default function TeamPerformancePage() {
                 <FreePeoplePanel free={scopedFree} loading={capLoading} />
                 <WipSwimlanes rows={data.swimlanes} />
               </div>
-            </TabsContent>
-          </Tabs>
+            </div>
+          )}
         </>
       )}
 
@@ -935,11 +925,16 @@ function DevsTab({ devs, scatter }: { devs: DevPerformanceRow[]; scatter: TeamPe
   return (
     <div className="space-y-4">
       <div className="grid gap-4 lg:grid-cols-2">
-        <SectionCard title="Entregas por dev">
-          <p className="mb-2 text-xs text-muted-foreground">
-            Comprimento da barra = <strong className="font-medium text-foreground">qtd. de User Stories concluídas</strong> na janela
-            (top 12). A cor indica a <strong className="font-medium text-foreground">carga atual</strong> do dev, não o volume entregue.
-          </p>
+        <SectionCard
+          title="Entregas por dev"
+          icon={PackageCheck}
+          subtitle={
+            <>
+              Comprimento da barra = <strong className="font-medium text-foreground">qtd. de User Stories concluídas</strong> na janela
+              (top 12). A cor indica a <strong className="font-medium text-foreground">carga atual</strong> do dev, não o volume entregue.
+            </>
+          }
+        >
           {topThroughput.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">Sem entregas na janela.</p>
           ) : (
@@ -985,10 +980,11 @@ function DevsTab({ devs, scatter }: { devs: DevPerformanceRow[]; scatter: TeamPe
           )}
         </SectionCard>
 
-        <SectionCard title="Carga × Entregas">
-          <p className="mb-2 text-xs text-muted-foreground">
-            Eixo X = % de utilização (horas alocadas ÷ capacidade) · Eixo Y = US concluídas. Cor = status de carga.
-          </p>
+        <SectionCard
+          title="Carga × Entregas"
+          icon={Activity}
+          subtitle="Eixo X = % de utilização (horas alocadas ÷ capacidade) · Eixo Y = US concluídas. Cor = status de carga."
+        >
           {scatter.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">Sem dados de carga para plotar.</p>
           ) : (
@@ -1025,33 +1021,34 @@ function DevsTab({ devs, scatter }: { devs: DevPerformanceRow[]; scatter: TeamPe
         </SectionCard>
       </div>
 
-      <div className="overflow-x-auto rounded-md border bg-card">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
-              <th className="px-3 py-2 font-medium"><ColumnHeaderTip label="Dev" tip={DEV_COL_TIPS.dev} /></th>
-              <th className="px-3 py-2 font-medium text-center"><ColumnHeaderTip label="Entregues" tip={DEV_COL_TIPS.entregues} align="center" /></th>
-              <th className="px-3 py-2 font-medium text-center"><ColumnHeaderTip label="On-time" tip={DEV_COL_TIPS.onTime} align="center" /></th>
-              <th className="px-3 py-2 font-medium text-center"><ColumnHeaderTip label="Atrasadas" tip={DEV_COL_TIPS.atrasadas} align="center" /></th>
-              <th className="px-3 py-2 font-medium text-center"><ColumnHeaderTip label="WIP" tip={DEV_COL_TIPS.wip} align="center" /></th>
-              <th className="px-3 py-2 font-medium text-center"><ColumnHeaderTip label="Aging" tip={DEV_COL_TIPS.aging} align="center" /></th>
-              <th className="px-3 py-2 font-medium text-center"><ColumnHeaderTip label="Cycle" tip={DEV_COL_TIPS.cycle} align="center" /></th>
-              <th className="px-3 py-2 font-medium text-center"><ColumnHeaderTip label="Lead" tip={DEV_COL_TIPS.lead} align="center" /></th>
-              <th className="px-3 py-2 font-medium"><ColumnHeaderTip label="Carga" tip={DEV_COL_TIPS.carga} /></th>
-              <th className="px-3 py-2 font-medium"><ColumnHeaderTip label="Status" tip={DEV_COL_TIPS.status} /></th>
+      <Card className="overflow-hidden">
+      <div className={TABLE.wrap}>
+        <table className={TABLE.table}>
+          <thead className={TABLE.thead}>
+            <tr>
+              <th className={TABLE.thFirst}><ColumnHeaderTip label="Dev" tip={DEV_COL_TIPS.dev} /></th>
+              <th className={`${TABLE.th} text-center`}><ColumnHeaderTip label="Entregues" tip={DEV_COL_TIPS.entregues} align="center" /></th>
+              <th className={`${TABLE.th} text-center`}><ColumnHeaderTip label="On-time" tip={DEV_COL_TIPS.onTime} align="center" /></th>
+              <th className={`${TABLE.th} text-center`}><ColumnHeaderTip label="Atrasadas" tip={DEV_COL_TIPS.atrasadas} align="center" /></th>
+              <th className={`${TABLE.th} text-center`}><ColumnHeaderTip label="WIP" tip={DEV_COL_TIPS.wip} align="center" /></th>
+              <th className={`${TABLE.th} text-center`}><ColumnHeaderTip label="Aging" tip={DEV_COL_TIPS.aging} align="center" /></th>
+              <th className={`${TABLE.th} text-center`}><ColumnHeaderTip label="Cycle" tip={DEV_COL_TIPS.cycle} align="center" /></th>
+              <th className={`${TABLE.th} text-center`}><ColumnHeaderTip label="Lead" tip={DEV_COL_TIPS.lead} align="center" /></th>
+              <th className={TABLE.th}><ColumnHeaderTip label="Carga" tip={DEV_COL_TIPS.carga} /></th>
+              <th className={TABLE.th}><ColumnHeaderTip label="Status" tip={DEV_COL_TIPS.status} /></th>
             </tr>
           </thead>
           <tbody>
             {devs.map((d) => (
-              <tr key={d.person_id} className="border-b last:border-b-0">
-                <td className="px-3 py-2">
+              <tr key={d.person_id} className={TABLE.tr}>
+                <td className={TABLE.tdFirst}>
                   <div className="flex flex-col">
                     <span className="font-medium">{d.full_name}{!d.is_mapped && <span className="ml-1 text-xs text-muted-foreground">(não mapeado)</span>}</span>
                     {d.position_label && <span className="text-xs text-muted-foreground">{d.position_label}</span>}
                     <DevAbsenceList absences={d.absences ?? []} />
                   </div>
                 </td>
-                <td className="px-3 py-2 text-center tabular-nums font-medium">
+                <td className={`${TABLE.td} text-center tabular-nums font-medium`}>
                   <UsBreakdownTooltip
                     count={d.delivered}
                     breakdown={d.delivered_breakdown}
@@ -1059,8 +1056,8 @@ function DevsTab({ devs, scatter }: { devs: DevPerformanceRow[]; scatter: TeamPe
                     className="font-medium"
                   />
                 </td>
-                <td className="px-3 py-2 text-center tabular-nums">{d.on_time_pct == null ? "—" : `${d.on_time_pct.toFixed(0)}%`}</td>
-                <td className="px-3 py-2 text-center tabular-nums">
+                <td className={`${TABLE.td} text-center tabular-nums`}>{d.on_time_pct == null ? "—" : `${d.on_time_pct.toFixed(0)}%`}</td>
+                <td className={`${TABLE.td} text-center tabular-nums`}>
                   <UsBreakdownTooltip
                     count={d.overdue}
                     breakdown={d.overdue_breakdown}
@@ -1069,35 +1066,34 @@ function DevsTab({ devs, scatter }: { devs: DevPerformanceRow[]; scatter: TeamPe
                     showStatusAndDue
                   />
                 </td>
-                <td className="px-3 py-2 text-center tabular-nums">{d.wip}</td>
-                <td className="px-3 py-2 text-center tabular-nums text-muted-foreground">{fmt(d.avg_aging_days)}d</td>
-                <td className="px-3 py-2 text-center tabular-nums text-muted-foreground">{fmt(d.avg_cycle_time_days)}d</td>
-                <td className="px-3 py-2 text-center tabular-nums text-muted-foreground">{fmt(d.avg_lead_time_days)}d</td>
-                <td className="px-3 py-2"><UtilBar value={d.utilization_pct} /></td>
-                <td className="px-3 py-2"><StatusBadge status={d.status} /></td>
+                <td className={`${TABLE.td} text-center tabular-nums`}>{d.wip}</td>
+                <td className={`${TABLE.td} text-center tabular-nums text-muted-foreground`}>{fmt(d.avg_aging_days)}d</td>
+                <td className={`${TABLE.td} text-center tabular-nums text-muted-foreground`}>{fmt(d.avg_cycle_time_days)}d</td>
+                <td className={`${TABLE.td} text-center tabular-nums text-muted-foreground`}>{fmt(d.avg_lead_time_days)}d</td>
+                <td className={TABLE.td}><UtilBar value={d.utilization_pct} /></td>
+                <td className={TABLE.td}><StatusBadge status={d.status} /></td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      </Card>
     </div>
   )
 }
 
 // ── Aba POs ────────────────────────────────────────────────────────────────
 function RagPills({ rag }: { rag: PoPerformanceRow["rag"] }) {
-  const cells: { n: number; color: string; label: string }[] = [
-    { n: rag.verde, color: "#6AB42F", label: "Saudável" },
-    { n: rag.amarelo, color: "#E8A00F", label: "Atenção" },
-    { n: rag.vermelho, color: "#E84E0F", label: "Crítico" },
+  const cells: { n: number; tone: Tone; label: string }[] = [
+    { n: rag.verde, tone: "emerald", label: "Saudável" },
+    { n: rag.amarelo, tone: "amber", label: "Atenção" },
+    { n: rag.vermelho, tone: "red", label: "Crítico" },
   ]
   return (
     <div className="flex gap-1">
       {cells.map((c) => (
-        <span key={c.label} title={`${c.label}: ${c.n}`}
-          className="inline-flex min-w-6 items-center justify-center rounded px-1.5 py-0.5 text-xs font-medium tabular-nums"
-          style={{ background: `${c.color}22`, color: c.color }}>
-          {c.n}
+        <span key={c.label} title={`${c.label}: ${c.n}`}>
+          <Pill tone={c.tone} className="min-w-7 justify-center tabular-nums">{c.n}</Pill>
         </span>
       ))}
     </div>
@@ -1109,74 +1105,76 @@ function PosTab({ pos }: { pos: PoPerformanceRow[] }) {
     return <EmptyState icon={Gauge} title="Sem POs no recorte" description="Nenhum PO com projetos/programas no filtro escolhido." />
   }
   return (
-    <div className="overflow-x-auto rounded-md border bg-card">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
-            <th className="px-3 py-2 font-medium">PO</th>
-            <th className="px-3 py-2 font-medium text-center">Projetos</th>
-            <th className="px-3 py-2 font-medium text-center">On-time</th>
-            <th className="px-3 py-2 font-medium text-center">Progresso</th>
-            <th className="px-3 py-2 font-medium text-center">Execução</th>
-            <th className="px-3 py-2 font-medium text-center">Em risco</th>
-            <th className="px-3 py-2 font-medium text-center">Atrasados</th>
-            <th className="px-3 py-2 font-medium">Saúde (RAG)</th>
-          </tr>
-        </thead>
-        <tbody>
-          {pos.map((p) => (
-            <tr key={p.po_id} className="border-b last:border-b-0">
-              <td className="px-3 py-2 font-medium">{p.full_name}</td>
-              <td className="px-3 py-2 text-center tabular-nums">{p.projetos}</td>
-              <td className="px-3 py-2 text-center tabular-nums">{pct(p.on_time_pct)}</td>
-              <td className="px-3 py-2 text-center tabular-nums text-muted-foreground">{pct(p.avg_progress_pct)}</td>
-              <td className="px-3 py-2 text-center tabular-nums text-muted-foreground">{pct(p.avg_exec_pct)}</td>
-              <td className={`px-3 py-2 text-center tabular-nums ${p.em_risco > 0 ? "font-medium text-destructive" : "text-muted-foreground"}`}>{p.em_risco}</td>
-              <td className={`px-3 py-2 text-center tabular-nums ${p.atrasados > 0 ? "font-medium text-warning" : "text-muted-foreground"}`}>{p.atrasados}</td>
-              <td className="px-3 py-2"><RagPills rag={p.rag} /></td>
+    <Card className="overflow-hidden">
+      <div className={TABLE.wrap}>
+        <table className={TABLE.table}>
+          <thead className={TABLE.thead}>
+            <tr>
+              <th className={TABLE.thFirst}>PO</th>
+              <th className={`${TABLE.th} text-center`}>Projetos</th>
+              <th className={`${TABLE.th} text-center`}>On-time</th>
+              <th className={`${TABLE.th} text-center`}>Progresso</th>
+              <th className={`${TABLE.th} text-center`}>Execução</th>
+              <th className={`${TABLE.th} text-center`}>Em risco</th>
+              <th className={`${TABLE.th} text-center`}>Atrasados</th>
+              <th className={TABLE.th}>Saúde (RAG)</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {pos.map((p) => (
+              <tr key={p.po_id} className={TABLE.tr}>
+                <td className={`${TABLE.tdFirst} font-medium`}>{p.full_name}</td>
+                <td className={`${TABLE.td} text-center tabular-nums`}>{p.projetos}</td>
+                <td className={`${TABLE.td} text-center tabular-nums`}>{pct(p.on_time_pct)}</td>
+                <td className={`${TABLE.td} text-center tabular-nums text-muted-foreground`}>{pct(p.avg_progress_pct)}</td>
+                <td className={`${TABLE.td} text-center tabular-nums text-muted-foreground`}>{pct(p.avg_exec_pct)}</td>
+                <td className={`${TABLE.td} text-center tabular-nums ${p.em_risco > 0 ? "font-medium text-destructive" : "text-muted-foreground"}`}>{p.em_risco}</td>
+                <td className={`${TABLE.td} text-center tabular-nums ${p.atrasados > 0 ? "font-medium text-warning" : "text-muted-foreground"}`}>{p.atrasados}</td>
+                <td className={TABLE.td}><RagPills rag={p.rag} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
   )
 }
 
 // ── Painel "Quem está livre / superlotado" ──────────────────────────────────
 function FreePeoplePanel({ free, loading }: { free: FreePeopleResponse | null; loading: boolean }) {
-  if (loading) return <SectionCard title="Disponibilidade"><Skeleton className="h-40 w-full" /></SectionCard>
+  if (loading) return <SectionCard title="Disponibilidade" icon={Users}><Skeleton className="h-40 w-full" /></SectionCard>
   const rows = free?.rows ?? []
   const livres = rows.filter((r) => r.utilization_pct < 60 && r.free_hours_total > 0)
   const sobre = rows.filter((r) => r.utilization_pct > 100)
   return (
-    <SectionCard title="Disponibilidade do time">
+    <SectionCard title="Disponibilidade do time" icon={Users}>
       {rows.length === 0 ? (
         <p className="py-6 text-center text-sm text-muted-foreground">Sem pessoas ativas na janela.</p>
       ) : (
         <div className="space-y-3">
           <div>
-            <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-success">
-              <CheckCircle2 size={12} /> Com folga ({livres.length})
+            <p className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold text-success">
+              <CheckCircle2 size={14} /> Com folga ({livres.length})
             </p>
             <ul className="space-y-1">
               {livres.slice(0, 8).map((r) => (
                 <li key={r.person_id} className="flex items-center justify-between gap-2 text-sm">
                   <span className="truncate">{r.full_name}{r.position_label && <span className="text-xs text-muted-foreground"> · {r.position_label}</span>}</span>
-                  <Badge variant="secondary" className="shrink-0 font-normal">{r.free_hours_total.toFixed(0)}h livres</Badge>
+                  <Pill tone="emerald" className="shrink-0">{r.free_hours_total.toFixed(0)}h livres</Pill>
                 </li>
               ))}
               {livres.length === 0 && <li className="text-sm text-muted-foreground">Ninguém com folga relevante.</li>}
             </ul>
           </div>
           <div>
-            <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-destructive">
-              <AlertTriangle size={12} /> Superlotados ({sobre.length})
+            <p className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold text-destructive">
+              <AlertTriangle size={14} /> Superlotados ({sobre.length})
             </p>
             <ul className="space-y-1">
               {sobre.slice(0, 8).map((r) => (
                 <li key={r.person_id} className="flex items-center justify-between gap-2 text-sm">
                   <span className="truncate">{r.full_name}{r.position_label && <span className="text-xs text-muted-foreground"> · {r.position_label}</span>}</span>
-                  <Badge variant="destructive" className="shrink-0 font-normal">{r.utilization_pct.toFixed(0)}%</Badge>
+                  <Pill tone="red" className="shrink-0">{r.utilization_pct.toFixed(0)}%</Pill>
                 </li>
               ))}
               {sobre.length === 0 && <li className="text-sm text-muted-foreground">Ninguém acima da capacidade.</li>}
@@ -1191,11 +1189,11 @@ function FreePeoplePanel({ free, loading }: { free: FreePeopleResponse | null; l
 // ── Raias de WIP/aging por etapa ────────────────────────────────────────────
 function WipSwimlanes({ rows }: { rows: TeamPerformance["swimlanes"] }) {
   if (rows.length === 0) {
-    return <SectionCard title="WIP por etapa"><p className="py-6 text-center text-sm text-muted-foreground">Sem US em aberto.</p></SectionCard>
+    return <SectionCard title="WIP por etapa" icon={Layers}><p className="py-6 text-center text-sm text-muted-foreground">Sem US em aberto.</p></SectionCard>
   }
   const maxCount = Math.max(1, ...rows.map((r) => r.count))
   return (
-    <SectionCard title="WIP por etapa (aging & atrasos)">
+    <SectionCard title="WIP por etapa (aging & atrasos)" icon={Layers}>
       <div className="space-y-2">
         {rows.map((r) => (
           <div key={`${r.funnel_name}-${r.status_name}`} className="flex items-center gap-3">

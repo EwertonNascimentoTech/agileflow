@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { ArrowLeft, Printer } from "lucide-react"
+import { AlertTriangle, ArrowLeft, FileText, Printer } from "lucide-react"
 
 import { projetosApi, type StatusReportResponse } from "@/api/projetos"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Notice, PageHeader } from "@/components/ds"
 import StatusReportDocument from "@/modules/projetos/StatusReportDocument"
 
 /**
@@ -32,21 +33,36 @@ export default function StatusReportViewPage() {
 
   return (
     <div className="mx-auto max-w-[1320px] p-4 md:p-6">
-      <div className="no-print mb-4 flex flex-wrap items-center gap-3">
-        <Button variant="ghost" size="sm" className="gap-1.5" onClick={() => navigate("/app/modules/projetos/painel-po")}>
-          <ArrowLeft className="h-4 w-4" /> Voltar
-        </Button>
-        <Button className="ml-auto gap-1.5" onClick={() => window.print()} disabled={!report}>
-          <Printer className="h-4 w-4" /> Imprimir / PDF
-        </Button>
+      {/* Cabeçalho da tela fica fora da impressão: o PDF é só o documento. */}
+      <div className="no-print mb-5 print:hidden">
+        <PageHeader
+          icon={FileText}
+          color="#2563EB"
+          title={report?.title ?? "Status Report"}
+          description={
+            report
+              ? `Somente leitura · gerado em ${new Date(report.generated_at).toLocaleString("pt-BR")}`
+              : "Somente leitura."
+          }
+          actions={
+            <>
+              <Button variant="outline" className="h-10 gap-1.5" onClick={() => navigate("/app/modules/projetos/painel-po")}>
+                <ArrowLeft size={16} /> Voltar
+              </Button>
+              <Button className="h-10 gap-1.5" onClick={() => window.print()} disabled={!report}>
+                <Printer size={16} /> Imprimir / PDF
+              </Button>
+            </>
+          }
+        />
       </div>
 
-      {error && <p className="mb-3 text-sm text-destructive">{error}</p>}
+      {error && <div className="mb-3 print:hidden"><Notice tone="red" icon={AlertTriangle}>{error}</Notice></div>}
 
       {loading || !report ? (
         <div className="space-y-3">
-          <Skeleton className="h-48 w-full" />
-          <Skeleton className="h-32 w-full" />
+          <Skeleton className="h-48 w-full rounded-2xl" />
+          <Skeleton className="h-32 w-full rounded-2xl" />
         </div>
       ) : (
         <StatusReportDocument snapshot={report.snapshot} />

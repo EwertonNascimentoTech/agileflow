@@ -497,7 +497,7 @@ export function BacklogClassificationDialog({ open, task, mode = "backlog_exit",
           )}
 
           {askProcurement && (
-            <div className="space-y-1.5 rounded-md border border-orange-200 bg-orange-50/60 p-3">
+            <div className="space-y-1.5 rounded-md border border-orange-200 bg-orange-50/60 p-3 dark:border-orange-900 dark:bg-orange-950/30">
               <Label>Será contratado?</Label>
               <p className="text-[11px] text-muted-foreground">
                 Se sim, o card ficará na raia Contratação até concluir o fluxo no kanban Contratar.
@@ -513,7 +513,7 @@ export function BacklogClassificationDialog({ open, task, mode = "backlog_exit",
                     onClick={() => setProcurementRequired(opt.value)}
                     className={`flex-1 rounded-md border px-3 py-2 text-sm font-medium transition ${
                       procurementRequired === opt.value
-                        ? "border-orange-500 bg-orange-100 text-orange-800"
+                        ? "border-orange-500 bg-orange-100 text-orange-800 dark:bg-orange-950/60 dark:text-orange-300"
                         : "text-muted-foreground hover:bg-muted"
                     }`}
                   >

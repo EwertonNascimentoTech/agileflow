@@ -184,7 +184,7 @@ export function CommentComposer({
       <div className="min-w-0 flex-1 space-y-2">
         <div
           className={cn(
-            "overflow-hidden rounded-md border bg-background transition-shadow",
+            "overflow-hidden rounded-lg border bg-background transition-shadow",
             focused ? "border-primary ring-2 ring-primary/25" : "border-input",
           )}
         >
@@ -218,7 +218,7 @@ export function CommentComposer({
           )}
 
           {mode === "rich" && (
-            <div className="flex flex-wrap items-center gap-0.5 border-t border-border/60 bg-muted/20 px-1.5 py-1">
+            <div className="flex flex-wrap items-center gap-0.5 border-t border-border/60 bg-muted/40 px-1.5 py-1">
               <ToolbarButton title="Negrito" onClick={() => exec("bold")}>
                 <Bold size={14} />
               </ToolbarButton>

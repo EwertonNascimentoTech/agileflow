@@ -127,18 +127,10 @@ export function AssigneeCapacityPanel({
     : "Nenhuma outra demanda no período."
 
   return (
-    <div
-      style={{
-        marginTop: 8,
-        border: "1px solid var(--af-border)",
-        borderRadius: 8,
-        padding: "8px 10px",
-        background: "var(--af-muted-2)",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-        <Gauge size={13} style={{ color: "var(--af-muted-fg)" }} />
-        <span style={{ fontSize: 11, fontWeight: 700, color: "var(--af-muted-fg)", textTransform: "uppercase", letterSpacing: 0.4 }}>
+    <div className="mt-2 rounded-xl border bg-muted/40 px-3 py-2.5">
+      <div className="mb-1.5 flex items-center gap-1.5">
+        <Gauge size={14} className="shrink-0 text-muted-foreground" />
+        <span className="text-xs font-semibold text-foreground">
           Capacidade · {fmtDay(start)} → {fmtDay(due)} ({data.work_days} dia{data.work_days === 1 ? "" : "s"} úte{data.work_days === 1 ? "l" : "is"})
         </span>
         {loading && <Loader2 size={12} className="animate-spin" style={{ color: "var(--af-faint)" }} />}

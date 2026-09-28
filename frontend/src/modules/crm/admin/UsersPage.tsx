@@ -4,21 +4,20 @@ import { companyApi as companyAdminApi } from "@/api/company"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { Users, Plus, Search, Pencil, Loader2 } from "lucide-react"
+import { Users, Plus, Search, Pencil, Loader2, UserCheck, UserX, ShieldCheck, KeyRound } from "lucide-react"
 import { companyApi } from "@/api/crm"
 import type { User, Role } from "@/types"
 import { useAuth } from "@/contexts/AuthContext"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Badge } from "@/components/ui/badge"
-import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { EmptyState } from "@/components/EmptyState"
+import { KpiCount, KpiRow, Pill, SectionCard, TABLE, type Tone } from "@/components/ds"
 import { passwordSchema } from "@/lib/passwordSchema"
 import { PasswordChecklist } from "@/components/PasswordChecklist"
 
@@ -45,6 +44,12 @@ const ROLE_LABELS: Record<string, string> = {
   company_admin: "Admin",
   company_user: "Usuário",
   super_admin: "Super Admin",
+}
+
+const ROLE_TONE: Record<string, Tone> = {
+  company_admin: "violet",
+  company_user: "slate",
+  super_admin: "amber",
 }
 
 function getApiError(err: unknown): string {
@@ -131,92 +136,141 @@ export default function UsersPage() {
     }
   }
 
+  function openCreate() {
+    createForm.reset({ role: "company_user" }); setCreateError(""); setCreateOpen(true)
+  }
+
+  // Indicadores do topo (só leitura; contam sobre todos os usuários, sem a busca).
+  const activeCount = users.filter(u => u.is_active).length
+  const adminCount = users.filter(u => u.role === "company_admin").length
+  const pendingFirstAccess = users.filter(u => !u.last_login && u.is_active).length
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Usuários</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {loading ? "Carregando…" : `${users.length} usuário${users.length !== 1 ? "s" : ""}`}
-          </p>
-        </div>
-        <Button onClick={() => { createForm.reset({ role: "company_user" }); setCreateError(""); setCreateOpen(true) }} className="gap-1.5">
-          <Plus size={16} /> Novo Usuário
-        </Button>
-      </div>
-
-      <div className="relative max-w-sm">
-        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          placeholder="Buscar por nome ou e-mail…"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="pl-9"
-        />
-      </div>
-
+    <div className="space-y-5">
       {loading ? (
-        <div className="space-y-2">
-          {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-16 w-full rounded-lg" />)}
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
+          {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-[74px] rounded-xl" />)}
         </div>
-      ) : filtered.length === 0 ? (
-        <EmptyState
-          icon={Users}
-          title={search ? "Nenhum usuário encontrado" : "Nenhum usuário cadastrado"}
-          description={search ? "Tente buscar por outro termo." : "Adicione o primeiro usuário da empresa."}
-          action={!search ? { label: "Novo Usuário", onClick: () => { createForm.reset({ role: "company_user" }); setCreateError(""); setCreateOpen(true) } } : undefined}
-        />
       ) : (
-        <div className="space-y-2">
-          {filtered.map(user => (
-            <Card key={user.id} className={!user.is_active ? "opacity-60" : ""}>
-              <CardContent className="flex items-center gap-4 p-4">
-                <div className="h-9 w-9 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-sm shrink-0">
-                  {user.full_name.split(" ").slice(0, 2).map(n => n[0]).join("").toUpperCase()}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="font-medium text-sm truncate">{user.full_name}</p>
-                    {user.id === me?.id && (
-                      <span className="text-xs text-muted-foreground">(você)</span>
-                    )}
-                  </div>
-                  <p className="text-xs text-muted-foreground truncate">{user.email}</p>
-                </div>
-                <div className="hidden sm:flex items-center gap-2 shrink-0">
-                  <Badge variant="secondary" className="text-xs">
-                    {ROLE_LABELS[user.role] ?? user.role}
-                  </Badge>
-                  {roleNameById(user.role_id) && (
-                    <Badge variant="outline" className="text-xs">
-                      {roleNameById(user.role_id)}
-                    </Badge>
-                  )}
-                  <Badge variant={user.is_active ? "success" : "destructive"}>
-                    {user.is_active ? "Ativo" : "Inativo"}
-                  </Badge>
-                </div>
-                {!user.last_login && user.is_active && (
-                  <FirstAccessLinkButton
-                    size="icon"
-                    variant="ghost"
-                    personName={user.full_name}
-                    generate={() => companyAdminApi.userFirstAccessLink(user.id)}
-                  />
-                )}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 shrink-0"
-                  onClick={() => openEdit(user)}
-                >
-                  <Pencil size={13} />
-                </Button>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        <KpiRow className="sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
+          <KpiCount icon={Users} value={users.length} label="Usuários" />
+          <KpiCount icon={UserCheck} value={activeCount} label="Ativos" tone="emerald" />
+          <KpiCount icon={UserX} value={users.length - activeCount} label="Inativos" tone="slate" />
+          <KpiCount icon={ShieldCheck} value={adminCount} label="Administradores" tone="violet" />
+          <KpiCount
+            icon={KeyRound} value={pendingFirstAccess} label="Aguardando primeiro acesso"
+            tone={pendingFirstAccess > 0 ? "amber" : "slate"} highlight={pendingFirstAccess > 0}
+          />
+        </KpiRow>
       )}
+
+      <SectionCard
+        title="Usuários"
+        subtitle={loading ? "Carregando…" : `${users.length} usuário${users.length !== 1 ? "s" : ""}`}
+        icon={Users}
+        flush
+        right={
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="relative block">
+              <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="search"
+                placeholder="Buscar por nome ou e-mail…"
+                aria-label="Buscar por nome ou e-mail"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="h-10 w-64 max-w-full rounded-md border bg-background pl-9 pr-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </span>
+            <Button onClick={openCreate} className="h-10 gap-1.5">
+              <Plus size={16} /> Novo Usuário
+            </Button>
+          </div>
+        }
+      >
+        {loading ? (
+          <div className="space-y-2 p-4">
+            {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-12 w-full rounded-lg" />)}
+          </div>
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            icon={Users}
+            title={search ? "Nenhum usuário encontrado" : "Nenhum usuário cadastrado"}
+            description={search ? "Tente buscar por outro termo." : "Adicione o primeiro usuário da empresa."}
+            action={!search ? { label: "Novo Usuário", onClick: openCreate } : undefined}
+            compact
+          />
+        ) : (
+          <div className={TABLE.wrap}>
+            <table className={`${TABLE.table} min-w-[720px]`}>
+              <thead className={TABLE.thead}>
+                <tr>
+                  <th className={TABLE.thFirst}>Usuário</th>
+                  <th className={TABLE.th}>Perfil</th>
+                  <th className={TABLE.th}>Função</th>
+                  <th className={TABLE.th}>Status</th>
+                  <th className={`${TABLE.th} w-24`}><span className="sr-only">Ações</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(user => (
+                  <tr key={user.id} className={`${TABLE.tr} ${!user.is_active ? "opacity-60" : ""}`}>
+                    <td className={TABLE.tdFirst}>
+                      <div className="flex items-center gap-3">
+                        <div className="h-9 w-9 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-sm shrink-0">
+                          {user.full_name.split(" ").slice(0, 2).map(n => n[0]).join("").toUpperCase()}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className="font-semibold truncate">{user.full_name}</p>
+                            {user.id === me?.id && (
+                              <span className="text-xs text-muted-foreground">(você)</span>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className={TABLE.td}>
+                      <Pill tone={ROLE_TONE[user.role] ?? "slate"}>{ROLE_LABELS[user.role] ?? user.role}</Pill>
+                    </td>
+                    <td className={TABLE.td}>
+                      {roleNameById(user.role_id)
+                        ? <Pill tone="blue">{roleNameById(user.role_id)}</Pill>
+                        : <span className="text-muted-foreground">—</span>}
+                    </td>
+                    <td className={TABLE.td}>
+                      <Pill tone={user.is_active ? "emerald" : "red"} dot>{user.is_active ? "Ativo" : "Inativo"}</Pill>
+                    </td>
+                    <td className={TABLE.td}>
+                      <div className="flex items-center justify-end gap-0.5">
+                        {!user.last_login && user.is_active && (
+                          <FirstAccessLinkButton
+                            size="icon"
+                            variant="ghost"
+                            personName={user.full_name}
+                            generate={() => companyAdminApi.userFirstAccessLink(user.id)}
+                          />
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0"
+                          title="Editar usuário"
+                          aria-label={`Editar ${user.full_name}`}
+                          onClick={() => openEdit(user)}
+                        >
+                          <Pencil size={14} />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SectionCard>
 
       {/* Dialog: Criar usuário */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>

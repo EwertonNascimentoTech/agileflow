@@ -6,7 +6,7 @@ import { projetosApi, type ScheduleBaseline, type ScheduleLockState } from "@/ap
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { Badge } from "@/components/ui/badge"
+import { Notice, Pill } from "@/components/ds"
 import { toast } from "@/lib/toast"
 import { useAuth } from "@/contexts/AuthContext"
 import { hasPermission } from "@/lib/permissions"
@@ -87,20 +87,10 @@ export function ScheduleLockBanner({
     }
   }
 
+  // Faixa no padrão do Portal (Notice): vermelha quando travado, âmbar na revisão aberta.
   return (
-    <div
-      style={{
-        display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
-        padding: compact ? "8px 10px" : "10px 14px", margin: "8px 0",
-        borderRadius: 8, border: "1px solid",
-        borderColor: locked ? "var(--af-destructive)" : "var(--af-warning)",
-        background: locked ? "#fdecec" : "#fff7e6",
-      }}
-    >
-      {locked
-        ? <Lock size={16} style={{ color: "var(--af-destructive)", flexShrink: 0 }} />
-        : <Unlock size={16} style={{ color: "var(--af-warning)", flexShrink: 0 }} />}
-      <div style={{ flex: 1, minWidth: 180, fontSize: 13, lineHeight: 1.4 }}>
+    <Notice tone={locked ? "red" : "amber"} icon={locked ? Lock : Unlock}>
+      <div className="min-w-[180px] flex-1 leading-snug">
         {showTitle && lock.root_title && <b>{lock.root_title}: </b>}
         {locked ? (
           <><b>Cronograma travado</b>{compact ? "" : " — o projeto entrou em desenvolvimento."} Salve um baseline com a justificativa para liberar a edição.</>
@@ -108,21 +98,21 @@ export function ScheduleLockBanner({
           <><b>Revisão aberta</b> — edições liberadas. Conclua a revisão para re-travar e registrar o compromisso.</>
         )}
         {lock.baseline_count > 0 && (
-          <span style={{ color: "var(--af-muted-fg)" }}>
+          <span className="opacity-75">
             {" · "}{lock.baseline_count} baseline(s){lock.latest_version ? `, atual v${lock.latest_version}` : ""}
           </span>
         )}
       </div>
       {!canManageSchedule ? null : locked ? (
-        <Button size="sm" variant="destructive" onClick={() => { setJustification(""); setDialogOpen(true) }}>
+        <Button size="sm" variant="destructive" className="gap-1.5" onClick={() => { setJustification(""); setDialogOpen(true) }}>
           <Unlock size={14} /> Liberar alteração
         </Button>
       ) : (
-        <Button size="sm" onClick={() => void doClose()}>
+        <Button size="sm" className="gap-1.5" onClick={() => void doClose()}>
           <Lock size={14} /> Concluir revisão
         </Button>
       )}
-      <Button size="sm" variant="ghost" onClick={() => void openHistory()}>
+      <Button size="sm" variant="ghost" className="gap-1.5" onClick={() => void openHistory()}>
         <History size={14} /> Histórico
       </Button>
 
@@ -168,10 +158,10 @@ export function ScheduleLockBanner({
           ) : (
             <div className="max-h-[60vh] space-y-3 overflow-y-auto">
               {baselines.map((b) => (
-                <div key={b.id} className="rounded-lg border p-3">
+                <div key={b.id} className="rounded-xl border p-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
-                      <Badge variant="secondary">v{b.version}</Badge>
+                      <Pill tone="slate">v{b.version}</Pill>
                       <span className="text-xs text-muted-foreground">
                         {new Date(b.created_at).toLocaleString("pt-BR")} · {b.snapshot?.tasks?.length ?? 0} itens
                       </span>
@@ -198,6 +188,6 @@ export function ScheduleLockBanner({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </Notice>
   )
 }

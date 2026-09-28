@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ElementType, type ReactNode } from "react"
 import {
-  AlertTriangle, GitBranch, GitCommitHorizontal, Package, RefreshCw, Users,
+  AlertTriangle, ChevronDown, GitBranch, GitCommitHorizontal, Package, RefreshCw, Users,
 } from "lucide-react"
 import {
   Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -13,15 +13,11 @@ import {
   type RepoOverview,
 } from "@/api/produtos"
 import { EmptyState } from "@/components/EmptyState"
-import { KpiCard } from "@/components/KpiCard"
-import { SectionCard } from "@/components/SectionCard"
-import { Badge } from "@/components/ui/badge"
+import {
+  Card, DetailTabs, FilterSelect, KpiRow, Notice, PageHeader, Pill, SectionCard, TABLE, type KpiTone, type TabDef,
+} from "@/components/ds"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { RepositoriosConfigDialog } from "@/modules/produtos/RepositoriosConfigDialog"
 
 type WindowPreset = "30d" | "90d" | "180d" | "365d" | "year"
@@ -32,6 +28,42 @@ const WINDOW_OPTS: { value: WindowPreset; label: string }[] = [
   { value: "365d", label: "Últimos 12 meses" },
   { value: "year", label: "Ano atual" },
 ]
+
+type Aba = "devs" | "produtos" | "commits"
+const ABAS: TabDef<Aba>[] = [
+  { value: "devs", label: "Por Dev", icon: Users },
+  { value: "produtos", label: "Por Produto", icon: Package },
+  { value: "commits", label: "Commits", icon: GitCommitHorizontal },
+]
+
+const TONE: Record<KpiTone, string> = {
+  primary: "bg-primary/10 text-primary",
+  amber: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
+  emerald: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
+  red: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
+  violet: "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300",
+  slate: "bg-muted text-muted-foreground",
+}
+
+/** Cartão de indicador do Portal (mesmo visual do KpiCount) com uma linha extra de detalhe. */
+function StatTile({ icon: Icon, value, label, sub, tone = "primary" }: {
+  icon: ElementType
+  value: ReactNode
+  label: string
+  sub?: string
+  tone?: KpiTone
+}) {
+  return (
+    <div className="flex min-w-0 items-center gap-3 rounded-xl border bg-card px-4 py-3 shadow-sm">
+      <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${TONE[tone]}`}><Icon size={19} /></span>
+      <div className="min-w-0">
+        <p className="text-2xl font-bold leading-none tabular-nums">{value}</p>
+        <p className="mt-1 text-sm leading-tight text-muted-foreground">{label}</p>
+        {sub && <p className="mt-0.5 text-xs text-muted-foreground">{sub}</p>}
+      </div>
+    </div>
+  )
+}
 
 function iso(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
@@ -103,13 +135,14 @@ function FilterMultiSelect({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-background px-3 text-sm ring-offset-background hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        aria-expanded={open}
+        className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 text-sm ring-offset-background hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <span className="truncate text-left">{triggerLabel}</span>
-        <span className="ml-2 shrink-0 text-xs text-muted-foreground">{open ? "▲" : "▼"}</span>
+        <ChevronDown size={16} className={`ml-2 shrink-0 opacity-50 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
       {open && (
-        <div className="absolute z-30 mt-1 max-h-64 w-full min-w-[240px] overflow-y-auto rounded-md border bg-popover p-1 shadow-md">
+        <div className="absolute z-30 mt-1 max-h-64 w-full min-w-[240px] overflow-y-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg">
           <button
             type="button"
             className="mb-1 w-full rounded px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-accent"
@@ -158,7 +191,7 @@ export default function RepositoriosPage() {
   const [loadingCommits, setLoadingCommits] = useState(false)
 
   const [configOpen, setConfigOpen] = useState(false)
-  const [aba, setAba] = useState("devs")
+  const [aba, setAba] = useState<Aba>("devs")
 
   const range = useMemo(() => windowRange(preset), [preset])
   const repoKey = repositories.join(","), posKey = positions.join(","), teamKey = teams.join(",")
@@ -217,127 +250,119 @@ export default function RepositoriosPage() {
     [data],
   )
 
+  const totalPaginas = commits ? Math.ceil(commits.total / commits.page_size) : 1
+
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold">Repositórios e commits</h1>
-          <p className="text-sm text-muted-foreground">
-            Evolução das entregas de código dos devs, a partir dos repositórios vinculados aos produtos.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={carregar} disabled={loading}>
-            <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
-            Atualizar
-          </Button>
-          <Button size="sm" onClick={() => setConfigOpen(true)}>
-            <GitBranch size={14} />
-            Repositórios
-          </Button>
-        </div>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        icon={GitBranch}
+        color="#7C3AED"
+        title="Repositórios e commits"
+        description="Evolução das entregas de código dos devs, a partir dos repositórios vinculados aos produtos."
+        actions={
+          <>
+            <Button variant="outline" className="h-10 gap-1.5" onClick={carregar} disabled={loading}>
+              <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+              Atualizar
+            </Button>
+            <Button className="h-10 gap-1.5" onClick={() => setConfigOpen(true)}>
+              <GitBranch size={16} />
+              Repositórios
+            </Button>
+          </>
+        }
+      />
 
       {data && !data.integracao_configurada && (
-        <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm">
-          <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warning" />
-          <div>
+        <Notice tone="amber" icon={AlertTriangle}>
+          <div className="min-w-0 flex-1">
             <p className="font-medium">Integração com o Azure DevOps não configurada.</p>
-            <p className="text-muted-foreground">
+            <p className="opacity-90">
               Defina <code>AZURE_DEVOPS_PAT</code> no <code>.env</code> (escopo Code → Read). Até lá o
               inventário de repositórios funciona, mas nenhum commit é importado.
             </p>
           </div>
-        </div>
+        </Notice>
       )}
 
       {k && k.autores_pendentes > 0 && (
-        <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/40 p-3 text-sm">
-          <span>
+        <Notice tone="amber" icon={Users}>
+          <span className="min-w-0 flex-1">
             <strong>{k.autores_pendentes}</strong>{" "}
             {k.autores_pendentes === 1 ? "autor de commit não vinculado" : "autores de commit não vinculados"} a
             uma pessoa — esses commits ficam fora do ranking por dev.
           </span>
-          <Button variant="outline" size="sm" onClick={() => setConfigOpen(true)}>
+          <Button variant="outline" size="sm" className="h-8 bg-background" onClick={() => setConfigOpen(true)}>
             Vincular
           </Button>
-        </div>
+        </Notice>
       )}
 
       {/* Filtros compartilhados pelas três abas */}
-      <SectionCard>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">Período</label>
-            <Select value={preset} onValueChange={(v) => setPreset(v as WindowPreset)}>
-              <SelectTrigger className="h-9">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {WINDOW_OPTS.map((o) => (
-                  <SelectItem key={o.value} value={o.value}>
-                    {o.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">Repositório</label>
-            <FilterMultiSelect
-              options={(data?.repo_options ?? []).map((r) => ({ value: r.id, label: r.name }))}
-              selected={repositories}
-              onChange={setRepositories}
-              emptyLabel="Todos os repositórios"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">Cargo</label>
-            <FilterMultiSelect
-              options={(data?.position_options ?? []).map((p) => ({ value: p.slug, label: p.name }))}
-              selected={positions}
-              onChange={setPositions}
-              emptyLabel="Todos os cargos"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">Time</label>
-            <FilterMultiSelect
-              options={(data?.team_options ?? []).map((t) => ({ value: t.id, label: t.name }))}
-              selected={teams}
-              onChange={setTeams}
-              emptyLabel="Todos os times"
-            />
-          </div>
-          <div className="flex items-end">
-            <label className="flex h-9 cursor-pointer items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                className="h-3.5 w-3.5 accent-primary"
-                checked={incluirBots}
-                onChange={(e) => setIncluirBots(e.target.checked)}
-              />
-              Incluir bots/pipelines
-            </label>
-          </div>
+      <Card className="flex flex-wrap items-end gap-3 p-4">
+        <div className="w-56 max-w-full">
+          <FilterSelect
+            label="Período"
+            value={preset}
+            onChange={(v) => setPreset(v as WindowPreset)}
+            options={WINDOW_OPTS}
+          />
         </div>
-      </SectionCard>
+        <div className="w-56 max-w-full space-y-1">
+          <span className="block text-xs text-muted-foreground">Repositório</span>
+          <FilterMultiSelect
+            options={(data?.repo_options ?? []).map((r) => ({ value: r.id, label: r.name }))}
+            selected={repositories}
+            onChange={setRepositories}
+            emptyLabel="Todos os repositórios"
+          />
+        </div>
+        <div className="w-56 max-w-full space-y-1">
+          <span className="block text-xs text-muted-foreground">Cargo</span>
+          <FilterMultiSelect
+            options={(data?.position_options ?? []).map((p) => ({ value: p.slug, label: p.name }))}
+            selected={positions}
+            onChange={setPositions}
+            emptyLabel="Todos os cargos"
+          />
+        </div>
+        <div className="w-56 max-w-full space-y-1">
+          <span className="block text-xs text-muted-foreground">Time</span>
+          <FilterMultiSelect
+            options={(data?.team_options ?? []).map((t) => ({ value: t.id, label: t.name }))}
+            selected={teams}
+            onChange={setTeams}
+            emptyLabel="Todos os times"
+          />
+        </div>
+        <label className="flex h-10 cursor-pointer items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="h-4 w-4 accent-primary"
+            checked={incluirBots}
+            onChange={(e) => setIncluirBots(e.target.checked)}
+          />
+          Incluir bots/pipelines
+        </label>
+      </Card>
 
       {erro ? (
-        <EmptyState icon={AlertTriangle} title="Não foi possível carregar" description={erro} />
+        <Card>
+          <EmptyState icon={AlertTriangle} title="Não foi possível carregar" description={erro} />
+        </Card>
       ) : loading ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-24" />
+            <Skeleton key={i} className="h-[92px] rounded-xl" />
           ))}
         </div>
       ) : (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <KpiCard
-              label="Commits no período"
-              value={k?.commits_total ?? 0}
+          <KpiRow className="sm:grid-cols-2 lg:grid-cols-4">
+            <StatTile
               icon={GitCommitHorizontal}
+              value={k?.commits_total ?? 0}
+              label="Commits no período"
               sub={
                 k
                   ? [
@@ -347,24 +372,25 @@ export default function RepositoriosPage() {
                   : undefined
               }
             />
-            <KpiCard label="Devs com commit" value={k?.devs_ativos ?? 0} icon={Users} />
-            <KpiCard
-              label="Repositórios ativos"
-              value={k?.repos_ativos ?? 0}
+            <StatTile icon={Users} value={k?.devs_ativos ?? 0} label="Devs com commit" tone="violet" />
+            <StatTile
               icon={GitBranch}
+              value={k?.repos_ativos ?? 0}
+              label="Repositórios ativos"
+              tone="emerald"
               sub={k?.repos_sem_commit ? `${k.repos_sem_commit} sem commit no período` : undefined}
             />
-            <KpiCard
-              label="Produtos com repositório"
-              value={k?.produtos_com_repo ?? 0}
+            <StatTile
               icon={Package}
+              value={k?.produtos_com_repo ?? 0}
+              label="Produtos com repositório"
               sub={k?.produtos_sem_commit ? `${k.produtos_sem_commit} sem commit no período` : undefined}
             />
-          </div>
+          </KpiRow>
 
           <SectionCard
             title="Evolução mensal"
-            action={
+            right={
               k?.ultimo_sync_at ? (
                 <span className="text-xs text-muted-foreground">
                   Última sincronização: {fmtDateTime(k.ultimo_sync_at)}
@@ -391,18 +417,16 @@ export default function RepositoriosPage() {
             )}
           </SectionCard>
 
-          <Tabs value={aba} onValueChange={setAba}>
-            <TabsList>
-              <TabsTrigger value="devs">Por Dev</TabsTrigger>
-              <TabsTrigger value="produtos">Por Produto</TabsTrigger>
-              <TabsTrigger value="commits">Commits</TabsTrigger>
-            </TabsList>
+          <div className="space-y-4">
+            <DetailTabs tabs={ABAS} value={aba} onChange={setAba} />
 
-            <TabsContent value="devs" className="space-y-4 pt-4">
-              {(data?.by_dev ?? []).length === 0 ? (
-                <EmptyState icon={GitCommitHorizontal} title="Sem commits no período" description="Ajuste os filtros ou sincronize os repositórios." />
+            {aba === "devs" && (
+              (data?.by_dev ?? []).length === 0 ? (
+                <Card>
+                  <EmptyState icon={GitCommitHorizontal} title="Sem commits no período" description="Ajuste os filtros ou sincronize os repositórios." />
+                </Card>
               ) : (
-                <>
+                <div className="space-y-4">
                   <SectionCard title="Commits por dev">
                     <ResponsiveContainer width="100%" height={Math.max(200, devChart.length * 32)}>
                       <BarChart data={devChart} layout="vertical" margin={{ left: 24 }}>
@@ -415,128 +439,132 @@ export default function RepositoriosPage() {
                     </ResponsiveContainer>
                   </SectionCard>
 
-                  <SectionCard title="Detalhamento" bodyClassName="overflow-x-auto">
-                    <table className="w-full min-w-[820px] text-sm">
-                      <thead className="text-left text-xs uppercase text-muted-foreground">
-                        <tr className="border-b">
-                          <th className="py-2 pr-3">Dev</th>
-                          <th className="py-2 pr-3">Cargo</th>
-                          <th className="py-2 pr-3 text-right">Commits</th>
-                          <th className="py-2 pr-3 text-right">Merges</th>
-                          <th className="py-2 pr-3 text-right">Dias com commit</th>
-                          <th className="py-2 pr-3 text-right">Repos</th>
-                          <th className="py-2 pr-3 text-right">Produtos</th>
-                          <th className="py-2 pr-3 text-right">Arquivos tocados</th>
-                          <th className="py-2 pr-3">Último commit</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(data?.by_dev ?? []).map((d) => (
-                          <tr key={d.person_id ?? d.person_name} className="border-b last:border-0">
-                            <td className="py-2 pr-3 font-medium">
-                              {d.person_name}
-                              {!d.person_id && (
-                                <Badge variant="outline" className="ml-2 text-[10px]">
-                                  não vinculado
-                                </Badge>
-                              )}
-                            </td>
-                            <td className="py-2 pr-3 text-muted-foreground">{d.position ?? "—"}</td>
-                            <td className="py-2 pr-3 text-right font-semibold">{d.commits}</td>
-                            <td className="py-2 pr-3 text-right text-muted-foreground">{d.merges}</td>
-                            <td className="py-2 pr-3 text-right">{d.dias_com_commit}</td>
-                            <td className="py-2 pr-3 text-right">{d.repos_tocados}</td>
-                            <td className="py-2 pr-3 text-right">{d.produtos_tocados}</td>
-                            <td className="py-2 pr-3 text-right text-muted-foreground">
-                              {d.arquivos_add + d.arquivos_edit + d.arquivos_delete}
-                            </td>
-                            <td className="py-2 pr-3 text-muted-foreground">{fmtDate(d.ultimo_commit)}</td>
+                  <SectionCard title="Detalhamento" flush>
+                    <div className={TABLE.wrap}>
+                      <table className={`${TABLE.table} min-w-[820px]`}>
+                        <thead className={TABLE.thead}>
+                          <tr>
+                            <th className={TABLE.thFirst}>Dev</th>
+                            <th className={TABLE.th}>Cargo</th>
+                            <th className={`${TABLE.th} text-right`}>Commits</th>
+                            <th className={`${TABLE.th} text-right`}>Merges</th>
+                            <th className={`${TABLE.th} text-right`}>Dias com commit</th>
+                            <th className={`${TABLE.th} text-right`}>Repos</th>
+                            <th className={`${TABLE.th} text-right`}>Produtos</th>
+                            <th className={`${TABLE.th} text-right`}>Arquivos tocados</th>
+                            <th className={TABLE.th}>Último commit</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    <p className="mt-3 text-xs text-muted-foreground">
+                        </thead>
+                        <tbody>
+                          {(data?.by_dev ?? []).map((d) => (
+                            <tr key={d.person_id ?? d.person_name} className={TABLE.tr}>
+                              <td className={`${TABLE.tdFirst} font-medium`}>
+                                {d.person_name}
+                                {!d.person_id && (
+                                  <Pill tone="amber" className="ml-2">não vinculado</Pill>
+                                )}
+                              </td>
+                              <td className={`${TABLE.td} text-muted-foreground`}>{d.position ?? "—"}</td>
+                              <td className={`${TABLE.td} text-right font-semibold tabular-nums`}>{d.commits}</td>
+                              <td className={`${TABLE.td} text-right tabular-nums text-muted-foreground`}>{d.merges}</td>
+                              <td className={`${TABLE.td} text-right tabular-nums`}>{d.dias_com_commit}</td>
+                              <td className={`${TABLE.td} text-right tabular-nums`}>{d.repos_tocados}</td>
+                              <td className={`${TABLE.td} text-right tabular-nums`}>{d.produtos_tocados}</td>
+                              <td className={`${TABLE.td} text-right tabular-nums text-muted-foreground`}>
+                                {d.arquivos_add + d.arquivos_edit + d.arquivos_delete}
+                              </td>
+                              <td className={`${TABLE.td} whitespace-nowrap tabular-nums text-muted-foreground`}>{fmtDate(d.ultimo_commit)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="border-t px-5 py-3 text-xs text-muted-foreground">
                       Commit mede atividade de código, não valor entregue — leia junto com o painel de
                       Desempenho do Time, que mede User Stories concluídas. “Arquivos tocados” vem do
                       <code> changeCounts</code> do Azure, que conta arquivos, não linhas.
                     </p>
                   </SectionCard>
-                </>
-              )}
-            </TabsContent>
+                </div>
+              )
+            )}
 
-            <TabsContent value="produtos" className="pt-4">
-              {(data?.by_product ?? []).length === 0 ? (
-                <EmptyState icon={GitCommitHorizontal} title="Sem commits no período" description="Ajuste os filtros ou sincronize os repositórios." />
+            {aba === "produtos" && (
+              (data?.by_product ?? []).length === 0 ? (
+                <Card>
+                  <EmptyState icon={GitCommitHorizontal} title="Sem commits no período" description="Ajuste os filtros ou sincronize os repositórios." />
+                </Card>
               ) : (
-                <SectionCard title="Atividade por produto" bodyClassName="overflow-x-auto">
-                  <table className="w-full min-w-[700px] text-sm">
-                    <thead className="text-left text-xs uppercase text-muted-foreground">
-                      <tr className="border-b">
-                        <th className="py-2 pr-3">Produto</th>
-                        <th className="py-2 pr-3 text-right">Commits</th>
-                        <th className="py-2 pr-3 text-right">Devs</th>
-                        <th className="py-2 pr-3 text-right">Repos</th>
-                        <th className="py-2 pr-3">Último commit</th>
-                        <th className="py-2 pr-3 text-right">Dias parado</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(data?.by_product ?? []).map((p) => (
-                        <tr key={p.product_id} className="border-b last:border-0">
-                          <td className="py-2 pr-3 font-medium">
-                            {p.product_name}
-                            {p.sigla && <span className="ml-2 text-xs text-muted-foreground">{p.sigla}</span>}
-                          </td>
-                          <td className="py-2 pr-3 text-right font-semibold">{p.commits}</td>
-                          <td className="py-2 pr-3 text-right">{p.devs}</td>
-                          <td className="py-2 pr-3 text-right">{p.repos}</td>
-                          <td className="py-2 pr-3 text-muted-foreground">{fmtDate(p.ultimo_commit_at)}</td>
-                          <td className="py-2 pr-3 text-right">
-                            {p.dias_sem_commit == null ? (
-                              "—"
-                            ) : p.dias_sem_commit > 90 ? (
-                              <Badge variant="outline" className="text-warning">
-                                {p.dias_sem_commit}
-                              </Badge>
-                            ) : (
-                              p.dias_sem_commit
-                            )}
-                          </td>
+                <SectionCard title="Atividade por produto" flush>
+                  <div className={TABLE.wrap}>
+                    <table className={`${TABLE.table} min-w-[700px]`}>
+                      <thead className={TABLE.thead}>
+                        <tr>
+                          <th className={TABLE.thFirst}>Produto</th>
+                          <th className={`${TABLE.th} text-right`}>Commits</th>
+                          <th className={`${TABLE.th} text-right`}>Devs</th>
+                          <th className={`${TABLE.th} text-right`}>Repos</th>
+                          <th className={TABLE.th}>Último commit</th>
+                          <th className={`${TABLE.th} text-right`}>Dias parado</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <p className="mt-3 text-xs text-muted-foreground">
+                      </thead>
+                      <tbody>
+                        {(data?.by_product ?? []).map((p) => (
+                          <tr key={p.product_id} className={TABLE.tr}>
+                            <td className={`${TABLE.tdFirst} font-medium`}>
+                              {p.product_name}
+                              {p.sigla && <span className="ml-2 text-xs font-normal text-muted-foreground">{p.sigla}</span>}
+                            </td>
+                            <td className={`${TABLE.td} text-right font-semibold tabular-nums`}>{p.commits}</td>
+                            <td className={`${TABLE.td} text-right tabular-nums`}>{p.devs}</td>
+                            <td className={`${TABLE.td} text-right tabular-nums`}>{p.repos}</td>
+                            <td className={`${TABLE.td} whitespace-nowrap tabular-nums text-muted-foreground`}>{fmtDate(p.ultimo_commit_at)}</td>
+                            <td className={`${TABLE.td} text-right tabular-nums`}>
+                              {p.dias_sem_commit == null ? (
+                                "—"
+                              ) : p.dias_sem_commit > 90 ? (
+                                <Pill tone="amber" dot>{p.dias_sem_commit}</Pill>
+                              ) : (
+                                p.dias_sem_commit
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="border-t px-5 py-3 text-xs text-muted-foreground">
                     Um repositório compartilhado por mais de um produto conta para todos eles — por isso a
                     soma desta aba pode superar o total de commits do período.
                   </p>
                 </SectionCard>
-              )}
-            </TabsContent>
+              )
+            )}
 
-            <TabsContent value="commits" className="pt-4">
+            {aba === "commits" && (
               <SectionCard
                 title={commits ? `${commits.total} commits` : "Commits"}
-                bodyClassName="overflow-x-auto"
-                action={
+                flush
+                right={
                   commits && commits.total > commits.page_size ? (
                     <div className="flex items-center gap-2 text-sm">
                       <Button
                         variant="outline"
                         size="sm"
+                        className="h-8"
                         disabled={commitsPage <= 1 || loadingCommits}
                         onClick={() => setCommitsPage((p) => p - 1)}
                       >
                         Anterior
                       </Button>
-                      <span className="text-xs text-muted-foreground">
-                        {commitsPage} / {Math.ceil(commits.total / commits.page_size)}
+                      <span className="text-xs tabular-nums text-muted-foreground">
+                        {commitsPage} / {totalPaginas}
                       </span>
                       <Button
                         variant="outline"
                         size="sm"
-                        disabled={commitsPage >= Math.ceil(commits.total / commits.page_size) || loadingCommits}
+                        className="h-8"
+                        disabled={commitsPage >= totalPaginas || loadingCommits}
                         onClick={() => setCommitsPage((p) => p + 1)}
                       >
                         Próxima
@@ -546,66 +574,64 @@ export default function RepositoriosPage() {
                 }
               >
                 {loadingCommits ? (
-                  <Skeleton className="h-64" />
+                  <div className="p-5"><Skeleton className="h-64 rounded-xl" /></div>
                 ) : !commits || commits.items.length === 0 ? (
                   <EmptyState icon={GitCommitHorizontal} title="Nenhum commit" description="Ajuste os filtros ou sincronize os repositórios." />
                 ) : (
-                  <table className="w-full min-w-[900px] text-sm">
-                    <thead className="text-left text-xs uppercase text-muted-foreground">
-                      <tr className="border-b">
-                        <th className="py-2 pr-3">Data</th>
-                        <th className="py-2 pr-3">Autor</th>
-                        <th className="py-2 pr-3">Repositório</th>
-                        <th className="py-2 pr-3">Mensagem</th>
-                        <th className="py-2 pr-3">Produto(s)</th>
-                        <th className="py-2 pr-3">Commit</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {commits.items.map((c) => (
-                        <tr key={c.id} className="border-b last:border-0">
-                          <td className="whitespace-nowrap py-2 pr-3 text-muted-foreground">
-                            {fmtDateTime(c.author_date)}
-                          </td>
-                          <td className="py-2 pr-3">
-                            {c.person_name ?? c.author_name ?? c.author_email ?? "—"}
-                            {!c.person_id && (
-                              <Badge variant="outline" className="ml-2 text-[10px]">
-                                sem vínculo
-                              </Badge>
-                            )}
-                          </td>
-                          <td className="py-2 pr-3 text-muted-foreground">
-                            {c.project}/{c.repository}
-                          </td>
-                          <td className="max-w-[320px] truncate py-2 pr-3" title={c.comment ?? ""}>
-                            {c.is_merge && (
-                              <Badge variant="outline" className="mr-2 text-[10px]">
-                                merge
-                              </Badge>
-                            )}
-                            {c.comment ?? "—"}
-                          </td>
-                          <td className="py-2 pr-3 text-xs text-muted-foreground">
-                            {c.produtos.join(", ") || "—"}
-                          </td>
-                          <td className="py-2 pr-3 font-mono text-xs">
-                            {c.remote_url ? (
-                              <a href={c.remote_url} target="_blank" rel="noreferrer" className="text-primary hover:underline">
-                                {c.short_id}
-                              </a>
-                            ) : (
-                              c.short_id
-                            )}
-                          </td>
+                  <div className={TABLE.wrap}>
+                    <table className={`${TABLE.table} min-w-[900px]`}>
+                      <thead className={TABLE.thead}>
+                        <tr>
+                          <th className={TABLE.thFirst}>Data</th>
+                          <th className={TABLE.th}>Autor</th>
+                          <th className={TABLE.th}>Repositório</th>
+                          <th className={TABLE.th}>Mensagem</th>
+                          <th className={TABLE.th}>Produto(s)</th>
+                          <th className={TABLE.th}>Commit</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {commits.items.map((c) => (
+                          <tr key={c.id} className={TABLE.tr}>
+                            <td className={`${TABLE.tdFirst} whitespace-nowrap tabular-nums text-muted-foreground`}>
+                              {fmtDateTime(c.author_date)}
+                            </td>
+                            <td className={TABLE.td}>
+                              {c.person_name ?? c.author_name ?? c.author_email ?? "—"}
+                              {!c.person_id && (
+                                <Pill tone="amber" className="ml-2">sem vínculo</Pill>
+                              )}
+                            </td>
+                            <td className={`${TABLE.td} text-muted-foreground`}>
+                              {c.project}/{c.repository}
+                            </td>
+                            <td className={`${TABLE.td} max-w-[320px] truncate`} title={c.comment ?? ""}>
+                              {c.is_merge && (
+                                <Pill tone="violet" className="mr-2">merge</Pill>
+                              )}
+                              {c.comment ?? "—"}
+                            </td>
+                            <td className={`${TABLE.td} text-xs text-muted-foreground`}>
+                              {c.produtos.join(", ") || "—"}
+                            </td>
+                            <td className={`${TABLE.td} font-mono text-xs`}>
+                              {c.remote_url ? (
+                                <a href={c.remote_url} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                                  {c.short_id}
+                                </a>
+                              ) : (
+                                c.short_id
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </SectionCard>
-            </TabsContent>
-          </Tabs>
+            )}
+          </div>
         </>
       )}
 

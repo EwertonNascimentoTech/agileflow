@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Pill } from "@/components/ds"
 import { cn } from "@/lib/utils"
 import { toast } from "@/lib/toast"
 import { computePriority } from "./computePriority"
@@ -194,32 +195,32 @@ export function ProjectPriorityWidget({
 
   return (
     <div className="space-y-3 border-t border-border pt-4">
-      <div className="flex items-center gap-2">
-        <span className="h-4 w-1 rounded-full bg-primary" />
-        <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">Priorização (Impacto × Esforço)</p>
+      <div className="flex flex-wrap items-center gap-2">
+        <Target size={16} className="shrink-0 text-muted-foreground" />
+        <p className="text-sm font-semibold">Priorização (Impacto × Esforço)</p>
         {result && hasScore && <QuadrantBadge code={result.quadrantCode} quadrants={quadrants} className="ml-1" />}
       </div>
 
       {loading ? (
-        <Skeleton className="h-40 w-full" />
+        <Skeleton className="h-40 w-full rounded-xl" />
       ) : (
         <>
           <div className="space-y-3">
             <div>
               <div className="mb-2 flex items-center justify-between">
-                <p className="text-[11px] font-semibold text-muted-foreground">
+                <p className="flex flex-wrap items-center gap-1.5 text-xs font-medium text-muted-foreground">
                   Pilares estratégicos
                   {pillarIds.length > 0 && (
-                    <span className="ml-1.5 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary">
+                    <Pill tone="blue">
                       {pillarIds.length} selecionado{pillarIds.length > 1 ? "s" : ""}
-                    </span>
+                    </Pill>
                   )}
                 </p>
                 {!readOnly && pillarIds.length > 0 && (
                   <button
                     type="button"
                     onClick={() => setPillarIds([])}
-                    className="text-[10px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                    className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
                   >
                     Limpar seleção
                   </button>
@@ -227,14 +228,14 @@ export function ProjectPriorityWidget({
               </div>
 
               {pillars.length === 0 ? (
-                <p className="text-[11px] text-muted-foreground">Nenhum pilar configurado.</p>
+                <p className="text-xs text-muted-foreground">Nenhum pilar configurado.</p>
               ) : (
-                <div className="space-y-2.5 rounded-lg border bg-muted/20 p-3">
+                <div className="space-y-3 rounded-xl border bg-muted/20 p-3">
                   {pillarGroups.map((group) => (
                     <div key={group.perspective}>
                       <div className="mb-1.5 flex items-center gap-1.5">
                         <span className="h-2 w-2 rounded-full" style={{ backgroundColor: group.color }} />
-                        <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                        <span className="text-xs font-medium text-muted-foreground">
                           {group.perspective}
                         </span>
                       </div>
@@ -275,7 +276,7 @@ export function ProjectPriorityWidget({
               )}
 
               {pillarIds.length > 1 && (
-                <p className="mt-1.5 text-[10px] text-muted-foreground">
+                <p className="mt-1.5 text-xs text-muted-foreground">
                   Modificador aplicado: o maior entre os pilares selecionados.
                 </p>
               )}
@@ -283,21 +284,21 @@ export function ProjectPriorityWidget({
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2 rounded-md border p-3">
-              <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Impacto</p>
+            <div className="space-y-2 rounded-xl border bg-card p-3">
+              <p className="text-sm font-semibold">Impacto</p>
               {impactCriteria.map((c) => criterionRow(c, impactScores, setImpactScores))}
             </div>
-            <div className="space-y-2 rounded-md border p-3">
-              <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Esforço</p>
+            <div className="space-y-2 rounded-xl border bg-card p-3">
+              <p className="text-sm font-semibold">Esforço</p>
               {effortCriteria.map((c) => criterionRow(c, effortScores, setEffortScores))}
             </div>
           </div>
 
           {result && (
-            <div className="flex flex-wrap items-center gap-4 rounded-md bg-muted/40 p-3 text-sm">
+            <div className="flex flex-wrap items-center gap-4 rounded-xl border bg-muted/40 px-4 py-3 text-sm">
               <span>
                 Impacto efetivo: <strong>{result.impactoEfetivo.toFixed(2)}</strong>
-                <span className="text-[11px] text-muted-foreground"> (bruto {result.impactoBruto.toFixed(2)} × {result.modulador} ÷ {result.divisor})</span>
+                <span className="text-xs text-muted-foreground"> (bruto {result.impactoBruto.toFixed(2)} × {result.modulador} ÷ {result.divisor})</span>
               </span>
               <span>
                 Esforço: <strong>{result.esforco.toFixed(2)}</strong>
@@ -307,7 +308,7 @@ export function ProjectPriorityWidget({
           )}
 
           {readOnly ? (
-            <span className="flex items-center gap-1 text-[11px] italic text-muted-foreground">
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
               <Target size={12} /> {hasScore ? "Somente leitura nesta etapa" : "Ainda não pontuada"}
             </span>
           ) : (
@@ -321,7 +322,7 @@ export function ProjectPriorityWidget({
                 </Button>
               )}
               {!hasScore && (
-                <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
                   <Target size={12} /> Ainda não pontuada
                 </span>
               )}

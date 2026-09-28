@@ -12,7 +12,7 @@ import {
   type PortfolioServicoRef,
 } from "@/api/indicadores"
 import { AttachmentField, type Attachment } from "@/components/AttachmentField"
-import { Badge } from "@/components/ui/badge"
+import { Pill, TABLE } from "@/components/ds"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { toast } from "@/lib/toast"
@@ -42,7 +42,7 @@ function ServicosTable({ rows, highlight }: { rows: PortfolioServicoRef[]; highl
   return (
     <div className="overflow-hidden rounded-md border">
       <table className="w-full text-sm">
-        <thead className="bg-muted/50 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+        <thead className={TABLE.thead}>
           <tr>
             <th className="px-3 py-2 font-semibold">Produto</th>
             <th className="px-3 py-2 font-semibold">Serviço</th>
@@ -60,7 +60,7 @@ function ServicosTable({ rows, highlight }: { rows: PortfolioServicoRef[]; highl
                 <span className="flex items-center gap-1.5">
                   {s.product_name}
                   {(highlight || s.novo_no_mes) && (
-                    <Badge variant="secondary" className="h-4 px-1 text-[9px] font-normal">Novo</Badge>
+                    <Pill tone="blue">Novo</Pill>
                   )}
                 </span>
               </td>
@@ -80,7 +80,7 @@ function DocumentosTable({ rows, highlight }: { rows: PortfolioDocumentoRef[]; h
   return (
     <div className="overflow-hidden rounded-md border">
       <table className="w-full text-sm">
-        <thead className="bg-muted/50 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+        <thead className={TABLE.thead}>
           <tr>
             <th className="px-3 py-2 font-semibold">Produto</th>
             <th className="px-3 py-2 font-semibold">Documento</th>
@@ -98,7 +98,7 @@ function DocumentosTable({ rows, highlight }: { rows: PortfolioDocumentoRef[]; h
                 <span className="flex items-center gap-1.5">
                   {d.product_name}
                   {(highlight || d.novo_no_mes) && (
-                    <Badge variant="secondary" className="h-4 px-1 text-[9px] font-normal">Novo</Badge>
+                    <Pill tone="blue">Novo</Pill>
                   )}
                 </span>
               </td>
@@ -118,7 +118,7 @@ function ProcessosTable({ rows, highlight }: { rows: PortfolioProcessoRef[]; hig
   return (
     <div className="overflow-hidden rounded-md border">
       <table className="w-full text-sm">
-        <thead className="bg-muted/50 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+        <thead className={TABLE.thead}>
           <tr>
             <th className="px-3 py-2 font-semibold">Sub-processo</th>
             <th className="px-3 py-2 font-semibold">Serviços vinculados</th>
@@ -135,7 +135,7 @@ function ProcessosTable({ rows, highlight }: { rows: PortfolioProcessoRef[]; hig
                 <span className="flex items-center gap-1.5">
                   {p.codigo ? `${p.codigo} — ${p.processo_name}` : p.processo_name}
                   {(highlight || p.novo_no_mes) && (
-                    <Badge variant="secondary" className="h-4 px-1 text-[9px] font-normal">Novo</Badge>
+                    <Pill tone="blue">Novo</Pill>
                   )}
                 </span>
                 <span className="block text-[11px] text-muted-foreground">{p.portfolio_name}</span>
@@ -310,7 +310,7 @@ export function AcompanhamentoEvidenciasDialog({
             </section>
 
             <section className="space-y-2">
-              <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+              <p className="text-sm font-semibold">
                 Acumulado no numerador até {acomp.periodo_fim} ({acumuladoCount} {itemLabel}(s))
               </p>
               {isProcessosDigitais ? (

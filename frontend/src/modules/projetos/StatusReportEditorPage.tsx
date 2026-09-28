@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import { ArrowLeft, Save } from "lucide-react"
+import { AlertTriangle, ArrowLeft, FileText, Save } from "lucide-react"
 
 import { projetosApi, type StatusReportSnapshot } from "@/api/projetos"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Card, Notice, PageHeader } from "@/components/ds"
 import StatusReportDocument from "@/modules/projetos/StatusReportDocument"
 
 /**
@@ -63,28 +64,42 @@ export default function StatusReportEditorPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[1320px] p-4 md:p-6">
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <Button variant="ghost" size="sm" className="gap-1.5" onClick={() => navigate("/app/modules/projetos/painel-po")}>
-          <ArrowLeft className="h-4 w-4" /> Voltar
-        </Button>
-        <Input
-          className="h-9 max-w-md flex-1"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="Título do report"
-        />
-        <Button className="ml-auto gap-1.5" onClick={save} disabled={saving || loading || !snapshot}>
-          <Save className="h-4 w-4" /> {saving ? "Salvando…" : "Salvar report"}
-        </Button>
-      </div>
+    <div className="mx-auto max-w-[1320px] space-y-5 p-4 md:p-6">
+      <PageHeader
+        icon={FileText}
+        color="#2563EB"
+        title="Novo Status Report"
+        description="Rascunho com o estado atual do recorte: ajuste a narrativa e salve — o report salvo fica imutável."
+        actions={
+          <>
+            <Button variant="outline" className="h-10 gap-1.5" onClick={() => navigate("/app/modules/projetos/painel-po")}>
+              <ArrowLeft size={16} /> Voltar
+            </Button>
+            <Button className="h-10 gap-1.5" onClick={save} disabled={saving || loading || !snapshot}>
+              <Save size={16} /> {saving ? "Salvando…" : "Salvar report"}
+            </Button>
+          </>
+        }
+      />
 
-      {error && <p className="mb-3 text-sm text-destructive">{error}</p>}
+      <Card className="p-4">
+        <label className="block max-w-xl space-y-1">
+          <span className="text-xs text-muted-foreground">Título do report</span>
+          <Input
+            className="h-10"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Título do report"
+          />
+        </label>
+      </Card>
+
+      {error && <Notice tone="red" icon={AlertTriangle}>{error}</Notice>}
 
       {loading || !snapshot ? (
         <div className="space-y-3">
-          <Skeleton className="h-48 w-full" />
-          <Skeleton className="h-32 w-full" />
+          <Skeleton className="h-48 w-full rounded-2xl" />
+          <Skeleton className="h-32 w-full rounded-2xl" />
         </div>
       ) : (
         <StatusReportDocument snapshot={snapshot} editable onChange={setSnapshot} />

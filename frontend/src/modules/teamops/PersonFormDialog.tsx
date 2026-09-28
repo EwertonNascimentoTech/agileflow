@@ -557,7 +557,7 @@ export function PersonFormDialog({ person, areas, onClose, onSaved }: Props) {
             <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
           </div>
 
-          <div className="md:col-span-2 space-y-3 rounded-md border border-border p-3">
+          <div className="md:col-span-2 space-y-3 rounded-xl border border-border p-4">
             <p className="text-sm font-semibold">Acesso ao sistema</p>
             {hasLoginAlready && (
               <p className="text-xs text-muted-foreground">
@@ -579,7 +579,7 @@ export function PersonFormDialog({ person, areas, onClose, onSaved }: Props) {
                 <div>
                   <Label>Senha inicial *</Label>
                   <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
-                  <p className="mt-1 text-[11px] text-muted-foreground">
+                  <p className="mt-1 text-xs text-muted-foreground">
                     Mín. 8 caracteres, com maiúscula, minúscula, número e especial.
                   </p>
                 </div>
@@ -597,7 +597,7 @@ export function PersonFormDialog({ person, areas, onClose, onSaved }: Props) {
                 </div>
               )}
             </div>
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               Cria um login usando o e-mail acima. <strong>O que a pessoa pode fazer vem da matriz de permissões do cargo</strong> — configure em Configurações → Cargos → Acesso.
             </p>
           </div>

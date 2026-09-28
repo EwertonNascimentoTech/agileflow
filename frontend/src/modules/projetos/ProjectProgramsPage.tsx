@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
-import { Layers, Loader2, Pencil, Plus, Settings2, Trash2 } from "lucide-react"
+import { CheckCircle2, Layers, Loader2, Pencil, PauseCircle, Plus, Settings2, Trash2, UserX } from "lucide-react"
 
 import { projetosApi, type ProjectProgram } from "@/api/projetos"
 import { teamopsApi, type Person } from "@/api/teamops"
+import { Card, IconTile, KpiCount, KpiRow, PageHeader, Pill, TABLE } from "@/components/ds"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -15,7 +16,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "@/lib/toast"
 import { useAuth } from "@/contexts/AuthContext"
 import { hasPermission } from "@/lib/permissions"
-import { IconTile } from "@/modules/portal/portfolioUi"
 import { ProgramAppearanceFields } from "@/modules/projetos/ProgramAppearanceFields"
 import { colorFor } from "@/modules/portal/portfolioMeta"
 
@@ -121,71 +121,101 @@ export default function ProjectProgramsPage() {
     }
   }
 
+  // Indicadores do topo (só leitura): contam sobre o catálogo inteiro.
+  const counts = {
+    ativos: programs.filter((p) => p.is_active).length,
+    inativos: programs.filter((p) => !p.is_active).length,
+    semResponsavel: programs.filter((p) => !p.responsavel_person_id).length,
+  }
+
   return (
-    <div className="w-full space-y-4 p-1">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold">Programa</h1>
-          <p className="text-sm text-muted-foreground">
+    <div className="w-full space-y-5 p-1">
+      <PageHeader
+        icon={Layers}
+        color="#2563EB"
+        title="Programa"
+        description={
+          <>
             Cadastro de programas (nome, descrição e responsável). Cards podem ser vinculados a um programa na conversão.
             Em "Gerenciar": pilares, pilar de cada projeto e clientes que veem o programa no Portal.
-          </p>
-        </div>
-        {canManage && <Button className="gap-1.5" onClick={openCreate}><Plus size={15} /> Novo programa</Button>}
-      </div>
+          </>
+        }
+        actions={canManage ? <Button className="h-10 gap-1.5" onClick={openCreate}><Plus size={16} /> Novo programa</Button> : undefined}
+      />
 
       {loading ? (
-        <Skeleton className="h-64 rounded-lg" />
-      ) : programs.length === 0 ? (
-        <EmptyState icon={Layers} title="Nenhum programa cadastrado"
-          description="Cadastre um programa para vincular cards na conversão."
-          action={canManage ? { label: "Novo programa", onClick: openCreate } : undefined} />
-      ) : (
-        <div className="overflow-hidden rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2 font-semibold">Nome</th>
-                <th className="px-3 py-2 font-semibold">Responsável</th>
-                <th className="px-3 py-2 font-semibold">Descrição</th>
-                <th className="px-3 py-2 font-semibold">Status</th>
-                <th className="w-44 px-3 py-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {programs.map((p) => (
-                <tr key={p.id} className="border-t">
-                  <td className="px-3 py-2 font-medium">
-                    <span className="flex items-center gap-2">
-                      <IconTile icon={p.icon} color={colorFor(p.color, p.id)} size={28} />
-                      {p.name}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-muted-foreground">{p.responsavel_nome ?? personName(p.responsavel_person_id)}</td>
-                  <td className="max-w-[28rem] truncate px-3 py-2 text-muted-foreground">{p.description ?? "—"}</td>
-                  <td className="px-3 py-2">
-                    <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${p.is_active ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"}`}>
-                      {p.is_active ? "Ativo" : "Inativo"}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    {canManage && <div className="flex items-center justify-end gap-0.5">
-                      <Button asChild variant="ghost" size="sm" className="gap-1 text-muted-foreground hover:text-primary">
-                        <Link to={`/app/modules/projetos/programas/${p.id}`}><Settings2 size={14} /> Gerenciar</Link>
-                      </Button>
-                      <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-primary" onClick={() => openEdit(p)}>
-                        <Pencil size={14} />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" onClick={() => void remove(p)}>
-                        <Trash2 size={14} />
-                      </Button>
-                    </div>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="space-y-5">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-[74px] rounded-xl" />)}
+          </div>
+          <Skeleton className="h-64 rounded-2xl" />
         </div>
+      ) : programs.length === 0 ? (
+        <Card>
+          <EmptyState icon={Layers} title="Nenhum programa cadastrado"
+            description="Cadastre um programa para vincular cards na conversão."
+            action={canManage ? { label: "Novo programa", onClick: openCreate } : undefined} />
+        </Card>
+      ) : (
+        <>
+          <KpiRow className="sm:grid-cols-2 lg:grid-cols-4">
+            <KpiCount icon={Layers} value={programs.length} label="Programas cadastrados" />
+            <KpiCount icon={CheckCircle2} value={counts.ativos} label="Ativos" tone="emerald" />
+            <KpiCount icon={PauseCircle} value={counts.inativos} label="Inativos" tone="slate" />
+            <KpiCount
+              icon={UserX} value={counts.semResponsavel} label="Sem responsável (PO)"
+              tone={counts.semResponsavel > 0 ? "amber" : "slate"} highlight={counts.semResponsavel > 0}
+            />
+          </KpiRow>
+
+          <Card className="overflow-hidden">
+            <div className={TABLE.wrap}>
+              <table className={`${TABLE.table} min-w-[760px]`}>
+                <thead className={TABLE.thead}>
+                  <tr>
+                    <th className={TABLE.thFirst}>Nome</th>
+                    <th className={TABLE.th}>Responsável</th>
+                    <th className={TABLE.th}>Descrição</th>
+                    <th className={TABLE.th}>Status</th>
+                    <th className={`${TABLE.th} w-44`}><span className="sr-only">Ações</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {programs.map((p) => (
+                    <tr key={p.id} className={TABLE.tr}>
+                      <td className={TABLE.tdFirst}>
+                        <span className="flex items-center gap-3 font-semibold">
+                          <IconTile icon={p.icon} color={colorFor(p.color, p.id)} size={36} />
+                          {p.name}
+                        </span>
+                      </td>
+                      <td className={`${TABLE.td} whitespace-nowrap text-muted-foreground`}>{p.responsavel_nome ?? personName(p.responsavel_person_id)}</td>
+                      <td className={`${TABLE.td} max-w-[28rem] truncate text-muted-foreground`} title={p.description ?? undefined}>{p.description ?? "—"}</td>
+                      <td className={TABLE.td}>
+                        <Pill tone={p.is_active ? "emerald" : "slate"} dot>{p.is_active ? "Ativo" : "Inativo"}</Pill>
+                      </td>
+                      <td className={`${TABLE.td} text-right`}>
+                        {canManage && <div className="flex items-center justify-end gap-0.5">
+                          <Button asChild variant="outline" size="sm" className="h-8 gap-1.5">
+                            <Link to={`/app/modules/projetos/programas/${p.id}`}><Settings2 size={14} /> Gerenciar</Link>
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-primary"
+                            title="Editar programa" aria-label={`Editar ${p.name}`} onClick={() => openEdit(p)}>
+                            <Pencil size={14} />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                            title="Excluir programa" aria-label={`Excluir ${p.name}`} onClick={() => void remove(p)}>
+                            <Trash2 size={14} />
+                          </Button>
+                        </div>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </>
       )}
 
       <Dialog open={open} onOpenChange={setOpen}>

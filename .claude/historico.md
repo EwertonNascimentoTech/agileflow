@@ -14,6 +14,23 @@ Modelo:
 
 ---
 
+## 2026-09-27 — Todos os módulos ativos no design system do Portal do Cliente
+
+- **Pedido:** aplicar o design system do Portal em todos os módulos, exceto Produtos e Clientes (Portal), que já estavam.
+- **Escopo:** Processos (kanban, lista, calendário, drawer do card e seções, Gantt/cronograma, capacidade e desempenho, PMO/Painel do PO/PO Sync/Status Reports/Relatórios/Entregas de US, programas, cadastro de clientes, priorização, solicitações simplificadas e todas as páginas de Configurações), Times (painel, pessoas e ficha, organograma, stacks, ausências, config), Indicadores (painel, lista, detalhe, config), RTD (reuniões e reunião), Empresa (painel inicial, Usuários, Funções, Configurações) e Documentação. Fora: módulos desativados, super admin, documentos de impressão (Status Report, capa da RTD), telas de carregamento do link público.
+- **Como:** 11 agentes em paralelo com arquivos exclusivos e um brief comum (só apresentação; referências do Produtos; regras do kanban/Gantt/heatmap). Acréscimos de apresentação: faixas de indicadores contadas no front (algumas ligam filtros já existentes), trilhas nas páginas de Configurações, legenda da escala no mapa de carga (aparece também no Gantt e no Simulador), aba do programa na URL (`?aba=`). Pequenos efeitos: aba do Desempenho e da ficha da Pessoa não volta mais à primeira ao recarregar; spinner de "Recalcular datas" agora gira.
+- **Verificação:** tsc limpo; ESLint dos módulos igual ao do commit anterior (único aumento no arquivo novo do Assistente IA); Playwright em 50 telas x claro/escuro antes (base) e depois, sem erro de console/página; kanban com 27/27 cards arrastáveis (dnd-kit) e drawer abrindo; PDF e link público da RTD conferidos. Times alinhado à margem dos outros módulos (p-4).
+- **Não mexer:** ver invariantes "Design system do Portal".
+- **Arquivos:** `frontend/src/modules/projetos/**` (páginas, seções e config), `modules/teamops/**`, `modules/indicadores/**`, `modules/rtd/` (RtdReunioesPage, RtdReuniaoPage, RtdIndicadoresSection, RtdPlanosEpaSection), `modules/crm/admin/` (Dashboard, Users, Roles, Settings, SettingsLayout), `pages/DocumentationPage.tsx`.
+
+## 2026-09-27 — Portfólio de Produtos no design system do Portal do Cliente
+
+- **Pedido:** usar no módulo Portfólio de Produtos o mesmo design system do Portal do Cliente.
+- **Feito:** `components/ds` (reexporta os componentes do Portal + `PageHeader`, `SectionCard`, `Notice`, `Pill`, `Field`, `TABLE`). As 9 telas do módulo migradas, só apresentação (APIs, estados, handlers, diálogos, permissões iguais): Dashboard (faixas de indicadores por tema, ciclo de vida em barras, alertas em tabela), Produtos (indicadores clicáveis que ligam os filtros rápidos já existentes, filtros com rótulo, tabela Portal), ficha do produto (`DetailHeader` com trilha e selos, indicadores, abas sublinhadas, Cadastro/Responsáveis/Ambientes em `Field`, Saúde do produto em cartão), Inteligência, Portfólio de Processos (árvore no estilo WorkTree, níveis em controle segmentado), Indicadores, Fornecedores, Repositórios, Configurações. Tons dos selos unificados em `produtos/constants.ts`. `PageHeader`/`DetailHeader`: ações ficam à direita mesmo com título/selos longos (vale para o Portal também).
+- **Testado:** tsc limpo; ESLint do módulo igual ao do commit anterior (nada novo); navegador automático nas 8 telas em tema claro e escuro + as 7 abas da ficha, sem erro no console; tela de projeto do Portal conferida depois do ajuste no `DetailHeader`.
+- **Não mexer:** ver invariantes "Design system do Portal".
+- **Arquivos:** `frontend/src/components/ds/` (novo: `index.ts`, `PageKit.tsx`, `table.ts`), `modules/portal/DetailShell.tsx`, `modules/produtos/` (`DashboardPage`, `ProductsPage`, `ProductDetailPage`, `InteligenciaPage`, `ProcessPortfolioPage`, `IndicadoresPage`, `FornecedoresPage`, `RepositoriosPage`, `config/ProdutosConfigPage`, `constants.ts`).
+
 ## 2026-09-26 — pgvector + embeddings bge-m3 (infra da busca semântica)
 
 - **Pedido:** preparar o banco para pgvector sem quebrar nada, com embedding gratuito compatível com a IA em uso (IDCortex); modelo escolhido: BAAI/bge-m3.

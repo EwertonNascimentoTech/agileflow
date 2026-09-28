@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
-import { useSearchParams } from "react-router-dom"
-import { CheckCircle2, ChevronDown, ChevronRight, Circle, ClipboardList, Search } from "lucide-react"
+import { Link, useSearchParams } from "react-router-dom"
+import { CheckCircle2, ChevronDown, ChevronRight, Circle, CircleDot, ClipboardList, ListChecks, Plus, Search } from "lucide-react"
 
 import {
   projetosApi,
@@ -8,6 +8,8 @@ import {
   type ProjectMyRequestStage,
   type ProjectTaskWithContext,
 } from "@/api/projetos"
+import { Card, KpiCount, KpiRow, PageHeader, ProgressBar } from "@/components/ds"
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { EmptyState } from "@/components/EmptyState"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -32,11 +34,12 @@ function formatDate(iso: string | null): string | null {
   return new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })
 }
 
+/** Selo da etapa no desenho do Pill do Portal, na cor configurada da etapa do kanban. */
 function StatusBadge({ name, color }: { name: string; color: string }) {
   return (
     <span
-      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium shrink-0"
-      style={{ backgroundColor: `${color}1A`, color }}
+      className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-medium text-foreground"
+      style={{ backgroundColor: `${color}1A`, boxShadow: `inset 0 0 0 1px ${color}55` }}
     >
       <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />
       {name}
@@ -99,7 +102,7 @@ function PipelineStage({
             "flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 transition",
             clickable && "hover:scale-105",
             stage.is_complete
-              ? "border-emerald-500 bg-emerald-500/10 text-emerald-600"
+              ? "border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
               : stage.is_current
                 ? "border-primary bg-primary/10 text-primary"
                 : "border-muted-foreground/30 bg-muted text-muted-foreground",
@@ -120,24 +123,24 @@ function PipelineStage({
         type={clickable ? "button" : undefined}
         onClick={clickable ? () => onOpen(stage.task!) : undefined}
         className={cn(
-          "group mb-3 flex-1 rounded-lg border bg-card px-3 py-2 text-left transition",
+          "group mb-3 flex-1 rounded-xl border bg-card px-3 py-2.5 text-left transition",
           clickable ? "hover:border-primary/40 hover:shadow-sm" : "opacity-80",
         )}
       >
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               Kanban
             </p>
             <p className={cn(
-              "text-xs font-medium text-foreground truncate",
+              "text-sm font-medium text-foreground truncate",
               clickable && "group-hover:text-primary",
             )}
             >
               {stage.label}
             </p>
             {stage.task?.demand_type && (
-              <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+              <p className="text-xs text-muted-foreground truncate mt-0.5">
                 {stage.task.demand_type.name}
               </p>
             )}
@@ -145,7 +148,7 @@ function PipelineStage({
           {stage.task ? (
             <StatusBadge name={stage.task.status.name} color={stage.task.status.color} />
           ) : (
-            <span className="inline-flex items-center rounded-full bg-muted px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground shrink-0">
+            <span className="inline-flex shrink-0 items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 ring-1 ring-inset ring-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700">
               {stage.is_pending ? "Aguardando" : "—"}
             </span>
           )}
@@ -169,16 +172,16 @@ function RequestCard({
   const [expanded, setExpanded] = useState(false)
 
   return (
-    <article className="rounded-xl border bg-card shadow-sm overflow-hidden">
-      <div className="px-4 pt-4 pb-3">
+    <article className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+      <div className="px-5 pb-4 pt-4">
         <div className="flex items-start justify-between gap-3">
           <button
             type="button"
             onClick={() => onOpenTask(item)}
             className="min-w-0 flex-1 space-y-1.5 text-left transition hover:opacity-80"
           >
-            <p className="text-sm font-semibold text-foreground leading-snug">{item.title}</p>
-            <p className="text-[11px] text-muted-foreground truncate">
+            <p className="text-base font-semibold text-foreground leading-snug">{item.title}</p>
+            <p className="text-xs text-muted-foreground truncate">
               {item.project.name}
               {active ? <> · {active.label}</> : item.demand_type ? <> · {item.demand_type.name}</> : null}
             </p>
@@ -191,7 +194,7 @@ function RequestCard({
                 aria-expanded={expanded}
                 aria-label={expanded ? "Minimizar card" : "Maximizar card"}
                 title={expanded ? "Minimizar" : "Maximizar"}
-                className="inline-flex h-7 items-center gap-1 rounded-md border bg-background px-2 text-[10px] font-medium text-muted-foreground transition hover:border-primary/40 hover:text-primary"
+                className="inline-flex h-8 items-center gap-1 rounded-md border bg-background px-2.5 text-xs font-medium text-muted-foreground transition hover:border-primary/40 hover:text-primary"
               >
                 <ChevronDown
                   size={12}
@@ -204,32 +207,24 @@ function RequestCard({
                 color={active?.task?.status.color ?? item.status.color}
               />
             </div>
-            <span className="text-[11px] text-muted-foreground">Aberta {timeAgo(item.created_at)}</span>
+            <span className="text-xs text-muted-foreground">Aberta {timeAgo(item.created_at)}</span>
           </div>
         </div>
 
         <div className="mt-3 space-y-1.5">
-          <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span>
               {progress.done} de {progress.total} etapas concluídas · {item.stages.length} kanbans
             </span>
-            <span className="font-semibold text-foreground">{progress.pct}%</span>
+            <span className="font-semibold tabular-nums text-foreground">{progress.pct}%</span>
           </div>
-          <div className="h-2 rounded-full bg-muted overflow-hidden">
-            <div
-              className={cn(
-                "h-full rounded-full transition-all",
-                progress.pct >= 100 ? "bg-emerald-500" : "bg-primary",
-              )}
-              style={{ width: `${progress.pct}%` }}
-            />
-          </div>
+          <ProgressBar value={progress.pct} showLabel={false} />
         </div>
       </div>
 
       {expanded && hasPipeline && (
-        <div className="border-t bg-muted/20 px-4 py-3">
-          <p className="mb-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <div className="border-t bg-muted/20 px-5 py-4">
+          <p className="mb-3 text-sm font-semibold">
             Reporte de andamento
           </p>
           <div>
@@ -246,8 +241,8 @@ function RequestCard({
       )}
 
       {expanded && hasChildren && (
-        <div className={cn("px-4 py-3", hasPipeline ? "border-t" : "border-t bg-muted/20")}>
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <div className={cn("px-5 py-4", hasPipeline ? "border-t" : "border-t bg-muted/20")}>
+          <p className="mb-2 text-sm font-semibold">
             Itens de projetos e programas
           </p>
           <ol className="space-y-1">
@@ -260,24 +255,24 @@ function RequestCard({
                     type="button"
                     onClick={() => onOpenTask(child)}
                     className={cn(
-                      "group flex w-full items-center gap-3 rounded-lg border bg-card px-3 py-2.5 text-left transition",
+                      "group flex w-full items-center gap-3 rounded-xl border bg-card px-3 py-2.5 text-left transition",
                       "hover:border-primary/40 hover:shadow-sm",
                     )}
                   >
                     <span
                       className={cn(
-                        "flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold",
-                        done ? "bg-emerald-500/15 text-emerald-600" : "bg-muted text-muted-foreground",
+                        "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold",
+                        done ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : "bg-muted text-muted-foreground",
                       )}
                     >
                       {done ? <CheckCircle2 size={14} /> : idx + 1}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className="text-xs font-medium text-foreground line-clamp-2 group-hover:text-primary">
+                      <p className="text-sm font-medium text-foreground line-clamp-2 group-hover:text-primary">
                         {child.title}
                       </p>
                       {due && (
-                        <p className="mt-0.5 text-[10px] text-muted-foreground">Prazo: {due}</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">Prazo: {due}</p>
                       )}
                     </div>
                     <StatusBadge name={child.status.name} color={child.status.color} />
@@ -291,8 +286,8 @@ function RequestCard({
       )}
 
       {expanded && !hasPipeline && !hasChildren && (
-        <div className="border-t px-4 py-3">
-          <p className="text-[11px] text-muted-foreground">
+        <div className="border-t px-5 py-4">
+          <p className="text-sm text-muted-foreground">
             Sua solicitação está em{" "}
             <span className="font-medium text-foreground">
               {(active?.task?.status.name ?? item.status.name).toLowerCase()}
@@ -303,7 +298,7 @@ function RequestCard({
       )}
 
       {expanded && (
-        <div className="border-t px-4 py-2.5 flex flex-wrap gap-x-4">
+        <div className="flex flex-wrap gap-x-4 border-t px-5 py-3">
           {item.origin_request_id && (
             <button
               type="button"
@@ -311,7 +306,7 @@ function RequestCard({
                 const origin = item.stages.find((s) => s.task?.id === item.origin_request_id)
                 if (origin?.task) onOpenTask(origin.task)
               }}
-              className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-primary hover:underline"
+              className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-primary hover:underline"
             >
               Ver solicitação original
               <ChevronRight size={12} />
@@ -320,7 +315,7 @@ function RequestCard({
           <button
             type="button"
             onClick={() => onOpenTask(item)}
-            className="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+            className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
           >
             {item.stages.length > 1 ? "Ver andamento completo" : "Ver solicitação completa"}
             <ChevronRight size={12} />
@@ -365,39 +360,62 @@ export default function BasicMyRequestsPage() {
     return items.filter((it) => matchesQuery(it, q))
   }, [items, query])
 
+  // Indicadores do topo (só leitura), sobre todas as solicitações. "Concluída" = barra de
+  // andamento do cartão em 100% (mesmo cálculo de reportProgress).
+  const concluidas = items.filter((it) => reportProgress(it).pct >= 100).length
+
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 rounded-xl border bg-card px-4 py-3 shadow-sm sm:flex-row sm:items-center">
-        <div className="min-w-0">
-          <h1 className="text-xl font-bold">Minhas Solicitações</h1>
-          <p className="text-xs text-muted-foreground">
-            Acompanhe todos os kanbans do fluxo: solicitação, programas e itens vinculados.
-          </p>
+    <div className="w-full space-y-5 p-1">
+      <PageHeader
+        icon={ClipboardList}
+        color="#2563EB"
+        title="Minhas Solicitações"
+        description="Acompanhe todos os kanbans do fluxo: solicitação, programas e itens vinculados."
+        actions={
+          <Button asChild className="h-10 gap-1.5">
+            <Link to="/app/modules/projetos/solicitacoes"><Plus size={16} /> Nova solicitação</Link>
+          </Button>
+        }
+      />
+
+      <KpiRow className="grid-cols-1 sm:grid-cols-3">
+        <KpiCount icon={ListChecks} value={loading ? "·" : items.length} label="Solicitações" />
+        <KpiCount icon={CircleDot} value={loading ? "·" : items.length - concluidas} label="Em andamento" tone="amber" />
+        <KpiCount icon={CheckCircle2} value={loading ? "·" : concluidas} label="Concluídas" tone="emerald" />
+      </KpiRow>
+
+      <Card className="p-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="block w-full max-w-md space-y-1">
+            <span className="text-xs text-muted-foreground">Buscar</span>
+            <span className="relative block">
+              <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Buscar solicitação ou item..."
+                className="h-10 bg-background pl-9"
+              />
+            </span>
+          </label>
+          <span className="ml-auto pb-2 text-sm text-muted-foreground">
+            <strong className="font-semibold text-foreground">{loading ? "·" : filtered.length}</strong> de {items.length} solicitações
+          </span>
         </div>
-        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-muted px-1.5 text-[11px] font-medium text-muted-foreground shrink-0 sm:ml-2">
-          {items.length}
-        </span>
-        <div className="relative sm:ml-auto sm:flex-1 sm:max-w-md">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Buscar solicitação ou item..."
-            className="pl-9 h-9"
-          />
-        </div>
-      </div>
+      </Card>
 
       {loading ? (
         <div className="space-y-3">
-          {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-48 rounded-xl" />)}
+          {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-48 rounded-2xl" />)}
         </div>
       ) : filtered.length === 0 ? (
-        <EmptyState
-          icon={ClipboardList}
-          title={items.length === 0 ? "Você ainda não fez nenhuma solicitação" : "Nada encontrado"}
-          description={items.length === 0 ? "Abra uma nova solicitação no menu ao lado." : "Tente outra busca."}
-        />
+        <Card>
+          <EmptyState
+            icon={ClipboardList}
+            title={items.length === 0 ? "Você ainda não fez nenhuma solicitação" : "Nada encontrado"}
+            description={items.length === 0 ? "Abra uma nova solicitação no menu ao lado." : "Tente outra busca."}
+          />
+        </Card>
       ) : (
         <div className="space-y-3">
           {filtered.map((item) => (

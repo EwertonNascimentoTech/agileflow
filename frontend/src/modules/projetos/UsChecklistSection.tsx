@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react"
-import { Loader2, Plus, Trash2 } from "lucide-react"
+import { ListChecks, Loader2, Plus, Trash2 } from "lucide-react"
 
 import type { UsChecklistItem } from "@/api/projetos"
+import { ProgressBar } from "@/components/ds"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { DrawerSection } from "@/modules/projetos/CollapsibleFormSection"
 import { percentFromUsChecklist } from "@/modules/projetos/kanbanDisplay"
 
 const EMPTY_CHECKLIST: UsChecklistItem[] = []
@@ -71,24 +73,15 @@ export function UsChecklistSection({
   }
 
   return (
-    <div className="space-y-3 border-t border-border pt-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="h-4 w-1 rounded-full bg-primary" />
-        <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">
-          Checklist de execução
-        </p>
-        <span className="ml-auto text-xs font-semibold tabular-nums text-primary">{pct}%</span>
-      </div>
-
-      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-        <div
-          className="h-full rounded-full bg-primary transition-all duration-300"
-          style={{ width: `${Math.max(0, Math.min(100, pct))}%` }}
-        />
-      </div>
+    <DrawerSection
+      title="Checklist de execução"
+      icon={ListChecks}
+      right={<span className="text-sm font-semibold tabular-nums text-primary">{pct}%</span>}
+    >
+      <ProgressBar value={pct} showLabel={false} />
 
       {local.length === 0 ? (
-        <p className="text-xs italic text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           Adicione itens para acompanhar o progresso desta User Story.
         </p>
       ) : (
@@ -96,7 +89,7 @@ export function UsChecklistSection({
           {local.map((item) => (
             <li
               key={item.id}
-              className="flex items-start gap-2 rounded-md border border-border/70 bg-muted/20 px-2 py-1.5"
+              className="flex items-start gap-2 rounded-lg border bg-muted/30 px-3 py-2"
             >
               <input
                 type="checkbox"
@@ -156,7 +149,7 @@ export function UsChecklistSection({
           </Button>
         </div>
       )}
-    </div>
+    </DrawerSection>
   )
 }
 

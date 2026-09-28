@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { CalendarClock, Gavel, Plus, Trash2 } from "lucide-react"
+import { CalendarClock, CheckCircle2, FilePen, Gavel, Lock, Plus, Scale, Trash2 } from "lucide-react"
 
-import { rtdApi, type Reuniao, type TipoCompetencia } from "@/api/rtd"
-import { Badge } from "@/components/ui/badge"
+import { rtdApi, type Reuniao, type ReuniaoStatus, type TipoCompetencia } from "@/api/rtd"
+import { EmptyState } from "@/components/EmptyState"
+import { Card, KpiCount, KpiRow, PageHeader, Pill, TABLE, type Tone } from "@/components/ds"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
@@ -19,8 +19,8 @@ const MESES = ["", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
   "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
 const ANOS = [2024, 2025, 2026, 2027, 2028]
 
-const STATUS_VARIANT: Record<string, "warning" | "default" | "success"> = {
-  rascunho: "warning", realizada: "default", fechada: "success",
+const STATUS_TONE: Record<ReuniaoStatus, Tone> = {
+  rascunho: "amber", realizada: "blue", fechada: "emerald",
 }
 const STATUS_LABEL: Record<string, string> = {
   rascunho: "Rascunho", realizada: "Realizada", fechada: "Fechada",
@@ -97,57 +97,97 @@ export default function RtdReunioesPage() {
     }
   }
 
+  const counts = {
+    rascunho: items.filter((r) => r.status === "rascunho").length,
+    realizada: items.filter((r) => r.status === "realizada").length,
+    fechada: items.filter((r) => r.status === "fechada").length,
+    deliberacoes: items.reduce((acc, r) => acc + (r.total_deliberacoes ?? 0), 0),
+  }
+
   return (
-    <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h1 className="flex items-center gap-2 text-xl font-semibold">
-            <Gavel className="h-5 w-5" /> Reuniões de Tomada de Decisão
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Comitê de Portfólio e Desenvolvimento Digital (Parte 1) — por competência.
-          </p>
-        </div>
-        <Button onClick={openNew}><Plus className="mr-1.5 h-4 w-4" /> Nova reunião</Button>
-      </div>
+    <div className="space-y-5 p-4">
+      <PageHeader
+        icon={Gavel}
+        color="#D97706"
+        title="Reuniões de Tomada de Decisão"
+        description="Comitê de Portfólio e Desenvolvimento Digital (Parte 1) — por competência."
+        actions={<Button className="h-10 gap-1.5" onClick={openNew}><Plus size={16} /> Nova reunião</Button>}
+      />
 
       {loading ? (
-        <div className="space-y-3">
-          <Skeleton className="h-20 w-full" /><Skeleton className="h-20 w-full" />
-        </div>
+        <>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            {Array.from({ length: 5 }, (_, i) => <Skeleton key={i} className="h-[74px] rounded-xl" />)}
+          </div>
+          <Skeleton className="h-64 w-full rounded-2xl" />
+        </>
       ) : items.length === 0 ? (
-        <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">
-          Nenhuma reunião ainda. Crie a primeira pela competência (mês ou trimestre).
-        </CardContent></Card>
+        <Card>
+          <EmptyState
+            icon={Gavel}
+            title="Nenhuma reunião ainda"
+            description="Crie a primeira pela competência (mês ou trimestre)."
+            action={{ label: "Nova reunião", onClick: openNew }}
+          />
+        </Card>
       ) : (
-        <div className="space-y-3">
-          {items.map((r) => (
-            <Card
-              key={r.id}
-              className="cursor-pointer transition-colors hover:bg-muted/30"
-              onClick={() => navigate(`/app/modules/rtd/reunioes/${r.id}`)}
-            >
-              <CardHeader className="flex-row items-center justify-between gap-3 space-y-0 py-4">
-                <div className="min-w-0">
-                  <CardTitle className="truncate text-base">{r.titulo}</CardTitle>
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <span className="inline-flex items-center gap-1">
-                      <CalendarClock className="h-3.5 w-3.5" /> {r.competencia}
-                    </span>
-                    <span>· {fmt(r.periodo_inicio)}–{fmt(r.periodo_fim)}</span>
-                    <span>· {r.total_deliberacoes} deliberação(ões)</span>
-                  </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <Badge variant={STATUS_VARIANT[r.status]}>{STATUS_LABEL[r.status]}</Badge>
-                  <Button variant="ghost" size="icon" onClick={(e) => remove(e, r)} title="Excluir">
-                    <Trash2 className="h-4 w-4 text-destructive" />
-                  </Button>
-                </div>
-              </CardHeader>
-            </Card>
-          ))}
-        </div>
+        <>
+          <KpiRow className="sm:grid-cols-2 lg:grid-cols-5">
+            <KpiCount icon={Gavel} value={items.length} label="Reuniões" />
+            <KpiCount icon={FilePen} value={counts.rascunho} label="Em rascunho" tone={counts.rascunho > 0 ? "amber" : "slate"} />
+            <KpiCount icon={CheckCircle2} value={counts.realizada} label="Realizadas" tone="primary" />
+            <KpiCount icon={Lock} value={counts.fechada} label="Fechadas" tone="emerald" />
+            <KpiCount icon={Scale} value={counts.deliberacoes} label="Deliberações" tone="violet" />
+          </KpiRow>
+
+          <Card className="overflow-hidden">
+            <div className={TABLE.wrap}>
+              <table className={TABLE.table}>
+                <thead className={TABLE.thead}>
+                  <tr>
+                    <th className={TABLE.thFirst}>Reunião</th>
+                    <th className={TABLE.th}>Competência</th>
+                    <th className={TABLE.th}>Período</th>
+                    <th className={`${TABLE.th} text-center`}>Deliberações</th>
+                    <th className={TABLE.th}>Status</th>
+                    <th className={`${TABLE.th} w-16`}><span className="sr-only">Ações</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((r) => (
+                    <tr
+                      key={r.id}
+                      className={`${TABLE.tr} cursor-pointer`}
+                      onClick={() => navigate(`/app/modules/rtd/reunioes/${r.id}`)}
+                    >
+                      <td className={`${TABLE.tdFirst} font-semibold`}>{r.titulo}</td>
+                      <td className={`${TABLE.td} whitespace-nowrap`}>
+                        <span className="inline-flex items-center gap-1.5">
+                          <CalendarClock size={15} className="text-muted-foreground" /> {r.competencia}
+                        </span>
+                      </td>
+                      <td className={`${TABLE.td} whitespace-nowrap tabular-nums text-muted-foreground`}>
+                        {fmt(r.periodo_inicio)}–{fmt(r.periodo_fim)}
+                      </td>
+                      <td className={`${TABLE.td} text-center tabular-nums`}>{r.total_deliberacoes}</td>
+                      <td className={TABLE.td}>
+                        <Pill tone={STATUS_TONE[r.status] ?? "slate"} dot>{STATUS_LABEL[r.status] ?? r.status}</Pill>
+                      </td>
+                      <td className={`${TABLE.td} text-right`}>
+                        <Button
+                          variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          onClick={(e) => remove(e, r)} title="Excluir" aria-label="Excluir reunião"
+                        >
+                          <Trash2 size={15} />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </>
       )}
 
       <Dialog open={open} onOpenChange={setOpen}>

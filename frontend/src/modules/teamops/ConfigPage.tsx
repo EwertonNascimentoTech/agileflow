@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react"
-import { Plus, Trash2, Pencil, KeyRound, Loader2 } from "lucide-react"
+import {
+  Briefcase, Building2, CalendarClock, CalendarDays, CalendarOff, Clock, KeyRound, Layers, Loader2, Pencil, Plus,
+  Settings2, Trash2,
+} from "lucide-react"
 import { PositionAccessDialog } from "@/modules/teamops/PositionAccessDialog"
 import { toast } from "@/lib/toast"
 import { nullableStr } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { EmptyState } from "@/components/EmptyState"
+import { DetailTabs, PageHeader, Pill, SectionCard, TABLE, type TabDef, type Tone } from "@/components/ds"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
@@ -33,32 +35,46 @@ import {
 
 const NONE = "__none__"
 
-export default function ConfigPage() {
+type ConfigTab = "areas" | "positions" | "categories" | "absence-types" | "calendar"
+
+const TABS: TabDef<ConfigTab>[] = [
+  { value: "areas", label: "Áreas", icon: Building2 },
+  { value: "positions", label: "Cargos", icon: Briefcase },
+  { value: "categories", label: "Categorias de stack", icon: Layers },
+  { value: "absence-types", label: "Tipos de ausência", icon: CalendarOff },
+  { value: "calendar", label: "Calendário de trabalho", icon: CalendarClock },
+]
+
+// Selos (Pill do design system do Portal) — mesmas cores dos antigos Badges.
+const AREA_STATUS_TONE: Record<AreaStatus, Tone> = { ativa: "emerald", inativa: "red", reestruturacao: "amber" }
+
+/** Botão de "novo" no cabeçalho dos cartões de catálogo. */
+function NewButton({ onClick, children }: { onClick: () => void; children: string }) {
   return (
-    <div className="space-y-4 p-6">
-      <header>
-        <h1 className="text-2xl font-bold tracking-tight">Configurações</h1>
-        <p className="text-sm text-muted-foreground">
-          Catálogos do módulo: áreas, cargos, categorias de stack, tipos de ausência e o calendário
-          de trabalho usado pelo cronograma.
-        </p>
-      </header>
+    <Button className="h-9 gap-1.5" onClick={onClick}>
+      <Plus size={15} /> {children}
+    </Button>
+  )
+}
 
-      <Tabs defaultValue="areas">
-        <TabsList>
-          <TabsTrigger value="areas">Áreas</TabsTrigger>
-          <TabsTrigger value="positions">Cargos</TabsTrigger>
-          <TabsTrigger value="categories">Categorias de stack</TabsTrigger>
-          <TabsTrigger value="absence-types">Tipos de ausência</TabsTrigger>
-          <TabsTrigger value="calendar">Calendário de trabalho</TabsTrigger>
-        </TabsList>
+export default function ConfigPage() {
+  const [tab, setTab] = useState<ConfigTab>("areas")
+  return (
+    <div className="space-y-5 p-4">
+      <PageHeader
+        icon={Settings2}
+        color="#0891B2"
+        title="Configurações"
+        description="Catálogos do módulo: áreas, cargos, categorias de stack, tipos de ausência e o calendário de trabalho usado pelo cronograma."
+      />
 
-        <TabsContent value="areas" className="mt-4"><AreasTab /></TabsContent>
-        <TabsContent value="positions" className="mt-4"><PositionsTab /></TabsContent>
-        <TabsContent value="categories" className="mt-4"><CategoriesTab /></TabsContent>
-        <TabsContent value="absence-types" className="mt-4"><AbsenceTypesTab /></TabsContent>
-        <TabsContent value="calendar" className="mt-4"><WorkCalendarTab /></TabsContent>
-      </Tabs>
+      <DetailTabs tabs={TABS} value={tab} onChange={setTab} />
+
+      {tab === "areas" && <AreasTab />}
+      {tab === "positions" && <PositionsTab />}
+      {tab === "categories" && <CategoriesTab />}
+      {tab === "absence-types" && <AbsenceTypesTab />}
+      {tab === "calendar" && <WorkCalendarTab />}
     </div>
   )
 }
@@ -106,64 +122,63 @@ function AreasTab() {
   }
   useEffect(() => { refresh() }, [])
 
-  if (loading) return <Skeleton className="h-64" />
+  if (loading) return <Skeleton className="h-64 rounded-2xl" />
 
   const tree = buildAreaTree(areas)
 
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
-        <Button size="sm" onClick={() => setCreating(true)}>
-          <Plus className="mr-2 h-4 w-4" /> Nova área
-        </Button>
-      </div>
-      {areas.length === 0 ? (
-        <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">
-          Nenhuma área cadastrada.
-        </CardContent></Card>
-      ) : (
-        <Card><CardContent className="p-0">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
-              <tr>
-                <th className="px-4 py-2 text-left">Área</th>
-                <th className="px-4 py-2 text-left">Tipo</th>
-                <th className="px-4 py-2 text-left">Sub-áreas</th>
-                <th className="px-4 py-2 text-left">Pessoas</th>
-                <th className="px-4 py-2 text-left">Status</th>
-                <th className="px-4 py-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {tree.map(({ area: a, depth }) => (
-                <tr key={a.id} className="border-t">
-                  <td className="px-4 py-2 font-medium">
-                    <span style={{ paddingLeft: depth * 18 }} className="inline-flex items-center gap-1">
-                      {depth > 0 && <span className="text-muted-foreground">↳</span>}
-                      {a.name}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2">{AREA_TYPE_LABELS[a.area_type]}</td>
-                  <td className="px-4 py-2">
-                    {a.subarea_count > 0 ? <Badge variant="secondary">{a.subarea_count}</Badge> : "—"}
-                  </td>
-                  <td className="px-4 py-2"><Badge variant="secondary">{a.person_count}</Badge></td>
-                  <td className="px-4 py-2">
-                    <Badge variant={a.status === "ativa" ? "success" : a.status === "inativa" ? "destructive" : "warning"}>
-                      {AREA_STATUS_LABELS[a.status]}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    <Button variant="ghost" size="sm" onClick={() => setEditing(a)}>
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                  </td>
+      <SectionCard
+        title="Áreas"
+        icon={Building2}
+        subtitle="Áreas e sub-áreas que montam o organograma."
+        right={<NewButton onClick={() => setCreating(true)}>Nova área</NewButton>}
+        flush
+      >
+        {areas.length === 0 ? (
+          <EmptyState icon={Building2} title="Nenhuma área cadastrada." compact />
+        ) : (
+          <div className={TABLE.wrap}>
+            <table className={`${TABLE.table} min-w-[720px]`}>
+              <thead className={TABLE.thead}>
+                <tr>
+                  <th className={TABLE.thFirst}>Área</th>
+                  <th className={TABLE.th}>Tipo</th>
+                  <th className={`${TABLE.th} text-center`}>Sub-áreas</th>
+                  <th className={`${TABLE.th} text-center`}>Pessoas</th>
+                  <th className={TABLE.th}>Status</th>
+                  <th className={TABLE.th}><span className="sr-only">Ações</span></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </CardContent></Card>
-      )}
+              </thead>
+              <tbody>
+                {tree.map(({ area: a, depth }) => (
+                  <tr key={a.id} className={TABLE.tr}>
+                    <td className={`${TABLE.tdFirst} font-medium`}>
+                      <span style={{ paddingLeft: depth * 18 }} className="inline-flex items-center gap-1">
+                        {depth > 0 && <span className="text-muted-foreground">↳</span>}
+                        {a.name}
+                      </span>
+                    </td>
+                    <td className={`${TABLE.td} text-muted-foreground`}>{AREA_TYPE_LABELS[a.area_type]}</td>
+                    <td className={`${TABLE.td} text-center tabular-nums`}>
+                      {a.subarea_count > 0 ? a.subarea_count : <span className="text-muted-foreground">—</span>}
+                    </td>
+                    <td className={`${TABLE.td} text-center tabular-nums`}>{a.person_count}</td>
+                    <td className={TABLE.td}>
+                      <Pill tone={AREA_STATUS_TONE[a.status]} dot>{AREA_STATUS_LABELS[a.status]}</Pill>
+                    </td>
+                    <td className={`${TABLE.td} text-right`}>
+                      <Button variant="ghost" size="sm" onClick={() => setEditing(a)} title="Editar área" aria-label={`Editar ${a.name}`}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SectionCard>
 
       {(creating || editing) && (
         <AreaDialog
@@ -356,74 +371,75 @@ function PositionsTab() {
     }
   }
 
-  if (loading) return <Skeleton className="h-64" />
+  if (loading) return <Skeleton className="h-64 rounded-2xl" />
 
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
-        <Button size="sm" onClick={() => setCreating(true)}>
-          <Plus className="mr-2 h-4 w-4" /> Novo cargo
-        </Button>
-      </div>
-      {items.length === 0 ? (
-        <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">
-          Nenhum cargo cadastrado.
-        </CardContent></Card>
-      ) : (
-        <Card><CardContent className="p-0">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
-              <tr>
-                <th className="px-4 py-2 text-left">Nome</th>
-                <th className="px-4 py-2 text-left">Slug</th>
-                <th className="px-4 py-2 text-left">Origem</th>
-                <th className="px-4 py-2 text-left">Pessoas</th>
-                <th className="px-4 py-2 text-left">Status</th>
-                <th className="px-4 py-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((p) => (
-                <tr key={p.id} className="border-t">
-                  <td className="px-4 py-2 font-medium">{p.name}</td>
-                  <td className="px-4 py-2 text-muted-foreground">{p.slug}</td>
-                  <td className="px-4 py-2">
-                    {p.is_system
-                      ? <Badge variant="info">Sistema</Badge>
-                      : <Badge variant="secondary">Custom</Badge>}
-                  </td>
-                  <td className="px-4 py-2"><Badge variant="secondary">{p.person_count}</Badge></td>
-                  <td className="px-4 py-2">
-                    {p.is_active ? <Badge variant="success">Ativo</Badge> : <Badge variant="secondary">Inativo</Badge>}
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    <Button variant="ghost" size="sm" className="gap-1.5" onClick={() => setAccessPos(p)} title="Acesso do cargo">
-                      <KeyRound className="h-4 w-4" /> Acesso
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => setEditing(p)} title="Editar cargo">
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                      disabled={p.person_count > 0}
-                      title={
-                        p.person_count > 0
-                          ? "Cargo vinculado a pessoas. Mova-as para outro cargo antes de excluir."
-                          : "Excluir cargo"
-                      }
-                      onClick={() => setConfirmDelete(p)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </td>
+      <SectionCard
+        title="Cargos"
+        icon={Briefcase}
+        subtitle="Quem tem o cargo (com acesso ao sistema) herda as permissões definidas em Acesso."
+        right={<NewButton onClick={() => setCreating(true)}>Novo cargo</NewButton>}
+        flush
+      >
+        {items.length === 0 ? (
+          <EmptyState icon={Briefcase} title="Nenhum cargo cadastrado." compact />
+        ) : (
+          <div className={TABLE.wrap}>
+            <table className={`${TABLE.table} min-w-[760px]`}>
+              <thead className={TABLE.thead}>
+                <tr>
+                  <th className={TABLE.thFirst}>Nome</th>
+                  <th className={TABLE.th}>Slug</th>
+                  <th className={TABLE.th}>Origem</th>
+                  <th className={`${TABLE.th} text-center`}>Pessoas</th>
+                  <th className={TABLE.th}>Status</th>
+                  <th className={TABLE.th}><span className="sr-only">Ações</span></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </CardContent></Card>
-      )}
+              </thead>
+              <tbody>
+                {items.map((p) => (
+                  <tr key={p.id} className={TABLE.tr}>
+                    <td className={`${TABLE.tdFirst} font-medium`}>{p.name}</td>
+                    <td className={`${TABLE.td} text-muted-foreground`}>{p.slug}</td>
+                    <td className={TABLE.td}>
+                      {p.is_system
+                        ? <Pill tone="blue">Sistema</Pill>
+                        : <Pill tone="slate">Custom</Pill>}
+                    </td>
+                    <td className={`${TABLE.td} text-center tabular-nums`}>{p.person_count}</td>
+                    <td className={TABLE.td}>
+                      {p.is_active ? <Pill tone="emerald" dot>Ativo</Pill> : <Pill tone="slate" dot>Inativo</Pill>}
+                    </td>
+                    <td className={`${TABLE.td} whitespace-nowrap text-right`}>
+                      <Button variant="ghost" size="sm" className="gap-1.5" onClick={() => setAccessPos(p)} title="Acesso do cargo">
+                        <KeyRound className="h-4 w-4" /> Acesso
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => setEditing(p)} title="Editar cargo">
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        disabled={p.person_count > 0}
+                        title={
+                          p.person_count > 0
+                            ? "Cargo vinculado a pessoas. Mova-as para outro cargo antes de excluir."
+                            : "Excluir cargo"
+                        }
+                        onClick={() => setConfirmDelete(p)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SectionCard>
 
       {(creating || editing) && (
         <PositionDialog
@@ -600,35 +616,34 @@ function CategoriesTab() {
 
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
-        <Button size="sm" onClick={() => setCreating(true)}>
-          <Plus className="mr-2 h-4 w-4" /> Nova categoria
-        </Button>
-      </div>
-      {loading ? <Skeleton className="h-48" /> : items.length === 0 ? (
-        <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">
-          Nenhuma categoria.
-        </CardContent></Card>
-      ) : (
-        <div className="space-y-2">
-          {items.map((c) => (
-            <Card key={c.id}>
-              <CardContent className="flex items-center justify-between p-3">
-                <div>
+      <SectionCard
+        title="Categorias de stack"
+        icon={Layers}
+        subtitle="Agrupam as stacks do catálogo e do mapa de competências."
+        right={<NewButton onClick={() => setCreating(true)}>Nova categoria</NewButton>}
+        flush
+      >
+        {loading ? <div className="p-5"><Skeleton className="h-48 rounded-xl" /></div> : items.length === 0 ? (
+          <EmptyState icon={Layers} title="Nenhuma categoria." compact />
+        ) : (
+          <ul className="divide-y">
+            {items.map((c) => (
+              <li key={c.id} className="flex items-center justify-between gap-3 px-5 py-3 transition-colors hover:bg-muted/40">
+                <div className="min-w-0">
                   <p className="font-medium">{c.name}</p>
                   <p className="text-xs text-muted-foreground">Ordem: {c.order}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  {c.is_active ? <Badge variant="success">Ativa</Badge> : <Badge variant="secondary">Inativa</Badge>}
-                  <Button variant="ghost" size="sm" onClick={() => setEditing(c)}>
+                  {c.is_active ? <Pill tone="emerald" dot>Ativa</Pill> : <Pill tone="slate" dot>Inativa</Pill>}
+                  <Button variant="ghost" size="sm" onClick={() => setEditing(c)} title="Editar categoria" aria-label={`Editar ${c.name}`}>
                     <Pencil className="h-4 w-4" />
                   </Button>
                 </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </SectionCard>
       {(creating || editing) && (
         <SimpleDialog
           title={editing ? "Editar categoria" : "Nova categoria"}
@@ -673,50 +688,51 @@ function AbsenceTypesTab() {
 
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
-        <Button size="sm" onClick={() => setCreating(true)}>
-          <Plus className="mr-2 h-4 w-4" /> Novo tipo
-        </Button>
-      </div>
-      {loading ? <Skeleton className="h-48" /> : items.length === 0 ? (
-        <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">
-          Nenhum tipo cadastrado.
-        </CardContent></Card>
-      ) : (
-        <Card><CardContent className="p-0">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
-              <tr>
-                <th className="px-4 py-2 text-left">Nome</th>
-                <th className="px-4 py-2 text-left">Slug</th>
-                <th className="px-4 py-2 text-left">Aprovação</th>
-                <th className="px-4 py-2 text-left">Reduz capacidade</th>
-                <th className="px-4 py-2 text-left">Cor</th>
-                <th className="px-4 py-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((t) => (
-                <tr key={t.id} className="border-t">
-                  <td className="px-4 py-2 font-medium">{t.name}</td>
-                  <td className="px-4 py-2 text-muted-foreground">{t.slug}</td>
-                  <td className="px-4 py-2">{t.requires_approval ? "Sim" : "Não"}</td>
-                  <td className="px-4 py-2">{t.affects_capacity ? "Sim" : "Não"}</td>
-                  <td className="px-4 py-2">
-                    <span className="inline-block h-4 w-4 rounded-full align-middle" style={{ background: t.color }} />
-                    <span className="ml-2 text-xs text-muted-foreground">{t.color}</span>
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    <Button variant="ghost" size="sm" onClick={() => setEditing(t)}>
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                  </td>
+      <SectionCard
+        title="Tipos de ausência"
+        icon={CalendarOff}
+        subtitle="Se o tipo pede aprovação e se reduz a capacidade do time."
+        right={<NewButton onClick={() => setCreating(true)}>Novo tipo</NewButton>}
+        flush
+      >
+        {loading ? <div className="p-5"><Skeleton className="h-48 rounded-xl" /></div> : items.length === 0 ? (
+          <EmptyState icon={CalendarOff} title="Nenhum tipo cadastrado." compact />
+        ) : (
+          <div className={TABLE.wrap}>
+            <table className={`${TABLE.table} min-w-[680px]`}>
+              <thead className={TABLE.thead}>
+                <tr>
+                  <th className={TABLE.thFirst}>Nome</th>
+                  <th className={TABLE.th}>Slug</th>
+                  <th className={TABLE.th}>Aprovação</th>
+                  <th className={TABLE.th}>Reduz capacidade</th>
+                  <th className={TABLE.th}>Cor</th>
+                  <th className={TABLE.th}><span className="sr-only">Ações</span></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </CardContent></Card>
-      )}
+              </thead>
+              <tbody>
+                {items.map((t) => (
+                  <tr key={t.id} className={TABLE.tr}>
+                    <td className={`${TABLE.tdFirst} font-medium`}>{t.name}</td>
+                    <td className={`${TABLE.td} text-muted-foreground`}>{t.slug}</td>
+                    <td className={TABLE.td}>{t.requires_approval ? "Sim" : "Não"}</td>
+                    <td className={TABLE.td}>{t.affects_capacity ? "Sim" : "Não"}</td>
+                    <td className={TABLE.td}>
+                      <span className="inline-block h-4 w-4 rounded-full border align-middle" style={{ background: t.color }} />
+                      <span className="ml-2 text-xs tabular-nums text-muted-foreground">{t.color}</span>
+                    </td>
+                    <td className={`${TABLE.td} text-right`}>
+                      <Button variant="ghost" size="sm" onClick={() => setEditing(t)} title="Editar tipo" aria-label={`Editar ${t.name}`}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SectionCard>
       {(creating || editing) && (
         <AbsenceTypeDialog
           item={editing}
@@ -995,13 +1011,12 @@ function WorkCalendarTab() {
     setHolidays((hs) => hs.filter((h) => h.id !== id))
   }
 
-  if (loading) return <Skeleton className="h-72 rounded-lg" />
+  if (loading) return <Skeleton className="h-72 rounded-2xl" />
 
   return (
-    <div className="grid gap-4 md:grid-cols-2">
-      <Card>
-        <CardContent className="space-y-4 p-5">
-          <h3 className="text-sm font-semibold">Expediente</h3>
+    <div className="grid items-start gap-4 md:grid-cols-2">
+      <SectionCard title="Expediente" icon={Clock} subtitle="Horário e dias úteis usados pelo cronograma.">
+        <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div><Label>Início</Label><Input type="time" value={dayStart} onChange={(e) => setDayStart(e.target.value)} /></div>
             <div><Label>Fim</Label><Input type="time" value={dayEnd} onChange={(e) => setDayEnd(e.target.value)} /></div>
@@ -1025,41 +1040,40 @@ function WorkCalendarTab() {
               ))}
             </div>
           </div>
-          <p className="text-xs text-muted-foreground">
-            {cal ? `${cal.hours_per_day} h úteis por dia` : ""}
+          <p className="text-sm text-muted-foreground">
+            {cal ? <><strong className="font-semibold tabular-nums text-foreground">{cal.hours_per_day} h</strong> úteis por dia</> : ""}
           </p>
-          <Button onClick={() => void saveCalendar()} disabled={saving}>
-            {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Salvar calendário
+          <Button className="h-10 gap-1.5" onClick={() => void saveCalendar()} disabled={saving}>
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Salvar calendário
           </Button>
-        </CardContent>
-      </Card>
+        </div>
+      </SectionCard>
 
-      <Card>
-        <CardContent className="space-y-4 p-5">
-          <h3 className="text-sm font-semibold">Feriados</h3>
+      <SectionCard title="Feriados" icon={CalendarDays} subtitle="Dias sem expediente; os marcados como Anual repetem todo ano.">
+        <div className="space-y-4">
           <div className="flex flex-wrap items-end gap-2">
             <div><Label>Data</Label><Input type="date" value={holDay} onChange={(e) => setHolDay(e.target.value)} /></div>
             <div className="flex-1"><Label>Nome</Label><Input value={holName} onChange={(e) => setHolName(e.target.value)} placeholder="ex.: Independência" /></div>
             <label className="flex items-center gap-1.5 pb-2 text-xs">
               <input type="checkbox" checked={holRecurring} onChange={(e) => setHolRecurring(e.target.checked)} /> Anual
             </label>
-            <Button type="button" size="icon" onClick={() => void addHoliday()}><Plus className="h-4 w-4" /></Button>
+            <Button type="button" size="icon" onClick={() => void addHoliday()} title="Adicionar feriado" aria-label="Adicionar feriado"><Plus className="h-4 w-4" /></Button>
           </div>
-          <ul className="divide-y rounded-md border">
+          <ul className="divide-y rounded-xl border">
             {holidays.length === 0 && <li className="p-3 text-sm text-muted-foreground">Nenhum feriado cadastrado.</li>}
             {holidays.map((h) => (
-              <li key={h.id} className="flex items-center gap-2 p-2.5 text-sm">
+              <li key={h.id} className="flex items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-muted/40">
                 <span className="font-medium tabular-nums">{h.day.split("-").reverse().join("/")}</span>
                 <span className="flex-1 truncate">{h.name}</span>
-                {h.is_recurring && <Badge variant="secondary">Anual</Badge>}
-                <Button type="button" size="icon" variant="ghost" onClick={() => void removeHoliday(h.id)}>
+                {h.is_recurring && <Pill tone="slate">Anual</Pill>}
+                <Button type="button" size="icon" variant="ghost" onClick={() => void removeHoliday(h.id)} title="Remover feriado" aria-label={`Remover ${h.name}`}>
                   <Trash2 className="h-4 w-4 text-destructive" />
                 </Button>
               </li>
             ))}
           </ul>
-        </CardContent>
-      </Card>
+        </div>
+      </SectionCard>
     </div>
   )
 }

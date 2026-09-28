@@ -6,6 +6,7 @@ import {
 import { Calendar, ChevronRight, Clock, GripVertical, Plus, Trash2 } from "lucide-react"
 import type { ProjectTask, ProjectTaskDependency, ScheduleOverloadRow } from "@/api/projetos"
 import type { User } from "@/types"
+import { Pill } from "@/components/ds"
 
 // ── Constantes de layout (do protótipo prototipo2) ──────────────────────────
 const ROW_H = 52
@@ -21,6 +22,12 @@ const MONTHS_FULL = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
 const WD_LETTER = ["D", "S", "T", "Q", "Q", "S", "S"]
 
 const AVATAR_PALETTE = ["#7C3AED", "#008BD2", "#6AB42F", "#E84E0F", "#014898", "#DB2777", "#0F766E", "#64748B"]
+
+// Cores do cabeçalho e da linha de hoje no padrão do roadmap do Portal. As regras .afx .gx-*
+// (agileflow.css) têm especificidade maior que um utilitário do Tailwind, daí o "!" — só cor,
+// peso e caixa do texto; medidas, posições e a grade continuam as do CSS.
+const HEAD_BG = "!bg-muted"
+const HEAD_LABEL = "!normal-case !tracking-normal !text-xs !font-medium !text-muted-foreground"
 
 // ── Zoom ────────────────────────────────────────────────────────────────────
 // Largura de um dia em px. O mínimo cobre cronogramas de vários anos numa tela só;
@@ -680,28 +687,31 @@ export function GanttChart({
 
   return (
     <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-      <div className="gx-gantt">
-        <div className="gx-scroll" ref={scrollRef}>
+      {/* Borda e cantos vêm do Card da página (legenda + gráfico no mesmo cartão). */}
+      <div className="gx-gantt !rounded-none !border-0">
+        {/* Altura: desconta o cabeçalho + barra de controle do Portal acima do gráfico (o CSS
+            contava só a barra antiga), para a rolagem horizontal não cair abaixo da dobra. */}
+        <div className="gx-scroll !max-h-[calc(100vh-400px)]" ref={scrollRef}>
           <div className="gx-inner" style={{ width: LABEL_W + timelineWidth, height: HEAD_H + bodyH }}>
             {/* Cabeçalho */}
             <div className="gx-hrow" style={{ height: HEAD_H }}>
-              <div className="gx-corner" style={{ width: LABEL_W, height: HEAD_H }}><span className="lbl">Item / Etapa</span></div>
-              <div className="gx-thead" style={{ width: timelineWidth, height: HEAD_H }}>
+              <div className={`gx-corner ${HEAD_BG}`} style={{ width: LABEL_W, height: HEAD_H }}><span className={`lbl ${HEAD_LABEL}`}>Item / Etapa</span></div>
+              <div className={`gx-thead ${HEAD_BG}`} style={{ width: timelineWidth, height: HEAD_H }}>
                 <div className="months">
                   {/* Rótulo do mês encolhe (e some) conforme o zoom, para não transbordar a coluna. */}
                   {months.map((m, i) => {
                     const w = m.days * dayWidth
-                    return <div key={i} className="mo" style={{ width: w }}>{w < 30 ? "" : w < 96 ? m.short : m.label}</div>
+                    return <div key={i} className="mo !font-semibold" style={{ width: w }}>{w < 30 ? "" : w < 96 ? m.short : m.label}</div>
                   })}
                 </div>
                 <div className="subs">
                   {subMode === "day"
                     ? subs.map((s, i) => (
-                      <div key={i} className={`day${s.we ? " we" : ""}`} style={{ left: s.left, width: s.width }}>
-                        <span>{s.label}</span><span className="wd">{s.wd}</span>
+                      <div key={i} className={`day !font-medium${s.we ? " we !bg-muted-foreground/10" : ""}`} style={{ left: s.left, width: s.width }}>
+                        <span>{s.label}</span><span className="wd !font-medium">{s.wd}</span>
                       </div>
                     ))
-                    : subs.map((s, i) => <div key={i} className="wk" style={{ left: s.left, width: s.width }}>{s.label}</div>)}
+                    : subs.map((s, i) => <div key={i} className="wk !font-medium" style={{ left: s.left, width: s.width }}>{s.label}</div>)}
                 </div>
               </div>
             </div>
@@ -744,14 +754,13 @@ export function GanttChart({
                             <div className="lmain">
                               <div className="tline">
                                 <button className="title" title={node.title} onClick={() => onOpenTask?.(node)}>{node.title}</button>
-                                {badge && <span className="gx-badge" style={{ background: "var(--af-muted-2)", color: "var(--af-muted-fg)" }} title="Tipo de card">{badge}</span>}
+                                {badge && <span className="shrink-0" title="Tipo de card"><Pill tone="slate">{badge}</Pill></span>}
                                 {absences.length > 0 && (
                                   <span
-                                    className="gx-badge"
-                                    style={{ background: "#fdece4", color: absences.some((a) => a.status === "aprovada") ? "var(--af-destructive)" : "var(--af-warning)" }}
+                                    className="shrink-0"
                                     title={`Responsável com ausência no período:\n${absences.map((a) => `${a.type_name} (${a.status}): ${a.start_date} → ${a.end_date}${a.partial_hours != null ? " (parcial)" : ""}`).join("\n")}`}
                                   >
-                                    ⚠
+                                    <Pill tone={absences.some((a) => a.status === "aprovada") ? "red" : "amber"}>⚠</Pill>
                                   </span>
                                 )}
                               </div>
@@ -893,7 +902,9 @@ export function GanttChart({
               })}
 
               {todayX >= 0 && todayX <= timelineWidth && (
-                <div className="gx-today" style={{ left: todayX }}><span className="flag">HOJE</span></div>
+                <div className="gx-today !bg-transparent border-l-2 border-dashed border-blue-600 dark:border-sky-400" style={{ left: todayX }}>
+                  <span className="flag !top-1 !rounded !bg-blue-600 !font-semibold dark:!bg-sky-500">Hoje</span>
+                </div>
               )}
             </div>
           </div>

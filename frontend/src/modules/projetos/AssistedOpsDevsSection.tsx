@@ -6,6 +6,7 @@ import { teamopsApi, type Person } from "@/api/teamops"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { toast } from "@/lib/toast"
+import { DrawerSection } from "@/modules/projetos/CollapsibleFormSection"
 import { AllocationSplitBar, allocationSplit } from "@/modules/teamops/AllocationSplit"
 
 function apiError(err: unknown, fallback: string): string {
@@ -106,31 +107,17 @@ export function AssistedOpsDevsSection({
 
   if (hideWhenEmpty && !editing && devs.length === 0) return null
 
-  return (
-    <div className={bare ? "space-y-2" : "space-y-2 rounded-md border border-teal-500/30 bg-teal-50/40 p-3 dark:bg-teal-950/20"}>
-      {!bare && <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Headset size={14} className="text-teal-600" />
-          <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-teal-700 dark:text-teal-400">
-            Operação Assistida · atendimento
-          </p>
-        </div>
-        {!readOnly && !editing && (
-          <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={() => startEdit()}>
-            <Pencil size={12} /> Definir
-          </Button>
-        )}
-      </div>}
-
+  const body = (
+    <>
       {!editing ? (
         devs.length === 0 ? (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Nenhum desenvolvedor definido. Quem estiver aqui recebe as ocorrências dos clientes deste projeto.
           </p>
         ) : (
           <div className="space-y-1.5">
             {devs.map((d) => (
-              <div key={d.person_id} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-background px-2 py-1 text-xs shadow-sm">
+              <div key={d.person_id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
                 <span className="font-medium" title={d.position_name ?? undefined}>{d.full_name}</span>
                 <AllocationSplitBar
                   compact
@@ -143,9 +130,9 @@ export function AssistedOpsDevsSection({
       ) : (
         <div className="space-y-2">
           <Input className="h-8" placeholder="Buscar pessoa" value={filter} onChange={(e) => setFilter(e.target.value)} />
-          <div className="max-h-48 overflow-y-auto rounded-md border bg-background">
+          <div className="max-h-48 overflow-y-auto rounded-lg border bg-background">
             {visible.map((p) => (
-              <label key={p.id} className="flex cursor-pointer items-center gap-2 border-b px-2 py-1 text-sm last:border-b-0 hover:bg-muted/50">
+              <label key={p.id} className="flex cursor-pointer items-center gap-2 border-b px-3 py-1.5 text-sm last:border-b-0 hover:bg-muted/50">
                 <input
                   type="checkbox"
                   className="h-4 w-4 rounded border-input accent-primary"
@@ -159,8 +146,8 @@ export function AssistedOpsDevsSection({
             ))}
           </div>
           {selected.length > 0 && (
-            <div className="space-y-1.5 rounded-md border bg-background p-2">
-              <p className="text-[11px] font-semibold text-muted-foreground">
+            <div className="space-y-1.5 rounded-lg border bg-background p-3">
+              <p className="text-xs font-medium text-muted-foreground">
                 Divisão da jornada (cadastro em Pessoas) — Chamados é o que sobra
               </p>
               {selected.map((id) => {
@@ -187,7 +174,7 @@ export function AssistedOpsDevsSection({
                   </div>
                 )
               })}
-              <p className="text-[10px] text-muted-foreground">Colunas: Projetos % · Operação Assistida % · Chamados %</p>
+              <p className="text-xs text-muted-foreground">Colunas: Projetos % · Operação Assistida % · Chamados %</p>
             </div>
           )}
           <div className="flex justify-end gap-2">
@@ -206,6 +193,25 @@ export function AssistedOpsDevsSection({
           </div>
         </div>
       )}
-    </div>
+    </>
+  )
+
+  if (bare) return <div className="space-y-2">{body}</div>
+
+  return (
+    <DrawerSection
+      title="Operação Assistida · atendimento"
+      icon={Headset}
+      iconClassName="text-teal-600 dark:text-teal-400"
+      right={
+        !readOnly && !editing && (
+          <Button variant="outline" size="sm" className="h-8 gap-1" onClick={() => startEdit()}>
+            <Pencil size={13} /> Definir
+          </Button>
+        )
+      }
+    >
+      {body}
+    </DrawerSection>
   )
 }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { Contact, Loader2, Pencil, Plus, Search } from "lucide-react"
+import { BriefcaseBusiness, Contact, Headset, KeyRound, Loader2, Pencil, Plus, Search } from "lucide-react"
 
 import {
   clientesApi,
@@ -7,6 +7,7 @@ import {
   type ClientProjectRef,
   type ProjectClient,
 } from "@/api/clientes"
+import { Card, KpiCount, KpiRow, PageHeader, Pill, TABLE } from "@/components/ds"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -196,132 +197,155 @@ export default function ProjectClientsPage() {
 
   const showForm = !!editing || (lookup !== null && (lookup.status === "new" || lookup.status === "internal_user"))
 
-  return (
-    <div className="w-full space-y-4 p-1">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold">Clientes</h1>
-          <p className="text-sm text-muted-foreground">
-            Clientes da Operação Assistida. Eles abrem e acompanham Ocorrências dos projetos vinculados.
-          </p>
-        </div>
-        <Button className="gap-1.5" onClick={openCreate}>
-          <Plus size={15} /> Novo cliente
-        </Button>
-      </div>
+  // Indicadores do topo (só leitura), sobre a lista carregada (com ou sem inativos).
+  const counts = {
+    pendentes: clients.filter((c) => c.first_access_pending && c.is_active).length,
+    colaboradores: clients.filter((c) => c.is_internal_user).length,
+  }
 
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative w-full max-w-sm">
-          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            className="pl-8"
-            placeholder="Buscar por nome, e-mail ou organização"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <label className="flex items-center gap-2 text-sm text-muted-foreground">
-          <input
-            type="checkbox"
-            checked={showInactive}
-            onChange={(e) => setShowInactive(e.target.checked)}
-            className="h-4 w-4 rounded border-input accent-primary"
-          />
-          Mostrar inativos
-        </label>
-      </div>
+  return (
+    <div className="w-full space-y-5 p-1">
+      <PageHeader
+        icon={Contact}
+        color="#2563EB"
+        title="Clientes"
+        description="Clientes da Operação Assistida. Eles abrem e acompanham Ocorrências dos projetos vinculados."
+        actions={
+          <Button className="h-10 gap-1.5" onClick={openCreate}>
+            <Plus size={16} /> Novo cliente
+          </Button>
+        }
+      />
 
       {loading ? (
-        <Skeleton className="h-64 rounded-lg" />
-      ) : filtered.length === 0 ? (
-        <EmptyState
-          icon={Contact}
-          title={clients.length === 0 ? "Nenhum cliente cadastrado" : "Nenhum cliente encontrado"}
-          description="Cadastre o cliente e vincule aos projetos que ele poderá acompanhar."
-          action={{ label: "Novo cliente", onClick: openCreate }}
-        />
-      ) : (
-        <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2 font-semibold">Cliente</th>
-                <th className="px-3 py-2 font-semibold">Organização</th>
-                <th className="px-3 py-2 font-semibold">Projetos</th>
-                <th className="px-3 py-2 font-semibold">Acesso</th>
-                <th className="w-12 px-3 py-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((c) => (
-                <tr key={c.id} className="border-t align-top">
-                  <td className="px-3 py-2">
-                    <div className="font-medium">{c.full_name}</div>
-                    <div className="text-xs text-muted-foreground">{c.email}</div>
-                  </td>
-                  <td className="px-3 py-2 text-muted-foreground">
-                    {[c.organization, c.department].filter(Boolean).join(" · ") || "—"}
-                  </td>
-                  <td className="max-w-[28rem] px-3 py-2">
-                    {c.projects.length === 0 ? (
-                      <span className="text-muted-foreground">—</span>
-                    ) : (
-                      <div className="flex flex-wrap gap-1">
-                        {c.projects.map((p) => (
-                          <span key={p.task_id} className="rounded bg-muted px-1.5 py-0.5 text-[11px]" title={p.status_name ?? undefined}>
-                            {p.title}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex flex-wrap gap-1">
-                      <span
-                        className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
-                          c.is_active ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"
-                        }`}
-                      >
-                        {c.is_active ? "Ativo" : "Inativo"}
-                      </span>
-                      {c.is_internal_user && (
-                        <span className="rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-700">
-                          Colaborador
-                        </span>
-                      )}
-                      {c.first_access_pending && (
-                        <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
-                          Primeiro acesso pendente
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      {c.first_access_pending && c.is_active && (
-                        <FirstAccessLinkButton
-                          size="icon"
-                          variant="ghost"
-                          personName={c.full_name}
-                          generate={() => clientesApi.firstAccessLink(c.id)}
-                        />
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="text-muted-foreground hover:text-primary"
-                        onClick={() => openEdit(c)}
-                        aria-label="Editar cliente"
-                      >
-                        <Pencil size={14} />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-[74px] rounded-xl" />)}
         </div>
+      ) : (
+        <KpiRow className="sm:grid-cols-2 lg:grid-cols-4">
+          <KpiCount icon={Contact} value={clients.length} label={showInactive ? "Clientes (com inativos)" : "Clientes ativos"} />
+          <KpiCount
+            icon={KeyRound} value={counts.pendentes} label="Primeiro acesso pendente"
+            tone={counts.pendentes > 0 ? "amber" : "slate"} highlight={counts.pendentes > 0}
+          />
+          <KpiCount icon={BriefcaseBusiness} value={counts.colaboradores} label="Colaboradores (login no AgileFlow)" tone="violet" />
+          <KpiCount icon={Headset} value={projects.length} label="Projetos em Operação Assistida" tone="slate" />
+        </KpiRow>
+      )}
+
+      <Card className="p-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="block w-full max-w-sm space-y-1">
+            <span className="text-xs text-muted-foreground">Buscar</span>
+            <span className="relative block">
+              <Search size={15} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                className="h-10 bg-background pl-8"
+                placeholder="Buscar por nome, e-mail ou organização"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </span>
+          </label>
+          <label className="flex h-10 items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={showInactive}
+              onChange={(e) => setShowInactive(e.target.checked)}
+              className="h-4 w-4 rounded border-input accent-primary"
+            />
+            Mostrar inativos
+          </label>
+          {!loading && (
+            <span className="ml-auto pb-2 text-sm text-muted-foreground">
+              <strong className="font-semibold text-foreground">{filtered.length}</strong> de {clients.length} clientes
+            </span>
+          )}
+        </div>
+      </Card>
+
+      {loading ? (
+        <Skeleton className="h-64 rounded-2xl" />
+      ) : filtered.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon={Contact}
+            title={clients.length === 0 ? "Nenhum cliente cadastrado" : "Nenhum cliente encontrado"}
+            description="Cadastre o cliente e vincule aos projetos que ele poderá acompanhar."
+            action={{ label: "Novo cliente", onClick: openCreate }}
+          />
+        </Card>
+      ) : (
+        <Card className="overflow-hidden">
+          <div className={TABLE.wrap}>
+            <table className={`${TABLE.table} min-w-[860px]`}>
+              <thead className={TABLE.thead}>
+                <tr>
+                  <th className={TABLE.thFirst}>Cliente</th>
+                  <th className={TABLE.th}>Organização</th>
+                  <th className={TABLE.th}>Projetos</th>
+                  <th className={TABLE.th}>Acesso</th>
+                  <th className={`${TABLE.th} w-24`}><span className="sr-only">Ações</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((c) => (
+                  <tr key={c.id} className={`${TABLE.tr} align-top`}>
+                    <td className={TABLE.tdFirst}>
+                      <div className="font-semibold">{c.full_name}</div>
+                      <div className="text-xs text-muted-foreground">{c.email}</div>
+                    </td>
+                    <td className={`${TABLE.td} text-muted-foreground`}>
+                      {[c.organization, c.department].filter(Boolean).join(" · ") || "—"}
+                    </td>
+                    <td className={`${TABLE.td} max-w-[28rem]`}>
+                      {c.projects.length === 0 ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : (
+                        <div className="flex flex-wrap gap-1">
+                          {c.projects.map((p) => (
+                            <span key={p.task_id} title={p.status_name ?? undefined}>
+                              <Pill className="!whitespace-normal">{p.title}</Pill>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                    <td className={TABLE.td}>
+                      <div className="flex flex-wrap gap-1">
+                        <Pill tone={c.is_active ? "emerald" : "slate"} dot>{c.is_active ? "Ativo" : "Inativo"}</Pill>
+                        {c.is_internal_user && <Pill tone="violet">Colaborador</Pill>}
+                        {c.first_access_pending && <Pill tone="amber">Primeiro acesso pendente</Pill>}
+                      </div>
+                    </td>
+                    <td className={`${TABLE.td} text-right`}>
+                      <div className="flex items-center justify-end gap-1">
+                        {c.first_access_pending && c.is_active && (
+                          <FirstAccessLinkButton
+                            size="icon"
+                            variant="ghost"
+                            personName={c.full_name}
+                            generate={() => clientesApi.firstAccessLink(c.id)}
+                          />
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-primary"
+                          onClick={() => openEdit(c)}
+                          aria-label="Editar cliente"
+                          title="Editar cliente"
+                        >
+                          <Pencil size={14} />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
       )}
 
       <Dialog open={open} onOpenChange={setOpen}>
@@ -441,7 +465,7 @@ export default function ProjectClientsPage() {
                     value={projectFilter}
                     onChange={(e) => setProjectFilter(e.target.value)}
                   />
-                  <div className="max-h-56 overflow-y-auto rounded-md border">
+                  <div className="max-h-56 overflow-y-auto rounded-lg border">
                     {visibleProjects.length === 0 ? (
                       <p className="p-3 text-sm text-muted-foreground">
                         {projectFilter.trim() ? "Nenhum projeto encontrado." : "Nenhum projeto em Operação Assistida no momento."}
@@ -459,7 +483,7 @@ export default function ProjectClientsPage() {
                             className="h-4 w-4 rounded border-input accent-primary"
                           />
                           <span className="flex-1 truncate">{p.title}</span>
-                          {p.status_name && <span className="text-[11px] text-muted-foreground">{p.status_name}</span>}
+                          {p.status_name && <span className="shrink-0 text-xs text-muted-foreground">{p.status_name}</span>}
                         </label>
                       ))
                     )}

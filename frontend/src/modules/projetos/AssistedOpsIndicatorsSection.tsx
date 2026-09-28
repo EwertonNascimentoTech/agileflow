@@ -2,11 +2,13 @@ import { useEffect, useState } from "react"
 import { BarChart3, Loader2, Plus, SlidersHorizontal, Trash2 } from "lucide-react"
 
 import { teamOccurrencesApi, type AssistedOpsEntryState, type AssistedOpsIndicators, type AssistedOpsTargets } from "@/api/clientes"
+import { Segmented } from "@/components/ds"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { toast } from "@/lib/toast"
+import { DrawerSection } from "@/modules/projetos/CollapsibleFormSection"
 import { IndicatorBreakdown, IndicatorGrid } from "@/modules/portal/assistedOpsUi"
 
 function apiError(err: unknown, fallback: string): string {
@@ -99,41 +101,40 @@ export function AssistedOpsIndicatorsSection({
 
   const t = data.targets
   return (
-    <div className="space-y-2 rounded-md border border-teal-500/30 bg-teal-50/40 p-3 dark:bg-teal-950/20">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <BarChart3 size={14} className="text-teal-600" />
-          <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-teal-700 dark:text-teal-400">
-            Operação Assistida · indicadores
-          </p>
-        </div>
-        <div className="flex gap-1">
-          {canRecord && !measure && (
-            <Button
-              variant="ghost" size="sm" className="h-7 gap-1 text-xs"
-              onClick={() => setMeasure({ kind: "taxa_erros", start: today(-6), end: today(), transactions: "", value: "", note: "" })}
-            >
-              <Plus size={12} /> Medição
-            </Button>
-          )}
-          {canManage && !targets && (
-            <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={() => setTargets({ ...t })}>
-              <SlidersHorizontal size={12} /> Metas
-            </Button>
-          )}
-        </div>
-      </div>
-
+    <DrawerSection
+      title="Operação Assistida · indicadores"
+      icon={BarChart3}
+      iconClassName="text-teal-600 dark:text-teal-400"
+      right={
+        ((canRecord && !measure) || (canManage && !targets)) && (
+          <>
+            {canRecord && !measure && (
+              <Button
+                variant="outline" size="sm" className="h-8 gap-1"
+                onClick={() => setMeasure({ kind: "taxa_erros", start: today(-6), end: today(), transactions: "", value: "", note: "" })}
+              >
+                <Plus size={14} /> Medição
+              </Button>
+            )}
+            {canManage && !targets && (
+              <Button variant="outline" size="sm" className="h-8 gap-1" onClick={() => setTargets({ ...t })}>
+                <SlidersHorizontal size={13} /> Metas
+              </Button>
+            )}
+          </>
+        )
+      }
+    >
       <IndicatorGrid items={data.items} compact />
       <IndicatorBreakdown data={data} />
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-xs text-muted-foreground">
         {data.targets_calibrated
           ? <>Metas calibradas para o projeto: {t.justificativa}</>
           : <>Metas de referência do POP (a calibrar pelo histórico institucional).</>}
       </p>
 
       {targets && (
-        <div className="space-y-2 rounded-md border bg-background p-2">
+        <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {(
               [
@@ -144,7 +145,7 @@ export function AssistedOpsIndicatorsSection({
               ] as const
             ).map(([k, label]) => (
               <div key={k} className="space-y-1">
-                <Label className="text-[11px]">{label}</Label>
+                <Label className="text-xs">{label}</Label>
                 <Input
                   type="number" step="0.1" className="h-8" value={targets[k]}
                   onChange={(e) => setTargets({ ...targets, [k]: Number(e.target.value) })}
@@ -167,50 +168,41 @@ export function AssistedOpsIndicatorsSection({
       )}
 
       {measure && (
-        <div className="space-y-2 rounded-md border bg-background p-2">
-          <div className="flex flex-wrap gap-1">
-            {(
-              [
-                ["taxa_erros", "Transações (taxa de erros)"],
-                ["disponibilidade", "Disponibilidade"],
-              ] as const
-            ).map(([k, label]) => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => setMeasure({ ...measure, kind: k })}
-                aria-pressed={measure.kind === k}
-                className={`rounded-md border px-2 py-1 text-xs font-medium ${
-                  measure.kind === k ? "border-primary bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
+        <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+          <div>
+            <Segmented
+              size="sm"
+              value={measure.kind}
+              onChange={(k) => setMeasure({ ...measure, kind: k })}
+              options={[
+                { value: "taxa_erros", label: "Transações (taxa de erros)" },
+                { value: "disponibilidade", label: "Disponibilidade" },
+              ]}
+            />
           </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             <div className="space-y-1">
-              <Label className="text-[11px]">Início</Label>
+              <Label className="text-xs">Início</Label>
               <Input type="date" className="h-8" value={measure.start} onChange={(e) => setMeasure({ ...measure, start: e.target.value })} />
             </div>
             <div className="space-y-1">
-              <Label className="text-[11px]">Fim</Label>
+              <Label className="text-xs">Fim</Label>
               <Input type="date" className="h-8" value={measure.end} onChange={(e) => setMeasure({ ...measure, end: e.target.value })} />
             </div>
             {measure.kind === "taxa_erros" ? (
               <div className="space-y-1">
-                <Label className="text-[11px]">Transações no período</Label>
+                <Label className="text-xs">Transações no período</Label>
                 <Input type="number" min={1} className="h-8" value={measure.transactions} onChange={(e) => setMeasure({ ...measure, transactions: e.target.value })} />
               </div>
             ) : (
               <div className="space-y-1">
-                <Label className="text-[11px]">Disponibilidade (%)</Label>
+                <Label className="text-xs">Disponibilidade (%)</Label>
                 <Input className="h-8" inputMode="decimal" placeholder="99,5" value={measure.value} onChange={(e) => setMeasure({ ...measure, value: e.target.value })} />
               </div>
             )}
           </div>
           {measure.kind === "taxa_erros" && (
-            <p className="text-[11px] text-muted-foreground">Os incidentes do período são as correções abertas nele; a taxa é por mil transações.</p>
+            <p className="text-xs text-muted-foreground">Os incidentes do período são as correções abertas nele; a taxa é por mil transações.</p>
           )}
           <Input className="h-8" placeholder="Observação (fonte do dado)" value={measure.note} onChange={(e) => setMeasure({ ...measure, note: e.target.value })} />
           <div className="flex justify-end gap-2">
@@ -224,9 +216,9 @@ export function AssistedOpsIndicatorsSection({
       )}
 
       {data.measures.length > 0 && (
-        <ul className="space-y-1 text-xs">
+        <ul className="space-y-1.5 text-sm">
           {data.measures.map((m) => (
-            <li key={m.id} className="flex items-center justify-between gap-2 rounded-md bg-background/70 px-2 py-1">
+            <li key={m.id} className="flex items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2">
               <span>
                 {fmtDay(m.period_start)} a {fmtDay(m.period_end)} ·{" "}
                 {m.kind === "taxa_erros"
@@ -235,7 +227,7 @@ export function AssistedOpsIndicatorsSection({
                 {m.note && <span className="text-muted-foreground"> · {m.note}</span>}
               </span>
               {canRecord && (
-                <Button variant="ghost" size="icon" className="h-6 w-6" title="Excluir" onClick={() => void removeMeasure(m.id)}>
+                <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 hover:text-destructive" title="Excluir" onClick={() => void removeMeasure(m.id)}>
                   <Trash2 size={12} />
                 </Button>
               )}
@@ -243,6 +235,6 @@ export function AssistedOpsIndicatorsSection({
           ))}
         </ul>
       )}
-    </div>
+    </DrawerSection>
   )
 }

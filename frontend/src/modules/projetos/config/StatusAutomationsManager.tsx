@@ -4,7 +4,7 @@ import { Loader2, Plus, Trash2, Zap } from "lucide-react"
 import { projetosApi, type ProjectAutomationAction, type ProjectAutomationRule } from "@/api/projetos"
 import type { User } from "@/types"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
+import { Pill } from "@/components/ds"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -56,41 +56,42 @@ export function StatusAutomationsManager({
   }
 
   return (
-    <div className="mt-2 rounded-md border bg-muted/30 p-2 space-y-2">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5 text-xs font-medium">
-          <Zap size={13} className="text-primary" />
+    <div className="rounded-xl border bg-muted/30 p-3 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <Zap size={15} className="text-primary" />
           Automações ao entrar
-          {rules.length > 0 && <Badge variant="secondary" className="text-[10px]">{rules.length}</Badge>}
+          {rules.length > 0 && <Pill tone="slate" className="tabular-nums">{rules.length}</Pill>}
         </div>
-        <Button type="button" variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={() => setOpen(true)}>
-          <Plus size={12} /> Adicionar
+        <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5 bg-background" onClick={() => setOpen(true)}>
+          <Plus size={14} /> Adicionar
         </Button>
       </div>
 
       {loading ? (
-        <p className="text-[11px] text-muted-foreground">Carregando…</p>
+        <p className="text-xs text-muted-foreground">Carregando…</p>
       ) : rules.length === 0 ? (
-        <p className="text-[11px] italic text-muted-foreground/70">Nenhuma automação nesta etapa.</p>
+        <p className="text-xs italic text-muted-foreground">Nenhuma automação nesta etapa.</p>
       ) : (
-        <div className="space-y-1">
+        <div className="divide-y overflow-hidden rounded-lg border bg-background">
           {rules.map((r) => (
-            <div key={r.id} className="flex items-center justify-between rounded bg-background px-2 py-1 text-xs">
+            <div key={r.id} className="flex items-center justify-between gap-2 px-3 py-2 text-sm transition-colors hover:bg-muted/40">
               <div className="flex items-center gap-2 min-w-0">
-                <Badge variant="info" className="text-[10px] shrink-0">{ACTION_LABELS[r.action]}</Badge>
+                <Pill tone="blue" className="shrink-0">{ACTION_LABELS[r.action]}</Pill>
                 <span className="font-medium truncate">{r.name}</span>
                 <span className="text-muted-foreground truncate">{describe(r)}</span>
-                {!r.is_active && <Badge variant="secondary" className="text-[10px]">inativa</Badge>}
+                {!r.is_active && <Pill tone="slate" className="shrink-0">inativa</Pill>}
               </div>
               <Button
-                type="button" variant="ghost" size="icon" className="h-6 w-6 shrink-0"
+                type="button" variant="ghost" size="icon" title="Remover automação"
+                className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
                 onClick={async () => {
                   if (!confirm(`Remover a automação "${r.name}"?`)) return
                   await projetosApi.deleteAutomation(projectId, r.id)
                   void refresh()
                 }}
               >
-                <Trash2 size={12} />
+                <Trash2 size={14} />
               </Button>
             </div>
           ))}
@@ -170,11 +171,11 @@ function AutomationDialog({
       <DialogContent>
         <DialogHeader><DialogTitle>Nova automação</DialogTitle></DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
+          <div className="space-y-1.5">
             <Label>Nome</Label>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex: Notificar PMO" />
           </div>
-          <div>
+          <div className="space-y-1.5">
             <Label>Ação *</Label>
             <Select value={action} onValueChange={(v) => setAction(v as ProjectAutomationAction)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
@@ -188,7 +189,7 @@ function AutomationDialog({
 
           {action === "assign_user" && (
             <>
-              <div>
+              <div className="space-y-1.5">
                 <Label>Origem do responsável *</Label>
                 <Select value={assignSource} onValueChange={(v) => setAssignSource(v as "user" | "field")}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
@@ -199,7 +200,7 @@ function AutomationDialog({
                 </Select>
               </div>
               {assignSource === "user" ? (
-                <div>
+                <div className="space-y-1.5">
                   <Label>Responsável *</Label>
                   <Select value={userId} onValueChange={setUserId}>
                     <SelectTrigger><SelectValue placeholder="Selecione…" /></SelectTrigger>
@@ -210,10 +211,10 @@ function AutomationDialog({
                   </Select>
                 </div>
               ) : (
-                <div>
+                <div className="space-y-1.5">
                   <Label>Campo do formulário *</Label>
                   <Input value={fieldKey} onChange={(e) => setFieldKey(e.target.value)} placeholder="requisitante" />
-                  <p className="mt-1 text-[11px] text-muted-foreground">
+                  <p className="mt-1 text-xs text-muted-foreground">
                     Chave do campo cujo valor será atribuído como responsável ao entrar na etapa. Ex.: <code>requisitante</code>.
                   </p>
                 </div>
@@ -223,7 +224,7 @@ function AutomationDialog({
 
           {action === "create_subtask" && (
             <>
-              <div>
+              <div className="space-y-1.5">
                 <Label>Título da subtarefa *</Label>
                 <Input value={subtaskTitle} onChange={(e) => setSubtaskTitle(e.target.value)} placeholder="Ex: Checklist técnico" required />
               </div>
@@ -236,7 +237,7 @@ function AutomationDialog({
 
           {action === "notify" && (
             <>
-              <div>
+              <div className="space-y-1.5">
                 <Label>Notificar</Label>
                 <Select value={notifyTarget} onValueChange={(v) => setNotifyTarget(v as "assignee" | "user")}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
@@ -247,7 +248,7 @@ function AutomationDialog({
                 </Select>
               </div>
               {notifyTarget === "user" && (
-                <div>
+                <div className="space-y-1.5">
                   <Label>Usuário *</Label>
                   <Select value={userId} onValueChange={setUserId}>
                     <SelectTrigger><SelectValue placeholder="Selecione…" /></SelectTrigger>
@@ -258,7 +259,7 @@ function AutomationDialog({
                   </Select>
                 </div>
               )}
-              <div>
+              <div className="space-y-1.5">
                 <Label>Mensagem</Label>
                 <Input value={message} onChange={(e) => setMessage(e.target.value)} placeholder="(opcional)" />
               </div>
@@ -266,7 +267,7 @@ function AutomationDialog({
           )}
 
           {action === "add_comment" && (
-            <div>
+            <div className="space-y-1.5">
               <Label>Conteúdo do comentário *</Label>
               <Input value={commentContent} onChange={(e) => setCommentContent(e.target.value)} placeholder="Ex: Card entrou em desenvolvimento" required />
             </div>

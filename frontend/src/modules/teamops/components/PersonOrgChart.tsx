@@ -26,14 +26,14 @@ function nodeColors(depth: number): { bg: string; text: string } {
 function AreaCard({ node, depth }: { node: OrgAreaNode; depth: number }) {
   const colors = nodeColors(depth)
   return (
-    <div className="inline-block min-w-[220px] max-w-[300px] overflow-hidden rounded-md border shadow-sm">
-      <div className={`px-4 py-2 text-center text-sm font-semibold ${colors.bg} ${colors.text}`}>
+    <div className="inline-block min-w-[220px] max-w-[300px] overflow-hidden rounded-xl border bg-card shadow-sm">
+      <div className={`px-4 py-2.5 text-center text-sm font-semibold ${colors.bg} ${colors.text}`}>
         {node.area_name}
-        <span className="ml-2 text-xs font-normal opacity-80">({node.person_count})</span>
+        <span className="ml-2 text-xs font-normal tabular-nums opacity-80">({node.person_count})</span>
       </div>
       <div className="divide-y bg-card">
         {node.members.length === 0 ? (
-          <div className="px-4 py-2 text-center text-xs italic text-muted-foreground">
+          <div className="px-4 py-2.5 text-center text-xs text-muted-foreground">
             Sem pessoas alocadas
           </div>
         ) : (
@@ -41,7 +41,7 @@ function AreaCard({ node, depth }: { node: OrgAreaNode; depth: number }) {
             <Link
               key={member.person_id}
               to={`/app/modules/teamops/people/${member.person_id}`}
-              className="block px-4 py-2 text-center transition hover:bg-muted/50"
+              className="block px-4 py-2 text-center transition-colors hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none"
             >
               <div className="flex items-center justify-center gap-1.5 text-sm font-medium leading-tight">
                 <span
@@ -50,7 +50,7 @@ function AreaCard({ node, depth }: { node: OrgAreaNode; depth: number }) {
                 />
                 {member.name}
               </div>
-              <div className="mt-0.5 text-xs italic text-muted-foreground">
+              <div className="mt-0.5 text-xs text-muted-foreground">
                 {member.position || "Sem cargo"}
               </div>
             </Link>
@@ -113,7 +113,7 @@ function AreaTree({ node, depth }: { node: OrgAreaNode; depth: number }) {
 export function PersonOrgChart({ tree }: { tree: OrgTree }) {
   if (tree.roots.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground">
+      <p className="rounded-2xl border bg-card p-8 text-center text-sm text-muted-foreground shadow-sm">
         Nenhuma área cadastrada. Crie áreas e aloque pessoas para montar o organograma.
       </p>
     )
@@ -122,7 +122,7 @@ export function PersonOrgChart({ tree }: { tree: OrgTree }) {
   return (
     <div className="w-full space-y-3">
       <OrgChartLegend />
-      <div className="w-full overflow-x-auto rounded-md border bg-card p-6">
+      <div className="w-full overflow-x-auto rounded-2xl border bg-card p-6 shadow-sm">
         <div className="inline-flex min-w-full flex-col items-center gap-8 px-4">
           {tree.roots.map((root) => (
             <AreaTree key={root.area_id} node={root} depth={0} />
@@ -137,9 +137,10 @@ export function PersonOrgChart({ tree }: { tree: OrgTree }) {
 function OrgChartLegend() {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+      <span className="font-semibold text-foreground">Vínculo</span>
       {(Object.keys(EMPLOYMENT_TYPE_LABELS) as (keyof typeof EMPLOYMENT_TYPE_LABELS)[]).map((type) => (
         <span key={type} className="flex items-center gap-1.5">
-          <span className={`inline-block h-2 w-2 rounded-full ${EMPLOYMENT_TYPE_DOT[type]}`} />
+          <span className={`inline-block h-2.5 w-2.5 rounded-full ${EMPLOYMENT_TYPE_DOT[type]}`} aria-hidden />
           {EMPLOYMENT_TYPE_LABELS[type]}
         </span>
       ))}

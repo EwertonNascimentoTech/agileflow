@@ -1,19 +1,24 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { Package, ArrowRight, Loader2, Users2, ClipboardList, CirclePlus } from "lucide-react"
+import { Package, ArrowRight, Users2, ClipboardList, CirclePlus, LayoutDashboard } from "lucide-react"
 import { resolveModuleIcon } from "@/lib/moduleIcons"
 import { companyApi, type MyTenant, type ActiveModule } from "@/api/crm"
 import { useAuth } from "@/contexts/AuthContext"
-import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyState } from "@/components/EmptyState"
+import { Card, PageHeader, Pill } from "@/components/ds"
 import { EXTERNAL_PO_BLOCKED_MODULES, isExternalProductOwner } from "@/lib/permissions"
 
 const resolveIcon = resolveModuleIcon
 
 function moduleHomePath(m: ActiveModule): string {
   return `/app/modules/${m.slug}`
+}
+
+/** Título de cada faixa (mesmo do painel de Produtos). */
+function RowTitle({ children }: { children: string }) {
+  return <h2 className="text-sm font-semibold text-muted-foreground">{children}</h2>
 }
 
 export default function CompanyDashboardPage() {
@@ -54,21 +59,21 @@ export default function CompanyDashboardPage() {
   const basicMyRequestsRoute = hasProjetosModule ? "/app/modules/projetos" : "/app/modules/crm/kanban"
 
   return (
-    <div className="space-y-8 max-w-3xl">
-      <div>
-        <h1 className="text-2xl font-bold">Olá, {firstName} 👋</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          {tenant ? `${tenant.name} · ` : ""}Bem-vindo ao seu painel.
-        </p>
-      </div>
+    <div className="max-w-6xl space-y-6">
+      <PageHeader
+        icon={LayoutDashboard}
+        color="#4F46E5"
+        title={`Olá, ${firstName} 👋`}
+        description={`${tenant ? `${tenant.name} · ` : ""}Bem-vindo ao seu painel.`}
+      />
 
       {!isBasicUser && (
-        <section>
-          <h2 className="text-sm font-semibold text-muted-foreground mb-3">Módulos ativos</h2>
+        <section className="space-y-2">
+          <RowTitle>Módulos ativos</RowTitle>
 
           {loading ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 size={14} className="animate-spin" /> Carregando…
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-[148px] rounded-2xl" />)}
             </div>
           ) : visibleModules.length === 0 ? (
             <Card className="border-dashed">
@@ -84,36 +89,35 @@ export default function CompanyDashboardPage() {
               {visibleModules.map((m) => {
                 const Icon = resolveIcon(m.icon)
                 return (
-                  <Card
+                  <button
                     key={m.slug}
-                    className="cursor-pointer hover:shadow-md transition-all hover:-translate-y-0.5 group overflow-hidden"
+                    type="button"
+                    className="group flex flex-col gap-3 rounded-2xl border bg-card p-5 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     onClick={() => navigate(moduleHomePath(m))}
                   >
-                    <div className="h-1" style={{ backgroundColor: m.color }} />
-                    <CardContent className="p-4 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div
-                          className="h-9 w-9 rounded-xl flex items-center justify-center"
-                          style={{ backgroundColor: `${m.color}1a`, color: m.color }}
-                        >
-                          <Icon size={17} />
-                        </div>
-                        <Badge variant="success" className="text-xs">Ativo</Badge>
-                      </div>
-                      <div>
-                        <p className="font-semibold text-sm">{m.name}</p>
-                        {m.description && (
-                          <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{m.description}</p>
-                        )}
-                      </div>
-                      <div
-                        className="flex items-center gap-1 text-xs font-medium group-hover:gap-2 transition-all"
-                        style={{ color: m.color }}
+                    <div className="flex w-full items-start justify-between gap-3">
+                      <span
+                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
+                        style={{ backgroundColor: `${m.color}1f`, color: m.color }}
+                        aria-hidden
                       >
-                        Acessar <ArrowRight size={11} />
-                      </div>
-                    </CardContent>
-                  </Card>
+                        <Icon size={20} />
+                      </span>
+                      <Pill tone="emerald" dot>Ativo</Pill>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold">{m.name}</p>
+                      {m.description && (
+                        <p className="mt-0.5 line-clamp-2 text-sm text-muted-foreground">{m.description}</p>
+                      )}
+                    </div>
+                    <span
+                      className="inline-flex items-center gap-1 text-sm font-medium transition-all group-hover:gap-2"
+                      style={{ color: m.color }}
+                    >
+                      Acessar <ArrowRight size={14} />
+                    </span>
+                  </button>
                 )
               })}
             </div>
@@ -121,29 +125,27 @@ export default function CompanyDashboardPage() {
         </section>
       )}
 
-      <section>
-        <h2 className="text-sm font-semibold text-muted-foreground mb-3">
-          {isBasicUser ? "Solicitações" : "Atalhos"}
-        </h2>
+      <section className="space-y-2">
+        <RowTitle>{isBasicUser ? "Solicitações" : "Atalhos"}</RowTitle>
         <div className="flex flex-wrap gap-2">
           {isBasicUser ? (
             <>
-              <Button variant="outline" size="sm" onClick={() => navigate(basicNewRequestRoute)}>
-                <CirclePlus size={13} className="mr-1.5" /> Nova Solicitação
+              <Button className="h-10 gap-1.5" onClick={() => navigate(basicNewRequestRoute)}>
+                <CirclePlus size={16} /> Nova Solicitação
               </Button>
-              <Button variant="outline" size="sm" onClick={() => navigate(basicMyRequestsRoute)}>
-                <ClipboardList size={13} className="mr-1.5" /> Minhas Solicitações
+              <Button variant="outline" className="h-10 gap-1.5" onClick={() => navigate(basicMyRequestsRoute)}>
+                <ClipboardList size={16} /> Minhas Solicitações
               </Button>
             </>
           ) : (
             <>
               {isAdmin && (
-                <Button variant="outline" size="sm" onClick={() => navigate("/app/users")}>
-                  <Users2 size={13} className="mr-1.5" /> Gerenciar usuários
+                <Button variant="outline" className="h-10 gap-1.5" onClick={() => navigate("/app/users")}>
+                  <Users2 size={16} /> Gerenciar usuários
                 </Button>
               )}
-              <Button variant="outline" size="sm" onClick={() => navigate("/app/modules/crm/dashboard")}>
-                <Package size={13} className="mr-1.5" /> Ver módulos
+              <Button variant="outline" className="h-10 gap-1.5" onClick={() => navigate("/app/modules/crm/dashboard")}>
+                <Package size={16} /> Ver módulos
               </Button>
             </>
           )}

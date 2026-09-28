@@ -1,6 +1,7 @@
-import { useCallback, useState, type ReactNode } from "react"
+import { useCallback, useState, type ElementType, type ReactNode } from "react"
 import { ChevronDown, type LucideIcon } from "lucide-react"
 
+import { Card } from "@/components/ds"
 import { cn } from "@/lib/utils"
 
 const STORAGE_PREFIX = "agileflow.form-section."
@@ -34,6 +35,50 @@ export function useFormSectionExpanded(sectionId: string, defaultExpanded = true
   return { expanded, toggle, setExpanded }
 }
 
+/** Bloco de seção do drawer do card no padrão do Portal, em escala compacta: cartão com
+ *  cabeçalho (ícone, título em text-sm, selos, subtítulo e ações à direita) e corpo.
+ *  `flush` tira o padding do corpo (listas de borda a borda). */
+export function DrawerSection({
+  title,
+  icon: Icon,
+  iconClassName,
+  subtitle,
+  badges,
+  right,
+  children,
+  flush = false,
+  className,
+}: {
+  title: ReactNode
+  icon?: ElementType
+  /** Cor do ícone (padrão: text-muted-foreground). */
+  iconClassName?: string
+  subtitle?: ReactNode
+  /** Selos logo depois do título. */
+  badges?: ReactNode
+  right?: ReactNode
+  children: ReactNode
+  flush?: boolean
+  className?: string
+}) {
+  return (
+    <Card className={className}>
+      <div className="flex flex-wrap items-start justify-between gap-2 border-b px-4 py-3">
+        <div className="min-w-0 flex-1">
+          <h3 className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+            {Icon && <Icon size={15} className={cn("shrink-0", iconClassName ?? "text-muted-foreground")} />}
+            <span className="min-w-0">{title}</span>
+            {badges}
+          </h3>
+          {subtitle && <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p>}
+        </div>
+        {right && <div className="flex shrink-0 flex-wrap items-center gap-1">{right}</div>}
+      </div>
+      <div className={flush ? "" : "space-y-3 p-4"}>{children}</div>
+    </Card>
+  )
+}
+
 export function CollapsibleFormSection({
   sectionId,
   title,
@@ -56,27 +101,26 @@ export function CollapsibleFormSection({
   const { expanded, toggle } = useFormSectionExpanded(sectionId, defaultExpanded)
 
   return (
-    <div className={cn("space-y-3 border-t border-border pt-4", className)}>
-      <div className="flex items-center justify-between gap-2">
+    <Card className={className}>
+      <div className={cn("flex items-center justify-between gap-2 px-4 py-3", expanded && "border-b")}>
         <button
           type="button"
           onClick={toggle}
-          className="inline-flex min-w-0 flex-1 items-center gap-2 rounded-md py-0.5 text-left hover:bg-muted/60"
+          className="inline-flex min-w-0 flex-1 flex-wrap items-center gap-2 rounded-md text-left text-sm font-semibold transition-colors hover:text-primary"
           aria-expanded={expanded}
           title={expanded ? "Minimizar seção" : "Expandir seção"}
         >
-          <span className="h-4 w-1 shrink-0 rounded-full bg-primary" />
-          {Icon && <Icon size={14} className="shrink-0 text-primary" />}
-          <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">{title}</p>
+          {Icon && <Icon size={15} className="shrink-0 text-muted-foreground" />}
+          <span className="min-w-0">{title}</span>
           {badges}
           <ChevronDown
-            size={14}
-            className={cn("ml-1 shrink-0 text-muted-foreground transition-transform", !expanded && "-rotate-90")}
+            size={15}
+            className={cn("shrink-0 text-muted-foreground transition-transform", !expanded && "-rotate-90")}
           />
         </button>
         {headerEnd}
       </div>
-      {expanded && <div className="space-y-3">{children}</div>}
-    </div>
+      {expanded && <div className="space-y-3 p-4">{children}</div>}
+    </Card>
   )
 }

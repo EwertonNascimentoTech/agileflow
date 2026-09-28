@@ -137,7 +137,7 @@ export function PositionAccessDialog({
         {loading ? (
           <div className="space-y-2">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-24" />)}</div>
         ) : modules.length === 0 ? (
-          <p className="rounded-md border p-4 text-sm text-muted-foreground">
+          <p className="rounded-xl border p-4 text-sm text-muted-foreground">
             Nenhum módulo ativo na empresa para configurar.
           </p>
         ) : (
@@ -149,8 +149,8 @@ export function PositionAccessDialog({
               const resources = [...byRes.keys()].sort((a, b) =>
                 (RESOURCE_LABELS[a] ?? a).localeCompare(RESOURCE_LABELS[b] ?? b))
               return (
-                <div key={module} className="rounded-md border">
-                  <div className="flex items-center justify-between border-b bg-muted/40 px-3 py-2">
+                <div key={module} className="overflow-hidden rounded-xl border">
+                  <div className="flex items-center justify-between border-b bg-muted/60 px-3 py-2">
                     <span className="text-sm font-semibold">{MODULE_LABELS[module] ?? module}</span>
                     <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
                       <input type="checkbox" checked={allOn} onChange={() => toggleModule(allCodes)} />

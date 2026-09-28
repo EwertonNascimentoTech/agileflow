@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import {
-  BarChart3, Calendar, CalendarCheck, Check, ChevronDown, ChevronUp, Clock, FlaskConical, Folder, GitBranch, Link2, Loader2, Lock, Maximize2, Plus, Users, Wand2, X, ZoomIn, ZoomOut,
+  BarChart3, Calendar, CalendarCheck, CalendarRange, Check, ChevronDown, ChevronUp, Clock, FlaskConical, Folder, GitBranch, Link2, Loader2, Lock, Maximize2, Plus, Wand2, X, ZoomIn, ZoomOut,
 } from "lucide-react"
 
 const DEP_LABELS: Record<DependencyType, string> = {
@@ -17,7 +17,9 @@ import {
 } from "@/api/projetos"
 import type { User } from "@/types"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/EmptyState"
+import { Card, Notice, PageHeader, Pill, Segmented } from "@/components/ds"
 import { GanttChart, clampDayWidth, zoomLabel, DEFAULT_DAY_W, MIN_DAY_W, MAX_DAY_W, ZOOM_STEP } from "@/modules/projetos/GanttChart"
 import { WorkloadView } from "@/modules/projetos/WorkloadView"
 import { ScheduleScenarioPanel } from "@/modules/projetos/ScheduleScenarioPanel"
@@ -27,10 +29,28 @@ import { BaselineAlertsDialog } from "@/modules/projetos/BaselineAlertsDialog"
 import { computeBaselineDiff } from "@/modules/projetos/baselineDiff"
 import { toast } from "@/lib/toast"
 
-const DOW = ["DOM", "SEG", "TER", "QUA", "QUI", "SEX", "SÁB"]
+const DOW = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]
 const MON = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"]
 // Largura da coluna "Demanda" da visão completa (igual ao grid-template-columns do CSS).
 const FULL_LABEL_W = 320
+
+// Visual do Portal por cima das classes .afx do cronograma (agileflow.css). As regras .afx têm
+// especificidade maior que um utilitário do Tailwind, por isso o "!" — só cor, peso e caixa do
+// texto; tamanho, posição e grade continuam os do CSS.
+const MODULE_COLOR = "#2563EB"
+const HEAD_CELL = "!bg-muted !normal-case !tracking-normal !text-xs !font-medium !text-muted-foreground"
+const WEEKEND_HEAD = "!bg-muted-foreground/10"
+const TODAY_NUM = "!bg-blue-600 dark:!bg-sky-500"
+const TODAY_LINE = "!bg-transparent !opacity-100 border-l-2 border-dashed border-blue-600 dark:border-sky-400"
+const PANEL_LABEL = "!normal-case !tracking-normal !text-sm !font-medium !text-foreground"
+const BASELINE_HATCH = "repeating-linear-gradient(45deg,#b6bcc6,#b6bcc6 3px,#cdd2da 3px,#cdd2da 6px)"
+// Gatilho no mesmo desenho do FilterSelect (SelectTrigger), para o menu próprio do seletor.
+const PICKER_BTN =
+  "flex h-10 w-full items-center gap-2 rounded-md border border-input bg-background px-3 text-sm shadow-sm ring-offset-background focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+const ZOOM_BTN =
+  "flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+// Botão desabilitado com dica: mantém o hover para o title aparecer (o Button bloqueia o ponteiro).
+const DISABLED_WITH_TIP = "disabled:pointer-events-auto disabled:cursor-not-allowed"
 
 /** Agrupa dias consecutivos pela chave (mês, ano…) em faixas do cabeçalho. */
 function daySegments(days: Date[], key: (d: Date) => string, label: (d: Date) => string) {
@@ -590,45 +610,58 @@ export default function GanttPage() {
   // Zoom: afastar/aproximar em passos e "ajustar" (todo o cronograma na tela).
   // Ctrl/⌘ + roda do mouse faz o mesmo direto no gráfico, ancorado no cursor.
   const zoomControl = (
-    <div className="scale-toggle" style={{ marginLeft: 8, alignItems: "center" }}>
-      <button
-        onClick={() => setDayWidth((w) => clampDayWidth(w / ZOOM_STEP))}
-        disabled={dayWidth <= MIN_DAY_W}
-        title="Afastar (Ctrl + roda do mouse)"
-      >
-        <ZoomOut size={13} />
-      </button>
-      <span style={{ padding: "0 6px", fontSize: 12, fontWeight: 600, color: "var(--af-muted-fg)", minWidth: 62, textAlign: "center" }}>
-        {zoomLabel(dayWidth)}
-      </span>
-      <button
-        onClick={() => setDayWidth((w) => clampDayWidth(w * ZOOM_STEP))}
-        disabled={dayWidth >= MAX_DAY_W}
-        title="Aproximar (Ctrl + roda do mouse)"
-      >
-        <ZoomIn size={13} />
-      </button>
-      <button onClick={() => setFitSignal((n) => n + 1)} title="Ajustar todo o cronograma à tela">
-        <Maximize2 size={13} />
-      </button>
+    <div className="space-y-1">
+      <span className="block text-xs text-muted-foreground">Zoom</span>
+      <div className="inline-flex h-10 items-center rounded-lg border bg-background p-0.5">
+        <button
+          type="button"
+          className={ZOOM_BTN}
+          onClick={() => setDayWidth((w) => clampDayWidth(w / ZOOM_STEP))}
+          disabled={dayWidth <= MIN_DAY_W}
+          title="Afastar (Ctrl + roda do mouse)"
+          aria-label="Afastar"
+        >
+          <ZoomOut size={15} />
+        </button>
+        <span className="min-w-[72px] px-1.5 text-center text-sm font-medium text-muted-foreground">
+          {zoomLabel(dayWidth)}
+        </span>
+        <button
+          type="button"
+          className={ZOOM_BTN}
+          onClick={() => setDayWidth((w) => clampDayWidth(w * ZOOM_STEP))}
+          disabled={dayWidth >= MAX_DAY_W}
+          title="Aproximar (Ctrl + roda do mouse)"
+          aria-label="Aproximar"
+        >
+          <ZoomIn size={15} />
+        </button>
+        <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
+        <button type="button" className={ZOOM_BTN} onClick={() => setFitSignal((n) => n + 1)} title="Ajustar todo o cronograma à tela" aria-label="Ajustar à tela">
+          <Maximize2 size={15} />
+        </button>
+      </div>
     </div>
   )
 
   const cardPicker = (
-    <div className="relative" style={{ marginLeft: 8 }}>
-      <button className="filter-btn" onClick={() => setCardOpen((o) => !o)}>
-        <GitBranch size={13} /><span>{rootTask ? rootTask.title : "Programa / Projeto"}</span><ChevronDown size={12} />
+    <div className="relative w-72 max-w-full space-y-1">
+      <span className="block text-xs text-muted-foreground">Programa / Projeto</span>
+      <button type="button" className={PICKER_BTN} onClick={() => setCardOpen((o) => !o)} aria-expanded={cardOpen}>
+        <GitBranch size={15} className="shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 truncate text-left">{rootTask ? rootTask.title : "Todos (por funil)"}</span>
+        <ChevronDown size={16} className="shrink-0 opacity-50" />
       </button>
       {cardOpen && (
-        <div className="dd-menu">
-          <div className="dd-head">Cronograma de…</div>
+        <div className="dd-menu !min-w-full">
+          <div className="dd-head !normal-case !tracking-normal !text-xs">Cronograma de…</div>
           <div className="dd-item" onClick={() => selectCard(null)}>
             <span style={{ flex: 1 }}>Todos (por funil)</span>
             {!rootTask && <Check size={13} style={{ color: "var(--af-primary)" }} />}
           </div>
           {planningCards.map((c) => (
             <div key={c.id} className="dd-item" onClick={() => selectCard(c.id)}>
-              <span className="chip muted" style={{ fontSize: 9 }}>{c.planning_kind === "programa" ? "Programa" : "Projeto"}</span>
+              <Pill tone={c.planning_kind === "programa" ? "violet" : "blue"} className="shrink-0">{c.planning_kind === "programa" ? "Programa" : "Projeto"}</Pill>
               <span style={{ flex: 1 }}>{c.title}</span>
               {rootTask?.id === c.id && <Check size={13} style={{ color: "var(--af-primary)" }} />}
             </div>
@@ -824,65 +857,78 @@ export default function GanttPage() {
     return "var(--af-primary)"
   }
 
-  if (loading) return <div className="p-1"><Skeleton className="h-96 rounded-lg" /></div>
+  if (loading) return <div className="p-1"><Skeleton className="h-96 rounded-2xl" /></div>
   // Sem root no URL, o efeito acima escolhe o 1º projeto logo após o render. Sem esta espera,
   // o 1º render desenhava o cronograma COMPLETO (~2,4 mil tarefas) e travava a aba por 40–85 s.
   if (!rootParam && (autoSelectPending || (!autoSelectedRef.current && planningCards.length > 0))) {
-    return <div className="p-1"><Skeleton className="h-96 rounded-lg" /></div>
+    return <div className="p-1"><Skeleton className="h-96 rounded-2xl" /></div>
   }
 
   // Modo escopado: cronograma de UM projeto (root) — o PO escreve as etapas (atividades-filhas).
   if (rootParam) {
     return (
-      <div className="afx w-full">
+      <div className="afx flex w-full flex-col gap-5">
         {cardOpen && <div style={{ position: "fixed", inset: 0, zIndex: 20 }} onClick={() => setCardOpen(false)} />}
-        <div className="gantt-toolbar" style={{ position: "relative", zIndex: 25 }}>
-          <div className="title">
-            <h1>Cronograma do projeto</h1>
-            <span className="slash">/</span>
-            <span className="project-name">{rootTask?.title ?? project?.name ?? ""}</span>
-          </div>
+        <PageHeader
+          icon={CalendarRange}
+          color={MODULE_COLOR}
+          title="Cronograma do projeto"
+          description={rootTask?.title ?? project?.name ?? ""}
+          actions={
+            <>
+              <Button
+                variant="outline"
+                className="h-10 gap-1.5"
+                onClick={() => { const p = new URLSearchParams(searchParams); p.delete("root"); setSearchParams(p, { replace: true }) }}
+              >
+                <BarChart3 size={16} /> Ver cronograma completo
+              </Button>
+              {view === "schedule" && (
+                <Button
+                  variant="outline"
+                  className={`h-10 gap-1.5 ${DISABLED_WITH_TIP}`}
+                  disabled={!rootTask || locked || rescheduling}
+                  title={
+                    locked
+                      ? "Cronograma travado — libere a alteração para recalcular."
+                      : "Recalcula as datas da subárvore pelo motor (horas + responsável + dependências + calendário), substituindo as datas manuais."
+                  }
+                  onClick={() => void handleReschedule()}
+                >
+                  {rescheduling ? <Loader2 size={16} className="animate-spin" /> : <Wand2 size={16} />} Recalcular datas
+                </Button>
+              )}
+              {view === "schedule" && (
+                <Button
+                  className={`h-10 gap-1.5 ${DISABLED_WITH_TIP}`}
+                  disabled={!rootTask || !canAddChild(rootTask)}
+                  title={rootTask && !canAddChild(rootTask) ? "Este item não tem um nível-filho definido na amarração de tipos." : undefined}
+                  onClick={() => rootTask && void addStage(rootTask.id)}
+                >
+                  <Plus size={16} /> Adicionar etapa
+                </Button>
+              )}
+            </>
+          }
+        />
+
+        {/* Barra de controle: acima do véu que fecha o menu (z-20), para o menu abrir por cima. */}
+        <Card className="relative z-[25] flex flex-wrap items-end gap-3 p-4">
           {cardPicker}
-          {view === "schedule" && zoomControl}
-          <div className="scale-toggle" style={{ marginLeft: 8 }}>
-            <button className={view === "schedule" ? "on" : ""} onClick={() => setView("schedule")}><Calendar size={12} /> Cronograma</button>
-            <button className={view === "resources" ? "on" : ""} onClick={() => setView("resources")}><Users size={12} /> Recursos</button>
-            <button className={view === "scenario" ? "on" : ""} onClick={() => setView("scenario")}><FlaskConical size={12} /> Cenário</button>
+          <div className="space-y-1">
+            <span className="block text-xs text-muted-foreground">Visão</span>
+            <Segmented
+              value={view}
+              onChange={setView}
+              options={[
+                { value: "schedule", label: "Cronograma" },
+                { value: "resources", label: "Recursos" },
+                { value: "scenario", label: "Cenário" },
+              ]}
+            />
           </div>
-          <span className="spacer" />
-          {view === "schedule" && (
-            <button
-              className="btn ghost"
-              disabled={!rootTask || locked || rescheduling}
-              title={
-                locked
-                  ? "Cronograma travado — libere a alteração para recalcular."
-                  : "Recalcula as datas da subárvore pelo motor (horas + responsável + dependências + calendário), substituindo as datas manuais."
-              }
-              onClick={() => void handleReschedule()}
-            >
-              {rescheduling ? <Loader2 size={14} className="spin" /> : <Wand2 size={14} />} Recalcular datas
-            </button>
-          )}
-          {view === "schedule" && (
-            <button
-              className="btn primary"
-              style={{ marginLeft: 8 }}
-              disabled={!rootTask || !canAddChild(rootTask)}
-              title={rootTask && !canAddChild(rootTask) ? "Este item não tem um nível-filho definido na amarração de tipos." : undefined}
-              onClick={() => rootTask && void addStage(rootTask.id)}
-            >
-              <Plus size={14} /> Adicionar etapa
-            </button>
-          )}
-          <button
-            className="btn ghost"
-            style={{ marginLeft: 8 }}
-            onClick={() => { const p = new URLSearchParams(searchParams); p.delete("root"); setSearchParams(p, { replace: true }) }}
-          >
-            Ver cronograma completo
-          </button>
-        </div>
+          {view === "schedule" && <div className="ml-auto">{zoomControl}</div>}
+        </Card>
 
         {view === "schedule" && lockState && (
           <ScheduleLockBanner
@@ -894,24 +940,17 @@ export default function GanttPage() {
         )}
 
         {view === "schedule" && compareBaseline && (
-          <div
-            style={{
-              display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", margin: "8px 0",
-              borderRadius: 8, border: "1px solid #b6bcc6", background: "#f3f5f8", fontSize: 13,
-            }}
-          >
-            <span
-              style={{ width: 22, height: 11, borderRadius: 3, flexShrink: 0, background: "repeating-linear-gradient(45deg,#b6bcc6,#b6bcc6 3px,#cdd2da 3px,#cdd2da 6px)" }}
-            />
-            <span style={{ flex: 1 }}>
+          <Notice tone="slate">
+            <span className="h-[11px] w-[22px] shrink-0 rounded-[3px]" style={{ background: BASELINE_HATCH }} aria-hidden />
+            <span className="min-w-[220px] flex-1 text-foreground">
               Comparando com <b>baseline v{compareBaseline.version}</b> (salvo em {new Date(compareBaseline.created_at).toLocaleString("pt-BR")}).
               As barras hachuradas são o cronograma planejado; passe o mouse para ver o desvio.
             </span>
-            <button className="btn primary" onClick={() => setAlertsOpen(true)}>
+            <Button size="sm" onClick={() => setAlertsOpen(true)}>
               Ver alterações{baselineDiff ? ` (${baselineDiff.total})` : ""}
-            </button>
-            <button className="btn ghost" onClick={() => setCompareBaseline(null)}>Limpar comparação</button>
-          </div>
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setCompareBaseline(null)}>Limpar comparação</Button>
+          </Notice>
         )}
 
         {compareBaseline && (
@@ -935,14 +974,17 @@ export default function GanttPage() {
               persons={persons}
             />
           ) : (
-            <EmptyState
-              icon={FlaskConical}
-              title="Selecione o projeto"
-              description="Abra o cronograma de um projeto/programa para montar o cenário de fim."
-            />
+            <Card>
+              <EmptyState
+                icon={FlaskConical}
+                title="Selecione o projeto"
+                description="Abra o cronograma de um projeto/programa para montar o cenário de fim."
+              />
+            </Card>
           )
         ) : rootTask ? (
-          <>
+          // Legenda + gráfico num cartão só (o GanttChart não desenha borda própria).
+          <Card className="overflow-hidden">
             <GanttLegend />
             <GanttChart
               rootId={rootTask.id}
@@ -967,9 +1009,11 @@ export default function GanttPage() {
               baselineById={baselineById}
               markById={baselineDiff?.markById}
             />
-          </>
+          </Card>
         ) : (
-          <EmptyState icon={BarChart3} title="Projeto não encontrado" description="O item do cronograma não foi localizado neste projeto." />
+          <Card>
+            <EmptyState icon={BarChart3} title="Projeto não encontrado" description="O item do cronograma não foi localizado neste projeto." />
+          </Card>
         )}
 
         {editing && (
@@ -998,24 +1042,28 @@ export default function GanttPage() {
   const isEmpty = swimlanes.every((s) => s.rows.length === 0)
 
   return (
-    <div className="afx w-full">
+    <div className="afx flex w-full flex-col gap-5">
       {(projOpen || cardOpen) && <div style={{ position: "fixed", inset: 0, zIndex: 20 }} onClick={() => { setProjOpen(false); setCardOpen(false) }} />}
 
-      <div className="gantt-toolbar" style={{ position: "relative", zIndex: 25 }}>
-        <div className="title">
-          <h1>Gantt</h1>
-          <span className="slash">/</span>
-          <span className="project-name">{project?.name}</span>
-          <span className="count-pill">{visible.length}</span>
-        </div>
+      <PageHeader
+        icon={CalendarRange}
+        color={MODULE_COLOR}
+        title="Gantt"
+        description={`${project?.name ? `${project.name} · ` : ""}${visible.length} demanda${visible.length !== 1 ? "s" : ""}`}
+      />
 
-        <div className="relative" style={{ marginLeft: 8 }}>
-          <button className="filter-btn" onClick={() => setProjOpen((o) => !o)}>
-            <Folder size={13} /><span>{project?.name ?? "Selecionar projeto"}</span><ChevronDown size={12} />
+      {/* Barra de controle: acima do véu que fecha os menus (z-20), para eles abrirem por cima. */}
+      <Card className="relative z-[25] flex flex-wrap items-end gap-3 p-4">
+        <div className="relative w-64 max-w-full space-y-1">
+          <span className="block text-xs text-muted-foreground">Projeto</span>
+          <button type="button" className={PICKER_BTN} onClick={() => setProjOpen((o) => !o)} aria-expanded={projOpen}>
+            <Folder size={15} className="shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate text-left">{project?.name ?? "Selecionar projeto"}</span>
+            <ChevronDown size={16} className="shrink-0 opacity-50" />
           </button>
           {projOpen && (
-            <div className="dd-menu">
-              <div className="dd-head">Filtrar por projeto</div>
+            <div className="dd-menu !min-w-full">
+              <div className="dd-head !normal-case !tracking-normal !text-xs">Filtrar por projeto</div>
               {projects.map((p) => (
                 <div key={p.id} className="dd-item" onClick={() => { setProjectId(p.id); setProjOpen(false) }}>
                   <Folder size={13} style={{ color: "var(--af-muted-fg)" }} />
@@ -1029,10 +1077,8 @@ export default function GanttPage() {
 
         {cardPicker}
 
-        <span className="spacer" />
-
-        {zoomControl}
-      </div>
+        <div className="ml-auto">{zoomControl}</div>
+      </Card>
 
       {(() => {
         const nonOpen = lockStates.filter((l) => l.state !== "open")
@@ -1040,24 +1086,18 @@ export default function GanttPage() {
         const nLocked = nonOpen.filter((l) => l.state === "locked").length
         const nRevision = nonOpen.length - nLocked
         return (
-          <>
-            <div
-              style={{
-                display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", margin: "8px 0",
-                borderRadius: 8, border: "1px solid var(--af-border)", background: "var(--af-muted)", fontSize: 13,
-              }}
-            >
-              <Lock size={15} style={{ color: "var(--af-muted-fg)", flexShrink: 0 }} />
-              <span style={{ flex: 1 }}>
+          <div className="space-y-2">
+            <Notice tone="slate" icon={Lock}>
+              <span className="min-w-[220px] flex-1 text-foreground">
                 {nLocked > 0 && <><b>{nLocked}</b> cronograma{nLocked !== 1 ? "s" : ""} travado{nLocked !== 1 ? "s" : ""}</>}
                 {nLocked > 0 && nRevision > 0 && " · "}
                 {nRevision > 0 && <><b>{nRevision}</b> em revisão</>}
-                <span style={{ color: "var(--af-muted-fg)" }}> — liberar alteração, concluir revisão e histórico ficam na lista.</span>
+                <span className="text-muted-foreground"> — liberar alteração, concluir revisão e histórico ficam na lista.</span>
               </span>
-              <button className="btn ghost" onClick={() => setLocksOpen((o) => !o)}>
+              <Button size="sm" variant="ghost" className="gap-1.5" onClick={() => setLocksOpen((o) => !o)}>
                 {locksOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />} {locksOpen ? "Ocultar" : "Ver"}
-              </button>
-            </div>
+              </Button>
+            </Notice>
             {locksOpen && nonOpen.map((l) => (
               <ScheduleLockBanner
                 key={l.root_task_id}
@@ -1067,35 +1107,39 @@ export default function GanttPage() {
                 onChanged={() => void reloadFullLocks()}
               />
             ))}
-          </>
+          </div>
         )
       })()}
 
       {isEmpty ? (
-        <EmptyState
-          icon={BarChart3}
-          title="Selecione um Programa ou Projeto para montar o cronograma"
-          description={
-            planningCards.length
-              ? "Use o seletor 'Programa / Projeto' acima para abrir o cronograma e escrever as etapas. Esta visão por funil mostra as demandas com início/prazo e vínculo de cronograma configurado."
-              : "Crie um Programa/Projeto (na triagem) e escreva as etapas no cronograma. Esta visão por funil também mostra demandas com início/prazo e vínculo de cronograma configurado."
-          }
-          {...(planningCards.length
-            ? { action: { label: "Selecionar Programa/Projeto", onClick: () => setCardOpen(true) } }
-            : {})}
-        />
+        <Card>
+          <EmptyState
+            icon={BarChart3}
+            title="Selecione um Programa ou Projeto para montar o cronograma"
+            description={
+              planningCards.length
+                ? "Use o seletor 'Programa / Projeto' acima para abrir o cronograma e escrever as etapas. Esta visão por funil mostra as demandas com início/prazo e vínculo de cronograma configurado."
+                : "Crie um Programa/Projeto (na triagem) e escreva as etapas no cronograma. Esta visão por funil também mostra demandas com início/prazo e vínculo de cronograma configurado."
+            }
+            {...(planningCards.length
+              ? { action: { label: "Selecionar Programa/Projeto", onClick: () => setCardOpen(true) } }
+              : {})}
+          />
+        </Card>
       ) : (
-        <div className="gantt">
-          <div className="gantt-scroll" ref={fullScrollRef}>
+        <div className="gantt !rounded-2xl shadow-sm">
+          {/* Altura: o CSS desconta a barra antiga (menor); aqui desconta cabeçalho + barra de
+              controle do Portal, para a barra de rolagem horizontal continuar dentro da tela. */}
+          <div className="gantt-scroll !max-h-[calc(100vh-340px)]" ref={fullScrollRef}>
           <div className="gantt-inner" style={{ width: FULL_LABEL_W + days.length * dayWidth }}>
-          <div className="gantt-head">
+          <div className="gantt-head !bg-muted">
           {/* Faixa superior: semanas (zoom em dias), meses (em semanas) ou anos (em meses) */}
           <div className="gantt-row-grid">
-            <div className="gantt-head-cell">Demanda</div>
+            <div className={`gantt-head-cell ${HEAD_CELL}`}>Demanda</div>
             <div className="gantt-head-cell right">
               <div className="gantt-weeks">
                 {(fullSub === "day" ? weeks : fullSub === "week" ? months : years).map((w, i) => (
-                  <div key={i} className="gantt-week" style={{ width: `${(w.cols / days.length) * 100}%`, flex: "none" }} title={w.label}>
+                  <div key={i} className="gantt-week !font-medium" style={{ width: `${(w.cols / days.length) * 100}%`, flex: "none" }} title={w.label}>
                     {w.label}
                   </div>
                 ))}
@@ -1104,7 +1148,7 @@ export default function GanttPage() {
           </div>
           {/* Faixa inferior: dias, semanas ou meses */}
           <div className="gantt-row-grid">
-            <div className="gantt-head-cell" style={{ color: "var(--af-muted-fg)", fontWeight: 500 }}>
+            <div className={`gantt-head-cell ${HEAD_CELL}`} style={{ color: "var(--af-muted-fg)", fontWeight: 500 }}>
               {visible.length} demanda{visible.length !== 1 ? "s" : ""}
             </div>
             <div className="gantt-head-cell right">
@@ -1114,9 +1158,9 @@ export default function GanttPage() {
                       const weekend = d.getDay() === 0 || d.getDay() === 6
                       const isToday = d.toDateString() === today.toDateString()
                       return (
-                        <div key={i} className={`gantt-day ${weekend ? "weekend" : ""} ${isToday ? "today" : ""}`} style={{ width: `${dayPct}%`, flex: "none", minWidth: 0 }}>
-                          <div className="dow">{DOW[d.getDay()]}</div>
-                          <div className="num">{d.getDate()}</div>
+                        <div key={i} className={`gantt-day ${weekend ? `weekend ${WEEKEND_HEAD}` : ""} ${isToday ? "today" : ""}`} style={{ width: `${dayPct}%`, flex: "none", minWidth: 0 }}>
+                          <div className="dow !font-medium">{DOW[d.getDay()]}</div>
+                          <div className={`num ${isToday ? TODAY_NUM : ""}`}>{d.getDate()}</div>
                         </div>
                       )
                     })
@@ -1132,10 +1176,10 @@ export default function GanttPage() {
           {swimlanes.map((sw) => (
             <div key={sw.funnel.id}>
               <div className="gantt-group-row">
-                <div className="label">
+                <div className="label !normal-case !tracking-normal !text-sm !font-semibold">
                   <GitBranch size={13} style={{ color: "var(--af-muted-fg)" }} />
                   <span>{sw.funnel.name}</span>
-                  <span className="count">{sw.rows.length}</span>
+                  <Pill tone="slate" className="ml-1">{sw.rows.length}</Pill>
                 </div>
                 <div className="right" />
               </div>
@@ -1156,7 +1200,7 @@ export default function GanttPage() {
                       </span>
                     </div>
                     <div className="gantt-track" style={{ minHeight: 44, backgroundImage: trackBg }}>
-                      {todayLeft >= 0 && <div className="gantt-today-line" style={{ left: todayLeft + "%" }} />}
+                      {todayLeft >= 0 && <div className={`gantt-today-line ${TODAY_LINE}`} style={{ left: todayLeft + "%" }} />}
                       <div className="gantt-bar" style={{ left: left + "%", width: width + "%", background: color }} onClick={() => setEditing(bar.task)}>
                         <span className="bar-title">{bar.task.title}</span>
                       </div>
@@ -1194,18 +1238,25 @@ export default function GanttPage() {
   )
 }
 
+// Legenda no padrão do roadmap do Portal (texto normal, amostras pequenas); as cores das amostras
+// são as mesmas das barras do GanttChart.
 function GanttLegend() {
+  const item = "inline-flex items-center gap-1.5"
+  const sw = "h-2.5 w-5 shrink-0 rounded-sm"
   return (
-    <div className="gx-legend">
-      <span className="lg-title">SLA</span>
-      <span className="lg"><span className="sw" style={{ background: "#014898" }} />No prazo</span>
-      <span className="lg"><span className="sw" style={{ background: "#6AB42F" }} />Concluída</span>
-      <span className="lg"><span className="sw" style={{ background: "#E84E0F" }} />Em risco / atrasada</span>
-      <span className="lg"><span className="sw" style={{ background: "#E11D48" }} />⚡ Caminho crítico</span>
-      <span className="lg"><span className="sw" style={{ background: "#E84E0F" }} />⚠ Ausência do responsável</span>
-      <span className="lg"><span className="sw" style={{ background: "repeating-linear-gradient(45deg,#b6bcc6,#b6bcc6 3px,#cdd2da 3px,#cdd2da 6px)" }} />Linha de base</span>
-      <span className="dep">
-        <svg width="34" height="12">
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b px-4 py-3 text-xs text-muted-foreground">
+      <span className="font-medium text-foreground">SLA:</span>
+      <span className={item}><span className={sw} style={{ background: "#014898" }} aria-hidden />No prazo</span>
+      <span className={item}><span className={sw} style={{ background: "#6AB42F" }} aria-hidden />Concluída</span>
+      <span className={item}><span className={sw} style={{ background: "#E84E0F" }} aria-hidden />Em risco / atrasada</span>
+      <span className={item}><span className={sw} style={{ background: "#E11D48" }} aria-hidden />⚡ Caminho crítico</span>
+      <span className={item}><span className={sw} style={{ background: "#E84E0F" }} aria-hidden />⚠ Ausência do responsável</span>
+      <span className={item}><span className={sw} style={{ background: BASELINE_HATCH }} aria-hidden />Linha de base</span>
+      <span className={item}>
+        <span className="h-3 w-0 shrink-0 border-l-2 border-dashed border-blue-600 dark:border-sky-400" aria-hidden />Hoje
+      </span>
+      <span className={`${item} sm:ml-auto`}>
+        <svg width="34" height="12" aria-hidden>
           <path d="M2 6h22" stroke="#9aa3b0" strokeWidth="1.6" fill="none" />
           <path d="M24 2l5 4-5 4" stroke="#9aa3b0" strokeWidth="1.6" fill="none" strokeLinejoin="round" strokeLinecap="round" />
         </svg>
@@ -1345,38 +1396,32 @@ function GanttEditModal({
       <aside className="gx-panel" role="dialog" aria-label="Edição rápida">
         <div className="panel-head">
           <div className="row1">
-            <span className="ttl-eyebrow">Edição rápida</span>
+            <span className="ttl-eyebrow !normal-case !tracking-normal !text-sm !font-medium !text-muted-foreground">Edição rápida</span>
             <span style={{ flex: 1 }} />
             <button className="icon-btn" onClick={onClose}><X size={16} /></button>
           </div>
           <input className="gx-title" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
-          <div className="meta">
-            <span className="gx-badge" style={{ background: "var(--af-muted-2)", color: "var(--af-muted-fg)" }}>{statusName ?? "—"}</span>
+          <div className="meta flex-wrap">
+            <Pill tone="slate">{statusName ?? "—"}</Pill>
             {critical && (critical.is_critical ? (
-              <span className="gx-badge" style={{ background: "#fdece4", color: "var(--af-warning)" }} title="Está no caminho crítico (folga zero)">⚡ Caminho crítico</span>
+              <span title="Está no caminho crítico (folga zero)"><Pill tone="red">⚡ Caminho crítico</Pill></span>
             ) : (
-              <span className="gx-badge" style={{ background: "var(--af-muted-2)", color: "var(--af-muted-fg)" }} title="Folga total (pode atrasar sem impactar o término do projeto)">Folga {critical.total_float_hours}h</span>
+              <span title="Folga total (pode atrasar sem impactar o término do projeto)"><Pill tone="slate">Folga {critical.total_float_hours}h</Pill></span>
             ))}
             {liveAbsences.length > 0 && (() => {
               const approved = liveAbsences.some((a) => a.status === "aprovada")
               return (
                 <span
-                  className="gx-badge"
-                  style={{ background: "#fdece4", color: approved ? "var(--af-destructive)" : "var(--af-warning)" }}
                   title={liveAbsences.map((a) => `${a.type_name} (${a.status}): ${a.start_date} → ${a.end_date}${a.partial_hours != null ? " (parcial)" : ""}`).join("\n")}
                 >
-                  ⚠ {approved ? "Responsável ausente no período" : "Ausência pendente no período"}
+                  <Pill tone={approved ? "red" : "amber"}>⚠ {approved ? "Responsável ausente no período" : "Ausência pendente no período"}</Pill>
                 </span>
               )
             })()}
             {/* Sobrecarga do responsável: sinal sempre visível, mesmo com o painel fora da viewport. */}
             {capacitySummary?.overloaded && (
-              <span
-                className="gx-badge"
-                style={{ background: "#fdece4", color: "var(--af-destructive)" }}
-                title="A alocação desta tarefa estoura a capacidade do responsável no período — veja o detalhe em Responsável."
-              >
-                ⚠ Sobrecarga{capacitySummary.utilizationPct != null ? ` ${Math.round(capacitySummary.utilizationPct)}%` : ""}
+              <span title="A alocação desta tarefa estoura a capacidade do responsável no período — veja o detalhe em Responsável.">
+                <Pill tone="red">⚠ Sobrecarga{capacitySummary.utilizationPct != null ? ` ${Math.round(capacitySummary.utilizationPct)}%` : ""}</Pill>
               </span>
             )}
           </div>
@@ -1384,7 +1429,7 @@ function GanttEditModal({
 
         <div className="panel-body">
           <div className="field">
-            <label>Descrição</label>
+            <label className={PANEL_LABEL}>Descrição</label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
@@ -1405,11 +1450,11 @@ function GanttEditModal({
           </div>
           <div className="grid2">
             <div className="field">
-              <label>{isRoot ? "Início (data-base)" : "Início"}</label>
+              <label className={PANEL_LABEL}>{isRoot ? "Início (data-base)" : "Início"}</label>
               <div className="inp"><Calendar size={14} className="ic" /><input type="date" value={start} onChange={(e) => changeStart(e.target.value)} disabled={startDerived} /></div>
             </div>
             <div className="field">
-              <label>Vencimento</label>
+              <label className={PANEL_LABEL}>Vencimento</label>
               <div className="inp"><CalendarCheck size={14} className="ic" /><input type="date" value={due} onChange={(e) => setDue(e.target.value)} disabled={dueDerived} /></div>
             </div>
           </div>
@@ -1428,7 +1473,7 @@ function GanttEditModal({
 
           {!isRoot && (
             <div className="field">
-              <label>Horas estimadas</label>
+              <label className={PANEL_LABEL}>Horas estimadas</label>
               <div className="inp">
                 <Clock size={14} className="ic" />
                 <input type="number" min={0} step="0.5" value={hours} onChange={(e) => changeHours(e.target.value)} placeholder="ex.: 16" disabled={isAggregatedParent} />
@@ -1450,7 +1495,7 @@ function GanttEditModal({
           {/* Progresso: calculado automaticamente pela conclusão dos filhos (somente leitura). */}
           {!isRoot && (
             <div className="field">
-              <label>Progresso</label>
+              <label className={PANEL_LABEL}>Progresso</label>
               <div className="pbar" style={{ height: 8, borderRadius: 5, background: "var(--af-muted-2)", overflow: "hidden" }}>
                 <i style={{ display: "block", height: "100%", width: `${Math.max(0, Math.min(100, rolledProgress))}%`, background: "var(--af-success)" }} />
               </div>
@@ -1464,7 +1509,7 @@ function GanttEditModal({
           )}
 
           <div className="field">
-            <label>{isAggregatedParent ? "Responsáveis (das US)" : "Responsável"}</label>
+            <label className={PANEL_LABEL}>{isAggregatedParent ? "Responsáveis (das US)" : "Responsável"}</label>
             {isAggregatedParent ? (
               <>
                 <div className="owner-row" style={{ alignItems: "center" }}>
@@ -1516,7 +1561,7 @@ function GanttEditModal({
           </div>
 
           <div className="field">
-            <label>Predecessoras</label>
+            <label className={PANEL_LABEL}>Predecessoras</label>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {predDeps.length === 0 && (
                 <div className="hint" style={{ marginTop: 0 }}>Nenhuma dependência. Esta etapa pode iniciar livremente.</div>

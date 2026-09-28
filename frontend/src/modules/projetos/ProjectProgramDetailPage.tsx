@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useState } from "react"
-import { Link, useParams } from "react-router-dom"
-import { ArrowLeft, Layers, Loader2, Pencil, Plus, Trash2, Wand2 } from "lucide-react"
+import { Link, useParams, useSearchParams } from "react-router-dom"
+import { ArrowLeft, CalendarClock, Layers, ListTree, Loader2, Pencil, Plus, Trash2, Users, Wand2, Waypoints } from "lucide-react"
 
 import { projetosApi, type ProgramAdminDetail, type ProgramPillar } from "@/api/projetos"
+import {
+  Card, DetailHeader, DetailTabs, IconTile, KpiCount, KpiPerson, KpiRow, KpiText, Pill, SectionCard, TABLE,
+  type MenuAction, type TabDef,
+} from "@/components/ds"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -14,7 +18,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "@/lib/toast"
 import { useAuth } from "@/contexts/AuthContext"
 import { hasPermission } from "@/lib/permissions"
-import { IconTile } from "@/modules/portal/portfolioUi"
 import { ProgramAppearanceFields } from "@/modules/projetos/ProgramAppearanceFields"
 import { ProjectClientsSection } from "@/modules/projetos/ProjectClientsSection"
 import { colorFor } from "@/modules/portal/portfolioMeta"
@@ -29,11 +32,18 @@ function apiError(err: unknown, fallback: string): string {
 type PillarForm = { name: string; description: string; icon: string | null; color: string | null }
 const emptyPillar = (): PillarForm => ({ name: "", description: "", icon: null, color: null })
 
+// Abas da tela (mesmo layout do programa no Portal); a aba fica na URL (?aba=).
+type Tab = "pilares" | "projetos" | "clientes"
+const TAB_VALUES: Tab[] = ["pilares", "projetos", "clientes"]
+
 /** Gestão do programa para o Portal do Cliente: pilares, pilar de cada projeto e clientes. */
 export default function ProjectProgramDetailPage() {
   const { programId } = useParams<{ programId: string }>()
   const { user } = useAuth()
   const canManage = hasPermission(user?.permissions, "projetos.program.manage")
+  const [params, setParams] = useSearchParams()
+  const tab = (TAB_VALUES.includes(params.get("aba") as Tab) ? params.get("aba") : "pilares") as Tab
+  const setTab = (v: Tab) => setParams((prev) => { const n = new URLSearchParams(prev); n.set("aba", v); return n }, { replace: true })
   const [data, setData] = useState<ProgramAdminDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -130,123 +140,163 @@ export default function ProjectProgramDetailPage() {
   )
 
   if (loading) {
-    return <div className="space-y-4 p-1">{back}<Skeleton className="h-64 rounded-lg" /></div>
+    return (
+      <div className="w-full space-y-5 p-1">
+        <Skeleton className="h-20 w-2/3 rounded-xl" />
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          {Array.from({ length: 5 }, (_, i) => <Skeleton key={i} className="h-[74px] rounded-xl" />)}
+        </div>
+        <Skeleton className="h-96 rounded-2xl" />
+      </div>
+    )
   }
   if (!data || !canManage) {
     return (
-      <div className="space-y-4 p-1">
+      <div className="w-full space-y-4 p-1">
         {back}
-        <EmptyState icon={Layers} title="Programa indisponível" description={error ?? "Só quem gerencia o catálogo de Programas acessa esta tela."} />
+        <Card>
+          <EmptyState icon={Layers} title="Programa indisponível" description={error ?? "Só quem gerencia o catálogo de Programas acessa esta tela."} />
+        </Card>
       </div>
     )
   }
 
   const prog = data.program
+  const tabs: TabDef<Tab>[] = [
+    { value: "pilares", label: `Pilares (${data.pillars.length})`, icon: Waypoints },
+    { value: "projetos", label: `Projetos do programa (${data.projects.length})`, icon: ListTree },
+    { value: "clientes", label: "Clientes", icon: Users },
+  ]
+  const actions: MenuAction[] = [
+    { label: "Novo pilar", icon: Plus, onClick: () => { setTab("pilares"); openNew() } },
+    ...(unassigned > 0 && !suggesting ? [{ label: "Sugerir pela Área", icon: Wand2, onClick: () => void suggest() }] : []),
+  ]
+
   return (
     <div className="w-full space-y-5 p-1">
-      {back}
-      <div className="flex flex-wrap items-center gap-3">
-        <IconTile icon={prog.icon} color={colorFor(prog.color, prog.id)} size={44} />
-        <div className="min-w-0">
-          <h1 className="text-xl font-bold">{prog.name}</h1>
-          <p className="text-sm text-muted-foreground">
-            Como o programa aparece no Portal do Cliente: pilares, projetos e quem acompanha.
-            Responsável: {prog.responsavel_nome ?? "—"} · Operação Assistida prevista: {prog.oa_days} dias.
-          </p>
-        </div>
-      </div>
+      <DetailHeader
+        crumbs={[{ label: "Programa", to: "/app/modules/projetos/programas" }, { label: prog.name }]}
+        icon={prog.icon}
+        color={colorFor(prog.color, prog.id)}
+        title={prog.name}
+        badge={<Pill tone={prog.is_active ? "emerald" : "slate"} dot>{prog.is_active ? "Ativo" : "Inativo"}</Pill>}
+        description="Como o programa aparece no Portal do Cliente: pilares, projetos e quem acompanha."
+        updatedAt={prog.updated_at ?? null}
+        actions={actions}
+      />
 
-      <section className="space-y-3 rounded-lg border p-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 className="font-semibold">Pilares</h2>
-            <p className="text-sm text-muted-foreground">Agrupam os projetos do programa na visão por pilares e no roadmap do Portal.</p>
-          </div>
-          <div className="flex gap-2">
-            {unassigned > 0 && (
-              <Button variant="outline" className="gap-1.5" onClick={() => void suggest()} disabled={suggesting}>
-                {suggesting ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />} Sugerir pela Área
-              </Button>
-            )}
-            <Button className="gap-1.5" onClick={openNew}><Plus size={15} /> Novo pilar</Button>
-          </div>
-        </div>
-        {data.pillars.length === 0 ? (
-          <p className="rounded-md bg-muted/50 px-3 py-4 text-sm text-muted-foreground">
-            Nenhum pilar ainda. Crie os pilares (ex.: Financeiro, Suprimentos) ou use "Sugerir pela Área" como ponto de partida.
-          </p>
-        ) : (
-          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-            {data.pillars.map((p) => (
-              <div key={p.id} className="flex items-start gap-3 rounded-md border p-3">
-                <IconTile icon={p.icon} color={colorFor(p.color, p.id)} size={36} />
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium">{p.name}</p>
-                  <p className="line-clamp-2 text-xs text-muted-foreground">{p.description || "Sem descrição"}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">{p.project_count} projeto(s)</p>
+      <KpiRow className="sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <KpiCount icon={Waypoints} value={data.pillars.length} label="Pilares" onClick={() => setTab("pilares")} active={tab === "pilares"} />
+        <KpiCount icon={Layers} value={data.projects.length} label="Projetos do programa" onClick={() => setTab("projetos")} active={tab === "projetos"} />
+        <KpiCount
+          icon={ListTree} value={unassigned} label="Projetos sem pilar" tone={unassigned > 0 ? "amber" : "slate"}
+          highlight={unassigned > 0} onClick={() => setTab("projetos")}
+        />
+        <KpiPerson name={prog.responsavel_nome} role="Responsável (PO)" />
+        <KpiText icon={CalendarClock} value={`${prog.oa_days} dias`} label="Operação Assistida prevista" tone="slate" />
+      </KpiRow>
+
+      <DetailTabs tabs={tabs} value={tab} onChange={setTab} />
+
+      {tab === "pilares" && (
+        <SectionCard
+          title="Pilares"
+          icon={Waypoints}
+          subtitle="Agrupam os projetos do programa na visão por pilares e no roadmap do Portal."
+          right={
+            <div className="flex flex-wrap gap-2">
+              {unassigned > 0 && (
+                <Button variant="outline" className="h-9 gap-1.5" onClick={() => void suggest()} disabled={suggesting}>
+                  {suggesting ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />} Sugerir pela Área
+                </Button>
+              )}
+              <Button className="h-9 gap-1.5" onClick={openNew}><Plus size={15} /> Novo pilar</Button>
+            </div>
+          }
+        >
+          {data.pillars.length === 0 ? (
+            <p className="rounded-xl bg-muted/50 px-4 py-5 text-sm text-muted-foreground">
+              Nenhum pilar ainda. Crie os pilares (ex.: Financeiro, Suprimentos) ou use "Sugerir pela Área" como ponto de partida.
+            </p>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {data.pillars.map((p) => (
+                <div key={p.id} className="flex items-start gap-3 rounded-xl border bg-card p-4 shadow-sm">
+                  <IconTile icon={p.icon} color={colorFor(p.color, p.id)} size={40} />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold">{p.name}</p>
+                    <p className="line-clamp-2 text-sm text-muted-foreground">{p.description || "Sem descrição"}</p>
+                    <Pill tone={p.project_count > 0 ? "blue" : "slate"} className="mt-2">{p.project_count} projeto(s)</Pill>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={() => openEdit(p)} aria-label={`Editar ${p.name}`} title="Editar pilar">
+                      <Pencil size={14} />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={() => void removePillar(p)} aria-label={`Excluir ${p.name}`} title="Excluir pilar">
+                      <Trash2 size={14} />
+                    </Button>
+                  </div>
                 </div>
-                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={() => openEdit(p)} aria-label={`Editar ${p.name}`}>
-                  <Pencil size={14} />
-                </Button>
-                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={() => void removePillar(p)} aria-label={`Excluir ${p.name}`}>
-                  <Trash2 size={14} />
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+              ))}
+            </div>
+          )}
+        </SectionCard>
+      )}
 
-      <section className="space-y-3 rounded-lg border p-4">
-        <div>
-          <h2 className="font-semibold">Projetos do programa ({data.projects.length})</h2>
-          <p className="text-sm text-muted-foreground">
-            Cards vinculados ao programa. Escolha o pilar de cada um{unassigned ? ` — ${unassigned} sem pilar` : ""}.
-          </p>
-        </div>
-        {data.projects.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nenhum card vinculado a este programa.</p>
-        ) : (
-          <div className="overflow-x-auto rounded-md border">
-            <table className="w-full min-w-[760px] text-sm">
-              <thead className="bg-muted/50 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-                <tr>
-                  <th className="px-3 py-2 font-semibold">Projeto</th>
-                  <th className="px-3 py-2 font-semibold">Etapa</th>
-                  <th className="px-3 py-2 font-semibold">Área</th>
-                  <th className="px-3 py-2 font-semibold">PO</th>
-                  <th className="w-56 px-3 py-2 font-semibold">Pilar</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.projects.map((t) => (
-                  <tr key={t.task_id} className="border-t">
-                    <td className="max-w-[360px] truncate px-3 py-2 font-medium" title={t.title}>{t.title}</td>
-                    <td className="px-3 py-2 text-muted-foreground">{t.stage_name ?? "—"}</td>
-                    <td className="px-3 py-2 text-muted-foreground">{t.area_label ?? "—"}</td>
-                    <td className="px-3 py-2 text-muted-foreground">{t.po_name ?? "—"}</td>
-                    <td className="px-3 py-1.5">
-                      <Select value={t.pillar_id ?? NONE} onValueChange={(v) => void setPillar(t.task_id, v)} disabled={busyTask === t.task_id}>
-                        <SelectTrigger className="h-8 text-xs">
-                          <SelectValue>{t.pillar_id ? pillarName.get(t.pillar_id) ?? "—" : "Sem pilar"}</SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={NONE}>Sem pilar</SelectItem>
-                          {data.pillars.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </td>
+      {tab === "projetos" && (
+        <SectionCard
+          flush
+          title={`Projetos do programa (${data.projects.length})`}
+          icon={ListTree}
+          subtitle={`Cards vinculados ao programa. Escolha o pilar de cada um${unassigned ? ` — ${unassigned} sem pilar` : ""}.`}
+          right={unassigned > 0 ? <Pill tone="amber" dot>{unassigned} sem pilar</Pill> : undefined}
+        >
+          {data.projects.length === 0 ? (
+            <EmptyState icon={Layers} title="Nenhum card vinculado a este programa" compact />
+          ) : (
+            <div className={TABLE.wrap}>
+              <table className={`${TABLE.table} min-w-[760px]`}>
+                <thead className={TABLE.thead}>
+                  <tr>
+                    <th className={TABLE.thFirst}>Projeto</th>
+                    <th className={TABLE.th}>Etapa</th>
+                    <th className={TABLE.th}>Área</th>
+                    <th className={TABLE.th}>PO</th>
+                    <th className={`${TABLE.th} w-56`}>Pilar</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+                </thead>
+                <tbody>
+                  {data.projects.map((t) => (
+                    <tr key={t.task_id} className={TABLE.tr}>
+                      <td className={`${TABLE.tdFirst} max-w-[360px] truncate font-semibold`} title={t.title}>{t.title}</td>
+                      <td className={TABLE.td}>{t.stage_name ? <Pill>{t.stage_name}</Pill> : <span className="text-muted-foreground">—</span>}</td>
+                      <td className={`${TABLE.td} text-muted-foreground`}>{t.area_label ?? "—"}</td>
+                      <td className={`${TABLE.td} whitespace-nowrap text-muted-foreground`}>{t.po_name ?? "—"}</td>
+                      <td className={`${TABLE.td} py-2`}>
+                        <Select value={t.pillar_id ?? NONE} onValueChange={(v) => void setPillar(t.task_id, v)} disabled={busyTask === t.task_id}>
+                          <SelectTrigger className={`h-9 bg-background ${t.pillar_id ? "" : "text-muted-foreground"}`}>
+                            <SelectValue>{t.pillar_id ? pillarName.get(t.pillar_id) ?? "—" : "Sem pilar"}</SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={NONE}>Sem pilar</SelectItem>
+                            {data.pillars.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </SectionCard>
+      )}
 
-      <section className="rounded-lg border p-4">
-        {programId && <ProjectClientsSection programId={programId} />}
-      </section>
+      {tab === "clientes" && (
+        <Card className="p-5">
+          {programId && <ProjectClientsSection programId={programId} />}
+        </Card>
+      )}
 
       <Dialog open={!!dialog} onOpenChange={(o) => !o && setDialog(null)}>
         <DialogContent className="max-h-[90vh] overflow-y-auto">

@@ -1,7 +1,8 @@
-import { LayoutGrid, BarChart3, FileText, Users, PackageCheck, Gauge } from "lucide-react"
+import { useState } from "react"
+import { LayoutGrid, BarChart3, FileText, Users, PackageCheck, Gauge, LayoutDashboard } from "lucide-react"
 
 import { useAuth } from "@/contexts/AuthContext"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { DetailTabs, PageHeader, type TabDef } from "@/components/ds"
 import PODashboardPage from "@/modules/projetos/PODashboardPage"
 import PoSyncPage from "@/modules/projetos/PoSyncPage"
 import ReportsPage from "@/modules/projetos/ReportsPage"
@@ -21,61 +22,37 @@ export default function PMODashboardPage({ initialTab = "portfolio" }: { initial
   const canViewPerformance =
     !!user &&
     (!!user.permissions?.includes("*") || !!user.permissions?.includes("projetos.performance.view"))
+  // Aba inicial vem da rota (mesmo comportamento do antigo `defaultValue`); a troca de aba não mexe na URL.
+  const [tab, setTab] = useState<PmoTab>(initialTab)
+
+  const tabs: TabDef<PmoTab>[] = [
+    { value: "portfolio", label: "Portfólio", icon: LayoutGrid },
+    ...(canViewPerformance ? [{ value: "desempenho" as const, label: "Desempenho", icon: Gauge }] : []),
+    { value: "po-sync", label: "PO Sync", icon: Users },
+    { value: "status-reports", label: "Status Reports", icon: FileText },
+    { value: "relatorios", label: "Relatórios", icon: BarChart3 },
+    { value: "entregas-us", label: "Entregas", icon: PackageCheck },
+  ]
 
   return (
-    <div className="w-full space-y-4">
+    <div className="w-full space-y-5">
+      <PageHeader
+        icon={LayoutDashboard}
+        color="#2563EB"
+        title="PMO"
+        description="Portfólio de todos os POs e relatórios do board num só lugar — priorize, repriorize e acompanhe entregas."
+      />
+
+      <DetailTabs tabs={tabs} value={tab} onChange={setTab} />
+
       <div>
-        <h2 className="text-lg font-bold">PMO</h2>
-        <p className="text-sm text-muted-foreground">
-          Portfólio de todos os POs e relatórios do board num só lugar — priorize, repriorize e acompanhe entregas.
-        </p>
+        {tab === "portfolio" && <PODashboardPage />}
+        {canViewPerformance && tab === "desempenho" && <TeamPerformancePage />}
+        {tab === "po-sync" && <PoSyncPage />}
+        {tab === "relatorios" && <ReportsPage />}
+        {tab === "entregas-us" && <UsDeliveryReportPage />}
+        {tab === "status-reports" && <StatusReportsPage />}
       </div>
-
-      <Tabs defaultValue={initialTab}>
-        <TabsList className="h-auto w-full flex-wrap justify-start gap-1">
-          <TabsTrigger value="portfolio" className="gap-1.5">
-            <LayoutGrid className="h-4 w-4" /> Portfólio
-          </TabsTrigger>
-          {canViewPerformance && (
-            <TabsTrigger value="desempenho" className="gap-1.5">
-              <Gauge className="h-4 w-4" /> Desempenho
-            </TabsTrigger>
-          )}
-          <TabsTrigger value="po-sync" className="gap-1.5">
-            <Users className="h-4 w-4" /> PO Sync
-          </TabsTrigger>
-          <TabsTrigger value="status-reports" className="gap-1.5">
-            <FileText className="h-4 w-4" /> Status Reports
-          </TabsTrigger>
-          <TabsTrigger value="relatorios" className="gap-1.5">
-            <BarChart3 className="h-4 w-4" /> Relatórios
-          </TabsTrigger>
-          <TabsTrigger value="entregas-us" className="gap-1.5">
-            <PackageCheck className="h-4 w-4" /> Entregas
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="portfolio" className="mt-4">
-          <PODashboardPage />
-        </TabsContent>
-        {canViewPerformance && (
-          <TabsContent value="desempenho" className="mt-4">
-            <TeamPerformancePage />
-          </TabsContent>
-        )}
-        <TabsContent value="po-sync" className="mt-4">
-          <PoSyncPage />
-        </TabsContent>
-        <TabsContent value="relatorios" className="mt-4">
-          <ReportsPage />
-        </TabsContent>
-        <TabsContent value="entregas-us" className="mt-4">
-          <UsDeliveryReportPage />
-        </TabsContent>
-        <TabsContent value="status-reports" className="mt-4">
-          <StatusReportsPage />
-        </TabsContent>
-      </Tabs>
     </div>
   )
 }

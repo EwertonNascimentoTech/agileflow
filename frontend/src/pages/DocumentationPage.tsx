@@ -1,13 +1,20 @@
 import { useEffect, useMemo, useState } from "react"
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom"
-import { BookOpen, FileCode2, FileText, Loader2 } from "lucide-react"
+import { AlertTriangle, BookOpen, FileCode2, FileText, GitBranch, Loader2, Wrench, type LucideIcon } from "lucide-react"
 import { docsApi, type DocsDocument, type DocsFileMeta, type DocsSection } from "@/api/docs"
 import { MarkdownPreview } from "@/components/MarkdownPreview"
 import { BpmnViewer } from "@/components/BpmnViewer"
-import { Button } from "@/components/ui/button"
+import { Card, Notice, PageHeader, Pill } from "@/components/ds"
 import { cn } from "@/lib/utils"
 
 const SECTION_ORDER = ["usuario", "processo", "tecnico"] as const
+
+// Mesmos ícones das secções na sidebar do módulo (moduleNavConfig).
+const SECTION_ICON: Record<string, LucideIcon> = {
+  usuario: BookOpen,
+  processo: GitBranch,
+  tecnico: Wrench,
+}
 
 function normalizeSection(raw: string | undefined | null): string {
   const v = (raw ?? "").trim().toLowerCase()
@@ -105,97 +112,109 @@ export default function DocumentationPage() {
     })
   }
 
+  const sectionList: DocsSection[] = loadingSections
+    ? SECTION_ORDER.map(
+        (slug): DocsSection => ({
+          slug,
+          folder: slug,
+          title: slug === "tecnico" ? "Técnico" : slug === "usuario" ? "Utilizador" : "Processo",
+          description: "",
+          file_count: 0,
+          available: true,
+        }),
+      )
+    : sections
+  const currentSection = sections.find((s) => s.slug === activeSection)
+
   return (
-    <div className="mx-auto flex h-full min-h-[calc(100vh-8rem)] max-w-7xl flex-col gap-4">
-      {!inModuleShell && (
-        <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <BookOpen size={20} />
-          </div>
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">Documentação</h1>
-            <p className="text-sm text-muted-foreground">
-              Guias de utilizador, processo de negócio e referência técnica.
-            </p>
-          </div>
-        </div>
-      )}
+    <div className="mx-auto flex h-full min-h-[calc(100vh-8rem)] max-w-7xl flex-col gap-5">
+      <PageHeader
+        icon={BookOpen}
+        color="#0D9488"
+        title="Documentação"
+        description="Guias de utilizador, processo de negócio e referência técnica."
+      >
+        {/* No módulo as secções ficam na sidebar: aqui só o selo da secção aberta. */}
+        {inModuleShell && currentSection && <Pill tone="teal">{currentSection.title}</Pill>}
+      </PageHeader>
 
-      {error && (
-        <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-          {error}
-        </div>
-      )}
+      {error && <Notice tone="red" icon={AlertTriangle}>{error}</Notice>}
 
       {!inModuleShell && (
-        <div className="flex flex-wrap gap-2">
-          {(loadingSections
-            ? SECTION_ORDER.map(
-                (slug): DocsSection => ({
-                  slug,
-                  folder: slug,
-                  title: slug === "tecnico" ? "Técnico" : slug === "usuario" ? "Utilizador" : "Processo",
-                  description: "",
-                  file_count: 0,
-                  available: true,
-                }),
+        <div className="border-b print:hidden">
+          <div className="-mb-px flex overflow-x-auto" role="tablist" aria-label="Secções">
+            {sectionList.map((s) => {
+              const Icon = SECTION_ICON[s.slug] ?? FileText
+              const active = activeSection === s.slug
+              return (
+                <button
+                  key={s.slug}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  disabled={!s.available}
+                  onClick={() => selectSection(s.slug)}
+                  className={cn(
+                    "inline-flex items-center gap-2 whitespace-nowrap border-b-2 px-4 py-3 text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50",
+                    active
+                      ? "border-primary text-primary"
+                      : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
+                  )}
+                >
+                  <Icon size={16} /> {s.title}
+                </button>
               )
-            : sections
-          ).map((s) => (
-            <Button
-              key={s.slug}
-              type="button"
-              variant={activeSection === s.slug ? "default" : "outline"}
-              size="sm"
-              disabled={!s.available}
-              onClick={() => selectSection(s.slug)}
-            >
-              {s.title}
-            </Button>
-          ))}
+            })}
+          </div>
         </div>
       )}
 
-      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[240px_1fr]">
-        <aside className="rounded-lg border bg-card p-2">
-          <p className="px-2 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            Documentos
-          </p>
-          {loadingFiles ? (
-            <div className="flex items-center gap-2 px-2 py-4 text-sm text-muted-foreground">
-              <Loader2 size={14} className="animate-spin" /> A carregar…
-            </div>
-          ) : files.length === 0 ? (
-            <p className="px-2 py-4 text-sm text-muted-foreground">Nenhum ficheiro nesta secção.</p>
-          ) : (
-            <ul className="space-y-0.5">
-              {files.map((f) => {
-                const active = f.name === fileParam
-                const Icon = f.format === "md" ? FileText : FileCode2
-                return (
-                  <li key={f.name}>
-                    <button
-                      type="button"
-                      onClick={() => selectFile(f.name)}
-                      className={cn(
-                        "flex w-full items-start gap-2 rounded-md px-2 py-2 text-left text-sm transition",
-                        active ? "bg-primary/10 text-primary" : "hover:bg-muted text-foreground",
-                      )}
-                    >
-                      <Icon size={15} className="mt-0.5 shrink-0 opacity-70" />
-                      <span className="min-w-0">
-                        <span className="block truncate font-medium leading-tight">{f.title}</span>
-                        <span className="block truncate text-[11px] text-muted-foreground">{f.name}</span>
-                      </span>
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
+      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[260px_1fr]">
+        <aside className="rounded-2xl border bg-card shadow-sm">
+          <div className="flex items-center justify-between gap-2 border-b px-4 py-3">
+            <h2 className="text-sm font-semibold">Documentos</h2>
+            {!loadingFiles && files.length > 0 && (
+              <span className="text-xs tabular-nums text-muted-foreground">{files.length}</span>
+            )}
+          </div>
+          <div className="p-2">
+            {loadingFiles ? (
+              <div className="flex items-center gap-2 px-2 py-4 text-sm text-muted-foreground">
+                <Loader2 size={14} className="animate-spin" /> A carregar…
+              </div>
+            ) : files.length === 0 ? (
+              <p className="px-2 py-4 text-sm text-muted-foreground">Nenhum ficheiro nesta secção.</p>
+            ) : (
+              <ul className="space-y-0.5">
+                {files.map((f) => {
+                  const active = f.name === fileParam
+                  const Icon = f.format === "md" ? FileText : FileCode2
+                  return (
+                    <li key={f.name}>
+                      <button
+                        type="button"
+                        onClick={() => selectFile(f.name)}
+                        aria-current={active ? "page" : undefined}
+                        className={cn(
+                          "flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors",
+                          active ? "bg-primary/10 text-primary" : "hover:bg-muted text-foreground",
+                        )}
+                      >
+                        <Icon size={15} className="mt-0.5 shrink-0 opacity-70" />
+                        <span className="min-w-0">
+                          <span className="block truncate font-medium leading-tight">{f.title}</span>
+                          <span className="block truncate text-xs text-muted-foreground">{f.name}</span>
+                        </span>
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
         </aside>
 
-        <section className="min-w-0 rounded-lg border bg-card">
+        <Card className="min-w-0">
           {loadingDoc ? (
             <div className="flex items-center gap-2 p-8 text-sm text-muted-foreground">
               <Loader2 size={16} className="animate-spin" /> A renderizar documento…
@@ -203,28 +222,28 @@ export default function DocumentationPage() {
           ) : !doc ? (
             <div className="p-8 text-sm text-muted-foreground">Selecione um documento.</div>
           ) : (
-            <div className="p-4 md:p-6">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b pb-3">
-                <div>
+            <>
+              <div className="flex flex-wrap items-start justify-between gap-3 border-b px-5 py-4 md:px-6">
+                <div className="min-w-0">
                   <h2 className="text-lg font-semibold">{doc.title}</h2>
                   <p className="text-xs text-muted-foreground">{doc.name}</p>
                 </div>
-                <span className="rounded-full border px-2 py-0.5 text-[11px] uppercase text-muted-foreground">
-                  {doc.format}
-                </span>
+                <Pill tone="teal">{doc.format.toUpperCase()}</Pill>
               </div>
-              {doc.format === "md" ? (
-                <MarkdownPreview content={doc.content} />
-              ) : doc.format === "xml" && isBpmnXml(doc.content) ? (
-                <BpmnViewer xml={doc.content} />
-              ) : (
-                <pre className="overflow-x-auto rounded-lg border bg-muted/50 p-4 font-mono text-[12px] leading-relaxed whitespace-pre-wrap">
-                  {doc.content}
-                </pre>
-              )}
-            </div>
+              <div className="p-5 md:p-6">
+                {doc.format === "md" ? (
+                  <MarkdownPreview content={doc.content} />
+                ) : doc.format === "xml" && isBpmnXml(doc.content) ? (
+                  <BpmnViewer xml={doc.content} />
+                ) : (
+                  <pre className="overflow-x-auto rounded-lg border bg-muted/50 p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap">
+                    {doc.content}
+                  </pre>
+                )}
+              </div>
+            </>
           )}
-        </section>
+        </Card>
       </div>
     </div>
   )

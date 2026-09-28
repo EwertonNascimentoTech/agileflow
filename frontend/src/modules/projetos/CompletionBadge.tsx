@@ -1,6 +1,7 @@
 import { CheckCircle2, Loader2 } from "lucide-react"
 
 import type { PendingStage } from "@/api/projetos"
+import { Pill } from "@/components/ds"
 
 /**
  * Conclusão por ETAPA FINAL (não pelo %). Um projeto só é "Concluído" quando todos os
@@ -48,23 +49,21 @@ export function CompletionBadge({
 
   if (isFinalized) {
     return (
-      <span className={`inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 ${className}`}>
+      <Pill tone="emerald" className={className}>
         <CheckCircle2 className="h-3 w-3" /> Concluído
-      </span>
+      </Pill>
     )
   }
 
   const mismatch = pending > 0 && progressPct >= 100
   return (
     <span className={`group/cb relative inline-flex ${className}`}>
-      <span
-        className={`inline-flex cursor-default items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${mismatch ? "bg-amber-100 text-amber-700" : "bg-muted text-muted-foreground"}`}
-      >
+      <Pill tone={mismatch ? "amber" : "slate"} className="cursor-default">
         <Loader2 className="h-3 w-3" /> Em andamento
         {mismatch && <span className="font-normal">· faltam {pending} em etapa final</span>}
-      </span>
+      </Pill>
       {pendingStages.length > 0 && (
-        <span className="pointer-events-none absolute left-0 top-full z-50 mt-1 hidden w-max max-w-xs flex-col gap-1 rounded-md border bg-popover p-2 text-left text-[11px] shadow-md group-hover/cb:flex">
+        <span className="pointer-events-none absolute left-0 top-full z-50 mt-1 hidden w-max max-w-xs flex-col gap-1 rounded-lg border bg-popover p-2 text-left text-xs text-popover-foreground shadow-md group-hover/cb:flex">
           <span className="font-semibold text-foreground">Kanbans em aberto</span>
           {pendingStages.slice(0, 12).map((s, i) => (
             <span key={i} className="text-muted-foreground">

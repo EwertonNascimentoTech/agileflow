@@ -2,6 +2,7 @@ import { useState } from "react"
 import { Plus, X } from "lucide-react"
 
 import { clientesApi, PROJECT_CLIENT_ROLE_LABEL, type ProjectClientRole } from "@/api/clientes"
+import { Pill } from "@/components/ds"
 import { Button } from "@/components/ui/button"
 import { ClientPicker, clientRoleLabel, type PickedClient } from "@/modules/projetos/ClientPicker"
 
@@ -45,16 +46,16 @@ export function ClientsFieldInput({
       {list.length > 0 && (
         <div className="space-y-1.5">
           {list.map((c) => (
-            <div key={c.email} className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5 text-xs">
+            <div key={c.email} className="flex items-center gap-2 rounded-lg border bg-background px-2.5 py-1.5 text-xs">
               <div className="min-w-0 flex-1">
                 <p className="truncate font-medium">{c.full_name || c.email}</p>
                 <p className="truncate text-[11px] text-muted-foreground">
                   {[c.email, c.department, c.job_title].filter(Boolean).join(" · ")}
                 </p>
               </div>
-              <span className="shrink-0 rounded bg-sky-100 px-1.5 py-0.5 text-[11px] font-medium text-sky-800 dark:bg-sky-900 dark:text-sky-200">
+              <Pill tone="blue" className="shrink-0">
                 {clientRoleLabel(c.project_role, c.project_role_other)}
-              </span>
+              </Pill>
               {!disabled && (
                 <Button
                   type="button" variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive"

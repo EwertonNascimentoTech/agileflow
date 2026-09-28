@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useState } from "react"
-import { Check, Pencil, Plus, Trash2, X } from "lucide-react"
+import { Check, Columns3, FolderKanban, GitBranch, GripVertical, Pencil, Plus, Settings2, Trash2, X } from "lucide-react"
 
 import { projetosApi, type Project, type ProjectFunnel, type ProjectStatus } from "@/api/projetos"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Badge } from "@/components/ui/badge"
+import { Card, PageHeader, Pill, SectionCard } from "@/components/ds"
 
 export default function ProjectConfigPage() {
   const [projects, setProjects] = useState<Project[]>([])
@@ -240,42 +239,51 @@ export default function ProjectConfigPage() {
     setDraggingStatusId(null)
   }
 
+  const header = (
+    <PageHeader
+      icon={Settings2}
+      color="#2563EB"
+      crumbs={[{ label: "Configurações", to: "/app/modules/projetos/config" }, { label: "Processos" }]}
+      title="Configurações de Processos"
+      description="Cadastre múltiplos funis e organize as colunas de cada funil."
+    />
+  )
+
   if (loading) {
     return (
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Skeleton className="h-48 rounded-lg" />
-        <Skeleton className="h-48 rounded-lg" />
+      <div className="space-y-5">
+        {header}
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Skeleton className="h-48 rounded-2xl" />
+          <Skeleton className="h-48 rounded-2xl" />
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold">Configurações de Processos</h1>
-        <p className="text-sm text-muted-foreground">Cadastre múltiplos funis e organize as colunas de cada funil.</p>
-      </div>
+    <div className="space-y-5">
+      {header}
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-1">
-          <CardHeader>
-            <CardTitle>Processos (CRUD)</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="space-y-2 rounded-md border p-3">
+      <div className="grid items-start gap-4 lg:grid-cols-3">
+        <SectionCard title="Processos (CRUD)" icon={FolderKanban} className="lg:col-span-1">
+          <div className="space-y-4">
+            <div className="space-y-2 rounded-xl border bg-muted/40 p-3">
               <Label>Novo processo</Label>
               <Input
                 placeholder="Nome do processo"
                 value={newProcessName}
                 onChange={(e) => setNewProcessName(e.target.value)}
+                className="h-10 bg-background"
               />
               <Input
                 placeholder="Descrição (opcional)"
                 value={newProcessDescription}
                 onChange={(e) => setNewProcessDescription(e.target.value)}
+                className="h-10 bg-background"
               />
-              <Button type="button" onClick={handleCreateProcess}>
-                <Plus size={14} className="mr-1" />
+              <Button type="button" className="h-10 gap-1.5" onClick={handleCreateProcess}>
+                <Plus size={15} />
                 Criar processo
               </Button>
             </div>
@@ -285,7 +293,12 @@ export default function ProjectConfigPage() {
                 <p className="text-sm text-muted-foreground">Sem processos cadastrados.</p>
               )}
               {projects.map((project) => (
-                <div key={project.id} className="rounded-md border p-2">
+                <div
+                  key={project.id}
+                  className={`rounded-xl border p-3 transition-colors ${
+                    selectedProjectId === project.id ? "border-primary ring-1 ring-primary/30" : "hover:bg-muted/40"
+                  }`}
+                >
                   {editingProcessId === project.id ? (
                     <div className="space-y-2">
                       <Input value={processDraftName} onChange={(e) => setProcessDraftName(e.target.value)} />
@@ -313,11 +326,11 @@ export default function ProjectConfigPage() {
                           <p className="truncate text-xs text-muted-foreground">{project.description}</p>
                         )}
                       </button>
-                      <div className="flex items-center gap-1">
+                      <div className="flex shrink-0 items-center gap-1">
                         <Button type="button" variant="ghost" size="icon" onClick={() => beginEditProcess(project)}>
                           <Pencil size={14} />
                         </Button>
-                        <Button type="button" variant="ghost" size="icon" onClick={() => void handleDeleteProcess(project.id)}>
+                        <Button type="button" variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" onClick={() => void handleDeleteProcess(project.id)}>
                           <Trash2 size={14} />
                         </Button>
                       </div>
@@ -326,14 +339,14 @@ export default function ProjectConfigPage() {
                 </div>
               ))}
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </SectionCard>
 
         <div className="space-y-4 lg:col-span-2">
-          <div className="max-w-sm">
-            <Label>Processo</Label>
+          <label className="block max-w-sm space-y-1">
+            <span className="text-xs text-muted-foreground">Processo</span>
             <Select value={selectedProjectId} onValueChange={setSelectedProjectId}>
-              <SelectTrigger>
+              <SelectTrigger className="h-10 bg-background">
                 <SelectValue placeholder="Selecione um processo" />
               </SelectTrigger>
               <SelectContent>
@@ -342,26 +355,21 @@ export default function ProjectConfigPage() {
                 ))}
               </SelectContent>
             </Select>
-          </div>
+          </label>
 
           {!selectedProjectId ? (
-            <Card>
-              <CardContent className="py-8">
-                <p className="text-sm text-muted-foreground">Selecione ou crie um processo para gerenciar funis e colunas.</p>
-              </CardContent>
+            <Card className="px-5 py-8">
+              <p className="text-sm text-muted-foreground">Selecione ou crie um processo para gerenciar funis e colunas.</p>
             </Card>
           ) : (
-            <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Funis</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
+            <div className="grid items-start gap-4 lg:grid-cols-2">
+        <SectionCard title="Funis" icon={GitBranch} subtitle="Arraste para reordenar.">
+          <div className="space-y-3">
             <div className="flex gap-2">
-              <Input placeholder="Nome do funil" value={newFunnelName} onChange={(e) => setNewFunnelName(e.target.value)} />
-              <Input className="w-20" type="color" value={newFunnelColor} onChange={(e) => setNewFunnelColor(e.target.value)} />
-              <Button type="button" onClick={handleCreateFunnel}>
-                <Plus size={14} className="mr-1" />
+              <Input placeholder="Nome do funil" value={newFunnelName} onChange={(e) => setNewFunnelName(e.target.value)} className="h-10" />
+              <Input className="h-10 w-20" type="color" value={newFunnelColor} onChange={(e) => setNewFunnelColor(e.target.value)} />
+              <Button type="button" className="h-10 gap-1.5" onClick={handleCreateFunnel}>
+                <Plus size={15} />
                 Criar
               </Button>
             </div>
@@ -369,7 +377,9 @@ export default function ProjectConfigPage() {
               {funnels.map((funnel) => (
                 <div
                   key={funnel.id}
-                  className="flex items-center justify-between rounded-md border p-2"
+                  className={`flex items-center justify-between gap-2 rounded-xl border p-2 transition-colors ${
+                    selectedFunnelId === funnel.id ? "border-primary ring-1 ring-primary/30" : "hover:bg-muted/40"
+                  }`}
                   draggable
                   onDragStart={() => setDraggingFunnelId(funnel.id)}
                   onDragEnd={() => setDraggingFunnelId(null)}
@@ -391,14 +401,15 @@ export default function ProjectConfigPage() {
                     <>
                       <button
                         type="button"
-                        className="flex items-center gap-2 text-sm"
+                        className="flex min-w-0 items-center gap-2 text-sm"
                         onClick={() => setSelectedFunnelId(funnel.id)}
                       >
-                        <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: funnel.color }} />
-                        <span className={selectedFunnelId === funnel.id ? "font-semibold" : ""}>{funnel.name}</span>
-                        {funnel.is_default && <Badge variant="outline">padrão</Badge>}
+                        <GripVertical size={14} className="shrink-0 cursor-grab text-muted-foreground" aria-hidden />
+                        <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: funnel.color }} />
+                        <span className={`truncate ${selectedFunnelId === funnel.id ? "font-semibold" : ""}`}>{funnel.name}</span>
+                        {funnel.is_default && <Pill tone="blue">padrão</Pill>}
                       </button>
-                      <div className="flex items-center gap-1">
+                      <div className="flex shrink-0 items-center gap-1">
                         {!funnel.is_default && (
                           <Button type="button" variant="ghost" size="sm" onClick={() => void handleSetDefaultFunnel(funnel.id)}>
                             Padrão
@@ -407,7 +418,7 @@ export default function ProjectConfigPage() {
                         <Button type="button" variant="ghost" size="icon" onClick={() => beginEditFunnel(funnel)}>
                           <Pencil size={14} />
                         </Button>
-                        <Button type="button" variant="ghost" size="icon" onClick={() => void handleDeleteFunnel(funnel.id)}>
+                        <Button type="button" variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" onClick={() => void handleDeleteFunnel(funnel.id)}>
                           <Trash2 size={14} />
                         </Button>
                       </div>
@@ -416,23 +427,24 @@ export default function ProjectConfigPage() {
                 </div>
               ))}
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </SectionCard>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Colunas do funil</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
+        <SectionCard
+          title="Colunas do funil"
+          icon={Columns3}
+          subtitle={selectedFunnel ? selectedFunnel.name : undefined}
+        >
+          <div className="space-y-3">
             {!selectedFunnel ? (
               <p className="text-sm text-muted-foreground">Selecione um funil para gerenciar as colunas.</p>
             ) : (
               <>
                 <div className="flex gap-2">
-                  <Input placeholder="Nome da coluna" value={newStatusName} onChange={(e) => setNewStatusName(e.target.value)} />
-                  <Input className="w-20" type="color" value={newStatusColor} onChange={(e) => setNewStatusColor(e.target.value)} />
-                  <Button type="button" onClick={handleCreateStatus}>
-                    <Plus size={14} className="mr-1" />
+                  <Input placeholder="Nome da coluna" value={newStatusName} onChange={(e) => setNewStatusName(e.target.value)} className="h-10" />
+                  <Input className="h-10 w-20" type="color" value={newStatusColor} onChange={(e) => setNewStatusColor(e.target.value)} />
+                  <Button type="button" className="h-10 gap-1.5" onClick={handleCreateStatus}>
+                    <Plus size={15} />
                     Criar
                   </Button>
                 </div>
@@ -440,7 +452,7 @@ export default function ProjectConfigPage() {
                   {statuses.map((status) => (
                     <div
                       key={status.id}
-                      className="flex items-center justify-between rounded-md border p-2"
+                      className="flex items-center justify-between gap-2 rounded-xl border p-2 transition-colors hover:bg-muted/40"
                       draggable
                       onDragStart={() => setDraggingStatusId(status.id)}
                       onDragEnd={() => setDraggingStatusId(null)}
@@ -460,15 +472,16 @@ export default function ProjectConfigPage() {
                         </div>
                       ) : (
                         <>
-                          <div className="flex items-center gap-2 text-sm">
-                            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: status.color }} />
-                            <span>{status.name}</span>
+                          <div className="flex min-w-0 items-center gap-2 text-sm">
+                            <GripVertical size={14} className="shrink-0 cursor-grab text-muted-foreground" aria-hidden />
+                            <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: status.color }} />
+                            <span className="truncate">{status.name}</span>
                           </div>
-                          <div className="flex items-center gap-1">
+                          <div className="flex shrink-0 items-center gap-1">
                             <Button type="button" variant="ghost" size="icon" onClick={() => beginEditStatus(status)}>
                               <Pencil size={14} />
                             </Button>
-                            <Button type="button" variant="ghost" size="icon" onClick={() => void handleDeleteStatus(status.id)}>
+                            <Button type="button" variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" onClick={() => void handleDeleteStatus(status.id)}>
                               <Trash2 size={14} />
                             </Button>
                           </div>
@@ -479,8 +492,8 @@ export default function ProjectConfigPage() {
                 </div>
               </>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </SectionCard>
             </div>
           )}
         </div>

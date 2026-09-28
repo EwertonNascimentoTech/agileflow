@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { CheckCircle2, FileCheck2, Loader2, Send, ShieldCheck, Sparkles, XCircle } from "lucide-react"
+import { AlertTriangle, CheckCircle2, FileCheck2, Loader2, Send, ShieldCheck, Sparkles, XCircle } from "lucide-react"
 
 import {
   teamOccurrencesApi,
@@ -7,11 +7,13 @@ import {
   type AssistedOpsClosureState,
   type AssistedOpsEntryState,
 } from "@/api/clientes"
+import { Notice, Pill, type Tone } from "@/components/ds"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { toast } from "@/lib/toast"
+import { DrawerSection } from "@/modules/projetos/CollapsibleFormSection"
 
 function apiError(err: unknown, fallback: string): string {
   const d = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
@@ -33,6 +35,7 @@ function toInput(s: AssistedOpsClosureState): AssistedOpsClosureInput {
 }
 
 const ACEITE_LABEL: Record<string, string> = { pendente: "aguardando o Dono do Processo", aceito: "aceito", recusado: "recusado" }
+const ACEITE_TONE: Record<string, Tone> = { pendente: "amber", aceito: "emerald", recusado: "red" }
 
 /** Encerramento formal da Operação Assistida no card do projeto (POP 8.4 e 8.5): critérios de
  *  saída (ou decisão estratégica), análise crítica e lições aprendidas (com rascunho gerado das
@@ -98,35 +101,30 @@ export function AssistedOpsClosureSection({
   const dirty = JSON.stringify(form) !== JSON.stringify(toInput(state))
 
   return (
-    <div className="space-y-3 rounded-md border border-teal-500/30 bg-teal-50/40 p-3 dark:bg-teal-950/20">
-      <div className="flex items-center gap-2">
-        <FileCheck2 size={14} className="text-teal-600" />
-        <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-teal-700 dark:text-teal-400">
-          Operação Assistida · encerramento (POP)
-        </p>
-      </div>
-
+    <DrawerSection
+      title="Operação Assistida · encerramento (POP)"
+      icon={FileCheck2}
+      iconClassName="text-teal-600 dark:text-teal-400"
+    >
       {state.concluded ? (
-        <p className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400">
-          <CheckCircle2 size={14} /> Operação Assistida encerrada.
-        </p>
+        <Notice tone="emerald" icon={CheckCircle2}>Operação Assistida encerrada.</Notice>
       ) : state.ready ? (
-        <p className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400">
-          <CheckCircle2 size={14} /> Pronto para encerrar: mova o projeto para Concluído.
-        </p>
+        <Notice tone="emerald" icon={CheckCircle2}>Pronto para encerrar: mova o projeto para Concluído.</Notice>
       ) : (
-        <div className="rounded-md bg-background/70 px-2 py-1.5 text-xs">
-          <p className="font-medium">Para mover o projeto para Concluído, falta:</p>
-          <ul className="ml-4 list-disc text-muted-foreground">
-            {state.missing.map((m) => <li key={m}>{m}</li>)}
-          </ul>
-        </div>
+        <Notice tone="amber" icon={AlertTriangle}>
+          <div className="min-w-0 flex-1">
+            <p className="font-medium">Para mover o projeto para Concluído, falta:</p>
+            <ul className="ml-4 list-disc">
+              {state.missing.map((m) => <li key={m}>{m}</li>)}
+            </ul>
+          </div>
+        </Notice>
       )}
 
       <div className="space-y-1.5">
-        <p className="text-xs font-semibold">Critérios de saída (8.4)</p>
+        <p className="text-sm font-semibold">Critérios de saída (8.4)</p>
         {state.criterios.map((c) => (
-          <label key={c.key} className="flex items-center gap-2 text-xs">
+          <label key={c.key} className="flex items-center gap-2 text-sm">
             <input
               type="checkbox" className="h-4 w-4 rounded border-input accent-primary"
               checked={!!form.criterios[c.key]} disabled={!editable || form.decisao_estrategica}
@@ -135,8 +133,8 @@ export function AssistedOpsClosureSection({
             {c.label}
           </label>
         ))}
-        <p className="text-[11px] text-muted-foreground">Aceite formal das áreas envolvidas: é o aceite do Dono do Processo, abaixo.</p>
-        <label className="flex items-center gap-2 pt-1 text-xs">
+        <p className="text-xs text-muted-foreground">Aceite formal das áreas envolvidas: é o aceite do Dono do Processo, abaixo.</p>
+        <label className="flex items-center gap-2 pt-1 text-sm">
           <Switch
             checked={form.decisao_estrategica} disabled={!editable}
             onCheckedChange={(v) => setForm({ ...form, decisao_estrategica: v })}
@@ -153,16 +151,16 @@ export function AssistedOpsClosureSection({
 
       <div className="space-y-1.5">
         <div className="flex items-center justify-between gap-2">
-          <p className="text-xs font-semibold">Análise crítica e lições aprendidas (8.5)</p>
+          <p className="text-sm font-semibold">Análise crítica e lições aprendidas (8.5)</p>
           {editable && (
-            <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={() => void draft()} disabled={busy !== null}>
-              {busy === "draft" ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} Gerar rascunho
+            <Button variant="outline" size="sm" className="h-8 gap-1" onClick={() => void draft()} disabled={busy !== null}>
+              {busy === "draft" ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} Gerar rascunho
             </Button>
           )}
         </div>
         {state.analise.map((a) => (
           <div key={a.key} className="space-y-1">
-            <Label className="text-[11px]">{a.label}</Label>
+            <Label className="text-xs">{a.label}</Label>
             <Textarea
               rows={a.key === "incidentes" ? 4 : 2} disabled={!editable}
               value={form.analise[a.key] ?? ""} onChange={(e) => setForm({ ...form, analise: { ...form.analise, [a.key]: e.target.value } })}
@@ -178,17 +176,20 @@ export function AssistedOpsClosureSection({
           </div>
         )}
         {dirty && editable && (state.aceite_status === "pendente" || state.aceite_status === "aceito") && (
-          <p className="text-[11px] text-amber-700 dark:text-amber-300">Salvar uma mudança invalida o aceite: será preciso pedir de novo.</p>
+          <p className="text-xs text-amber-700 dark:text-amber-300">Salvar uma mudança invalida o aceite: será preciso pedir de novo.</p>
         )}
       </div>
 
       {!form.decisao_estrategica && (
-        <div className="space-y-1.5 rounded-md bg-background/70 px-2 py-1.5 text-xs">
-          <p className="font-semibold">
-            Aceite do Dono do Processo:{" "}
-            <span className={state.aceite_status === "aceito" || state.override ? "text-emerald-700 dark:text-emerald-400" : state.aceite_status === "recusado" ? "text-red-700 dark:text-red-400" : "text-muted-foreground"}>
+        <div className="space-y-1.5 rounded-lg border bg-muted/30 p-3 text-sm">
+          <p className="flex flex-wrap items-center gap-2 font-semibold">
+            Aceite do Dono do Processo:
+            <Pill
+              tone={state.override ? "emerald" : state.aceite_status ? ACEITE_TONE[state.aceite_status] ?? "slate" : "slate"}
+              dot
+            >
               {state.override ? "registrado pela coordenação" : state.aceite_status ? ACEITE_LABEL[state.aceite_status] : "não pedido"}
-            </span>
+            </Pill>
           </p>
           {state.aceite_requested_at && (
             <p className="text-muted-foreground">Pedido em {fmtDate(state.aceite_requested_at)}{state.aceite_requested_by && ` por ${state.aceite_requested_by}`}.</p>
@@ -199,7 +200,7 @@ export function AssistedOpsClosureSection({
             <ul className="space-y-0.5">
               {state.donos.map((d) => (
                 <li key={d.name} className="flex flex-wrap items-center gap-1.5">
-                  {d.approved === true ? <CheckCircle2 size={12} className="text-emerald-600" /> : d.approved === false ? <XCircle size={12} className="text-red-600" /> : <ShieldCheck size={12} className="text-muted-foreground" />}
+                  {d.approved === true ? <CheckCircle2 size={13} className="text-emerald-600 dark:text-emerald-400" /> : d.approved === false ? <XCircle size={13} className="text-red-600 dark:text-red-400" /> : <ShieldCheck size={13} className="text-muted-foreground" />}
                   <span className="font-medium">{d.name}</span>
                   {!d.has_login && <span className="text-muted-foreground">(ainda não entrou no sistema)</span>}
                   {d.at && <span className="text-muted-foreground">· {fmtDate(d.at)}</span>}
@@ -214,13 +215,13 @@ export function AssistedOpsClosureSection({
           {!readOnly && !state.concluded && (
             <div className="flex flex-wrap gap-2 pt-1">
               {state.can_manage && state.aceite_status !== "aceito" && !state.override && (
-                <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={() => void requestAcceptance()} disabled={busy !== null || dirty}>
-                  {busy === "request" ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+                <Button size="sm" variant="outline" className="h-8 gap-1" onClick={() => void requestAcceptance()} disabled={busy !== null || dirty}>
+                  {busy === "request" ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
                   {state.aceite_status === "pendente" || state.aceite_status === "recusado" ? "Pedir aceite de novo" : "Pedir aceite ao Dono do Processo"}
                 </Button>
               )}
               {state.can_override && !state.override && state.aceite_status !== "aceito" && overrideText === null && (
-                <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setOverrideText("")}>
+                <Button size="sm" variant="ghost" className="h-8" onClick={() => setOverrideText("")}>
                   Registrar aceite (coordenação)
                 </Button>
               )}
@@ -240,6 +241,6 @@ export function AssistedOpsClosureSection({
           )}
         </div>
       )}
-    </div>
+    </DrawerSection>
   )
 }

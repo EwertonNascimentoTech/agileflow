@@ -7,13 +7,11 @@ import {
   type ProjectStageAgentBinding,
   type ProjectStageAgentKind,
 } from "@/api/projetos"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyState } from "@/components/EmptyState"
+import { Card, FilterSelect, PageHeader, Pill, TABLE, type Tone } from "@/components/ds"
 
 const PAGE_SIZE = 30
 const ALL = "__all__"
@@ -31,11 +29,11 @@ const EXEC_STATUS_LABELS: Record<string, string> = {
   failed: "Falha",
 }
 
-function execStatusVariant(status: string): "success" | "destructive" | "secondary" | "info" {
-  if (status === "success") return "success"
-  if (status === "failed") return "destructive"
-  if (status === "pending") return "info"
-  return "secondary"
+function execStatusTone(status: string): Tone {
+  if (status === "success") return "emerald"
+  if (status === "failed") return "red"
+  if (status === "pending") return "blue"
+  return "slate"
 }
 
 function formatDateTime(value: string): string {
@@ -127,105 +125,105 @@ export default function ProjectAgentLogsConfigPage() {
   }, [agents])
 
   return (
-    <div className="w-full space-y-4 p-1">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-xl font-bold">Logs de agentes</h1>
-          <p className="text-sm text-muted-foreground">
-            Histórico de execuções dos agentes (Azure AI Foundry) vinculados às etapas do kanban.
-          </p>
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={refreshing}
-          onClick={() => void load(offset, true)}
-        >
-          {refreshing ? <Loader2 size={14} className="animate-spin mr-1.5" /> : <RefreshCw size={14} className="mr-1.5" />}
-          Atualizar
-        </Button>
-      </div>
+    <div className="w-full space-y-5">
+      <PageHeader
+        icon={ScrollText}
+        color="#2563EB"
+        crumbs={[
+          { label: "Configurações", to: "/app/modules/projetos/config" },
+          { label: "Agentes", to: "/app/modules/projetos/config/agentes" },
+          { label: "Logs" },
+        ]}
+        title="Logs de agentes"
+        description="Histórico de execuções dos agentes (Azure AI Foundry) vinculados às etapas do kanban."
+        actions={
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 gap-1.5"
+            disabled={refreshing}
+            onClick={() => void load(offset, true)}
+          >
+            {refreshing ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+            Atualizar
+          </Button>
+        }
+      />
 
-      <Card>
-        <CardContent className="p-4 flex flex-col gap-3 sm:flex-row sm:items-center">
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground shrink-0">Status:</span>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL_STATUS}>Todos</SelectItem>
-                <SelectItem value="success">Sucesso</SelectItem>
-                <SelectItem value="failed">Falha</SelectItem>
-                <SelectItem value="pending">Pendente</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="text-sm text-muted-foreground shrink-0">Agente:</span>
-            <Select value={agentFilter} onValueChange={setAgentFilter}>
-              <SelectTrigger className="w-56 max-w-full"><SelectValue placeholder="Todos" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>Todos</SelectItem>
-                {agents.map((a) => (
-                  <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="text-sm text-muted-foreground sm:ml-auto">
-            {total} registro{total !== 1 ? "s" : ""}
-          </div>
-        </CardContent>
+      <Card className="p-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <FilterSelect
+            label="Status"
+            value={statusFilter}
+            onChange={setStatusFilter}
+            options={[
+              { value: ALL_STATUS, label: "Todos" },
+              { value: "success", label: "Sucesso" },
+              { value: "failed", label: "Falha" },
+              { value: "pending", label: "Pendente" },
+            ]}
+          />
+          <FilterSelect
+            label="Agente"
+            value={agentFilter}
+            onChange={setAgentFilter}
+            options={[{ value: ALL, label: "Todos" }, ...agents.map((a) => ({ value: a.id, label: a.name }))]}
+          />
+          <span className="ml-auto pb-2.5 text-sm text-muted-foreground">
+            <strong className="font-semibold text-foreground">{total}</strong> registro{total !== 1 ? "s" : ""}
+          </span>
+        </div>
       </Card>
 
       {loading ? (
-        <Skeleton className="h-96 rounded-lg" />
+        <Skeleton className="h-96 rounded-2xl" />
       ) : logs.length === 0 ? (
-        <EmptyState
-          icon={ScrollText}
-          title="Nenhuma execução registrada"
-          description="Quando um card entrar numa etapa com agente vinculado, a execução aparecerá aqui."
-        />
-      ) : (
         <Card>
-          <CardContent className="p-0 overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
-                  <th className="px-4 py-2 font-medium">Data</th>
-                  <th className="px-4 py-2 font-medium">Agente</th>
-                  <th className="px-4 py-2 font-medium">Etapa</th>
-                  <th className="px-4 py-2 font-medium">Card</th>
-                  <th className="px-4 py-2 font-medium">Status</th>
-                  <th className="px-4 py-2 font-medium">Resumo</th>
-                  <th className="px-4 py-2 font-medium w-12" />
+          <EmptyState
+            icon={ScrollText}
+            title="Nenhuma execução registrada"
+            description="Quando um card entrar numa etapa com agente vinculado, a execução aparecerá aqui."
+          />
+        </Card>
+      ) : (
+        <Card className="overflow-hidden">
+          <div className={TABLE.wrap}>
+            <table className={`${TABLE.table} min-w-[900px]`}>
+              <thead className={TABLE.thead}>
+                <tr>
+                  <th className={TABLE.thFirst}>Data</th>
+                  <th className={TABLE.th}>Agente</th>
+                  <th className={TABLE.th}>Etapa</th>
+                  <th className={TABLE.th}>Card</th>
+                  <th className={TABLE.th}>Status</th>
+                  <th className={TABLE.th}>Resumo</th>
+                  <th className={`${TABLE.th} w-12`}><span className="sr-only">Detalhe</span></th>
                 </tr>
               </thead>
               <tbody>
                 {logs.map((log) => (
-                  <tr key={log.id} className="border-b last:border-0 hover:bg-muted/20">
-                    <td className="px-4 py-2 whitespace-nowrap text-xs">{formatDateTime(log.created_at)}</td>
-                    <td className="px-4 py-2">
-                      <div className="font-medium">{log.agent_name}</div>
-                      <div className="text-[11px] text-muted-foreground">
+                  <tr key={log.id} className={TABLE.tr}>
+                    <td className={`${TABLE.tdFirst} whitespace-nowrap tabular-nums text-muted-foreground`}>{formatDateTime(log.created_at)}</td>
+                    <td className={TABLE.td}>
+                      <div className="font-semibold">{log.agent_name}</div>
+                      <div className="text-xs text-muted-foreground">
                         {AGENT_KIND_LABELS[log.agent_kind] ?? log.agent_kind}
                       </div>
                     </td>
-                    <td className="px-4 py-2">{log.status_name}</td>
-                    <td className="px-4 py-2 max-w-[200px] truncate" title={log.task_title}>{log.task_title}</td>
-                    <td className="px-4 py-2">
-                      <Badge variant={execStatusVariant(log.status)} className="text-[10px]">
+                    <td className={TABLE.td}>{log.status_name}</td>
+                    <td className={`${TABLE.td} max-w-[200px] truncate`} title={log.task_title}>{log.task_title}</td>
+                    <td className={TABLE.td}>
+                      <Pill tone={execStatusTone(log.status)} dot>
                         {EXEC_STATUS_LABELS[log.status] ?? log.status}
-                      </Badge>
+                      </Pill>
                     </td>
-                    <td className="px-4 py-2 max-w-xs text-xs text-muted-foreground">
+                    <td className={`${TABLE.td} max-w-xs text-xs text-muted-foreground`}>
                       {log.status === "failed"
                         ? truncate(log.error_message, 100)
                         : truncate(log.answer_message, 100)}
                     </td>
-                    <td className="px-4 py-2">
-                      <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => setDetail(log)}>
+                    <td className={TABLE.td}>
+                      <Button type="button" variant="ghost" size="icon" className="h-8 w-8" title="Ver detalhe" onClick={() => setDetail(log)}>
                         <Eye size={14} />
                       </Button>
                     </td>
@@ -233,7 +231,7 @@ export default function ProjectAgentLogsConfigPage() {
                 ))}
               </tbody>
             </table>
-          </CardContent>
+          </div>
         </Card>
       )}
 
@@ -266,7 +264,7 @@ export default function ProjectAgentLogsConfigPage() {
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Status</p>
-                    <Badge variant={execStatusVariant(detail.status)}>{EXEC_STATUS_LABELS[detail.status] ?? detail.status}</Badge>
+                    <Pill tone={execStatusTone(detail.status)} dot>{EXEC_STATUS_LABELS[detail.status] ?? detail.status}</Pill>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Agente</p>
@@ -279,7 +277,7 @@ export default function ProjectAgentLogsConfigPage() {
                   <div className="col-span-2">
                     <p className="text-xs text-muted-foreground">Card</p>
                     <p>{detail.task_title}</p>
-                    <p className="text-[11px] text-muted-foreground font-mono mt-0.5">{detail.task_id}</p>
+                    <p className="text-xs text-muted-foreground font-mono mt-0.5">{detail.task_id}</p>
                   </div>
                   {detail.thread_id && (
                     <div className="col-span-2">
@@ -311,10 +309,10 @@ export default function ProjectAgentLogsConfigPage() {
                       <p className="text-xs font-medium mb-1">Relatório de anonimização (categorias tratadas)</p>
                       <div className="flex flex-wrap gap-1.5">
                         {Object.entries(rep).map(([cat, n]) => (
-                          <Badge key={cat} variant="secondary" className="text-[10px]">{anonCatLabel(cat)}: {n}</Badge>
+                          <Pill key={cat} tone="slate">{anonCatLabel(cat)}: {n}</Pill>
                         ))}
                       </div>
-                      <p className="mt-1 text-[11px] text-muted-foreground">
+                      <p className="mt-1 text-xs text-muted-foreground">
                         O payload abaixo é a versão anonimizada efetivamente enviada ao Azure — sem dados pessoais reais.
                       </p>
                     </div>
@@ -332,7 +330,7 @@ export default function ProjectAgentLogsConfigPage() {
                 </div>
 
                 {agentsById.get(detail.binding_id) && (
-                  <p className="text-[11px] text-muted-foreground">
+                  <p className="text-xs text-muted-foreground">
                     ID do agente (Azure AI Foundry): {agentsById.get(detail.binding_id)?.agent_id}
                   </p>
                 )}

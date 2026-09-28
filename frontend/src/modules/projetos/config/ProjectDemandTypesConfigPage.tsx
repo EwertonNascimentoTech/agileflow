@@ -3,9 +3,8 @@ import { useNavigate } from "react-router-dom"
 import { ArrowLeft, ArrowRight, Check, FileText, GitBranch, Loader2, Pencil, Plus, Settings2, Trash2, X } from "lucide-react"
 
 import { projetosApi, type Project, type ProjectDemandType, type ProjectFunnel } from "@/api/projetos"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
+import { Card, PageHeader, Pill, SectionCard } from "@/components/ds"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { EmptyState } from "@/components/EmptyState"
 import { Input } from "@/components/ui/input"
@@ -178,43 +177,72 @@ export default function ProjectDemandTypesConfigPage() {
     setItems(reordered)
   }
 
-  if (loading) return <Skeleton className="h-28 rounded-lg" />
+  function renderHeader(withCreate: boolean) {
+    return (
+      <PageHeader
+        crumbs={[{ label: "Configurações", to: "/app/modules/projetos/config" }, { label: "Tipos de Demanda" }]}
+        icon={FileText}
+        color="#2563EB"
+        title="Tipos de Demanda"
+        description="Defina os tipos, seus formulários e o kanban de cada um."
+        actions={
+          <>
+            <Button variant="outline" className="h-10 gap-1.5" onClick={() => navigate("/app/modules/projetos/config")}>
+              <ArrowLeft size={16} />
+              Voltar às Configurações
+            </Button>
+            {withCreate && (
+              <Button type="button" className="h-10 gap-1.5" onClick={openCreateDialog}>
+                <Plus size={16} />
+                Novo Tipo
+              </Button>
+            )}
+          </>
+        }
+      />
+    )
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-5">
+        {renderHeader(false)}
+        <Skeleton className="h-28 rounded-2xl" />
+      </div>
+    )
+  }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <Button variant="ghost" size="icon" onClick={() => navigate("/app/modules/projetos/config")}>
-          <ArrowLeft size={16} />
-        </Button>
-        <div className="flex-1">
-          <h2 className="text-lg font-bold">Tipos de Demanda</h2>
-          <p className="text-sm text-muted-foreground">Defina os tipos, seus formulários e o kanban de cada um.</p>
-        </div>
-        <Button type="button" className="gap-1.5" onClick={openCreateDialog}>
-          <Plus size={14} />
-          Novo Tipo
-        </Button>
-      </div>
+    <div className="space-y-5">
+      {renderHeader(true)}
 
       {items.length === 0 ? (
-        <EmptyState
-          icon={Settings2}
-          title="Nenhum tipo de demanda"
-          description="Crie o primeiro tipo para habilitar formulários por sessão."
-          action={{ label: "Novo Tipo", onClick: openCreateDialog }}
-        />
+        <Card>
+          <EmptyState
+            icon={Settings2}
+            title="Nenhum tipo de demanda"
+            description="Crie o primeiro tipo para habilitar formulários por sessão."
+            action={{ label: "Novo Tipo", onClick: openCreateDialog }}
+          />
+        </Card>
       ) : (
-        <div className="space-y-2">
+        <SectionCard
+          title="Tipos cadastrados"
+          subtitle="Formulário, kanban vinculado, visibilidade e tipos filhos de cada tipo de demanda."
+          icon={FileText}
+          right={<Pill tone="slate">{items.length} {items.length === 1 ? "tipo" : "tipos"}</Pill>}
+          flush
+        >
+          <ul className="divide-y">
           {items.map((item) => {
             const linkedLabel = item.funnel_id ? funnelLabelById[item.funnel_id] : null
             return (
-              <Card key={item.id} className="transition-shadow hover:shadow-sm">
-                <CardContent className="p-3 space-y-2.5">
-                  <div className="flex items-start justify-between gap-3">
+              <li key={item.id} className="space-y-3 px-5 py-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 flex items-start gap-3 flex-1">
-                      <div className="h-9 w-9 shrink-0 rounded-md bg-primary/10 text-primary flex items-center justify-center">
-                        <FileText size={16} />
-                      </div>
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                        <FileText size={18} />
+                      </span>
                       <div className="min-w-0 flex-1 space-y-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           {editingId === item.id ? (
@@ -227,66 +255,59 @@ export default function ProjectDemandTypesConfigPage() {
                                   else if (e.key === "Escape") setEditingId(null)
                                 }}
                                 autoFocus
-                                className="h-7 w-52 text-sm"
+                                aria-label="Nome do tipo"
+                                className="h-10 w-56 text-sm"
                               />
                               <Button
                                 type="button"
                                 variant="ghost"
                                 size="icon"
-                                className="h-7 w-7 text-success"
+                                className="h-10 w-10 text-success"
+                                title="Salvar"
                                 disabled={savingName}
                                 onClick={() => void saveEditName(item)}
                               >
-                                {savingName ? <Loader2 size={13} className="animate-spin" /> : <Check size={14} />}
+                                {savingName ? <Loader2 size={14} className="animate-spin" /> : <Check size={16} />}
                               </Button>
                               <Button
                                 type="button"
                                 variant="ghost"
                                 size="icon"
-                                className="h-7 w-7 text-muted-foreground"
+                                className="h-10 w-10 text-muted-foreground"
+                                title="Cancelar"
                                 onClick={() => setEditingId(null)}
                               >
-                                <X size={14} />
+                                <X size={16} />
                               </Button>
                             </span>
                           ) : (
                             <span className="group/name flex items-center gap-1">
-                              <p className="font-semibold text-sm">{item.name}</p>
+                              <p className="text-base font-semibold">{item.name}</p>
                               <button
                                 type="button"
-                                className="text-muted-foreground opacity-0 transition hover:text-primary group-hover/name:opacity-100"
+                                className="text-muted-foreground opacity-0 transition hover:text-primary focus-visible:opacity-100 group-hover/name:opacity-100"
                                 title="Renomear tipo"
                                 onClick={() => startEditName(item)}
                               >
-                                <Pencil size={12} />
+                                <Pencil size={13} />
                               </button>
                             </span>
                           )}
-                          {!item.is_active && <Badge variant="secondary" className="text-[10px]">inativo</Badge>}
-                          {!item.available_for_basic && (
-                            <Badge variant="outline" className="text-[10px] text-warning border-warning/40">
-                              restrito p/ basic
-                            </Badge>
-                          )}
-                          {!item.show_in_schedule && (
-                            <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                              fora do cronograma
-                            </Badge>
-                          )}
+                          {!item.is_active && <Pill tone="slate">inativo</Pill>}
+                          {!item.available_for_basic && <Pill tone="amber">restrito p/ basic</Pill>}
+                          {!item.show_in_schedule && <Pill tone="slate">fora do cronograma</Pill>}
                           {linkedLabel ? (
-                            <Badge variant="outline" className="gap-1 text-[10px]">
-                              <GitBranch size={10} />
+                            <Pill tone="blue">
+                              <GitBranch size={12} />
                               {linkedLabel}
-                            </Badge>
+                            </Pill>
                           ) : (
-                            <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                              sem kanban vinculado
-                            </Badge>
+                            <Pill tone="slate">sem kanban vinculado</Pill>
                           )}
                         </div>
-                        <p className="text-xs text-muted-foreground truncate">
+                        <p className="truncate text-sm text-muted-foreground">
                           {item.description || <span className="italic">sem descrição</span>}
-                          <span className="ml-2 text-[10px] uppercase tracking-wide opacity-60">{item.slug}</span>
+                          <span className="ml-2 font-mono text-xs">{item.slug}</span>
                         </p>
                       </div>
                     </div>
@@ -310,90 +331,98 @@ export default function ProjectDemandTypesConfigPage() {
                         variant="ghost"
                         size="icon"
                         className="text-muted-foreground hover:text-destructive"
+                        title="Excluir"
                         onClick={() => void handleDelete(item)}
                       >
                         <Trash2 size={14} />
                       </Button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 pl-12">
-                    <Label className="text-xs whitespace-nowrap text-muted-foreground">Disponível p/ usuário basic</Label>
-                    <Switch
-                      checked={item.available_for_basic}
-                      onCheckedChange={() => void handleToggleBasic(item)}
-                    />
-                    <span className="text-[11px] text-muted-foreground">
-                      {item.available_for_basic
-                        ? "pode solicitar e ver em Minhas Solicitações"
-                        : "oculto para o usuário basic"}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 pl-12">
-                    <Label className="text-xs whitespace-nowrap text-muted-foreground">Visível no cronograma</Label>
-                    <Switch
-                      checked={item.show_in_schedule}
-                      onCheckedChange={() => void handleToggleSchedule(item)}
-                    />
-                    <span className="text-[11px] text-muted-foreground">
-                      {item.show_in_schedule ? "aparece no Cronograma" : "não aparece no Cronograma"}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 pl-12">
-                    <Label className="text-xs whitespace-nowrap text-muted-foreground">Kanban</Label>
-                    <Select
-                      value={item.funnel_id ?? NO_FUNNEL}
-                      onValueChange={(v) => void handleChangeFunnel(item, v)}
-                    >
-                      <SelectTrigger className="h-8 text-xs max-w-sm">
-                        <SelectValue placeholder="Sem vínculo" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={NO_FUNNEL}>Sem vínculo (usa kanban atual)</SelectItem>
-                        {funnelOptions.map((opt) => (
-                          <SelectItem key={opt.funnel.id} value={opt.funnel.id}>
-                            {opt.projectName} — {opt.funnel.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex items-start gap-2 pl-12">
-                    <Label className="text-xs whitespace-nowrap text-muted-foreground pt-1">
-                      Aceita como filhos
-                    </Label>
-                    <div className="flex flex-wrap gap-1.5">
-                      {items.filter((t) => t.id !== item.id).length === 0 ? (
-                        <span className="text-[11px] italic text-muted-foreground/70 pt-1">
-                          cadastre outros tipos primeiro
-                        </span>
-                      ) : (
-                        items
-                          .filter((t) => t.id !== item.id)
-                          .map((t) => {
-                            const selected = (item.allowed_child_type_ids ?? []).includes(t.id)
-                            return (
-                              <button
-                                key={t.id}
-                                type="button"
-                                onClick={() => void handleToggleChildType(item, t.id)}
-                                className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] transition ${
-                                  selected
-                                    ? "border-primary bg-primary/10 text-primary font-medium"
-                                    : "border-border text-muted-foreground hover:bg-muted"
-                                }`}
-                              >
-                                {t.name}
-                              </button>
-                            )
-                          })
-                      )}
+                  <div className="grid gap-x-6 gap-y-3 rounded-xl border bg-muted/30 p-3 sm:ml-[52px] md:grid-cols-2">
+                    <div className="flex items-start gap-3">
+                      <Switch
+                        checked={item.available_for_basic}
+                        onCheckedChange={() => void handleToggleBasic(item)}
+                        aria-label="Disponível p/ usuário basic"
+                      />
+                      <div className="min-w-0 leading-tight">
+                        <Label className="text-sm">Disponível p/ usuário basic</Label>
+                        <p className="text-xs text-muted-foreground">
+                          {item.available_for_basic
+                            ? "pode solicitar e ver em Minhas Solicitações"
+                            : "oculto para o usuário basic"}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <Switch
+                        checked={item.show_in_schedule}
+                        onCheckedChange={() => void handleToggleSchedule(item)}
+                        aria-label="Visível no cronograma"
+                      />
+                      <div className="min-w-0 leading-tight">
+                        <Label className="text-sm">Visível no cronograma</Label>
+                        <p className="text-xs text-muted-foreground">
+                          {item.show_in_schedule ? "aparece no Cronograma" : "não aparece no Cronograma"}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="space-y-1 md:col-span-2">
+                      <Label className="text-xs text-muted-foreground">Kanban</Label>
+                      <Select
+                        value={item.funnel_id ?? NO_FUNNEL}
+                        onValueChange={(v) => void handleChangeFunnel(item, v)}
+                      >
+                        <SelectTrigger className="h-10 max-w-md bg-background">
+                          <SelectValue placeholder="Sem vínculo" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={NO_FUNNEL}>Sem vínculo (usa kanban atual)</SelectItem>
+                          {funnelOptions.map((opt) => (
+                            <SelectItem key={opt.funnel.id} value={opt.funnel.id}>
+                              {opt.projectName} — {opt.funnel.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5 md:col-span-2">
+                      <Label className="text-xs text-muted-foreground">Aceita como filhos</Label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {items.filter((t) => t.id !== item.id).length === 0 ? (
+                          <span className="text-xs italic text-muted-foreground">
+                            cadastre outros tipos primeiro
+                          </span>
+                        ) : (
+                          items
+                            .filter((t) => t.id !== item.id)
+                            .map((t) => {
+                              const selected = (item.allowed_child_type_ids ?? []).includes(t.id)
+                              return (
+                                <button
+                                  key={t.id}
+                                  type="button"
+                                  aria-pressed={selected}
+                                  onClick={() => void handleToggleChildType(item, t.id)}
+                                  className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                                    selected
+                                      ? "border-primary bg-primary/10 text-primary"
+                                      : "bg-background text-muted-foreground hover:bg-muted hover:text-foreground"
+                                  }`}
+                                >
+                                  {t.name}
+                                </button>
+                              )
+                            })
+                        )}
+                      </div>
                     </div>
                   </div>
-                </CardContent>
-              </Card>
+              </li>
             )
           })}
-        </div>
+          </ul>
+        </SectionCard>
       )}
 
       <Dialog open={openCreate} onOpenChange={setOpenCreate}>
@@ -418,7 +447,7 @@ export default function ProjectDemandTypesConfigPage() {
                 onChange={(e) => setSlug(e.target.value)}
                 placeholder={name ? slugify(name) : "auto a partir do nome"}
               />
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 Usado internamente. Deixe vazio para gerar automaticamente.
               </p>
             </div>
@@ -446,7 +475,7 @@ export default function ProjectDemandTypesConfigPage() {
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 Toda demanda criada desse tipo cai automaticamente no kanban escolhido.
               </p>
             </div>
@@ -459,7 +488,7 @@ export default function ProjectDemandTypesConfigPage() {
                 <Switch checked={availableForBasic} onCheckedChange={setAvailableForBasic} />
                 <Label className="text-sm">Disponível para usuário basic</Label>
               </div>
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 Se desligado, o usuário basic não pode abrir solicitações deste tipo nem vê-las em
                 "Minhas Solicitações".
               </p>
@@ -469,7 +498,7 @@ export default function ProjectDemandTypesConfigPage() {
                 <Switch checked={showInSchedule} onCheckedChange={setShowInSchedule} />
                 <Label className="text-sm">Visível no cronograma</Label>
               </div>
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 Se desligado, itens deste tipo não aparecem no Cronograma.
               </p>
             </div>

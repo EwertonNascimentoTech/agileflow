@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
-import { AlertTriangle, Loader2, Plus, Save, Trash2 } from "lucide-react"
+import {
+  AlertTriangle, Columns3, Crosshair, Gauge, Grid2x2, Landmark, Loader2, Plus, Save, Scale, ShieldCheck, SlidersHorizontal, Trash2,
+} from "lucide-react"
 
 import {
   projetosApi,
@@ -14,11 +16,21 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
+import { DetailTabs, PageHeader, Pill, SectionCard, TABLE, type TabDef } from "@/components/ds"
 import { toast } from "@/lib/toast"
 
+type PriorityTab = "criteria" | "pillars" | "confidence" | "quadrants"
+
+const TABS: TabDef<PriorityTab>[] = [
+  { value: "criteria", label: "Critérios & Pesos", icon: Scale },
+  { value: "pillars", label: "Pilares", icon: Landmark },
+  { value: "confidence", label: "Confiança", icon: ShieldCheck },
+  { value: "quadrants", label: "Quadrantes & Corte", icon: Grid2x2 },
+]
+
 export default function ProjectPriorityConfigPage() {
+  const [tab, setTab] = useState<PriorityTab>("criteria")
   const [loading, setLoading] = useState(true)
   const [criteria, setCriteria] = useState<PriorityCriterion[]>([])
   const [pillars, setPillars] = useState<PriorityPillar[]>([])
@@ -185,29 +197,55 @@ export default function ProjectPriorityConfigPage() {
     }
   }
 
-  if (loading) return <Skeleton className="h-72 w-full" />
+  const header = (
+    <PageHeader
+      icon={Grid2x2}
+      color="#2563EB"
+      crumbs={[{ label: "Configurações", to: "/app/modules/projetos/config" }, { label: "Priorização" }]}
+      title="Priorização (Impacto × Esforço)"
+      description="Configure a metodologia: critérios, pesos, rubrica, pilares estratégicos, confiança e quadrantes."
+    />
+  )
+
+  if (loading) {
+    return (
+      <div className="w-full space-y-5">
+        {header}
+        <Skeleton className="h-72 w-full rounded-2xl" />
+      </div>
+    )
+  }
 
   const criteriaTable = (axis: "impact" | "effort") => {
     const rows = criteria.filter((c) => c.axis === axis).sort((a, b) => a.order - b.order)
     const total = sumByAxis[axis]
     const off = Math.abs(total - 1) > 0.001
     return (
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <p className="text-sm font-semibold">{axis === "impact" ? "Impacto" : "Esforço"}</p>
-          <p className={`text-xs font-medium ${off ? "text-destructive" : "text-muted-foreground"}`}>
-            {off && <AlertTriangle size={12} className="mr-1 inline" />}
+      <SectionCard
+        title={axis === "impact" ? "Impacto" : "Esforço"}
+        subtitle="Peso de cada critério e a rubrica (valor → descrição) usada na triagem."
+        icon={axis === "impact" ? Crosshair : Gauge}
+        right={
+          <Pill tone={off ? "red" : "slate"} className="tabular-nums">
+            {off && <AlertTriangle size={12} />}
             Soma dos pesos: {Math.round(total * 100)}%
-          </p>
-        </div>
+          </Pill>
+        }
+      >
         <div className="space-y-3">
+          <div className="grid grid-cols-[1fr_90px_50px_28px] items-center gap-2 px-3 text-xs text-muted-foreground">
+            <span>Critério</span>
+            <span>Peso</span>
+            <span className="text-right">Ativo</span>
+            <span className="sr-only">Remover</span>
+          </div>
           {rows.map((c) => (
-            <div key={c.code} className="space-y-2 rounded-md border p-3">
+            <div key={c.code} className="space-y-2 rounded-xl border p-3">
               <div className="grid grid-cols-[1fr_90px_50px_28px] items-center gap-2">
                 <Input
                   value={c.label}
                   onChange={(e) => onLabelChange(c, e.target.value)}
-                  className="h-8 text-sm font-medium"
+                  className="h-9 text-sm font-medium"
                 />
                 <div className="flex items-center gap-1">
                   <Input
@@ -216,7 +254,7 @@ export default function ProjectPriorityConfigPage() {
                     max={100}
                     value={Math.round(c.weight * 100)}
                     onChange={(e) => patchCriterion(c.code, c.axis, { weight: Number(e.target.value) / 100 })}
-                    className="h-8 text-sm"
+                    className="h-9 text-sm tabular-nums"
                   />
                   <span className="text-xs text-muted-foreground">%</span>
                 </div>
@@ -232,21 +270,21 @@ export default function ProjectPriorityConfigPage() {
                   <Trash2 size={14} />
                 </button>
               </div>
-              <div className="space-y-1 pl-1">
-                <p className="text-[11px] font-semibold text-muted-foreground">Escala (valor → descrição)</p>
+              <div className="space-y-1.5 rounded-lg bg-muted/40 p-2.5">
+                <p className="text-xs text-muted-foreground">Escala (valor → descrição)</p>
                 {c.scale.map((p, i) => (
                   <div key={i} className="grid grid-cols-[56px_1fr_28px] items-center gap-2">
                     <Input
                       type="number"
                       value={p.value}
                       onChange={(e) => updatePoint(c, i, { value: Number(e.target.value) })}
-                      className="h-7 text-sm"
+                      className="h-8 bg-background text-sm tabular-nums"
                     />
                     <Input
                       value={p.description}
                       placeholder="Descrição exibida na triagem"
                       onChange={(e) => updatePoint(c, i, { description: e.target.value })}
-                      className="h-7 text-[12px]"
+                      className="h-8 bg-background text-sm"
                     />
                     <button
                       type="button"
@@ -261,139 +299,214 @@ export default function ProjectPriorityConfigPage() {
                 <button
                   type="button"
                   onClick={() => addPoint(c)}
-                  className="flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+                  className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
                 >
                   <Plus size={12} /> Adicionar valor
                 </button>
               </div>
             </div>
           ))}
-          <Button variant="outline" size="sm" onClick={() => addCriterion(axis)} className="w-full">
-            <Plus size={14} /> Adicionar critério de {axis === "impact" ? "Impacto" : "Esforço"}
+          <Button variant="outline" onClick={() => addCriterion(axis)} className="h-10 w-full gap-1.5">
+            <Plus size={15} /> Adicionar critério de {axis === "impact" ? "Impacto" : "Esforço"}
           </Button>
         </div>
-      </div>
+      </SectionCard>
     )
   }
 
   return (
-    <div className="w-full space-y-4">
-      <div>
-        <h2 className="text-lg font-bold">Priorização (Impacto × Esforço)</h2>
-        <p className="text-sm text-muted-foreground">
-          Configure a metodologia: critérios, pesos, rubrica, pilares estratégicos, confiança e quadrantes.
-        </p>
-      </div>
+    <div className="w-full space-y-5">
+      {header}
 
-      <Tabs defaultValue="criteria">
-        <TabsList>
-          <TabsTrigger value="criteria">Critérios & Pesos</TabsTrigger>
-          <TabsTrigger value="pillars">Pilares</TabsTrigger>
-          <TabsTrigger value="confidence">Confiança</TabsTrigger>
-          <TabsTrigger value="quadrants">Quadrantes & Corte</TabsTrigger>
-        </TabsList>
+      <DetailTabs tabs={TABS} value={tab} onChange={setTab} />
 
-        <TabsContent value="criteria" className="mt-4 space-y-4">
-          <div className="grid gap-4 lg:grid-cols-2">
+      {tab === "criteria" && (
+        <div className="space-y-4">
+          <div className="grid items-start gap-4 lg:grid-cols-2">
             {criteriaTable("impact")}
             {criteriaTable("effort")}
           </div>
-          <Button onClick={() => void saveCriteria()} disabled={saving === "criteria"}>
-            {saving === "criteria" ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Salvar critérios
+          <Button className="h-10 gap-1.5" onClick={() => void saveCriteria()} disabled={saving === "criteria"}>
+            {saving === "criteria" ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} Salvar critérios
           </Button>
-        </TabsContent>
+        </div>
+      )}
 
-        <TabsContent value="pillars" className="mt-4 space-y-3">
-          <div className="space-y-2">
-            {pillars.map((p, idx) => (
-              <div key={p.id} className="grid grid-cols-[60px_1fr_180px_80px_50px_60px] items-center gap-2 rounded-md border p-2">
-                <Input value={p.code} onChange={(e) => setPillars((prev) => prev.map((x, i) => (i === idx ? { ...x, code: e.target.value } : x)))} className="h-8 text-sm" />
-                <Input value={p.label} onChange={(e) => setPillars((prev) => prev.map((x, i) => (i === idx ? { ...x, label: e.target.value } : x)))} className="h-8 text-sm" />
-                <Input value={p.perspective} onChange={(e) => setPillars((prev) => prev.map((x, i) => (i === idx ? { ...x, perspective: e.target.value } : x)))} className="h-8 text-sm" />
-                <Input type="number" step="0.1" min={0} max={5} value={p.modifier} onChange={(e) => setPillars((prev) => prev.map((x, i) => (i === idx ? { ...x, modifier: Number(e.target.value) } : x)))} className="h-8 text-sm" title="Modulador" />
-                <Input type="color" value={p.color} onChange={(e) => setPillars((prev) => prev.map((x, i) => (i === idx ? { ...x, color: e.target.value } : x)))} className="h-8 w-full p-1" />
-                <Switch checked={p.is_active} onCheckedChange={(v) => setPillars((prev) => prev.map((x, i) => (i === idx ? { ...x, is_active: v } : x)))} />
-              </div>
-            ))}
-          </div>
-          <Button onClick={() => void savePillars()} disabled={saving === "pillars"}>
-            {saving === "pillars" ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Salvar pilares
-          </Button>
-        </TabsContent>
-
-        <TabsContent value="confidence" className="mt-4 space-y-3">
-          {settings && (
-            <div className="flex flex-wrap items-end gap-3 rounded-md border bg-muted/30 p-3">
-              <div>
-                <p className="mb-1 text-[11px] font-semibold text-muted-foreground">Confiança ativa da metodologia</p>
-                <Select
-                  value={settings.confidence_id ?? "__none__"}
-                  onValueChange={(v) => setSettings({ ...settings, confidence_id: v === "__none__" ? null : v })}
-                >
-                  <SelectTrigger className="h-8 w-64">
-                    <SelectValue placeholder="Selecione" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">Nenhuma (÷1)</SelectItem>
-                    {confidence.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.label} (÷{c.divisor})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <p className="max-w-md text-[11px] text-muted-foreground">
-                Aplicada a todas as demandas (parâmetro da metodologia). Os níveis abaixo definem os divisores disponíveis.
-              </p>
+      {tab === "pillars" && (
+        <div className="space-y-4">
+          <SectionCard
+            title="Pilares estratégicos"
+            subtitle="Código, nome, perspectiva, modulador e cor de cada pilar."
+            icon={Landmark}
+            flush
+          >
+            <div className={TABLE.wrap}>
+              <table className={`${TABLE.table} min-w-[760px]`}>
+                <thead className={TABLE.thead}>
+                  <tr>
+                    <th className={`${TABLE.thFirst} w-24`}>Código</th>
+                    <th className={TABLE.th}>Nome</th>
+                    <th className={`${TABLE.th} w-48`}>Perspectiva</th>
+                    <th className={`${TABLE.th} w-28`}>Modulador</th>
+                    <th className={`${TABLE.th} w-20`}>Cor</th>
+                    <th className={`${TABLE.th} w-20`}>Ativo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pillars.map((p, idx) => (
+                    <tr key={p.id} className={TABLE.tr}>
+                      <td className={TABLE.tdFirst}>
+                        <Input value={p.code} onChange={(e) => setPillars((prev) => prev.map((x, i) => (i === idx ? { ...x, code: e.target.value } : x)))} className="h-9 text-sm" />
+                      </td>
+                      <td className={TABLE.td}>
+                        <Input value={p.label} onChange={(e) => setPillars((prev) => prev.map((x, i) => (i === idx ? { ...x, label: e.target.value } : x)))} className="h-9 text-sm" />
+                      </td>
+                      <td className={TABLE.td}>
+                        <Input value={p.perspective} onChange={(e) => setPillars((prev) => prev.map((x, i) => (i === idx ? { ...x, perspective: e.target.value } : x)))} className="h-9 text-sm" />
+                      </td>
+                      <td className={TABLE.td}>
+                        <Input type="number" step="0.1" min={0} max={5} value={p.modifier} onChange={(e) => setPillars((prev) => prev.map((x, i) => (i === idx ? { ...x, modifier: Number(e.target.value) } : x)))} className="h-9 text-sm tabular-nums" title="Modulador" />
+                      </td>
+                      <td className={TABLE.td}>
+                        <Input type="color" value={p.color} onChange={(e) => setPillars((prev) => prev.map((x, i) => (i === idx ? { ...x, color: e.target.value } : x)))} className="h-9 w-full p-1" />
+                      </td>
+                      <td className={TABLE.td}>
+                        <Switch checked={p.is_active} onCheckedChange={(v) => setPillars((prev) => prev.map((x, i) => (i === idx ? { ...x, is_active: v } : x)))} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          )}
-          <div className="space-y-2">
-            {confidence.map((c, idx) => (
-              <div key={c.id} className="grid grid-cols-[1fr_90px_60px] items-center gap-2 rounded-md border p-2">
-                <Input value={c.label} onChange={(e) => setConfidence((prev) => prev.map((x, i) => (i === idx ? { ...x, label: e.target.value } : x)))} className="h-8 text-sm" />
-                <Input type="number" step="0.1" min={0.1} value={c.divisor} onChange={(e) => setConfidence((prev) => prev.map((x, i) => (i === idx ? { ...x, divisor: Number(e.target.value) } : x)))} className="h-8 text-sm" title="Divisor" />
-                <Switch checked={c.is_active} onCheckedChange={(v) => setConfidence((prev) => prev.map((x, i) => (i === idx ? { ...x, is_active: v } : x)))} />
-              </div>
-            ))}
-          </div>
-          <p className="text-[11px] text-muted-foreground">O divisor reduz o impacto efetivo (ex.: confiança baixa = ÷1,5 penaliza estimativas sem dados).</p>
-          <Button onClick={() => void saveConfidence()} disabled={saving === "confidence"}>
-            {saving === "confidence" ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Salvar confiança
+          </SectionCard>
+          <Button className="h-10 gap-1.5" onClick={() => void savePillars()} disabled={saving === "pillars"}>
+            {saving === "pillars" ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} Salvar pilares
           </Button>
-        </TabsContent>
+        </div>
+      )}
 
-        <TabsContent value="quadrants" className="mt-4 space-y-4">
+      {tab === "confidence" && (
+        <div className="space-y-4">
           {settings && (
-            <div className="flex flex-wrap items-end gap-4 rounded-md border p-3">
-              <div>
-                <p className="mb-1 text-[11px] font-semibold text-muted-foreground">Corte do Impacto</p>
-                <Input type="number" step="0.1" min={1} max={5} value={settings.impact_cut} onChange={(e) => setSettings({ ...settings, impact_cut: Number(e.target.value) })} className="h-8 w-24 text-sm" />
+            <SectionCard title="Confiança ativa da metodologia" icon={SlidersHorizontal}>
+              <div className="flex flex-wrap items-end gap-4">
+                <label className="block space-y-1">
+                  <span className="text-xs text-muted-foreground">Confiança ativa</span>
+                  <Select
+                    value={settings.confidence_id ?? "__none__"}
+                    onValueChange={(v) => setSettings({ ...settings, confidence_id: v === "__none__" ? null : v })}
+                  >
+                    <SelectTrigger className="h-10 w-64 bg-background">
+                      <SelectValue placeholder="Selecione" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Nenhuma (÷1)</SelectItem>
+                      {confidence.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.label} (÷{c.divisor})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </label>
+                <p className="max-w-md pb-2 text-sm text-muted-foreground">
+                  Aplicada a todas as demandas (parâmetro da metodologia). Os níveis abaixo definem os divisores disponíveis.
+                </p>
               </div>
-              <div>
-                <p className="mb-1 text-[11px] font-semibold text-muted-foreground">Corte do Esforço</p>
-                <Input type="number" step="0.1" min={1} max={5} value={settings.effort_cut} onChange={(e) => setSettings({ ...settings, effort_cut: Number(e.target.value) })} className="h-8 w-24 text-sm" />
-              </div>
-              <label className="flex items-center gap-2 text-sm">
-                <Switch checked={settings.is_enabled} onCheckedChange={(v) => setSettings({ ...settings, is_enabled: v })} />
-                Funcionalidade habilitada
-              </label>
-            </div>
+            </SectionCard>
           )}
-          <div className="space-y-2">
-            {quadrants.map((q, idx) => (
-              <div key={q.id} className="grid grid-cols-[140px_50px_1fr] items-center gap-2 rounded-md border p-2">
-                <Input value={q.label} onChange={(e) => setQuadrants((prev) => prev.map((x, i) => (i === idx ? { ...x, label: e.target.value } : x)))} className="h-8 text-sm" />
-                <Input type="color" value={q.color} onChange={(e) => setQuadrants((prev) => prev.map((x, i) => (i === idx ? { ...x, color: e.target.value } : x)))} className="h-8 w-full p-1" />
-                <Input value={q.action_hint ?? ""} placeholder="Ação recomendada" onChange={(e) => setQuadrants((prev) => prev.map((x, i) => (i === idx ? { ...x, action_hint: e.target.value } : x)))} className="h-8 text-sm" />
-              </div>
-            ))}
-          </div>
-          <Button onClick={() => void saveQuadrantsAndSettings()} disabled={saving === "quadrants"}>
-            {saving === "quadrants" ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Salvar quadrantes e cortes
+          <SectionCard
+            title="Níveis de confiança"
+            subtitle="O divisor reduz o impacto efetivo (ex.: confiança baixa = ÷1,5 penaliza estimativas sem dados)."
+            icon={ShieldCheck}
+            flush
+          >
+            <div className={TABLE.wrap}>
+              <table className={`${TABLE.table} min-w-[480px]`}>
+                <thead className={TABLE.thead}>
+                  <tr>
+                    <th className={TABLE.thFirst}>Nível</th>
+                    <th className={`${TABLE.th} w-32`}>Divisor</th>
+                    <th className={`${TABLE.th} w-20`}>Ativo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {confidence.map((c, idx) => (
+                    <tr key={c.id} className={TABLE.tr}>
+                      <td className={TABLE.tdFirst}>
+                        <Input value={c.label} onChange={(e) => setConfidence((prev) => prev.map((x, i) => (i === idx ? { ...x, label: e.target.value } : x)))} className="h-9 text-sm" />
+                      </td>
+                      <td className={TABLE.td}>
+                        <Input type="number" step="0.1" min={0.1} value={c.divisor} onChange={(e) => setConfidence((prev) => prev.map((x, i) => (i === idx ? { ...x, divisor: Number(e.target.value) } : x)))} className="h-9 text-sm tabular-nums" title="Divisor" />
+                      </td>
+                      <td className={TABLE.td}>
+                        <Switch checked={c.is_active} onCheckedChange={(v) => setConfidence((prev) => prev.map((x, i) => (i === idx ? { ...x, is_active: v } : x)))} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </SectionCard>
+          <Button className="h-10 gap-1.5" onClick={() => void saveConfidence()} disabled={saving === "confidence"}>
+            {saving === "confidence" ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} Salvar confiança
           </Button>
-        </TabsContent>
-      </Tabs>
+        </div>
+      )}
+
+      {tab === "quadrants" && (
+        <div className="space-y-4">
+          {settings && (
+            <SectionCard title="Cortes da matriz" subtitle="Onde a matriz divide Impacto e Esforço (de 1 a 5)." icon={SlidersHorizontal}>
+              <div className="flex flex-wrap items-end gap-4">
+                <label className="block space-y-1">
+                  <span className="text-xs text-muted-foreground">Corte do Impacto</span>
+                  <Input type="number" step="0.1" min={1} max={5} value={settings.impact_cut} onChange={(e) => setSettings({ ...settings, impact_cut: Number(e.target.value) })} className="h-10 w-28 text-sm tabular-nums" />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs text-muted-foreground">Corte do Esforço</span>
+                  <Input type="number" step="0.1" min={1} max={5} value={settings.effort_cut} onChange={(e) => setSettings({ ...settings, effort_cut: Number(e.target.value) })} className="h-10 w-28 text-sm tabular-nums" />
+                </label>
+                <label className="flex h-10 items-center gap-2 text-sm">
+                  <Switch checked={settings.is_enabled} onCheckedChange={(v) => setSettings({ ...settings, is_enabled: v })} />
+                  Funcionalidade habilitada
+                </label>
+              </div>
+            </SectionCard>
+          )}
+          <SectionCard title="Quadrantes" subtitle="Nome, cor e ação recomendada de cada quadrante." icon={Columns3} flush>
+            <div className={TABLE.wrap}>
+              <table className={`${TABLE.table} min-w-[560px]`}>
+                <thead className={TABLE.thead}>
+                  <tr>
+                    <th className={`${TABLE.thFirst} w-44`}>Quadrante</th>
+                    <th className={`${TABLE.th} w-20`}>Cor</th>
+                    <th className={TABLE.th}>Ação recomendada</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {quadrants.map((q, idx) => (
+                    <tr key={q.id} className={TABLE.tr}>
+                      <td className={TABLE.tdFirst}>
+                        <Input value={q.label} onChange={(e) => setQuadrants((prev) => prev.map((x, i) => (i === idx ? { ...x, label: e.target.value } : x)))} className="h-9 text-sm" />
+                      </td>
+                      <td className={TABLE.td}>
+                        <Input type="color" value={q.color} onChange={(e) => setQuadrants((prev) => prev.map((x, i) => (i === idx ? { ...x, color: e.target.value } : x)))} className="h-9 w-full p-1" />
+                      </td>
+                      <td className={TABLE.td}>
+                        <Input value={q.action_hint ?? ""} placeholder="Ação recomendada" onChange={(e) => setQuadrants((prev) => prev.map((x, i) => (i === idx ? { ...x, action_hint: e.target.value } : x)))} className="h-9 text-sm" />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </SectionCard>
+          <Button className="h-10 gap-1.5" onClick={() => void saveQuadrantsAndSettings()} disabled={saving === "quadrants"}>
+            {saving === "quadrants" ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} Salvar quadrantes e cortes
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

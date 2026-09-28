@@ -46,12 +46,12 @@ export function DefaultFormSelectOptionsEditor({
   }
 
   return (
-    <div className="space-y-2 rounded-md border border-dashed border-border bg-muted/20 p-3 md:col-span-2 lg:col-span-4">
+    <div className="space-y-2 rounded-xl border border-dashed border-border bg-muted/40 p-3 md:col-span-2 lg:col-span-4">
       <div className="flex items-center justify-between gap-2">
-        <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <Label className="text-sm font-semibold">
           Opções do campo (seleção)
         </Label>
-        <Button type="button" variant="outline" size="sm" onClick={addOption}>
+        <Button type="button" variant="outline" size="sm" className="bg-background" onClick={addOption}>
           <Plus className="mr-1 h-3.5 w-3.5" /> Adicionar opção
         </Button>
       </div>
@@ -67,9 +67,9 @@ export function DefaultFormSelectOptionsEditor({
                 value={opt.label}
                 onChange={(e) => updateLabel(index, e.target.value)}
                 placeholder="Nome exibido"
-                className="h-8 flex-1"
+                className="h-9 flex-1 bg-background"
               />
-              <span className="text-[10px] text-muted-foreground font-mono shrink-0 hidden sm:inline">
+              <span className="hidden shrink-0 font-mono text-xs text-muted-foreground sm:inline">
                 {opt.value}
               </span>
               <Button

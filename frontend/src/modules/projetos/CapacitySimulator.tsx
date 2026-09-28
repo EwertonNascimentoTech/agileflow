@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { ArrowRight, ChevronDown, ChevronRight, Clock, DollarSign, FlaskConical, Loader2, Plus, Sparkles, Trash2, Wand2, X } from "lucide-react"
+import { AlertTriangle, ArrowRight, ChevronDown, ChevronRight, Clock, DollarSign, FlaskConical, Loader2, Plus, Sparkles, Trash2, Users, Wand2, X } from "lucide-react"
 
 import {
   projetosApi,
@@ -10,11 +10,9 @@ import {
   type SimTaskMeta,
 } from "@/api/projetos"
 import { teamopsApi, type Person } from "@/api/teamops"
-import { KpiCard } from "@/components/KpiCard"
-import { SectionCard } from "@/components/SectionCard"
 import { EmptyState } from "@/components/EmptyState"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { KpiCount, KpiRow, Pill, SectionCard } from "@/components/ds"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { WorkloadView } from "@/modules/projetos/WorkloadView"
 
@@ -40,8 +38,10 @@ const COST_LABEL: Record<SuggestedScenario["cost_tag"], string> = {
 }
 function CostTag({ tag }: { tag: SuggestedScenario["cost_tag"] }) {
   const Icon = tag === "custo" ? DollarSign : tag === "prazo" ? Clock : Sparkles
-  const cls = tag === "custo" ? "text-amber-600" : tag === "prazo" ? "text-blue-600" : "text-green-600"
-  return <span className={`inline-flex items-center gap-1 text-[11px] ${cls}`}><Icon size={12} />{COST_LABEL[tag]}</span>
+  const cls = tag === "custo"
+    ? "text-amber-600 dark:text-amber-400"
+    : tag === "prazo" ? "text-blue-600 dark:text-blue-400" : "text-emerald-600 dark:text-emerald-400"
+  return <span className={`inline-flex items-center gap-1 text-xs ${cls}`}><Icon size={12} />{COST_LABEL[tag]}</span>
 }
 
 function describe(m: ScenarioMutation, tasks: SimTaskMeta[], persons: Person[]): string {
@@ -143,7 +143,7 @@ export function CapacitySimulator({ from, to }: { from: string; to: string }) {
   return (
     <div className="space-y-5">
       {/* Cenários sugeridos (auto-gerados) */}
-      <SectionCard title={<span className="flex items-center gap-2"><Wand2 size={16} className="text-primary" /> Cenários sugeridos</span>}>
+      <SectionCard title="Cenários sugeridos" icon={Wand2}>
         {loadingSug ? (
           <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground"><Loader2 size={15} className="animate-spin" /> Gerando cenários…</div>
         ) : !suggestions?.has_overload ? (
@@ -155,20 +155,20 @@ export function CapacitySimulator({ from, to }: { from: string; to: string }) {
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
             {suggestions.rows.map((s) => (
-              <div key={s.id} className="flex flex-col gap-2 rounded-lg border bg-card p-3">
+              <div key={s.id} className="flex flex-col gap-2 rounded-xl border bg-card p-4 shadow-sm">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
-                    <Badge variant={s.kind === "combo" ? "default" : "secondary"} className="text-[10px]">{KIND_LABEL[s.kind]}</Badge>
+                    <Pill tone={s.kind === "combo" ? "blue" : "slate"}>{KIND_LABEL[s.kind]}</Pill>
                     <CostTag tag={s.cost_tag} />
                   </div>
-                  <span className="text-[11px] tabular-nums text-muted-foreground">
+                  <span className="text-xs tabular-nums text-muted-foreground">
                     {s.before_over_cells}<ArrowRight size={11} className="mx-0.5 inline" />{s.after_over_cells}
                   </span>
                 </div>
                 <p className="text-sm leading-snug">{s.description}</p>
-                <div className="flex items-center gap-3 text-[11px]">
-                  <span className="font-medium text-green-600">−{s.resolved_cells} dias de sobrecarga</span>
-                  {s.new_cells > 0 && <span className="text-amber-600">+{s.new_cells} novos</span>}
+                <div className="flex items-center gap-3 text-xs">
+                  <span className="font-medium text-emerald-600 dark:text-emerald-400">−{s.resolved_cells} dias de sobrecarga</span>
+                  {s.new_cells > 0 && <span className="text-amber-600 dark:text-amber-400">+{s.new_cells} novos</span>}
                 </div>
                 <div className="mt-1 flex gap-2">
                   <Button size="sm" className="gap-1.5" onClick={() => applySuggestion(s)} disabled={simulating}>
@@ -198,7 +198,7 @@ export function CapacitySimulator({ from, to }: { from: string; to: string }) {
         <SectionCard title="Montar cenário">
           <div className="space-y-3">
             <Select value={op} onValueChange={(v) => setOp(v as Op)}>
-              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-10 bg-background"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {(Object.keys(OP_LABEL) as Op[]).map((k) => (
                   <SelectItem key={k} value={k}>{OP_LABEL[k]}</SelectItem>
@@ -208,7 +208,7 @@ export function CapacitySimulator({ from, to }: { from: string; to: string }) {
 
             {(op === "move_task" || op === "reassign" || op === "scale_hours") && (
               <Select value={taskId} onValueChange={setTaskId}>
-                <SelectTrigger className="h-9"><SelectValue placeholder="Escolha a tarefa" /></SelectTrigger>
+                <SelectTrigger className="h-10 bg-background"><SelectValue placeholder="Escolha a tarefa" /></SelectTrigger>
                 <SelectContent>
                   {tasks.map((t) => <SelectItem key={t.task_id} value={t.task_id}>{taskLabel(t)}</SelectItem>)}
                 </SelectContent>
@@ -220,19 +220,19 @@ export function CapacitySimulator({ from, to }: { from: string; to: string }) {
                 <label className="flex-1 space-y-1 text-xs text-muted-foreground">
                   <span>Novo início</span>
                   <input type="date" value={newStart} onChange={(e) => setNewStart(e.target.value)}
-                    className="block h-9 w-full rounded-md border bg-background px-2 text-sm" />
+                    className="block h-10 w-full rounded-md border bg-background px-2 text-sm" />
                 </label>
                 <label className="flex-1 space-y-1 text-xs text-muted-foreground">
                   <span>Novo prazo</span>
                   <input type="date" value={newDue} onChange={(e) => setNewDue(e.target.value)}
-                    className="block h-9 w-full rounded-md border bg-background px-2 text-sm" />
+                    className="block h-10 w-full rounded-md border bg-background px-2 text-sm" />
                 </label>
               </div>
             )}
 
             {(op === "reassign" || op === "remove_person") && (
               <Select value={personId} onValueChange={setPersonId}>
-                <SelectTrigger className="h-9"><SelectValue placeholder="Escolha a pessoa" /></SelectTrigger>
+                <SelectTrigger className="h-10 bg-background"><SelectValue placeholder="Escolha a pessoa" /></SelectTrigger>
                 <SelectContent>
                   {persons.map((p) => <SelectItem key={p.id} value={p.id}>{p.full_name}</SelectItem>)}
                 </SelectContent>
@@ -243,7 +243,7 @@ export function CapacitySimulator({ from, to }: { from: string; to: string }) {
               <label className="space-y-1 text-xs text-muted-foreground">
                 <span>Fator (ex.: 1.5 = +50%, 0.5 = metade)</span>
                 <input type="number" step="0.1" min={0} value={factor} onChange={(e) => setFactor(e.target.value)}
-                  className="block h-9 w-40 rounded-md border bg-background px-2 text-sm" />
+                  className="block h-10 w-40 rounded-md border bg-background px-2 text-sm" />
               </label>
             )}
 
@@ -253,12 +253,12 @@ export function CapacitySimulator({ from, to }: { from: string; to: string }) {
                   <label className="flex-1 space-y-1 text-xs text-muted-foreground">
                     <span>Nome</span>
                     <input value={flName} onChange={(e) => setFlName(e.target.value)}
-                      className="block h-9 w-full rounded-md border bg-background px-2 text-sm" />
+                      className="block h-10 w-full rounded-md border bg-background px-2 text-sm" />
                   </label>
                   <label className="w-28 space-y-1 text-xs text-muted-foreground">
                     <span>h/dia</span>
                     <input type="number" min={1} value={flHours} onChange={(e) => setFlHours(e.target.value)}
-                      className="block h-9 w-full rounded-md border bg-background px-2 text-sm" />
+                      className="block h-10 w-full rounded-md border bg-background px-2 text-sm" />
                   </label>
                 </div>
                 <div className="space-y-1 text-xs text-muted-foreground">
@@ -291,7 +291,8 @@ export function CapacitySimulator({ from, to }: { from: string; to: string }) {
         {/* Cenário montado */}
         <SectionCard
           title="Cenário"
-          action={
+          icon={FlaskConical}
+          right={
             mutations.length > 0 ? (
               <Button variant="ghost" size="sm" className="gap-1 text-muted-foreground" onClick={() => { setMutations([]); setResult(null) }}>
                 <Trash2 size={14} /> Limpar
@@ -305,9 +306,9 @@ export function CapacitySimulator({ from, to }: { from: string; to: string }) {
           ) : (
             <div className="space-y-2">
               {mutations.map((m, i) => (
-                <div key={i} className="flex items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                <div key={i} className="flex items-center justify-between gap-2 rounded-xl border bg-muted/30 px-3 py-2 text-sm">
                   <div className="flex items-center gap-2">
-                    <Badge variant="secondary" className="text-[10px]">{OP_LABEL[m.op]}</Badge>
+                    <Pill tone="slate">{OP_LABEL[m.op]}</Pill>
                     <span className="text-muted-foreground">{describe(m, tasks, persons)}</span>
                   </div>
                   <button className="text-muted-foreground hover:text-destructive" onClick={() => setMutations((prev) => prev.filter((_, x) => x !== i))}>
@@ -328,18 +329,19 @@ export function CapacitySimulator({ from, to }: { from: string; to: string }) {
       {/* Resultado */}
       {result && diff && (
         <>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <KpiCard label="Sobrecarga resolvida" value={diff.resolved_cells} icon={Sparkles} deltaTone="up"
-              sub="dias/pessoa que saíram do vermelho" />
-            <KpiCard label="Nova sobrecarga" value={diff.new_cells} icon={FlaskConical}
-              deltaTone={diff.new_cells > 0 ? "down" : "neutral"} sub="dias/pessoa que ficaram no vermelho" />
-            <KpiCard label="Dias em sobrecarga"
-              value={<span className="flex items-center gap-1.5">{diff.before_over_cells}<ArrowRight size={14} className="text-muted-foreground" />{diff.after_over_cells}</span>}
-              deltaTone={diff.after_over_cells <= diff.before_over_cells ? "up" : "down"} />
-            <KpiCard label="Pessoas em risco"
-              value={<span className="flex items-center gap-1.5">{diff.before_persons_over}<ArrowRight size={14} className="text-muted-foreground" />{diff.after_persons_over}</span>}
-              deltaTone={diff.after_persons_over <= diff.before_persons_over ? "up" : "down"} />
-          </div>
+          <KpiRow className="sm:grid-cols-2 xl:grid-cols-4">
+            <KpiCount icon={Sparkles} value={diff.resolved_cells}
+              label="Sobrecarga resolvida · dias/pessoa que saíram do vermelho" tone="emerald" />
+            <KpiCount icon={FlaskConical} value={diff.new_cells}
+              label="Nova sobrecarga · dias/pessoa que ficaram no vermelho"
+              tone={diff.new_cells > 0 ? "red" : "slate"} highlight={diff.new_cells > 0} />
+            <KpiCount icon={AlertTriangle} value={`${diff.before_over_cells} → ${diff.after_over_cells}`}
+              label="Dias em sobrecarga (antes → depois)"
+              tone={diff.after_over_cells <= diff.before_over_cells ? "emerald" : "red"} />
+            <KpiCount icon={Users} value={`${diff.before_persons_over} → ${diff.after_persons_over}`}
+              label="Pessoas em risco (antes → depois)"
+              tone={diff.after_persons_over <= diff.before_persons_over ? "emerald" : "red"} />
+          </KpiRow>
 
           <SectionCard title="Carga por pessoa — DEPOIS do cenário">
             {result.after.cells.length > 0 ? (

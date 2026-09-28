@@ -1,7 +1,7 @@
 import { createElement } from "react"
 
 import { Label } from "@/components/ui/label"
-import { IconTile } from "@/modules/portal/portfolioUi"
+import { IconTile } from "@/components/ds"
 import { PORTAL_ICON_NAMES, PORTAL_PALETTE, resolvePortalIcon } from "@/modules/portal/portfolioMeta"
 
 /** Ícone e cor de Programa/Pilar como aparecem no Portal do Cliente. */
@@ -21,7 +21,7 @@ export function ProgramAppearanceFields({
     <div className="space-y-3">
       <div className="space-y-1.5">
         <Label>Ícone no Portal</Label>
-        <div className="flex max-h-32 flex-wrap gap-1 overflow-y-auto rounded-md border p-1.5">
+        <div className="flex max-h-32 flex-wrap gap-1 overflow-y-auto rounded-lg border p-1.5">
           {PORTAL_ICON_NAMES.map((name) => {
             const on = icon === name
             return (

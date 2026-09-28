@@ -8,10 +8,12 @@ import {
   type ProjectClientMember,
   type ProjectClientRole,
 } from "@/api/clientes"
+import { Pill } from "@/components/ds"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { toast } from "@/lib/toast"
 import { ClientPicker, PROJECT_CLIENT_ROLES, type PickedClient } from "@/modules/projetos/ClientPicker"
+import { DrawerSection } from "@/modules/projetos/CollapsibleFormSection"
 
 function apiError(err: unknown, fallback: string): string {
   const d = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
@@ -23,8 +25,17 @@ function apiError(err: unknown, fallback: string): string {
 /** Clientes do projeto (card-raiz do kanban Projetos e Programas): quem acompanha o andamento
  *  no Portal do Cliente, com a função de cada um. O PO do projeto e a coordenação adicionam e
  *  retiram a qualquer momento; os demais só veem — e, sem clientes, o bloco nem aparece.
- *  Com `programId`, são os clientes do Programa (veem todos os projetos dele no Portal). */
-export function ProjectClientsSection({ projectTaskId, programId }: { projectTaskId?: string; programId?: string }) {
+ *  Com `programId`, são os clientes do Programa (veem todos os projetos dele no Portal).
+ *  `bare`: sem o cartão próprio (a página já dá a moldura) — padrão na tela do Programa. */
+export function ProjectClientsSection({
+  projectTaskId,
+  programId,
+  bare = !!programId,
+}: {
+  projectTaskId?: string
+  programId?: string
+  bare?: boolean
+}) {
   const targetId = programId ?? projectTaskId ?? ""
   const noun = programId ? "programa" : "projeto"
   const membersApi = useMemo(() => (programId ? programClientsApi : projectClientsApi), [programId])
@@ -98,35 +109,30 @@ export function ProjectClientsSection({ projectTaskId, programId }: { projectTas
 
   if (!loaded || (!canManage && members.length === 0)) return null
 
-  return (
-    <div className="space-y-2 rounded-md border border-sky-500/30 bg-sky-50/40 p-3 dark:bg-sky-950/20">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Users size={14} className="text-sky-600" />
-          <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-sky-700 dark:text-sky-400">
-            Clientes do {noun}
-          </p>
-          {members.length > 0 && <span className="text-[11px] text-muted-foreground">({members.length})</span>}
-        </div>
-        {canManage && !adding && (
-          <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={() => setAdding(true)}>
-            <Plus size={12} /> Adicionar
-          </Button>
-        )}
-      </div>
-      <p className="text-xs text-muted-foreground">
-        {programId
-          ? "Veem no Portal do Cliente todos os projetos deste programa. Quem tem a função Sponsor aparece como Patrocinador."
-          : "Acompanham o andamento deste projeto no Portal do Cliente."}
-      </p>
+  const title = `Clientes do ${noun}`
+  const badge = members.length > 0 && <Pill tone="blue">{members.length}</Pill>
+  const subtitle = programId
+    ? "Veem no Portal do Cliente todos os projetos deste programa. Quem tem a função Sponsor aparece como Patrocinador."
+    : "Acompanham o andamento deste projeto no Portal do Cliente."
+  const addButton = canManage && !adding && (
+    <Button variant="outline" size="sm" className="h-8 gap-1" onClick={() => setAdding(true)}>
+      <Plus size={14} /> Adicionar
+    </Button>
+  )
+
+  const body = (
+    <>
+      {members.length === 0 && !adding && (
+        <p className="text-sm text-muted-foreground">Nenhum cliente vinculado.</p>
+      )}
 
       {members.length > 0 && (
         <div className="space-y-1.5">
           {members.map((m) => (
-            <div key={m.client_id} className="flex flex-wrap items-center gap-2 rounded-md bg-background px-2 py-1.5 text-xs shadow-sm">
+            <div key={m.client_id} className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
               <div className="min-w-0 flex-1">
                 <p className="truncate font-medium">{m.full_name}</p>
-                <p className="truncate text-[11px] text-muted-foreground">
+                <p className="truncate text-xs text-muted-foreground">
                   {[m.email, m.department, m.job_title].filter(Boolean).join(" · ")}
                   {!m.has_login && " · entra pelo IDigital"}
                   {!m.is_active && " · cadastro inativo"}
@@ -139,7 +145,7 @@ export function ProjectClientsSection({ projectTaskId, programId }: { projectTas
                     onValueChange={(v) => void changeRole(m, v as ProjectClientRole)}
                     disabled={busyId === m.client_id}
                   >
-                    <SelectTrigger className="h-7 w-40 text-xs">
+                    <SelectTrigger className="h-8 w-40 bg-background text-xs">
                       <SelectValue placeholder="Função">{m.project_role_label || "Função"}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
@@ -149,7 +155,7 @@ export function ProjectClientsSection({ projectTaskId, programId }: { projectTas
                     </SelectContent>
                   </Select>
                   <Button
-                    variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                    variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive"
                     title={`Retirar do ${noun}`} disabled={busyId === m.client_id}
                     onClick={() => void remove(m)}
                   >
@@ -157,11 +163,7 @@ export function ProjectClientsSection({ projectTaskId, programId }: { projectTas
                   </Button>
                 </>
               ) : (
-                m.project_role_label && (
-                  <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[11px] font-medium text-sky-800 dark:bg-sky-900 dark:text-sky-200">
-                    {m.project_role_label}
-                  </span>
-                )
+                m.project_role_label && <Pill tone="blue">{m.project_role_label}</Pill>
               )}
             </div>
           ))}
@@ -176,6 +178,38 @@ export function ProjectClientsSection({ projectTaskId, programId }: { projectTas
           excludeEmails={members.map((m) => m.email)}
         />
       )}
-    </div>
+    </>
+  )
+
+  if (bare) {
+    return (
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <h3 className="flex flex-wrap items-center gap-2 text-base font-semibold">
+              <Users size={16} className="shrink-0 text-sky-600 dark:text-sky-400" />
+              {title}
+              {badge}
+            </h3>
+            <p className="mt-0.5 text-sm text-muted-foreground">{subtitle}</p>
+          </div>
+          {addButton}
+        </div>
+        {body}
+      </div>
+    )
+  }
+
+  return (
+    <DrawerSection
+      title={title}
+      icon={Users}
+      iconClassName="text-sky-600 dark:text-sky-400"
+      badges={badge}
+      subtitle={subtitle}
+      right={addButton}
+    >
+      {body}
+    </DrawerSection>
   )
 }

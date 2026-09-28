@@ -1,22 +1,51 @@
-import { useEffect, useState } from "react"
-import { FileText, Workflow, Wrench } from "lucide-react"
+import { Fragment, useEffect, useState } from "react"
+import { CornerDownRight, FileText, GitBranch, Layers, TrendingUp, Workflow, Wrench } from "lucide-react"
 
-import { produtosApi, type GroupBy, type IndicadorResponse, type IndicadorSeriesPoint, type ProcessoConsolidacaoNode } from "@/api/produtos"
-import { KpiCard } from "@/components/KpiCard"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  produtosApi,
+  type GroupBy, type IndicadorCounts, type IndicadorResponse, type IndicadorSeriesPoint, type ProcessoConsolidacaoNode,
+} from "@/api/produtos"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { FilterSelect, KpiCount, KpiRow, PageHeader, Pill, ProgressBar, SectionCard, type Tone } from "@/components/ds"
 
 const YEAR = new Date().getFullYear()
 const YEARS = [YEAR, YEAR - 1, YEAR - 2]
 const GROUP_LABEL: Record<GroupBy, string> = { produto: "Produto", area: "Área", setor: "Setor", portfolio: "Portfólio" }
+const NIVEL_LABEL: Record<string, string> = { macroprocesso: "Macroprocesso", processo: "Processo", subprocesso: "Subprocesso" }
+const NIVEL_TONE: Record<string, Tone> = { macroprocesso: "violet", processo: "blue", subprocesso: "slate" }
+const PRIMARY = "hsl(var(--primary))"
 
-function BarRow({ label, value, max, color }: { label: string; value: number; max: number; color?: string }) {
+const totalOf = (c: IndicadorCounts) => c.servicos + c.documentos + c.processos_automatizados
+
+/** Linha de barra: rótulo, total e barra proporcional ao maior valor (mínimo de 2% quando há dado). */
+function BarRow({ label, value, max, color, strong = false }: { label: string; value: number; max: number; color?: string; strong?: boolean }) {
   const pct = max > 0 ? Math.max(2, Math.round((value / max) * 100)) : 0
   return (
-    <div className="space-y-1">
-      <div className="flex items-center justify-between gap-2 text-sm"><span className="truncate">{label}</span><span className="shrink-0 tabular-nums text-muted-foreground">{value}</span></div>
-      <div className="h-2 w-full overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: color ?? "hsl(var(--primary))" }} /></div>
+    <div className="space-y-1.5">
+      <div className="flex items-baseline justify-between gap-2 text-sm">
+        <span className={`truncate ${strong ? "font-semibold" : "font-medium"}`}>{label}</span>
+        <strong className="shrink-0 tabular-nums">{value}</strong>
+      </div>
+      <ProgressBar value={pct} color={color ?? PRIMARY} showLabel={false} />
+    </div>
+  )
+}
+
+/** Detalhe de um total: serviços, documentos e processos automatizados. */
+function Breakdown({ counts }: { counts: IndicadorCounts }) {
+  const parts = [
+    { label: "Serviços", value: counts.servicos, dot: "bg-primary" },
+    { label: "Documentos", value: counts.documentos, dot: "bg-violet-500" },
+    { label: "Automatizados", value: counts.processos_automatizados, dot: "bg-emerald-500" },
+  ]
+  return (
+    <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
+      {parts.map((p) => (
+        <span key={p.label} className="inline-flex items-center gap-1.5">
+          <span className={`h-1.5 w-1.5 rounded-full ${p.dot}`} aria-hidden />
+          {p.label} <span className="tabular-nums text-foreground">{p.value}</span>
+        </span>
+      ))}
     </div>
   )
 }
@@ -38,79 +67,119 @@ export default function IndicadoresPage() {
     ]).then(([d, s, c]) => { setData(d); setSeries(s); setCons(c) }).finally(() => setLoading(false))
   }, [ano, groupBy])
 
+  const grupos = data?.grupos ?? []
+  const maxGrupo = Math.max(1, ...grupos.map((g) => totalOf(g.counts)))
+  const maxSerie = Math.max(1, ...series.map((s) => totalOf(s.counts)))
+
   return (
     <div className="space-y-5">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div><h2 className="text-lg font-bold">Indicadores</h2><p className="text-sm text-muted-foreground">Serviços digitais, documentos natos e processos automatizados.</p></div>
-        <div className="flex gap-2">
-          <Select value={String(ano)} onValueChange={(v) => setAno(Number(v))}>
-            <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
-            <SelectContent>{YEARS.map((y) => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
-          </Select>
-          <Select value={groupBy} onValueChange={(v) => setGroupBy(v as GroupBy)}>
-            <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
-            <SelectContent>{(["produto", "area", "setor", "portfolio"] as GroupBy[]).map((g) => <SelectItem key={g} value={g}>{GROUP_LABEL[g]}</SelectItem>)}</SelectContent>
-          </Select>
-        </div>
-      </div>
+      <PageHeader
+        icon="BarChart3"
+        color="#7C3AED"
+        title="Indicadores"
+        description="Serviços digitais, documentos natos e processos automatizados."
+        actions={
+          <>
+            <FilterSelect
+              label="Ano"
+              value={String(ano)}
+              onChange={(v) => setAno(Number(v))}
+              options={YEARS.map((y) => ({ value: String(y), label: String(y) }))}
+            />
+            <FilterSelect
+              label="Agrupar por"
+              value={groupBy}
+              onChange={(v) => setGroupBy(v as GroupBy)}
+              options={(["produto", "area", "setor", "portfolio"] as GroupBy[]).map((g) => ({ value: g, label: GROUP_LABEL[g] }))}
+            />
+          </>
+        }
+      />
 
-      {loading ? <Skeleton className="h-80 w-full" /> : (
-        <>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <KpiCard label={`Serviços digitais (${ano})`} value={data?.total.servicos ?? 0} icon={Wrench} />
-            <KpiCard label={`Documentos natos (${ano})`} value={data?.total.documentos ?? 0} icon={FileText} />
-            <KpiCard label={`Processos automatizados (${ano})`} value={data?.total.processos_automatizados ?? 0} icon={Workflow} />
+      {loading ? (
+        <div className="space-y-5">
+          <div className="grid gap-3 sm:grid-cols-3">
+            {Array.from({ length: 3 }, (_, i) => <Skeleton key={i} className="h-[74px] rounded-xl" />)}
           </div>
+          <Skeleton className="h-72 rounded-2xl" />
+        </div>
+      ) : (
+        <>
+          <KpiRow className="sm:grid-cols-3">
+            <KpiCount icon={Wrench} value={data?.total.servicos ?? 0} label={`Serviços digitais (${ano})`} />
+            <KpiCount icon={FileText} value={data?.total.documentos ?? 0} label={`Documentos natos (${ano})`} tone="violet" />
+            <KpiCount icon={Workflow} value={data?.total.processos_automatizados ?? 0} label={`Processos automatizados (${ano})`} tone="emerald" />
+          </KpiRow>
 
           <div className="grid gap-4 lg:grid-cols-2">
-            <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-base">Por {GROUP_LABEL[groupBy].toLowerCase()}</CardTitle></CardHeader>
-              <CardContent className="space-y-3">
-                {(data?.grupos.length ?? 0) === 0 ? <p className="text-sm text-muted-foreground">Sem dados para {ano}.</p> : data!.grupos.map((g) => {
-                  const max = Math.max(1, ...data!.grupos.map((x) => x.counts.servicos + x.counts.documentos + x.counts.processos_automatizados))
-                  return (
-                    <div key={g.key}>
-                      <BarRow label={g.label} value={g.counts.servicos + g.counts.documentos + g.counts.processos_automatizados} max={max} />
-                      <div className="mt-0.5 flex gap-3 text-[10px] text-muted-foreground"><span>Serv {g.counts.servicos}</span><span>Doc {g.counts.documentos}</span><span>Autom {g.counts.processos_automatizados}</span></div>
-                    </div>
-                  )
-                })}
-              </CardContent>
-            </Card>
+            <SectionCard
+              title={`Por ${GROUP_LABEL[groupBy].toLowerCase()}`}
+              subtitle={`Serviços, documentos e processos automatizados em ${ano}.`}
+              icon={Layers}
+            >
+              {grupos.length === 0 ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">Sem dados para {ano}.</p>
+              ) : (
+                <ul className="space-y-4">
+                  {grupos.map((g) => (
+                    <li key={g.key}>
+                      <BarRow label={g.label} value={totalOf(g.counts)} max={maxGrupo} />
+                      <Breakdown counts={g.counts} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </SectionCard>
 
-            <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-base">Comparativo entre anos (portfólio)</CardTitle><CardDescription>Total por ano.</CardDescription></CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {series.map((s) => {
-                    const max = Math.max(1, ...series.map((x) => x.counts.servicos + x.counts.documentos + x.counts.processos_automatizados))
-                    return <BarRow key={s.ano} label={String(s.ano)} value={s.counts.servicos + s.counts.documentos + s.counts.processos_automatizados} max={max} color="#2563EB" />
-                  })}
-                </div>
-              </CardContent>
-            </Card>
+            <SectionCard title="Comparativo entre anos (portfólio)" subtitle="Total por ano." icon={TrendingUp}>
+              {series.length === 0 ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">Sem dados.</p>
+              ) : (
+                <ul className="space-y-4">
+                  {series.map((s) => (
+                    <li key={s.ano}>
+                      <BarRow label={String(s.ano)} value={totalOf(s.counts)} max={maxSerie} color="#2563EB" strong={s.ano === ano} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </SectionCard>
           </div>
 
-          <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-base">Processos automatizados na árvore ({ano})</CardTitle><CardDescription>Consolidação: macroprocesso = soma dos processos = soma dos subprocessos.</CardDescription></CardHeader>
-            <CardContent>
-              {cons.length === 0 ? <p className="text-sm text-muted-foreground">Catálogo de processos vazio.</p> : <div className="space-y-1">{cons.map((n) => <ConsNode key={n.id} node={n} />)}</div>}
-            </CardContent>
-          </Card>
+          <SectionCard
+            title={`Processos automatizados na árvore (${ano})`}
+            subtitle="Consolidação: macroprocesso = soma dos processos = soma dos subprocessos."
+            icon={GitBranch}
+            flush
+          >
+            {cons.length === 0 ? (
+              <p className="px-5 py-8 text-center text-sm text-muted-foreground">Catálogo de processos vazio.</p>
+            ) : (
+              <div className="divide-y">{cons.map((n) => <ConsNode key={n.id} node={n} />)}</div>
+            )}
+          </SectionCard>
         </>
       )}
     </div>
   )
 }
 
+/** Nó da árvore de processos; os filhos saem como linhas irmãs (recuadas) para a lista ficar contínua. */
 function ConsNode({ node, depth = 0 }: { node: ProcessoConsolidacaoNode; depth?: number }) {
   return (
-    <div>
-      <div className="flex items-center justify-between rounded-md border px-2 py-1.5 text-sm" style={{ marginLeft: depth * 18 }}>
-        <span className="truncate">{node.name} <span className="text-[10px] uppercase text-muted-foreground">({node.nivel})</span></span>
-        <span className="shrink-0 font-semibold tabular-nums">{node.automatizados}</span>
+    <Fragment>
+      <div
+        className="flex items-center justify-between gap-3 py-2.5 pr-5 text-sm transition-colors hover:bg-muted/40"
+        style={{ paddingLeft: 20 + depth * 24 }}
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          {depth > 0 && <CornerDownRight size={14} className="shrink-0 text-muted-foreground" aria-hidden />}
+          <span className={`truncate ${depth === 0 ? "font-semibold" : "font-medium"}`}>{node.name}</span>
+          <Pill tone={NIVEL_TONE[node.nivel] ?? "slate"}>{NIVEL_LABEL[node.nivel] ?? node.nivel}</Pill>
+        </span>
+        <Pill tone={node.automatizados > 0 ? "emerald" : "slate"} className="font-semibold tabular-nums">{node.automatizados}</Pill>
       </div>
-      {node.children.length > 0 && <div className="mt-1 space-y-1">{node.children.map((c) => <ConsNode key={c.id} node={c} depth={depth + 1} />)}</div>}
-    </div>
+      {node.children.map((c) => <ConsNode key={c.id} node={c} depth={depth + 1} />)}
+    </Fragment>
   )
 }

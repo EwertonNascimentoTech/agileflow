@@ -7,6 +7,7 @@ import {
   type ProjectClientCandidates,
   type ProjectClientRole,
 } from "@/api/clientes"
+import { Pill } from "@/components/ds"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -156,7 +157,7 @@ export function ClientPicker({
   const genusHint = results ? GENUS_HINT[results.genus] : undefined
 
   return (
-    <div className="space-y-2 rounded-md border bg-background p-2">
+    <div className="space-y-2 rounded-lg border bg-background p-2.5">
       {!draft ? (
         <>
           <div className="relative">
@@ -168,7 +169,7 @@ export function ClientPicker({
             {searching && <Loader2 size={13} className="absolute right-2 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground" />}
           </div>
           {results && (
-            <div className="max-h-52 overflow-y-auto rounded-md border">
+            <div className="max-h-52 overflow-y-auto rounded-lg border">
               {results.items.length === 0 ? (
                 <p className="px-2 py-2 text-xs text-muted-foreground">Ninguém encontrado com “{query.trim()}”.</p>
               ) : (
@@ -186,9 +187,9 @@ export function ClientPicker({
                           {[c.full_name ? c.email : null, c.department, c.job_title].filter(Boolean).join(" · ")}
                         </span>
                       </span>
-                      <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                      <Pill className="shrink-0">
                         {taken ? "já está na lista" : SOURCE_LABEL[c.source]}
-                      </span>
+                      </Pill>
                     </button>
                   )
                 })
@@ -223,7 +224,7 @@ export function ClientPicker({
                 onChange={(e) => setDraft({ ...draft, job_title: e.target.value })} />
             </div>
           ) : (
-            <div className="rounded-md bg-muted/40 px-2 py-1.5 text-xs">
+            <div className="rounded-lg bg-muted/40 px-2.5 py-1.5 text-xs">
               <p className="font-medium">{draft.full_name}</p>
               <p className="text-[11px] text-muted-foreground">
                 {[draft.email, draft.department, draft.job_title].filter(Boolean).join(" · ")}

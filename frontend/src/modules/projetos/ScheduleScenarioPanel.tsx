@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { AlertTriangle, CalendarClock, FlaskConical, Loader2, Users } from "lucide-react"
+import { AlertTriangle, CalendarCheck, CalendarClock, FlaskConical, Loader2, Users } from "lucide-react"
 
 import {
   projetosApi,
@@ -7,8 +7,7 @@ import {
 } from "@/api/projetos"
 import type { Person } from "@/api/teamops"
 import { EmptyState } from "@/components/EmptyState"
-import { KpiCard } from "@/components/KpiCard"
-import { Badge } from "@/components/ui/badge"
+import { Card, KpiCount, KpiRow, Notice, Pill, SectionCard, TABLE } from "@/components/ds"
 import { Button } from "@/components/ui/button"
 
 function fmtH(h: number): string {
@@ -88,41 +87,39 @@ export function ScheduleScenarioPanel({
   }
 
   return (
-    <div className="space-y-4 p-4">
-      <div className="rounded-lg border bg-card p-4">
-        <div className="mb-3 flex items-start gap-2">
-          <FlaskConical size={18} className="mt-0.5 text-muted-foreground" />
-          <div>
-            <h2 className="text-sm font-semibold">Cenário de fim do projeto</h2>
-            <p className="text-xs text-muted-foreground">
-              {rootTitle ? <span className="font-medium text-foreground">{rootTitle}</span> : null}
-              {rootTitle ? " · " : ""}
-              Informe o início e os devs. O sistema soma as horas das US abertas e avança dia a dia
-              na capacidade livre do time (desconta outros projetos, sáb/dom e ausências).
-              {" "}
-              <span className="font-medium text-foreground">Cenário hipotético — não altera o cronograma.</span>
-            </p>
-          </div>
-        </div>
-
+    <div className="space-y-5">
+      <SectionCard
+        icon={FlaskConical}
+        title="Cenário de fim do projeto"
+        subtitle={
+          <>
+            {rootTitle ? <span className="font-medium text-foreground">{rootTitle}</span> : null}
+            {rootTitle ? " · " : ""}
+            Informe o início e os devs. O sistema soma as horas das US abertas e avança dia a dia
+            na capacidade livre do time (desconta outros projetos, sáb/dom e ausências).
+            {" "}
+            <span className="font-medium text-foreground">Cenário hipotético — não altera o cronograma.</span>
+          </>
+        }
+      >
         <div className="grid gap-4 lg:grid-cols-[200px_1fr_auto]">
           <div className="space-y-1">
-            <label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <label className="block text-xs text-muted-foreground">
               Início do cenário
             </label>
             <input
               type="date"
               value={start}
               onChange={(e) => setStart(e.target.value)}
-              className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
             />
           </div>
 
           <div className="space-y-1">
-            <label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <label className="block text-xs text-muted-foreground">
               Desenvolvedores ({selected.length})
             </label>
-            <div className="max-h-40 overflow-y-auto rounded-md border bg-background p-1">
+            <div className="max-h-40 overflow-y-auto rounded-lg border bg-background p-1">
               {activePersons.length === 0 ? (
                 <p className="px-2 py-2 text-xs text-muted-foreground">Nenhuma pessoa ativa no TeamOps.</p>
               ) : (
@@ -152,7 +149,7 @@ export function ScheduleScenarioPanel({
           <div className="flex items-end">
             <Button
               type="button"
-              className="w-full gap-1.5 lg:w-auto"
+              className="h-10 w-full gap-1.5 lg:w-auto"
               disabled={loading || !start || selected.length === 0}
               onClick={() => void calculate()}
             >
@@ -163,11 +160,11 @@ export function ScheduleScenarioPanel({
         </div>
 
         {error && (
-          <p className="mt-3 flex items-center gap-1.5 text-sm text-destructive">
-            <AlertTriangle size={14} /> {error}
-          </p>
+          <div className="mt-4">
+            <Notice tone="red" icon={AlertTriangle}>{error}</Notice>
+          </div>
         )}
-      </div>
+      </SectionCard>
 
       {loading && !result && (
         <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground">
@@ -176,80 +173,78 @@ export function ScheduleScenarioPanel({
       )}
 
       {result && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <KpiCard
-              label="Demanda (US abertas)"
+        <div className="space-y-5">
+          <KpiRow className="sm:grid-cols-2 xl:grid-cols-4">
+            <KpiCount
+              icon={CalendarClock}
               value={fmtH(result.demand_hours)}
-              icon={CalendarClock}
+              label="Demanda (US abertas)"
             />
-            <KpiCard
-              label="Folga do time"
-              value={fmtH(result.team_free_hours)}
+            <KpiCount
               icon={Users}
-              sub={`Capacidade ${fmtH(result.team_capacity_hours)}`}
+              value={fmtH(result.team_free_hours)}
+              label={`Folga do time · capacidade ${fmtH(result.team_capacity_hours)}`}
             />
-            <KpiCard
-              label="Dias úteis"
-              value={result.work_days}
+            <KpiCount
               icon={CalendarClock}
+              value={result.work_days}
+              label="Dias úteis"
+              tone="slate"
             />
-            <KpiCard
-              label="Fim projetado"
+            <KpiCount
+              icon={CalendarCheck}
               value={result.projected_end_date ? fmtDate(result.projected_end_date) : "—"}
-              icon={FlaskConical}
-              sub={result.start_date ? `Início ${fmtDate(result.start_date)}` : undefined}
-              deltaTone={result.projected_end_date ? "up" : "down"}
+              label={result.start_date ? `Fim projetado · início ${fmtDate(result.start_date)}` : "Fim projetado"}
+              tone={result.projected_end_date ? "emerald" : "amber"}
+              highlight={!result.projected_end_date}
             />
-          </div>
+          </KpiRow>
 
           {result.warnings.length > 0 && (
-            <div className="space-y-1 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-warning-foreground">
-              {result.warnings.map((w) => (
-                <p key={w} className="flex items-start gap-1.5">
-                  <AlertTriangle size={14} className="mt-0.5 shrink-0" /> {w}
-                </p>
-              ))}
-            </div>
+            <Notice tone="amber" icon={AlertTriangle}>
+              <div className="min-w-0 flex-1 space-y-1">
+                {result.warnings.map((w) => <p key={w}>{w}</p>)}
+              </div>
+            </Notice>
           )}
 
           {result.persons.length > 0 && (
-            <div className="overflow-x-auto rounded-md border bg-card">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
-                    <th className="px-3 py-2 font-medium">Pessoa</th>
-                    <th className="px-3 py-2 text-right font-medium">Capacidade</th>
-                    <th className="px-3 py-2 text-right font-medium">Alocado (outros)</th>
-                    <th className="px-3 py-2 text-right font-medium">Folga</th>
-                    <th className="px-3 py-2 text-right font-medium">Utilização</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.persons.map((p) => (
-                    <tr key={p.person_id} className="border-b last:border-0">
-                      <td className="px-3 py-2 font-medium">
-                        {p.full_name ?? `Sem cadastro (${p.person_id.slice(0, 8)})`}
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums">{fmtH(p.capacity_hours)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
-                        {fmtH(p.allocated_elsewhere_hours)}
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums font-medium">{fmtH(p.free_hours)}</td>
-                      <td className="px-3 py-2 text-right">
-                        <Badge variant="secondary" className="font-normal tabular-nums">
-                          {Math.round(p.utilization_pct)}%
-                        </Badge>
-                      </td>
+            <SectionCard title="Capacidade por pessoa" icon={Users} flush>
+              <div className={TABLE.wrap}>
+                <table className={TABLE.table}>
+                  <thead className={TABLE.thead}>
+                    <tr>
+                      <th className={TABLE.thFirst}>Pessoa</th>
+                      <th className={`${TABLE.th} text-right`}>Capacidade</th>
+                      <th className={`${TABLE.th} text-right`}>Alocado (outros)</th>
+                      <th className={`${TABLE.th} text-right`}>Folga</th>
+                      <th className={`${TABLE.th} text-right`}>Utilização</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {result.persons.map((p) => (
+                      <tr key={p.person_id} className={TABLE.tr}>
+                        <td className={`${TABLE.tdFirst} font-medium`}>
+                          {p.full_name ?? `Sem cadastro (${p.person_id.slice(0, 8)})`}
+                        </td>
+                        <td className={`${TABLE.td} text-right tabular-nums`}>{fmtH(p.capacity_hours)}</td>
+                        <td className={`${TABLE.td} text-right tabular-nums text-muted-foreground`}>
+                          {fmtH(p.allocated_elsewhere_hours)}
+                        </td>
+                        <td className={`${TABLE.td} text-right tabular-nums font-medium`}>{fmtH(p.free_hours)}</td>
+                        <td className={`${TABLE.td} text-right`}>
+                          <Pill tone="slate" className="tabular-nums">{Math.round(p.utilization_pct)}%</Pill>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </SectionCard>
           )}
 
           {result.days.length > 0 && result.projected_end_date && (
-            <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            <div className="rounded-xl border bg-muted/40 px-4 py-2.5 text-xs text-muted-foreground">
               Consumo dia a dia até {fmtDate(result.projected_end_date)}:{" "}
               {result.days.length} dia(s) útil(is) simulado(s)
               {result.days.length > 0 && (
@@ -262,11 +257,13 @@ export function ScheduleScenarioPanel({
       )}
 
       {!loading && !result && !error && (
-        <EmptyState
-          icon={FlaskConical}
-          title="Monte o cenário"
-          description="Escolha a data de início e os desenvolvedores, depois calcule para ver quando a demanda das US cabe na capacidade livre do time."
-        />
+        <Card>
+          <EmptyState
+            icon={FlaskConical}
+            title="Monte o cenário"
+            description="Escolha a data de início e os desenvolvedores, depois calcule para ver quando a demanda das US cabe na capacidade livre do time."
+          />
+        </Card>
       )}
     </div>
   )

@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ElementType, type ReactNode } from "react"
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { AlertTriangle, ArrowUpRight, BarChart3, Bot, CalendarRange, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Eye, GitBranch, KanbanSquare, List as ListIcon, Loader2, Plus, Search, X } from "lucide-react"
 import {
@@ -47,6 +47,8 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
+import { EmptyState } from "@/components/EmptyState"
+import { Card, Pill, type Tone } from "@/components/ds"
 import { ProjectTaskDrawer } from "@/modules/projetos/ProjectTaskDrawer"
 import { BacklogClassificationDialog } from "@/modules/projetos/BacklogClassificationDialog"
 import { FormFieldRenderer, applyAutoFillCurrentFields } from "@/modules/projetos/FormFieldRenderer"
@@ -118,11 +120,61 @@ const CLASSIFICATION_LABELS: Record<NonNullable<ProjectTask["card_classification
   melhoria: "Melhoria",
 }
 
-const CLASSIFICATION_COLORS: Record<NonNullable<ProjectTask["card_classification"]>, { bg: string; color: string }> = {
-  desenvolvimento: { bg: "#2563eb", color: "#fff" },
-  implantacao: { bg: "#0891b2", color: "#fff" },
-  melhoria: { bg: "#7c3aed", color: "#fff" },
+// Tom do selo (Pill do design system) por classificação — mesmas famílias de cor de antes
+// (azul, ciano, violeta).
+const CLASSIFICATION_TONES: Record<NonNullable<ProjectTask["card_classification"]>, Tone> = {
+  desenvolvimento: "blue",
+  implantacao: "teal",
+  melhoria: "violet",
 }
+
+// Cor do módulo Processos (quadrado do ícone no cabeçalho).
+const MODULE_COLOR = "#2563EB"
+
+/** Selo do design system (Pill) com dica, ícone opcional e texto que corta com reticências na
+ *  largura do card (o Pill não repassa `title` nem limita a largura). */
+function Tag({
+  tone = "slate",
+  dot = false,
+  icon: Icon,
+  title,
+  className = "",
+  children,
+}: {
+  tone?: Tone
+  dot?: boolean
+  icon?: ElementType
+  title?: string
+  className?: string
+  children: ReactNode
+}) {
+  return (
+    <span title={title} className={`inline-flex min-w-0 max-w-full ${className}`}>
+      <Pill tone={tone} dot={dot} className="min-w-0 max-w-full">
+        {Icon && <Icon size={12} className="shrink-0" />}
+        <span className="min-w-0 truncate">{children}</span>
+      </Pill>
+    </span>
+  )
+}
+
+/** Selo com cor livre (quadrante da priorização, etapa): mesmo desenho do selo de quadrante
+ *  do Portal — fundo translúcido + contorno na cor, funciona nos dois temas. */
+function ColorTag({ color, title, children }: { color: string; title?: string; children: ReactNode }) {
+  return (
+    <span
+      title={title}
+      className="inline-flex min-w-0 max-w-full items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-medium text-foreground"
+      style={{ backgroundColor: `${color}1a`, boxShadow: `inset 0 0 0 1px ${color}55` }}
+    >
+      <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: color }} aria-hidden />
+      <span className="min-w-0 truncate">{children}</span>
+    </span>
+  )
+}
+
+// Cabeçalho fixo dos menus de filtro (texto normal, sem caixa alta miúda).
+const DD_HEAD = "sticky top-0 z-[1] -mx-1 -mt-1 mb-0.5 border-b bg-card px-2.5 pb-1.5 pt-2 text-xs font-medium text-muted-foreground"
 
 /** Tooltip com o resumo de IA dos cards: com auxílio, sem auxílio e não classificados. */
 function iaSummaryTitle(tasks: ProjectTask[]): string {
@@ -134,21 +186,16 @@ function iaSummaryTitle(tasks: ProjectTask[]): string {
 
 function ClassificationChip({ value }: { value: ProjectTask["card_classification"] }) {
   if (!value) return null
-  const colors = CLASSIFICATION_COLORS[value]
   return (
-    <span
-      className="chip"
-      style={{ background: colors.bg, color: colors.color }}
-      title="Classificação do portfólio de produtos"
-    >
+    <Tag tone={CLASSIFICATION_TONES[value]} title="Classificação do portfólio de produtos">
       {CLASSIFICATION_LABELS[value]}
-    </span>
+    </Tag>
   )
 }
 
 function SlaChip({ state }: { state: ProjectTask["sla_state"] }) {
-  if (state === "warning") return <span className="chip warning">SLA: alerta</span>
-  if (state === "breached") return <span className="chip destructive">SLA: atrasado</span>
+  if (state === "warning") return <Tag tone="amber">SLA: alerta</Tag>
+  if (state === "breached") return <Tag tone="red">SLA: atrasado</Tag>
   return null
 }
 
@@ -239,13 +286,11 @@ const BoardCard = memo(function BoardCard({
     switch (key) {
       case "demand_type": {
         const name = ctx.demandTypeName(task.demand_type_id)
-        return name ? <span className="chip">{name}</span> : null
+        return name ? <Tag tone="blue">{name}</Tag> : null
       }
       case "priority_quadrant": {
         const q = ctx.quadrantInfo(task.id)
-        return q ? (
-          <span className="chip" style={{ background: q.color, color: "#fff" }}>{q.label}</span>
-        ) : null
+        return q ? <ColorTag color={q.color}>{q.label}</ColorTag> : null
       }
       case "card_classification":
         return task.card_classification ? (
@@ -255,17 +300,16 @@ const BoardCard = memo(function BoardCard({
         if (ctx.useEstimatedHoursOnCard) {
           const text = fmtEstimatedHours(task.estimated_hours)
           return (
-            <span className="chip muted" title="Horas estimadas">
-              <Clock size={10} />
+            <Tag icon={Clock} title="Horas estimadas">
               {text ?? "—"}
-            </span>
+            </Tag>
           )
         }
         if (task.completed_at) return null // Status já aparece na raia (ex.: Concluído).
-        if (task.sla_state === "breached") return <span className="chip destructive">Atrasado</span>
-        if (task.sla_state === "warning") return <span className="chip warning">Alerta</span>
-        if (isOverdue) return <span className="chip destructive">Atrasado</span>
-        return <span className="chip success">Em dia</span>
+        if (task.sla_state === "breached") return <Tag tone="red">Atrasado</Tag>
+        if (task.sla_state === "warning") return <Tag tone="amber">Alerta</Tag>
+        if (isOverdue) return <Tag tone="red">Atrasado</Tag>
+        return <Tag tone="emerald">Em dia</Tag>
       }
       case "code":
         return <span className="task-id">{task.id.slice(0, 8).toUpperCase()}</span>
@@ -276,7 +320,7 @@ const BoardCard = memo(function BoardCard({
         // foi carregado inteiro (ex.: depois de salvar no drawer).
         const desc = task.description ?? task.description_preview ?? null
         return desc ? (
-          <p style={{ width: "100%", fontSize: 12, color: "var(--af-muted-foreground, #6b7280)", margin: 0, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+          <p className="m-0 line-clamp-2 w-full text-xs text-muted-foreground">
             {desc}
           </p>
         ) : null
@@ -284,38 +328,35 @@ const BoardCard = memo(function BoardCard({
       case "parent": {
         const parent = task.parent_task_id ? ctx.parentName(task.parent_task_id) : null
         return parent ? (
-          <span className="chip muted"><GitBranch size={10} />
-            <span style={{ maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{parent}</span>
-          </span>
+          <Tag icon={GitBranch} title={parent} className="max-w-[180px]">{parent}</Tag>
         ) : null
       }
       case "children_progress": {
         const p = ctx.childrenProgress(task.id)
         return p ? (
-          <div style={{ width: "100%" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#6b7280" }}>
-              <span>{label}</span><span>{p.done}/{p.total} · {p.pct}%</span>
+          <div className="w-full">
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span>{label}</span><span className="tabular-nums">{p.done}/{p.total} · {p.pct}%</span>
             </div>
-            <div style={{ height: 5, borderRadius: 3, background: "#e5e7eb", overflow: "hidden", marginTop: 2 }}>
-              <div style={{ width: `${p.pct}%`, height: "100%", background: "var(--af-primary, #2563eb)" }} />
+            <div className="mt-0.5 h-1.5 overflow-hidden rounded-full bg-muted dark:bg-white/10">
+              <div className="h-full rounded-full bg-primary" style={{ width: `${p.pct}%` }} />
             </div>
           </div>
         ) : null
       }
       case "diretoria": {
         const text = formatDiretoriaAreaLabel(ctx.defaultFormFields, "diretoria", task.diretoria)
-        return text ? <span className="chip muted">{text}</span> : null
+        return text ? <Tag title={text}>{text}</Tag> : null
       }
       case "area": {
         const text = formatDiretoriaAreaLabel(ctx.defaultFormFields, "area", task.area)
-        return text ? <span className="chip muted">{text}</span> : null
+        return text ? <Tag title={text}>{text}</Tag> : null
       }
       case "due_date":
         return task.due_date ? (
-          <span className={`due-pill ${isOverdue ? "overdue" : ""}`}>
-            <span className="dot" />
+          <Tag tone={isOverdue ? "red" : "slate"} dot>
             {DM_FORMAT.format(new Date(task.due_date))}
-          </span>
+          </Tag>
         ) : null
       case "assignee":
         return (
@@ -331,7 +372,7 @@ const BoardCard = memo(function BoardCard({
         if (!task.requester_name) return null
         return (
           <span
-            style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+            className="inline-flex min-w-0 max-w-full items-center gap-1"
             title={`${label}: ${task.requester_name}`}
           >
             <span
@@ -340,7 +381,7 @@ const BoardCard = memo(function BoardCard({
             >
               {initialsOf(task.requester_name)}
             </span>
-            <span className="chip muted">{task.requester_name}</span>
+            <Tag>{task.requester_name}</Tag>
           </span>
         )
       }
@@ -364,7 +405,7 @@ const BoardCard = memo(function BoardCard({
         if (isPersonLike) {
           return (
             <span
-              style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+              className="inline-flex min-w-0 max-w-full items-center gap-1"
               title={`${label}: ${text}`}
             >
               <span
@@ -373,11 +414,11 @@ const BoardCard = memo(function BoardCard({
               >
                 {initialsOf(text)}
               </span>
-              <span className="chip muted">{text}</span>
+              <Tag>{text}</Tag>
             </span>
           )
         }
-        return <span className="chip muted">{text}</span>
+        return <Tag title={`${label}: ${text}`}>{text}</Tag>
       }
     }
   }
@@ -400,40 +441,33 @@ const BoardCard = memo(function BoardCard({
     <article
       ref={setNodeRef}
       style={style}
-      className={`task-card ${isDragging ? "dragging" : ""}`}
+      className={`task-card shadow-sm ${isDragging ? "dragging" : ""}`}
       onClick={() => onOpen(task)}
       {...attributes}
       {...(locked ? {} : listeners)}
     >
       {planningTag && (
-        <div style={{ marginBottom: 4, display: "flex", flexWrap: "wrap", gap: 4 }}>
-          <span
-            className="chip"
-            style={
-              planningTag.kind === "programa"
-                ? { background: "#7c3aed", color: "#fff" }
-                : { background: "#0ea5e9", color: "#fff" }
-            }
-          >
+        <div className="mb-1.5 flex flex-wrap gap-1">
+          <Tag tone={planningTag.kind === "programa" ? "violet" : "blue"} dot>
             {planningTag.kind === "programa" ? "Programa" : "Projeto"}
-          </span>
+          </Tag>
           {planningTag.kind === "programa" && planningTag.programName && (
-            <span className="chip muted" title="Programa vinculado">{planningTag.programName}</span>
+            <Tag title="Programa vinculado">{planningTag.programName}</Tag>
           )}
         </div>
       )}
       {locked && (
-        <div style={{ marginBottom: 4, display: "flex", flexWrap: "wrap", gap: 4 }}>
-          <span className="chip" style={{ background: "#ea580c", color: "#fff" }} title="Aguardando conclusão no kanban Contratar">
+        <div className="mb-1.5 flex flex-wrap gap-1">
+          <Tag tone="amber" title="Aguardando conclusão no kanban Contratar">
             Aguardando contratação
-          </span>
+          </Tag>
         </div>
       )}
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+      <div className="flex flex-wrap items-center gap-1.5">
         {rendered.length > 0
           ? rendered.map((x) => (
             <Fragment key={x.key}>
-              {x.fullWidth ? <div style={{ width: "100%" }}>{x.node}</div> : x.node}
+              {x.fullWidth ? <div className="w-full">{x.node}</div> : x.node}
             </Fragment>
           ))
           : <h4 className="title" style={{ width: "100%" }}>{task.title}</h4>}
@@ -451,22 +485,14 @@ const BoardCard = memo(function BoardCard({
         <UsCardProgressBar key={bar.key} percent={bar.pct} label={bar.label} />
       ))}
       {ctx.isFeatureKanban && task.us_impediment_active && (
-        <span
-          className="chip"
-          title="Alguma User Story desta Feature está com impedimento"
-          style={{ color: "#b91c1c", borderColor: "#fecaca", background: "#fef2f2" }}
-        >
-          <AlertTriangle size={10} /> Impedimento
-        </span>
+        <Tag tone="red" className="mr-1 mt-1.5" icon={AlertTriangle} title="Alguma User Story desta Feature está com impedimento">
+          Impedimento
+        </Tag>
       )}
       {ctx.isFeatureKanban && task.us_codereview_active && (
-        <span
-          className="chip"
-          title="Alguma User Story desta Feature está em Code Review"
-          style={{ color: "#6d28d9", borderColor: "#ddd6fe", background: "#f5f3ff" }}
-        >
-          <Eye size={10} /> Code Review
-        </span>
+        <Tag tone="violet" className="mr-1 mt-1.5" icon={Eye} title="Alguma User Story desta Feature está em Code Review">
+          Code Review
+        </Tag>
       )}
     </article>
   )
@@ -510,25 +536,25 @@ const BoardColumn = memo(function BoardColumn({
   return (
     <section className={`column ${isOver ? "drag-over" : ""}`}>
       <div className="col-bar" style={{ background: status.color }} />
-      <header className="column-head">
-        <div className="left">
-          <h3>{status.name}</h3>
+      <header className="flex items-center justify-between gap-2 px-3.5 pb-2.5 pt-3.5">
+        <div className="flex min-w-0 items-center gap-2">
+          <h3 className="min-w-0 truncate text-sm font-semibold text-foreground" title={status.name}>{status.name}</h3>
           {hasAgent && (
             <span
-              className="inline-flex items-center text-violet-600"
+              className="inline-flex shrink-0 items-center text-violet-600 dark:text-violet-400"
               title="Esta raia é executada por um agente de IA"
             >
               <Bot size={15} />
             </span>
           )}
-          <span
-            className="col-count"
+          <Tag
+            className="shrink-0 tabular-nums"
             title={hiddenCount > 0
               ? `Mostrando ${shownCount} de ${totalCount} — os mais recentes primeiro.`
               : iaSummaryTitle(tasks)}
           >
             {hiddenCount > 0 ? `${shownCount}/${totalCount}` : shownCount}
-          </span>
+          </Tag>
         </div>
       </header>
       <div ref={setNodeRef} className="col-body">
@@ -538,19 +564,19 @@ const BoardColumn = memo(function BoardColumn({
           <BoardCard key={task.id} task={task} ctx={ctx} onOpen={onOpen} />
         ))}
         {notRendered > 0 && (
-          <button
+          <Button
             type="button"
-            className="btn ghost"
-            style={{ width: "100%", marginTop: 6 }}
+            variant="ghost"
+            className="mt-1.5 h-9 w-full shrink-0 text-muted-foreground"
             onClick={() => setRenderLimit((n) => n + COLUMN_RENDER_STEP * 2)}
           >
             Mostrar mais {Math.min(notRendered, COLUMN_RENDER_STEP * 2)} (de {notRendered})
-          </button>
+          </Button>
         )}
         {notRendered === 0 && hiddenCount > 0 && onLoadMore && (
-          <button type="button" className="btn ghost" style={{ width: "100%", marginTop: 6 }} onClick={onLoadMore}>
+          <Button type="button" variant="ghost" className="mt-1.5 h-9 w-full shrink-0 text-muted-foreground" onClick={onLoadMore}>
             Carregar mais {hiddenCount}
-          </button>
+          </Button>
         )}
       </div>
     </section>
@@ -576,25 +602,35 @@ function ViewTabs({
   onGantt: () => void
   count: number
 }) {
+  // Abas sublinhadas no padrão DetailTabs do Portal (o Gantt é outra rota, por isso aba própria).
+  const tab = (on: boolean) =>
+    `inline-flex items-center gap-2 whitespace-nowrap border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
+      on ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:border-border hover:text-foreground"
+    }`
   return (
-    <div className="view-tabs">
-      <button className={`view-tab ${active === "board" ? "active" : ""}`} onClick={() => onChange("board")}>
-        <KanbanSquare size={14} /> Quadro <span className="pill">{count}</span>
-      </button>
-      <button className={`view-tab ${active === "list" ? "active" : ""}`} onClick={() => onChange("list")}>
-        <ListIcon size={14} /> Lista
-      </button>
-      <button className="view-tab" onClick={onGantt}>
-        <BarChart3 size={14} /> Gantt
-      </button>
-      <button className={`view-tab ${active === "cal" ? "active" : ""}`} onClick={() => onChange("cal")}>
-        <CalendarRange size={14} /> Calendário
-      </button>
+    <div className="flex shrink-0 items-end border-b">
+      <div className="-mb-px flex overflow-x-auto" role="tablist">
+        <button type="button" role="tab" aria-selected={active === "board"} className={tab(active === "board")} onClick={() => onChange("board")}>
+          <KanbanSquare size={16} /> Quadro
+          <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">{count}</span>
+        </button>
+        <button type="button" role="tab" aria-selected={active === "list"} className={tab(active === "list")} onClick={() => onChange("list")}>
+          <ListIcon size={16} /> Lista
+        </button>
+        <button type="button" role="tab" aria-selected={false} className={tab(false)} onClick={onGantt}>
+          <BarChart3 size={16} /> Gantt
+        </button>
+        <button type="button" role="tab" aria-selected={active === "cal"} className={tab(active === "cal")} onClick={() => onChange("cal")}>
+          <CalendarRange size={16} /> Calendário
+        </button>
+      </div>
     </div>
   )
 }
 
 // ─────────── List view (agrupada por etapa) ───────────
+// Mesmas colunas da lista de antes (etapa, demanda, tipo, status, responsável, SLA/horas, prazo).
+const LIST_GRID = "grid grid-cols-[28px_1fr_130px_150px_120px_120px_120px] items-center"
 function ListView({
   statuses,
   tasks,
@@ -625,8 +661,8 @@ function ListView({
   const [limits, setLimits] = useState<Record<string, number>>({})
   const today = new Date(new Date().toDateString())
   return (
-    <div className="list-card">
-      <div className="list-row header">
+    <Card className="overflow-hidden">
+      <div className={`${LIST_GRID} bg-muted/60 px-3.5 py-3 text-sm font-semibold text-foreground`}>
         <span />
         <span>Demanda</span>
         <span>Tipo</span>
@@ -640,11 +676,14 @@ function ListView({
         if (stTasks.length === 0) return null
         return (
           <div key={s.id}>
-            <div className="list-row group" onClick={() => toggle(s.id)}>
-              {collapsed[s.id] ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
-              <span className="status-dot" style={{ background: s.color }} />
+            <div
+              className="flex cursor-pointer items-center gap-3 border-t bg-muted/30 px-3.5 py-2.5 text-sm font-semibold transition-colors hover:bg-muted/60"
+              onClick={() => toggle(s.id)}
+            >
+              {collapsed[s.id] ? <ChevronRight size={14} className="text-muted-foreground" /> : <ChevronDown size={14} className="text-muted-foreground" />}
+              <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: s.color }} />
               <span>{s.name}</span>
-              <span style={{ color: "var(--af-muted-fg)", fontWeight: 500 }} title={iaSummaryTitle(stTasks)}>{stTasks.length}</span>
+              <Tag className="tabular-nums" title={iaSummaryTitle(stTasks)}>{stTasks.length}</Tag>
             </div>
             {!collapsed[s.id] && stTasks.slice(0, limits[s.id] ?? LIST_RENDER_STEP).map((t) => {
               const a = resolveAssignee(t.assigned_to)
@@ -655,87 +694,84 @@ function ListView({
               const lastDue = childAgg ? childrenDates(t.id)?.due : null
               const groupLabel = t.planning_kind === "programa" ? "Programa" : null
               return (
-                <div key={t.id} className="list-row task" onClick={() => onOpen(t)}>
+                <div
+                  key={t.id}
+                  className={`${LIST_GRID} cursor-pointer border-t px-3.5 py-2.5 text-sm transition-colors hover:bg-muted/40`}
+                  onClick={() => onOpen(t)}
+                >
                   <span />
-                  <div className="col-title" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    <span className="text">{t.title}</span>
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <span className="min-w-0 truncate font-medium">{t.title}</span>
                     {childAgg && (
-                      <span className="chip" style={{ background: "var(--af-primary, #2563eb)", color: "#fff" }} title="Abra o card para ver/gerenciar os itens">
+                      <Tag tone="blue" title="Abra o card para ver/gerenciar os itens">
                         {groupLabel ? `${groupLabel} · ` : ""}{childAgg.total} {childAgg.total === 1 ? "item" : "itens"} · {childAgg.pct}%
-                      </span>
+                      </Tag>
                     )}
                     {lastDue && (
-                      <span className="chip muted">Última entrega: {DMY_FORMAT.format(new Date(lastDue))}</span>
+                      <Tag>Última entrega: {DMY_FORMAT.format(new Date(lastDue))}</Tag>
                     )}
                     {t.card_classification && <ClassificationChip value={t.card_classification} />}
                     {t.procurement_locked && (
-                      <span className="chip" style={{ background: "#ea580c", color: "#fff" }}>
-                        Aguardando contratação
-                      </span>
+                      <Tag tone="amber">Aguardando contratação</Tag>
                     )}
                     {canSendToDev && t.parent_task_id && (
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); onSendToDev(t) }}
-                        className="flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+                        className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
                         title="Enviar este projeto para o kanban de desenvolvimento"
                       >
-                        <ArrowUpRight size={12} /> Enviar p/ dev
+                        <ArrowUpRight size={13} /> Enviar p/ dev
                       </button>
                     )}
                   </div>
-                  <span>{typeName && <span className="chip">{typeName}</span>}</span>
-                  <span>
-                    <span className="chip" style={{ background: s.color + "22", color: s.color }}>
-                      <span style={{ width: 6, height: 6, borderRadius: 3, background: s.color }} />
-                      {s.name}
-                    </span>
+                  <span className="min-w-0">{typeName && <Tag tone="blue">{typeName}</Tag>}</span>
+                  <span className="min-w-0">
+                    <ColorTag color={s.color}>{s.name}</ColorTag>
                   </span>
-                  <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span className="flex min-w-0 items-center gap-1.5">
                     <span className="assignee-avatar" style={{ background: colorForUser(a?.id ?? null), width: 22, height: 22, fontSize: 9 }}>
                       {a ? initialsOf(a.full_name) : "?"}
                     </span>
-                    <span style={{ fontSize: 12 }}>{a?.full_name?.split(" ")[0] ?? "—"}</span>
+                    <span className="truncate text-xs">{a?.full_name?.split(" ")[0] ?? "—"}</span>
                   </span>
-                  <span>
+                  <span className="min-w-0">
                     {useEstimatedHoursOnCard ? (
-                      <span className="chip muted" title="Horas estimadas">
-                        <Clock size={10} />
+                      <Tag icon={Clock} title="Horas estimadas">
                         {fmtEstimatedHours(t.estimated_hours) ?? "—"}
-                      </span>
+                      </Tag>
                     ) : (
                       <SlaChip state={t.sla_state} />
                     )}
                   </span>
-                  <span>{due && (
-                    <span className={`due-pill ${overdue ? "overdue" : ""}`}>
-                      <span className="dot" />{due.toLocaleDateString("pt-BR")}
-                    </span>
+                  <span className="min-w-0">{due && (
+                    <Tag tone={overdue ? "red" : "slate"} dot>{due.toLocaleDateString("pt-BR")}</Tag>
                   )}</span>
                 </div>
               )
             })}
             {!collapsed[s.id] && stTasks.length > (limits[s.id] ?? LIST_RENDER_STEP) && (
-              <div className="list-row" style={{ justifyContent: "center" }}>
-                <button
+              <div className="flex justify-center border-t px-3.5 py-2">
+                <Button
                   type="button"
-                  className="btn ghost"
+                  variant="ghost"
+                  className="h-9 text-muted-foreground"
                   onClick={() => setLimits((l) => ({ ...l, [s.id]: (l[s.id] ?? LIST_RENDER_STEP) + LIST_RENDER_STEP * 2 }))}
                 >
                   Mostrar mais {Math.min(stTasks.length - (limits[s.id] ?? LIST_RENDER_STEP), LIST_RENDER_STEP * 2)} (de {stTasks.length - (limits[s.id] ?? LIST_RENDER_STEP)})
-                </button>
+                </Button>
               </div>
             )}
           </div>
         )
       })}
-    </div>
+    </Card>
   )
 }
 
 // ─────────── Calendar view (mês) ───────────
 const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
-const DOWS = ["SEG", "TER", "QUA", "QUI", "SEX", "SÁB", "DOM"]
+const DOWS = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
 function CalendarView({
   tasks,
   demandTypeName,
@@ -755,43 +791,51 @@ function CalendarView({
   for (let i = 0; i < startDow; i++) cells.push(null)
   for (let i = 1; i <= daysInMonth; i++) cells.push(i)
   return (
-    <>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
-        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>{MONTHS[cursor.m]} {cursor.y}</h2>
-        <button className="btn ghost icon" onClick={() => setCursor((c) => { const d = new Date(c.y, c.m - 1, 1); return { y: d.getFullYear(), m: d.getMonth() } })}>
-          <ChevronLeft size={14} />
-        </button>
-        <button className="btn ghost icon" onClick={() => setCursor((c) => { const d = new Date(c.y, c.m + 1, 1); return { y: d.getFullYear(), m: d.getMonth() } })}>
-          <ChevronRight size={14} />
-        </button>
-        <span className="spacer" />
-        <button className="btn ghost" onClick={() => setCursor({ y: now.getFullYear(), m: now.getMonth() })}>Hoje</button>
+    <Card className="p-4">
+      <div className="mb-4 flex items-center gap-2">
+        <h2 className="text-lg font-semibold">{MONTHS[cursor.m]} {cursor.y}</h2>
+        <Button type="button" variant="outline" size="icon" className="h-9 w-9" aria-label="Mês anterior" title="Mês anterior" onClick={() => setCursor((c) => { const d = new Date(c.y, c.m - 1, 1); return { y: d.getFullYear(), m: d.getMonth() } })}>
+          <ChevronLeft size={15} />
+        </Button>
+        <Button type="button" variant="outline" size="icon" className="h-9 w-9" aria-label="Próximo mês" title="Próximo mês" onClick={() => setCursor((c) => { const d = new Date(c.y, c.m + 1, 1); return { y: d.getFullYear(), m: d.getMonth() } })}>
+          <ChevronRight size={15} />
+        </Button>
+        <span className="flex-1" />
+        <Button type="button" variant="outline" className="h-9" onClick={() => setCursor({ y: now.getFullYear(), m: now.getMonth() })}>Hoje</Button>
       </div>
-      <div className="cal-grid" style={{ marginBottom: 6 }}>
+      <div className="mb-1.5 grid grid-cols-7 gap-1.5">
         {DOWS.map((d) => (
-          <div key={d} style={{ padding: "6px 8px", fontSize: 11, fontWeight: 600, color: "var(--af-muted-fg)" }}>{d}</div>
+          <div key={d} className="px-2 py-1.5 text-xs font-medium text-muted-foreground">{d}</div>
         ))}
       </div>
-      <div className="cal-grid">
+      <div className="grid grid-cols-7 gap-1.5">
         {cells.map((day, i) => {
           if (!day) return <div key={i} />
           const dayDate = new Date(cursor.y, cursor.m, day)
           const isToday = dayDate.toDateString() === today.toDateString()
           const dayTasks = tasks.filter((t) => t.due_date && new Date(t.due_date).toDateString() === dayDate.toDateString())
           return (
-            <div key={i} className={`cal-day ${isToday ? "today" : ""}`}>
-              <div className="num">{day}</div>
+            <div
+              key={i}
+              className={`flex min-h-[90px] min-w-0 flex-col gap-1 rounded-xl bg-card p-2 ${isToday ? "border-2 border-primary" : "border"}`}
+            >
+              <div className={`text-xs font-semibold tabular-nums ${isToday ? "text-primary" : "text-muted-foreground"}`}>{day}</div>
               {dayTasks.slice(0, 3).map((t) => (
-                <div key={t.id} className="cal-tag" onClick={() => onOpen(t)} title={t.title}>
+                <div
+                  key={t.id}
+                  className="cursor-pointer truncate rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary hover:bg-primary/15"
+                  onClick={() => onOpen(t)}
+                  title={t.title}
+                >
                   {demandTypeName(t.demand_type_id) ? `${demandTypeName(t.demand_type_id)}: ` : ""}{t.title}
                 </div>
               ))}
-              {dayTasks.length > 3 && <div style={{ fontSize: 10, color: "var(--af-muted-fg)" }}>+{dayTasks.length - 3}</div>}
+              {dayTasks.length > 3 && <div className="text-xs text-muted-foreground">+{dayTasks.length - 3}</div>}
             </div>
           )
         })}
       </div>
-    </>
+    </Card>
   )
 }
 
@@ -815,10 +859,24 @@ function FilterDropdown({
 }) {
   return (
     <div className={`relative${align === "end" ? " filter-dropdown-end" : ""}`}>
-      <button type="button" className={`filter-btn ${selectedCount ? "active" : ""}`} onClick={onToggle}>
+      {/* Mesmo desenho do gatilho do FilterSelect do Portal (h-10, borda, fundo); o menu
+          continua multi-seleção. */}
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className={`inline-flex h-10 items-center gap-1.5 rounded-md border bg-background px-3 text-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+          selectedCount ? "border-primary text-primary" : "text-foreground"
+        }`}
+        onClick={onToggle}
+      >
         <span>{label}</span>
-        {selectedCount > 0 && <span className="filter-count">{selectedCount}</span>}
-        <ChevronDown size={12} />
+        {selectedCount > 0 && (
+          <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-primary/10 px-1.5 text-xs font-semibold tabular-nums text-primary">
+            {selectedCount}
+          </span>
+        )}
+        <ChevronDown size={14} className="text-muted-foreground" />
       </button>
       {open && <div className={`dd-menu${menuClassName ? ` ${menuClassName}` : ""}`}>{children}</div>}
     </div>
@@ -1974,8 +2032,12 @@ export default function ProjectBoardPage() {
 
   if (loading) {
     return (
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-40 rounded-lg" />)}
+      <div className="space-y-3">
+        <Skeleton className="h-11 w-1/3 rounded-xl" />
+        <Skeleton className="h-16 rounded-2xl" />
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-40 rounded-xl" />)}
+        </div>
       </div>
     )
   }
@@ -1984,15 +2046,15 @@ export default function ProjectBoardPage() {
   // redirect inicial e para o nome — se ela falhar, o kanban ainda abre.
   if (!projectId) {
     return (
-      <div className="space-y-3 text-sm text-muted-foreground">
+      <Card className="space-y-3 p-5 text-sm text-muted-foreground">
         <p>{bootError ?? "Não foi possível carregar o kanban. Recarregue a página em instantes."}</p>
-        <button
-          className="btn primary"
+        <Button
+          className="h-10"
           onClick={() => { setLoading(true); setBootAttempt((n) => n + 1) }}
         >
           Tentar novamente
-        </button>
-      </div>
+        </Button>
+      </Card>
     )
   }
 
@@ -2069,8 +2131,43 @@ export default function ProjectBoardPage() {
   const hiddenDoneCount = doneLimit === null ? 0 : Math.max(0, doneTotal - doneLimit)
 
   return (
-    <div className="afx kanban-page-root flex min-h-0 w-full min-w-0 flex-col gap-4 overflow-hidden">
+    <div className="afx kanban-page-root flex min-h-0 w-full min-w-0 flex-col gap-3 overflow-hidden">
       {openMenu && <div style={{ position: "fixed", inset: 0, zIndex: 20 }} onClick={() => setOpenMenu(null)} />}
+
+      {/* Cabeçalho no padrão PageHeader do Portal, em versão compacta (ícone menor e sem
+          descrição) para sobrar altura para as raias. */}
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
+            style={{ backgroundColor: `${MODULE_COLOR}1f`, color: MODULE_COLOR }}
+            aria-hidden
+          >
+            <KanbanSquare size={22} />
+          </span>
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <h1 className="text-2xl font-bold tracking-tight">Kanban</h1>
+            {selectedFunnel && (
+              <>
+                <span className="text-lg text-muted-foreground" aria-hidden>/</span>
+                <span className="max-w-[28rem] truncate text-lg font-semibold text-muted-foreground" title={selectedFunnel.name}>
+                  {selectedFunnel.name}
+                </span>
+              </>
+            )}
+            <Tag className="tabular-nums" title={iaSummaryTitle(funnelTasks)}>
+              {funnelTasks.length} {funnelTasks.length === 1 ? "demanda" : "demandas"}
+            </Tag>
+          </div>
+        </div>
+        {canManageFunnel && (
+          <div className="flex shrink-0 flex-wrap items-center gap-2 print:hidden">
+            <Button className="h-10 gap-1.5" onClick={() => setOpenCreate(true)} title="Nova demanda">
+              <Plus size={16} /> Nova demanda
+            </Button>
+          </div>
+        )}
+      </div>
 
       <ViewTabs
         active={view}
@@ -2088,20 +2185,21 @@ export default function ProjectBoardPage() {
         count={funnelTasks.length}
       />
 
-      <div className="board-toolbar" style={{ position: "relative", zIndex: 25 }}>
-        <div className="board-title">
-          <h1>Kanban</h1>
-          {selectedFunnel && (<><span className="slash">/</span><span className="funnel-name">{selectedFunnel.name}</span></>)}
-          <span className="count-pill" title={iaSummaryTitle(funnelTasks)}>{funnelTasks.length}</span>
-        </div>
-
-        <div className="tb-search">
-          <Search size={14} />
-          <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Buscar demandas pelo título..." />
-        </div>
+      {/* Barra de filtros (Card do Portal). z-index acima da camada que fecha os menus. */}
+      <Card className="relative z-[25] flex shrink-0 flex-wrap items-center gap-2 p-3">
+        <label className="relative block min-w-[200px] flex-1">
+          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Buscar demandas pelo título..."
+            aria-label="Buscar demandas pelo título"
+            className="h-10 w-full rounded-md border bg-background pl-9 pr-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </label>
 
         <FilterDropdown label="Responsável" open={openMenu === "assignee"} onToggle={() => setOpenMenu(openMenu === "assignee" ? null : "assignee")} selectedCount={assignees.length}>
-          <div className="dd-head">Filtrar por responsável</div>
+          <div className={DD_HEAD}>Filtrar por responsável</div>
           {assigneeOptions.length === 0 ? (
             <div className="dd-item" style={{ opacity: 0.6, pointerEvents: "none" }}>Nenhum responsável nos cards</div>
           ) : assigneeOptions.map((m) => {
@@ -2116,7 +2214,7 @@ export default function ProjectBoardPage() {
         </FilterDropdown>
 
         <FilterDropdown label="Product Owner" open={openMenu === "po"} onToggle={() => setOpenMenu(openMenu === "po" ? null : "po")} selectedCount={productOwners.length}>
-          <div className="dd-head">Filtrar por Product Owner</div>
+          <div className={DD_HEAD}>Filtrar por Product Owner</div>
           {[{ id: "__none__", full_name: "Sem PO" }, ...poUsers].map((m) => {
             const checked = productOwners.includes(m.id)
             return (
@@ -2131,7 +2229,7 @@ export default function ProjectBoardPage() {
 
         {!hideRequisitanteFilter && (
           <FilterDropdown label="Requisitante" open={openMenu === "requisitante"} onToggle={() => setOpenMenu(openMenu === "requisitante" ? null : "requisitante")} selectedCount={requisitantes.length}>
-            <div className="dd-head">Filtrar por requisitante</div>
+            <div className={DD_HEAD}>Filtrar por requisitante</div>
             {[
               { label: "Sem requisitante", values: ["__none__"] as string[] },
               ...requisitanteOptionGroups,
@@ -2157,7 +2255,7 @@ export default function ProjectBoardPage() {
             onToggle={() => setOpenMenu(openMenu === "entrega" ? null : "entrega")}
             selectedCount={deliveryPeriod ? 1 : 0}
           >
-            <div className="dd-head">Entregas por prazo</div>
+            <div className={DD_HEAD}>Entregas por prazo</div>
             {DELIVERY_PERIOD_OPTIONS.map((opt) => {
               const checked = deliveryPeriod === opt.value
               return (
@@ -2178,7 +2276,7 @@ export default function ProjectBoardPage() {
         )}
 
         <FilterDropdown label="Diretoria" open={openMenu === "diretoria"} onToggle={() => setOpenMenu(openMenu === "diretoria" ? null : "diretoria")} selectedCount={diretorias.length} align="end">
-          <div className="dd-head">Filtrar por diretoria</div>
+          <div className={DD_HEAD}>Filtrar por diretoria</div>
           {[
             { label: "Sem diretoria", values: ["__none__"] as string[] },
             ...groupFilterValuesByLabel(availDiretorias, (v) => dimLabelMaps.diretoria.get(v) ?? v),
@@ -2197,7 +2295,7 @@ export default function ProjectBoardPage() {
         </FilterDropdown>
 
         <FilterDropdown label="Área" open={openMenu === "area"} onToggle={() => setOpenMenu(openMenu === "area" ? null : "area")} selectedCount={areas.length} align="end">
-          <div className="dd-head">Filtrar por área</div>
+          <div className={DD_HEAD}>Filtrar por área</div>
           {[
             { label: "Sem área", values: ["__none__"] as string[] },
             ...availAreas.map((v) => ({ label: dimLabelMaps.area.get(v) ?? v, values: [v] })),
@@ -2212,7 +2310,7 @@ export default function ProjectBoardPage() {
         </FilterDropdown>
 
         <FilterDropdown label="Programa" open={openMenu === "programa"} onToggle={() => setOpenMenu(openMenu === "programa" ? null : "programa")} selectedCount={programIds.length} menuClassName="dd-menu-wide">
-          <div className="dd-head">Filtrar por programa</div>
+          <div className={DD_HEAD}>Filtrar por programa</div>
           <div
             className="dd-item"
             onClick={() => toggleMulti(setProgramIds, programIds, "__none__")}
@@ -2238,7 +2336,7 @@ export default function ProjectBoardPage() {
         </FilterDropdown>
 
         <FilterDropdown label="Projeto / Programa" open={openMenu === "planning"} onToggle={() => setOpenMenu(openMenu === "planning" ? null : "planning")} selectedCount={planningCards.length} menuClassName="dd-menu-wide">
-          <div className="dd-head">Projetos e programas criados</div>
+          <div className={DD_HEAD}>Projetos e programas criados</div>
           {productOwners.length > 0 && (
             <div className="dd-item" style={{ opacity: 0.75, pointerEvents: "none", fontSize: 12 }}>
               Filtrado pelo Product Owner selecionado
@@ -2253,29 +2351,28 @@ export default function ProjectBoardPage() {
             return (
               <div key={c.id} className="dd-item" onClick={() => toggleMulti(setPlanningCards, planningCards, c.id)}>
                 <span className={`check ${checked ? "checked" : ""}`}>{checked && <Check size={11} />}</span>
-                <span className="chip muted" style={{ fontSize: 9, flexShrink: 0 }}>
+                <Pill tone={c.planning_kind === "programa" ? "violet" : "blue"} className="shrink-0">
                   {c.planning_kind === "programa" ? "Programa" : "Projeto"}
-                </span>
+                </Pill>
                 <span className="dd-item-label">{c.title}</span>
               </div>
             )
           })}
         </FilterDropdown>
 
-        {hasFilters && (<button className="btn ghost" onClick={clearFilters}><X size={14} /> Limpar</button>)}
-        {canManageFunnel && (
-          <button className="btn primary icon" onClick={() => setOpenCreate(true)} title="Nova demanda"><Plus size={16} /></button>
+        {hasFilters && (
+          <Button variant="ghost" className="h-10 gap-1.5 text-muted-foreground" onClick={clearFilters}>
+            <X size={15} /> Limpar
+          </Button>
         )}
-      </div>
+      </Card>
 
       {view === "board" && (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {statuses.length === 0 ? (
-          <div className="empty-state">
-            <div className="icon-wrap"><KanbanSquare size={24} /></div>
-            <h3>Sem colunas</h3>
-            <p>Este funil ainda não possui colunas de kanban.</p>
-          </div>
+          <Card>
+            <EmptyState icon={KanbanSquare} title="Sem colunas" description="Este funil ainda não possui colunas de kanban." />
+          </Card>
         ) : (
           <DndContext sensors={boardSensors} onDragEnd={onBoardDragEnd}>
             <div className="kanban-board-shell">
@@ -2292,9 +2389,9 @@ export default function ProjectBoardPage() {
                   onLoadMore={status.is_final ? loadAllDone : undefined}
                 />
               ))}
-              <button className="btn ghost" style={{ flexShrink: 0, alignSelf: "flex-start", marginTop: 8 }}>
-                <Plus size={14} /> Nova coluna
-              </button>
+              <Button variant="ghost" className="mt-2 shrink-0 gap-1.5 self-start text-muted-foreground">
+                <Plus size={15} /> Nova coluna
+              </Button>
             </div>
             </div>
           </DndContext>
@@ -2374,14 +2471,14 @@ export default function ProjectBoardPage() {
                       <div key={section.id} className="space-y-3 border-t border-border pt-4 first:border-t-0 first:pt-0">
                         <div className="flex items-center gap-2">
                           <span className="h-4 w-1 rounded-full bg-primary" />
-                          <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">
+                          <p className="text-sm font-semibold text-foreground">
                             {section.title}
                           </p>
                           {secMode === "visible" && (
-                            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">somente leitura</span>
+                            <Pill tone="slate">somente leitura</Pill>
                           )}
                           {secMode === "required" && (
-                            <span className="text-[10px] uppercase tracking-wide text-destructive">obrigatória</span>
+                            <Pill tone="red">obrigatória</Pill>
                           )}
                         </div>
                         <div className="space-y-3">
@@ -2401,7 +2498,7 @@ export default function ProjectBoardPage() {
                                       {field.label}
                                       {isRequired && <span className="text-destructive ml-0.5">*</span>}
                                       {isReadOnly && (
-                                        <span className="ml-2 text-[10px] uppercase tracking-wide text-muted-foreground">só leitura</span>
+                                        <span className="ml-2 text-xs font-normal text-muted-foreground">só leitura</span>
                                       )}
                                     </Label>
                                     <div className={fieldError ? "rounded-md ring-2 ring-destructive/60" : ""}>
@@ -2423,7 +2520,7 @@ export default function ProjectBoardPage() {
                                       />
                                     </div>
                                     {fieldError && (
-                                      <p className="text-[11px] text-destructive">{fieldError}</p>
+                                      <p className="text-xs text-destructive">{fieldError}</p>
                                     )}
                                   </div>
                                 )
@@ -2600,7 +2697,7 @@ export default function ProjectBoardPage() {
                   </button>
                 ))}
               </div>
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 Em <strong>Programa</strong>, é obrigatório vincular o card a um programa existente (ou cadastrar um novo).
               </p>
             </div>
@@ -2631,7 +2728,7 @@ export default function ProjectBoardPage() {
                 </SelectContent>
               </Select>
               {poUsers.length === 0 && (
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   Nenhum usuário com cargo PO (Product Owner) cadastrado.
                 </p>
               )}
@@ -2676,7 +2773,7 @@ export default function ProjectBoardPage() {
                     </SelectContent>
                   </Select>
                   {programs.length === 0 && (
-                    <p className="text-[11px] text-muted-foreground">Nenhum programa cadastrado — use “Novo programa”.</p>
+                    <p className="text-xs text-muted-foreground">Nenhum programa cadastrado — use “Novo programa”.</p>
                   )}
                 </>
               ) : (
@@ -2699,12 +2796,12 @@ export default function ProjectBoardPage() {
                       rows={2}
                     />
                   </div>
-                  <p className="text-[11px] text-muted-foreground">
+                  <p className="text-xs text-muted-foreground">
                     O programa será cadastrado (menu “Programa”) e vinculado a este projeto. O PO acima é herdado.
                   </p>
                 </div>
               )}
-              <p className="text-[11px] text-muted-foreground">Obrigatório — vincule este projeto a um programa.</p>
+              <p className="text-xs text-muted-foreground">Obrigatório — vincule este projeto a um programa.</p>
             </div>
             )}
           </div>

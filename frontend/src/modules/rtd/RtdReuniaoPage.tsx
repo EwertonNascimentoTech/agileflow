@@ -1,14 +1,17 @@
 import { useEffect, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Gavel, Link2, Link2Off, Printer } from "lucide-react"
+import {
+  BarChart3, ChevronLeft, ChevronRight, ClipboardCheck, ExternalLink, Flag, Gavel, Link2, Link2Off, Lock, LockOpen,
+  Presentation, Printer, Target,
+} from "lucide-react"
 
 import { rtdApi, type PersonMini, type ReuniaoReport } from "@/api/rtd"
 import { RtdIndicadoresSection } from "@/modules/rtd/RtdIndicadoresSection"
 import { RtdPlanosEpaSection } from "@/modules/rtd/RtdPlanosEpaSection"
 import { RtdCapaSlide } from "@/modules/rtd/RtdPresentationDocument"
-import { Badge } from "@/components/ui/badge"
+import { EmptyState } from "@/components/EmptyState"
+import { Card, DetailTabs, Notice, PageHeader, Pill, SectionCard, type TabDef, type Tone } from "@/components/ds"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "@/lib/toast"
 
@@ -59,16 +62,21 @@ const SLIDES = [
   "4. Planos Táticos",
 ]
 
+// Abas do stepper (mesma ordem de SLIDES; o valor é o índice do slide).
+const SLIDE_TABS: TabDef<string>[] = SLIDES.map((label, i) => ({
+  value: String(i),
+  label,
+  icon: [Presentation, Target, Flag, BarChart3, ClipboardCheck][i],
+}))
+
+const STATUS_LABEL: Record<string, string> = { rascunho: "Rascunho", realizada: "Realizada", fechada: "Fechada" }
+const STATUS_TONE: Record<string, Tone> = { rascunho: "amber", realizada: "blue", fechada: "emerald" }
+
 function Section({ n, title, children }: { n: string; title: string; children: React.ReactNode }) {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">
-          <span className="mr-2 text-muted-foreground">{n}</span>{title}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">{children}</CardContent>
-    </Card>
+    <SectionCard title={<><span className="text-muted-foreground">{n}</span>{title}</>}>
+      <div className="space-y-4">{children}</div>
+    </SectionCard>
   )
 }
 
@@ -165,97 +173,94 @@ export default function RtdReuniaoPage() {
   }
 
   if (loading) {
-    return <div className="mx-auto max-w-6xl space-y-4 p-4 md:p-6">
-      <Skeleton className="h-16 w-full" /><Skeleton className="h-48 w-full" /><Skeleton className="h-48 w-full" />
+    return <div className="space-y-5 p-4">
+      <Skeleton className="h-20 w-2/3 rounded-xl" /><Skeleton className="h-12 w-full rounded-xl" /><Skeleton className="h-48 w-full rounded-2xl" /><Skeleton className="h-48 w-full rounded-2xl" />
     </div>
   }
-  if (!rep) return null
+  if (!rep) {
+    return (
+      <div className="p-4">
+        <Card>
+          <EmptyState icon={Gavel} title="Reunião não carregada" description="Não foi possível carregar o relatório desta reunião." />
+        </Card>
+      </div>
+    )
+  }
 
   const { meta, panorama } = rep
+  const status = String(meta.status)
+  const btn = "h-10 gap-1.5"
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5 p-4 md:p-6">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <button onClick={() => navigate("/app/modules/rtd/reunioes")}
-            className="mb-1 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="h-3.5 w-3.5" /> Reuniões
-          </button>
-          <h1 className="flex items-center gap-2 text-xl font-semibold">
-            <Gavel className="h-5 w-5" /> {String(meta.titulo)}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Competência <b>{String(meta.competencia)}</b> · período {fmt(panorama.periodo.inicio)}–{fmt(panorama.periodo.fim)}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <Badge variant={meta.status === "fechada" ? "success" : "secondary"}>{String(meta.status)}</Badge>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => navigate(`/app/modules/rtd/reunioes/${id}/pdf`)}
-            title="Abrir versão imprimível da apresentação"
-          >
-            <Printer className="mr-1.5 h-3.5 w-3.5" />
-            Gerar PDF
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => void copiarLinkPublico()} disabled={sharing}
-            title="Copiar link para compartilhar sem login">
-            <Link2 className="mr-1.5 h-3.5 w-3.5" />
-            {sharing ? "…" : publicToken ? "Copiar link" : "Compartilhar"}
-          </Button>
-          {publicToken && (
+    <div className="space-y-5 p-4">
+      <PageHeader
+        crumbs={[{ label: "Reuniões", to: "/app/modules/rtd/reunioes" }, { label: String(meta.titulo) }]}
+        icon={Gavel}
+        color="#D97706"
+        title={String(meta.titulo)}
+        description={
+          <>Competência <b className="font-semibold text-foreground">{String(meta.competencia)}</b> · período {fmt(panorama.periodo.inicio)}–{fmt(panorama.periodo.fim)}</>
+        }
+        actions={
+          <>
             <Button
               variant="outline"
-              size="sm"
-              onClick={() => window.open(`/p/rtd/${publicToken}`, "_blank")}
-              title="Abrir a apresentação pública"
+              className={btn}
+              onClick={() => navigate(`/app/modules/rtd/reunioes/${id}/pdf`)}
+              title="Abrir versão imprimível da apresentação"
             >
-              <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
-              Abrir
+              <Printer size={16} />
+              Gerar PDF
             </Button>
-          )}
-          {publicToken && (
-            <Button variant="ghost" size="sm" onClick={() => void revogarLinkPublico()} disabled={sharing}
-              title="Revogar link público">
-              <Link2Off className="h-3.5 w-3.5 text-muted-foreground" />
+            <Button variant="outline" className={btn} onClick={() => void copiarLinkPublico()} disabled={sharing}
+              title="Copiar link para compartilhar sem login">
+              <Link2 size={16} />
+              {sharing ? "…" : publicToken ? "Copiar link" : "Compartilhar"}
             </Button>
-          )}
-          {meta.status === "fechada" ? (
-            <Button variant="outline" size="sm" onClick={() => alterarStatus(false)} disabled={closing}>
-              {closing ? "…" : "Reabrir reunião"}
-            </Button>
-          ) : (
-            <Button variant="outline" size="sm" onClick={() => alterarStatus(true)} disabled={closing}>
-              {closing ? "…" : "Fechar reunião"}
-            </Button>
-          )}
-        </div>
-      </div>
+            {publicToken && (
+              <Button
+                variant="outline"
+                className={btn}
+                onClick={() => window.open(`/p/rtd/${publicToken}`, "_blank")}
+                title="Abrir a apresentação pública"
+              >
+                <ExternalLink size={16} />
+                Abrir
+              </Button>
+            )}
+            {publicToken && (
+              <Button variant="ghost" size="icon" className="h-10 w-10" onClick={() => void revogarLinkPublico()} disabled={sharing}
+                title="Revogar link público" aria-label="Revogar link público">
+                <Link2Off size={16} className="text-muted-foreground" />
+              </Button>
+            )}
+            {meta.status === "fechada" ? (
+              <Button variant="outline" className={btn} onClick={() => alterarStatus(false)} disabled={closing}>
+                <LockOpen size={16} />
+                {closing ? "…" : "Reabrir reunião"}
+              </Button>
+            ) : (
+              <Button variant="outline" className={btn} onClick={() => alterarStatus(true)} disabled={closing}>
+                <Lock size={16} />
+                {closing ? "…" : "Fechar reunião"}
+              </Button>
+            )}
+          </>
+        }
+      >
+        <Pill tone={STATUS_TONE[status] ?? "slate"} dot>{STATUS_LABEL[status] ?? status}</Pill>
+      </PageHeader>
       {publicToken && (
-        <p className="break-all rounded-md border bg-muted/40 px-3 py-2 font-mono text-xs text-muted-foreground">
-          {`${typeof window !== "undefined" ? window.location.origin : ""}/p/rtd/${publicToken}`}
-        </p>
+        <Notice tone="blue" icon={Link2}>
+          <span className="shrink-0 font-medium">Link público ativo</span>
+          <span className="min-w-0 flex-1 break-all font-mono text-xs">
+            {`${typeof window !== "undefined" ? window.location.origin : ""}/p/rtd/${publicToken}`}
+          </span>
+        </Notice>
       )}
 
       {/* Stepper da apresentação */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        {SLIDES.map((label, i) => (
-          <button
-            key={label}
-            type="button"
-            onClick={() => setSlide(i)}
-            className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
-              slide === i
-                ? "border-blue-800 bg-blue-800 text-white"
-                : "bg-background text-muted-foreground hover:bg-muted"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <DetailTabs tabs={SLIDE_TABS} value={String(slide)} onChange={(v) => setSlide(Number(v))} />
 
       {/* Slide 0 — Capa */}
       <div className={slide === 0 ? "" : "hidden"}>
@@ -321,16 +326,15 @@ export default function RtdReuniaoPage() {
 
       {/* Navegação da apresentação */}
       <div className="flex items-center justify-between border-t pt-3">
-        <Button variant="outline" size="sm" disabled={slide === 0} onClick={() => setSlide((s) => s - 1)}>
-          <ChevronLeft className="mr-1 h-4 w-4" /> Anterior
+        <Button variant="outline" className={btn} disabled={slide === 0} onClick={() => setSlide((s) => s - 1)}>
+          <ChevronLeft size={16} /> Anterior
         </Button>
         <span className="text-xs text-muted-foreground">
           {slide + 1} / {SLIDES.length} · use ← → para navegar
         </span>
-        <Button size="sm" disabled={slide === SLIDES.length - 1}
-          className="bg-blue-800 hover:bg-blue-900"
+        <Button className={btn} disabled={slide === SLIDES.length - 1}
           onClick={() => setSlide((s) => s + 1)}>
-          Próximo <ChevronRight className="ml-1 h-4 w-4" />
+          Próximo <ChevronRight size={16} />
         </Button>
       </div>
 

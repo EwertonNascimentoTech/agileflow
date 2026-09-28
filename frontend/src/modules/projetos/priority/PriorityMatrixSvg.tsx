@@ -149,7 +149,7 @@ export function PriorityMatrixSvg({
 
       {perspectives.length > 0 && (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Perspectiva</span>
+          <span className="text-xs font-semibold text-foreground">Perspectiva</span>
           {perspectives.map(([name, color]) => (
             <span key={name} className="flex items-center gap-1.5 text-xs">
               <span className="h-3 w-3 rounded-full" style={{ backgroundColor: color }} />

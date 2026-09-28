@@ -1,14 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState, type ElementType, type ReactNode } from "react"
 import {
   ArrowDown,
   ArrowUp,
+  Building2,
   ChevronDown,
   ChevronRight,
   ChevronsDownUp,
   ChevronsUpDown,
   GitCompare,
+  Layers,
+  ListTree,
   Loader2,
   Lock,
+  Network,
   Pencil,
   Plus,
   Trash2,
@@ -23,7 +27,6 @@ import {
   type ProcessVersionSummary,
   type ProcessVersionTree,
 } from "@/api/produtos"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -32,13 +35,14 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyState } from "@/components/EmptyState"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Card, FilterSelect, Notice, PageHeader, Pill, ProgressBar, Segmented, type Tone } from "@/components/ds"
 import { toast } from "@/lib/toast"
 import { defaultSelectLabel } from "@/modules/projetos/defaultFormUtils"
 import { useDefaultFormConfig } from "@/modules/projetos/useDefaultFormConfig"
 import ProcessPortfolioItemDialog, { type ItemDialogSpec } from "./ProcessPortfolioItemDialog"
 import ProcessPortfolioVersionDiffDialog from "./ProcessPortfolioVersionDiffDialog"
 import { documentationStats, effectiveStatusItem, formatVigenciaRange } from "./processPortfolioDocUtils"
-import { PROCESS_ITEM_STATUS_COLOR, PROCESS_ITEM_STATUS_LABEL } from "@/modules/produtos/constants"
+import { PROCESS_ITEM_STATUS_LABEL } from "@/modules/produtos/constants"
 
 const NIVEL_LABEL: Record<ProcessNivel, string> = {
   diretoria: "Diretoria", macroprocesso: "Macro Processo", processo: "Processo", subprocesso: "Sub Processo",
@@ -46,6 +50,21 @@ const NIVEL_LABEL: Record<ProcessNivel, string> = {
 const DOT: Record<ProcessNivel, string> = {
   diretoria: "#7C3AED", macroprocesso: "#2563EB", processo: "#059669", subprocesso: "#D97706",
 }
+/** Ícone do nível na árvore (quadrado na cor do nível, como Feature/US na árvore do Portal). */
+const NIVEL_ICON: Record<ProcessNivel, ElementType> = {
+  diretoria: Building2, macroprocesso: Layers, processo: Workflow, subprocesso: ListTree,
+}
+/** Status do item (planejado/em andamento/concluído) no selo do Portal. */
+const STATUS_TONE: Record<string, Tone> = {
+  planejado: "slate", em_andamento: "blue", concluido: "emerald",
+}
+// Atalhos de nível: o selecionado é deduzido do que está recolhido (sem estado próprio).
+type LevelMode = "macro" | "processo" | "todos" | "custom"
+const LEVEL_OPTS: { value: LevelMode; label: string }[] = [
+  { value: "macro", label: "Somente macro" },
+  { value: "processo", label: "Até processo" },
+  { value: "todos", label: "Todos os níveis" },
+]
 // Cascata vigente: Macro Processo → Processo → Sub Processo. (Diretoria é atributo do macro, não nível.)
 const CHILD: Record<ProcessNivel, ProcessNivel | null> = {
   diretoria: "macroprocesso", macroprocesso: "processo", processo: "subprocesso", subprocesso: null,
@@ -101,6 +120,14 @@ export default function ProcessPortfolioPage() {
 
   const selected = portfolios.find((p) => p.id === selectedId) ?? null
   const parentIds = useMemo(() => (tree ? collectParentIds(tree.items) : new Set<string>()), [tree])
+  const levelMode = useMemo<LevelMode>(() => {
+    if (!tree) return "custom"
+    const same = (s: Set<string>) => s.size === collapsedIds.size && [...s].every((id) => collapsedIds.has(id))
+    if (collapsedIds.size === 0) return "todos"
+    if (same(collectCollapsedForDepth(tree.items, 0, 0))) return "macro"
+    if (same(collectCollapsedForDepth(tree.items, 0, 1))) return "processo"
+    return "custom"
+  }, [tree, collapsedIds])
 
   useEffect(() => {
     setCollapsedIds(tree?.items ? collectParentIds(tree.items) : new Set())
@@ -200,52 +227,70 @@ export default function ProcessPortfolioPage() {
     } catch (e) { toast.error(detail(e)) }
   }
 
-  if (loading) return <Skeleton className="h-64 w-full" />
+  const header = (actions?: ReactNode) => (
+    <PageHeader
+      icon={Network}
+      color="#7C3AED"
+      title="Portfólio de Processos"
+      description="Cascata versionada: Diretoria → Macro Processo → Processo → Sub Processo."
+      actions={actions}
+    />
+  )
+
+  if (loading) {
+    return (
+      <div className="space-y-5">
+        <Skeleton className="h-16 w-2/3 rounded-xl" />
+        <Skeleton className="h-64 w-full rounded-2xl" />
+      </div>
+    )
+  }
 
   if (portfolios.length === 0) {
     return (
-      <>
-        <EmptyState icon={Workflow} title="Nenhum portfólio de processos"
-          description="Crie um portfólio para mapear a cascata Diretoria → Macro Processo → Processo → Sub Processo."
-          action={{ label: "Criar portfólio", onClick: () => setNewPortfolio(true) }} />
+      <div className="space-y-5">
+        {header()}
+        <Card>
+          <EmptyState icon={Workflow} title="Nenhum portfólio de processos"
+            description="Crie um portfólio para mapear a cascata Diretoria → Macro Processo → Processo → Sub Processo."
+            action={{ label: "Criar portfólio", onClick: () => setNewPortfolio(true) }} />
+        </Card>
         {newPortfolio && <PortfolioDialog onClose={() => setNewPortfolio(false)} onSaved={async (id) => { setNewPortfolio(false); await loadPortfolios(); setSelectedId(id) }} />}
-      </>
+      </div>
     )
   }
 
   const editable = tree?.editable ?? false
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-bold">Portfólio de Processos</h2>
-          <p className="text-sm text-muted-foreground">Cascata versionada: Diretoria → Macro Processo → Processo → Sub Processo.</p>
-        </div>
-        <Button variant="outline" className="gap-1.5" onClick={() => setNewPortfolio(true)}><Plus size={15} /> Novo portfólio</Button>
-      </div>
+    <div className="space-y-5">
+      {header(
+        <Button variant="outline" className="h-10 gap-1.5" onClick={() => setNewPortfolio(true)}><Plus size={16} /> Novo portfólio</Button>,
+      )}
 
       {/* Barra de controle: portfólio + versão + ações */}
-      <div className="flex flex-wrap items-end gap-3 rounded-md border p-3">
-        <div className="space-y-1.5">
-          <Label className="text-xs">Portfólio</Label>
-          <div className="flex items-center gap-1">
-            <Select value={selectedId} onValueChange={setSelectedId}>
-              <SelectTrigger className="w-56"><SelectValue /></SelectTrigger>
-              <SelectContent>{portfolios.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
-            </Select>
-            {selected && (
-              <>
-                <Button variant="ghost" size="icon" className="h-9 w-9" title="Editar portfólio" onClick={() => setEditPortfolio(selected)}><Pencil size={14} /></Button>
-                <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground hover:text-destructive" title="Excluir portfólio" onClick={() => void delPortfolio(selected)}><Trash2 size={14} /></Button>
-              </>
-            )}
+      <Card className="flex flex-wrap items-end gap-3 p-4">
+        <div className="flex items-end gap-1">
+          <div className="w-64 max-w-full">
+            <FilterSelect
+              label="Portfólio"
+              value={selectedId}
+              onChange={setSelectedId}
+              options={portfolios.map((p) => ({ value: p.id, label: p.name }))}
+            />
           </div>
+          {selected && (
+            <>
+              <Button variant="ghost" size="icon" className="h-10 w-10" title="Editar portfólio" aria-label="Editar portfólio" onClick={() => setEditPortfolio(selected)}><Pencil size={15} /></Button>
+              <Button variant="ghost" size="icon" className="h-10 w-10 text-muted-foreground hover:text-destructive" title="Excluir portfólio" aria-label="Excluir portfólio" onClick={() => void delPortfolio(selected)}><Trash2 size={15} /></Button>
+            </>
+          )}
         </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs">Versão</Label>
+        {/* Mesmo visual do FilterSelect, mantendo o "—" quando ainda não há versão carregada. */}
+        <label className="block w-56 max-w-full space-y-1">
+          <span className="text-xs text-muted-foreground">Versão</span>
           <Select value={tree?.id ?? ""} onValueChange={(v) => void loadVersionsAndTree(selectedId, v)}>
-            <SelectTrigger className="w-44"><SelectValue placeholder="—" /></SelectTrigger>
+            <SelectTrigger className="h-10 bg-background"><SelectValue placeholder="—" /></SelectTrigger>
             <SelectContent>
               {versions.map((v) => (
                 <SelectItem key={v.id} value={v.id}>
@@ -254,76 +299,79 @@ export default function ProcessPortfolioPage() {
               ))}
             </SelectContent>
           </Select>
-        </div>
+        </label>
         <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
           {versions.length > 1 && (
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setShowDiff(true)}><GitCompare size={14} /> Comparar versões</Button>
+            <Button variant="outline" className="h-10 gap-1.5" onClick={() => setShowDiff(true)}><GitCompare size={16} /> Comparar versões</Button>
           )}
           {editable ? (
-            <Button size="sm" className="gap-1.5" onClick={() => void consolidate()}><Lock size={14} /> Consolidar v{tree?.version}</Button>
+            <Button className="h-10 gap-1.5" onClick={() => void consolidate()}><Lock size={16} /> Consolidar v{tree?.version}</Button>
           ) : (
-            <Button size="sm" className="gap-1.5" onClick={() => setNewVersion(true)}><Plus size={14} /> Nova versão</Button>
+            <Button className="h-10 gap-1.5" onClick={() => setNewVersion(true)}><Plus size={16} /> Nova versão</Button>
           )}
         </div>
-      </div>
+      </Card>
 
       {tree && !editable && (
-        <div className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          <Lock size={14} /> Versão consolidada (somente leitura). Crie uma nova versão para editar.
-        </div>
+        <Notice tone="amber" icon={Lock}>
+          Versão consolidada (somente leitura). Crie uma nova versão para editar.
+        </Notice>
       )}
       {tree?.justification && (
-        <p className="text-xs text-muted-foreground"><span className="font-medium">Justificativa da versão:</span> {tree.justification}</p>
+        <p className="text-sm text-muted-foreground"><span className="font-medium text-foreground">Justificativa da versão:</span> {tree.justification}</p>
       )}
 
       {loadingTree ? (
-        <Skeleton className="h-48 w-full" />
+        <Skeleton className="h-48 w-full rounded-2xl" />
       ) : tree ? (
-        <div className="space-y-2">
-          {editable && (
-            <Button variant="outline" size="sm" className="gap-1.5"
-              onClick={() => setItemDialog({ versionId: tree.id, nivel: ROOT_NIVEL, parentId: null })}>
-              <Plus size={14} /> Macro Processo
-            </Button>
-          )}
-          {tree.items.length === 0 ? (
-            <EmptyState icon={Workflow} title="Versão vazia" description={editable ? "Adicione o primeiro macro processo." : "Esta versão não possui itens."} />
-          ) : (
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
-                <span className="text-xs font-medium text-muted-foreground">Níveis:</span>
-                <Button variant="outline" size="sm" className="h-7 gap-1 text-xs" onClick={expandAllNodes}>
-                  <ChevronsUpDown size={13} /> Expandir tudo
+        <Card>
+          {(editable || tree.items.length > 0) && (
+            <div className="flex flex-wrap items-end justify-between gap-3 p-4">
+              {tree.items.length > 0 ? (
+                <div className="flex flex-wrap items-end gap-2">
+                  <div className="space-y-1">
+                    <span className="block text-xs text-muted-foreground">Níveis</span>
+                    <Segmented
+                      value={levelMode}
+                      onChange={(v) => (v === "macro" ? collapseToDepth(0) : v === "processo" ? collapseToDepth(1) : expandAllNodes())}
+                      options={LEVEL_OPTS}
+                    />
+                  </div>
+                  <Button variant="outline" className="h-10 gap-1.5" onClick={expandAllNodes}>
+                    <ChevronsUpDown size={15} /> Expandir tudo
+                  </Button>
+                  <Button variant="outline" className="h-10 gap-1.5" onClick={collapseAllNodes}>
+                    <ChevronsDownUp size={15} /> Recolher tudo
+                  </Button>
+                </div>
+              ) : <span />}
+              {editable && (
+                <Button variant="outline" className="h-10 gap-1.5"
+                  onClick={() => setItemDialog({ versionId: tree.id, nivel: ROOT_NIVEL, parentId: null })}>
+                  <Plus size={16} /> Macro Processo
                 </Button>
-                <Button variant="outline" size="sm" className="h-7 gap-1 text-xs" onClick={collapseAllNodes}>
-                  <ChevronsDownUp size={13} /> Recolher tudo
-                </Button>
-                <span className="hidden h-4 w-px bg-border sm:inline" />
-                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => collapseToDepth(0)}>
-                  Somente macro
-                </Button>
-                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => collapseToDepth(1)}>
-                  Até processo
-                </Button>
-                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={expandAllNodes}>
-                  Todos os níveis
-                </Button>
-              </div>
-              <div className="space-y-1">
-                {tree.items.map((node, idx) => (
-                  <Node key={node.id} node={node} editable={editable} siblings={tree.items} index={idx}
-                    collapsedIds={collapsedIds}
-                    onToggleExpand={toggleNodeExpand}
-                    formatDiretoria={formatDiretoria}
-                    formatArea={formatArea}
-                    onAdd={(nivel, parentId) => setItemDialog({ versionId: tree.id, nivel, parentId })}
-                    onEdit={(item) => setItemDialog({ versionId: tree.id, nivel: item.nivel, parentId: item.parent_id, item })}
-                    onDelete={delItem} onMove={moveItem} />
-                ))}
-              </div>
+              )}
             </div>
           )}
-        </div>
+          {tree.items.length === 0 ? (
+            <div className={editable ? "border-t" : ""}>
+              <EmptyState icon={Workflow} title="Versão vazia" description={editable ? "Adicione o primeiro macro processo." : "Esta versão não possui itens."} compact />
+            </div>
+          ) : (
+            <div className="pb-1">
+              {tree.items.map((node, idx) => (
+                <Node key={node.id} node={node} editable={editable} siblings={tree.items} index={idx}
+                  collapsedIds={collapsedIds}
+                  onToggleExpand={toggleNodeExpand}
+                  formatDiretoria={formatDiretoria}
+                  formatArea={formatArea}
+                  onAdd={(nivel, parentId) => setItemDialog({ versionId: tree.id, nivel, parentId })}
+                  onEdit={(item) => setItemDialog({ versionId: tree.id, nivel: item.nivel, parentId: item.parent_id, item })}
+                  onDelete={delItem} onMove={moveItem} />
+              ))}
+            </div>
+          )}
+        </Card>
       ) : null}
 
       {itemDialog && (
@@ -376,100 +424,124 @@ function Node({ node, depth = 0, editable, siblings, index, collapsedIds, onTogg
   const expanded = hasChildren && !collapsedIds.has(node.id)
   const vigenciaLabel = formatVigenciaRange(node.vigencia_inicio, node.vigencia_fim)
   const statusItem = effectiveStatusItem(node)
+  const LevelIcon = NIVEL_ICON[node.nivel]
+  const levelColor = DOT[node.nivel]
+  const area = formatArea(node)
+  const meta = [
+    node.diretoria ? `Diretoria: ${formatDiretoria(node.diretoria)}` : null,
+    area ? `Área: ${area}` : null,
+    node.dono_nome ? `Dono: ${node.dono_nome}` : null,
+    node.analista_nome ? `Analista: ${node.analista_nome}` : null,
+    vigenciaLabel ? `Vigência: ${vigenciaLabel}` : null,
+  ].filter((m): m is string => !!m)
   return (
     <div>
-      <div className="relative z-0 flex items-center gap-2 overflow-visible rounded-md border p-2 hover:z-20" style={{ marginLeft: depth * 20 }}>
-        {hasChildren ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 shrink-0"
-            title={expanded ? "Recolher" : "Expandir"}
-            onClick={() => onToggleExpand(node.id)}
+      {/* Linha da árvore no padrão do Portal (WorkTree): recuo por nível, ícone do nível, progresso e selos. */}
+      <div
+        className="relative z-0 flex flex-wrap items-center gap-x-3 gap-y-2 border-t py-2.5 pr-3 hover:z-20"
+        style={{ paddingLeft: 8 + depth * 28 }}
+      >
+        <div className="flex min-w-[14rem] flex-1 items-center gap-2">
+          {hasChildren ? (
+            <button
+              type="button"
+              className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+              title={expanded ? "Recolher" : "Expandir"}
+              aria-label={expanded ? "Recolher" : "Expandir"}
+              aria-expanded={expanded}
+              onClick={() => onToggleExpand(node.id)}
+            >
+              {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            </button>
+          ) : (
+            <span className="w-6 shrink-0" aria-hidden />
+          )}
+          <span
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+            style={{ backgroundColor: `${levelColor}1f`, color: levelColor }}
+            aria-hidden
           >
-            {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-          </Button>
-        ) : (
-          <span className="h-6 w-6 shrink-0" aria-hidden />
-        )}
-        <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: DOT[node.nivel] }} />
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-2">
-            <p className="truncate text-sm font-medium">{node.name}</p>
-            {node.nivel !== "subprocesso" && <DocumentationProgressBar node={node} />}
-          </div>
-          <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-            {node.diretoria && <span>Diretoria: {formatDiretoria(node.diretoria)}</span>}
-            {formatArea(node) && <span>· Área: {formatArea(node)}</span>}
-            {node.dono_nome && <span>· Dono: {node.dono_nome}</span>}
-            {node.analista_nome && <span>· Analista: {node.analista_nome}</span>}
-            {vigenciaLabel && <span>· Vigência: {vigenciaLabel}</span>}
+            <LevelIcon size={16} />
+          </span>
+          <div className="min-w-0">
+            <p className={`truncate text-sm ${depth === 0 ? "font-semibold" : "font-medium"}`} title={node.name}>{node.name}</p>
+            {meta.length > 0 && (
+              <div className="flex flex-wrap gap-x-1.5 text-xs text-muted-foreground">
+                {meta.map((m, i) => <span key={m}>{i > 0 && "· "}{m}</span>)}
+              </div>
+            )}
           </div>
         </div>
-        {node.nivel === "subprocesso" ? (
-          <>
-            <div className="group/sv relative shrink-0">
-              <Badge
-                variant={(node.servicos_count ?? 0) > 0 ? "success" : "outline"}
-                className="cursor-default text-[9px]"
-              >
-                Serviços {node.servicos_count ?? 0}
-              </Badge>
-              {(node.servicos?.length ?? 0) > 0 && (
-                <div className="pointer-events-none absolute right-0 top-full z-50 mt-1 hidden w-80 rounded-md border bg-popover p-2 text-left text-[11px] leading-snug text-popover-foreground shadow-lg group-hover/sv:block">
-                  <p className="mb-1.5 font-semibold text-foreground">
-                    {node.servicos!.length} serviço(s)
-                  </p>
-                  <ul className="space-y-1.5">
-                    {node.servicos!.map((s, i) => (
-                      <li key={`${s.name}-${i}`}>
-                        <span className="block font-medium text-foreground">{s.name}</span>
-                        {s.product_name && (
-                          <span className="block text-muted-foreground">{s.product_name}</span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+        <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-x-3 gap-y-2">
+          {node.nivel === "subprocesso" ? (
+            <div className="flex items-center gap-2">
+              <div className="group/sv relative shrink-0">
+                <Pill tone={(node.servicos_count ?? 0) > 0 ? "emerald" : "slate"} className="cursor-default">
+                  Serviços {node.servicos_count ?? 0}
+                </Pill>
+                {(node.servicos?.length ?? 0) > 0 && (
+                  <div className="pointer-events-none absolute right-0 top-full z-50 mt-1 hidden w-80 rounded-lg border bg-popover p-3 text-left text-xs leading-snug text-popover-foreground shadow-lg group-hover/sv:block">
+                    <p className="mb-1.5 font-semibold text-foreground">
+                      {node.servicos!.length} serviço(s)
+                    </p>
+                    <ul className="space-y-1.5">
+                      {node.servicos!.map((s, i) => (
+                        <li key={`${s.name}-${i}`}>
+                          <span className="block font-medium text-foreground">{s.name}</span>
+                          {s.product_name && (
+                            <span className="block text-muted-foreground">{s.product_name}</span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+              <Pill tone={node.passagem_para_ti ? "violet" : "slate"}>
+                {node.passagem_para_ti ? "Passagem TI" : "Sem passagem TI"}
+              </Pill>
             </div>
-            <Badge variant={node.passagem_para_ti ? "default" : "outline"} className="shrink-0 text-[9px]">
-              {node.passagem_para_ti ? "Passagem TI" : "Sem passagem TI"}
-            </Badge>
-          </>
-        ) : null}
-        <Badge
-          variant="secondary"
-          className="shrink-0 text-[9px]"
-          style={{
-            backgroundColor: `${PROCESS_ITEM_STATUS_COLOR[statusItem] ?? "#6B7280"}22`,
-            color: PROCESS_ITEM_STATUS_COLOR[statusItem] ?? "#6B7280",
-          }}
-        >
-          {PROCESS_ITEM_STATUS_LABEL[statusItem] ?? statusItem}
-        </Badge>
-        <Badge variant="outline" className="shrink-0 text-[9px] uppercase">{NIVEL_LABEL[node.nivel]}</Badge>
-        {editable && (
-          <>
-            <Button variant="ghost" size="icon" className="h-7 w-7" title="Mover para cima" disabled={index === 0} onClick={() => onMove(siblings, index, index - 1)}><ArrowUp size={13} /></Button>
-            <Button variant="ghost" size="icon" className="h-7 w-7" title="Mover para baixo" disabled={index === siblings.length - 1} onClick={() => onMove(siblings, index, index + 1)}><ArrowDown size={13} /></Button>
-          </>
-        )}
-        {editable && childNivel && (
-          <Button variant="ghost" size="icon" className="h-7 w-7" title={`Novo ${NIVEL_LABEL[childNivel]}`} onClick={() => onAdd(childNivel, node.id)}><Plus size={13} /></Button>
-        )}
-        {editable && (
-          <>
-            <Button variant="ghost" size="icon" className="h-7 w-7" title="Editar" onClick={() => onEdit(node)}><Pencil size={13} /></Button>
-            <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" title="Remover" onClick={() => onDelete(node)}><Trash2 size={13} /></Button>
-          </>
-        )}
-        {!editable && (
-          <Button variant="ghost" size="icon" className="h-7 w-7" title="Ver detalhes" onClick={() => onEdit(node)}><Pencil size={13} /></Button>
-        )}
+          ) : (
+            <div className="w-36">
+              <DocumentationProgressBar node={node} />
+            </div>
+          )}
+          <div className="w-32">
+            <Pill tone={STATUS_TONE[statusItem] ?? "slate"} dot>
+              {PROCESS_ITEM_STATUS_LABEL[statusItem] ?? statusItem}
+            </Pill>
+          </div>
+          <div className="w-[7.5rem]">
+            <span className="inline-flex whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-medium text-muted-foreground ring-1 ring-inset ring-border">
+              {NIVEL_LABEL[node.nivel]}
+            </span>
+          </div>
+          <div className="flex shrink-0 items-center gap-0.5">
+            {editable && (
+              <>
+                <Button variant="ghost" size="icon" className="h-8 w-8" title="Mover para cima" aria-label="Mover para cima" disabled={index === 0} onClick={() => onMove(siblings, index, index - 1)}><ArrowUp size={15} /></Button>
+                <Button variant="ghost" size="icon" className="h-8 w-8" title="Mover para baixo" aria-label="Mover para baixo" disabled={index === siblings.length - 1} onClick={() => onMove(siblings, index, index + 1)}><ArrowDown size={15} /></Button>
+              </>
+            )}
+            {editable && (childNivel ? (
+              <Button variant="ghost" size="icon" className="h-8 w-8" title={`Novo ${NIVEL_LABEL[childNivel]}`} aria-label={`Novo ${NIVEL_LABEL[childNivel]}`} onClick={() => onAdd(childNivel, node.id)}><Plus size={15} /></Button>
+            ) : (
+              <span className="h-8 w-8" aria-hidden />
+            ))}
+            {editable && (
+              <>
+                <Button variant="ghost" size="icon" className="h-8 w-8" title="Editar" aria-label="Editar" onClick={() => onEdit(node)}><Pencil size={15} /></Button>
+                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" title="Remover" aria-label="Remover" onClick={() => onDelete(node)}><Trash2 size={15} /></Button>
+              </>
+            )}
+            {!editable && (
+              <Button variant="ghost" size="icon" className="h-8 w-8" title="Ver detalhes" aria-label="Ver detalhes" onClick={() => onEdit(node)}><Pencil size={15} /></Button>
+            )}
+          </div>
+        </div>
       </div>
       {hasChildren && expanded && (
-        <div className="mt-1 space-y-1">
+        <div>
           {node.children.map((c, idx) => (
             <Node
               key={c.id}
@@ -498,17 +570,8 @@ function DocumentationProgressBar({ node }: { node: ProcessItem }) {
   const { pct, total, documented } = documentationStats(node)
   if (total === 0) return null
   return (
-    <div
-      className="flex shrink-0 items-center gap-1.5"
-      title={`${documented} de ${total} sub processos documentados`}
-    >
-      <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
-        <div
-          className={`h-full rounded-full transition-all ${pct === 100 ? "bg-emerald-500" : "bg-primary"}`}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <span className="text-[10px] tabular-nums text-muted-foreground">{pct}%</span>
+    <div title={`${documented} de ${total} sub processos documentados`}>
+      <ProgressBar value={pct} />
     </div>
   )
 }

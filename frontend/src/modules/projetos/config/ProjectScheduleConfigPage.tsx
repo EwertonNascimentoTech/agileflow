@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from "react"
-import { GitBranch, Loader2, Save } from "lucide-react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { CalendarRange, GitBranch, Loader2, Save } from "lucide-react"
 
 import { projetosApi, type Project, type ProjectFunnel, type ProjectStatus } from "@/api/projetos"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
+import { Card, PageHeader, Pill, SectionCard } from "@/components/ds"
 import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -75,91 +75,112 @@ export default function BindingsConfigPage() {
     }
   }
 
-  if (loading) return <div className="p-1"><Skeleton className="h-96 rounded-lg" /></div>
+  const header = (actions?: ReactNode) => (
+    <PageHeader
+      icon={CalendarRange}
+      color="#2563EB"
+      crumbs={[{ label: "Configurações", to: "/app/modules/projetos/config" }, { label: "Cronograma" }]}
+      title="Fluxos e etapas do cronograma"
+      description={
+        <>
+          Marque as etapas em que o cronograma deve ser preenchido. Os cards nessas etapas entram
+          no cronograma; "exigir preenchimento" bloqueia a saída da etapa sem início e prazo.
+        </>
+      }
+      actions={actions}
+    />
+  )
+
+  if (loading) {
+    return (
+      <div className="w-full space-y-5">
+        {header()}
+        <Skeleton className="h-96 rounded-2xl" />
+      </div>
+    )
+  }
 
   const orderedFunnels = [...funnels].sort((a, b) => a.order - b.order)
 
   return (
-    <div className="w-full space-y-4 p-1">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-xl font-bold">Fluxos e etapas do cronograma</h1>
-          <p className="text-sm text-muted-foreground">
-            Marque as etapas em que o cronograma deve ser preenchido. Os cards nessas etapas entram
-            no cronograma; "exigir preenchimento" bloqueia a saída da etapa sem início e prazo.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+    <div className="w-full space-y-5">
+      {header(
+        <>
           {projects.length > 1 && (
             <Select value={projectId} onValueChange={setProjectId}>
-              <SelectTrigger className="w-48"><SelectValue placeholder="Projeto" /></SelectTrigger>
+              <SelectTrigger className="h-10 w-48 bg-background"><SelectValue placeholder="Projeto" /></SelectTrigger>
               <SelectContent>{projects.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
             </Select>
           )}
-          <Button type="button" onClick={() => void handleSave()} disabled={saving}>
-            {saving ? <Loader2 size={14} className="animate-spin mr-1.5" /> : <Save size={14} className="mr-1.5" />}
+          <Button type="button" className="h-10 gap-1.5" onClick={() => void handleSave()} disabled={saving}>
+            {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
             Salvar
           </Button>
-        </div>
-      </div>
+        </>,
+      )}
 
-      <Card>
-        <CardContent className="space-y-3 p-4">
-          <ScheduleImportPanel
-            projectId={projectId}
-            statuses={statuses}
-            funnels={funnels}
-            includedStatusIds={config}
-          />
-        </CardContent>
+      <Card className="p-5">
+        <ScheduleImportPanel
+          projectId={projectId}
+          statuses={statuses}
+          funnels={funnels}
+          includedStatusIds={config}
+        />
       </Card>
 
       {orderedFunnels.length === 0 ? (
-        <EmptyState
-          icon={GitBranch}
-          title="Nenhum fluxo configurado"
-          description="Crie fluxos e etapas no módulo Projetos (Configurações → Fluxos / Etapas) para então vinculá-los ao cronograma."
-        />
+        <Card>
+          <EmptyState
+            icon={GitBranch}
+            title="Nenhum fluxo configurado"
+            description="Crie fluxos e etapas no módulo Projetos (Configurações → Fluxos / Etapas) para então vinculá-los ao cronograma."
+          />
+        </Card>
       ) : (
         <div className="space-y-4">
           {orderedFunnels.map((f) => {
             const sts = statusesByFunnel.get(f.id) ?? []
+            const includedCount = sts.filter((s) => config[s.id]?.included).length
             return (
-              <Card key={f.id}>
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className="h-3 w-3 rounded-full" style={{ backgroundColor: f.color }} />
-                    <h2 className="font-semibold text-sm">{f.name}</h2>
-                  </div>
-                  {sts.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">Sem etapas neste fluxo.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {sts.map((s) => {
-                        const cfg = config[s.id] ?? { included: false, requireFill: true }
-                        return (
-                          <div key={s.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border px-3 py-2">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
-                              <span className="text-sm truncate">{s.name}</span>
-                            </div>
-                            <div className="flex items-center gap-5">
-                              <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                                <Switch checked={cfg.included} onCheckedChange={(v) => update(s.id, { included: v })} />
-                                incluir no cronograma
-                              </label>
-                              <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                                <Switch checked={cfg.requireFill} disabled={!cfg.included} onCheckedChange={(v) => update(s.id, { requireFill: v })} />
-                                exigir preenchimento
-                              </label>
-                            </div>
+              <SectionCard
+                key={f.id}
+                title={
+                  <span className="inline-flex items-center gap-2">
+                    <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: f.color }} />
+                    {f.name}
+                  </span>
+                }
+                right={sts.length > 0 ? <Pill tone={includedCount > 0 ? "blue" : "slate"}>{includedCount} de {sts.length} no cronograma</Pill> : undefined}
+                flush
+              >
+                {sts.length === 0 ? (
+                  <p className="px-5 py-4 text-sm text-muted-foreground">Sem etapas neste fluxo.</p>
+                ) : (
+                  <ul className="divide-y">
+                    {sts.map((s) => {
+                      const cfg = config[s.id] ?? { included: false, requireFill: true }
+                      return (
+                        <li key={s.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 transition-colors hover:bg-muted/40">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: s.color }} />
+                            <span className="truncate text-sm font-medium">{s.name}</span>
                           </div>
-                        )
-                      })}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+                          <div className="flex flex-wrap items-center gap-5">
+                            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                              <Switch checked={cfg.included} onCheckedChange={(v) => update(s.id, { included: v })} />
+                              incluir no cronograma
+                            </label>
+                            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                              <Switch checked={cfg.requireFill} disabled={!cfg.included} onCheckedChange={(v) => update(s.id, { requireFill: v })} />
+                              exigir preenchimento
+                            </label>
+                          </div>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+              </SectionCard>
             )
           })}
         </div>

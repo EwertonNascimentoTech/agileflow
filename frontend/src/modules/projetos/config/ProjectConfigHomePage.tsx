@@ -1,7 +1,11 @@
+import { createElement, type ElementType } from "react"
 import { useNavigate } from "react-router-dom"
 import { ArrowRight, Bot, CalendarRange, ClipboardList, FileText, GitBranch, Grid2x2, KanbanSquare, LayoutGrid, ListChecks, ScrollText, Settings2 } from "lucide-react"
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { PageHeader } from "@/components/ds"
+
+/** Cor do módulo Processos (cabeçalho e quadrados dos ícones). */
+const MODULE_COLOR = "#2563EB"
 
 const sections = [
   {
@@ -72,36 +76,49 @@ const sections = [
   },
 ]
 
+/** Quadrado do ícone no padrão do IconTile do Portal, com o componente lucide direto.
+ *  O cartão é o próprio botão (mesmas classes do Card do ds: rounded-2xl, borda, bg-card). */
+function SectionTile({ icon }: { icon: ElementType }) {
+  return (
+    <span
+      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
+      style={{ backgroundColor: `${MODULE_COLOR}1f`, color: MODULE_COLOR }}
+      aria-hidden
+    >
+      {createElement(icon, { size: 20 })}
+    </span>
+  )
+}
+
 export default function ProjectConfigHomePage() {
   const navigate = useNavigate()
 
   return (
-    <div className="w-full space-y-4">
-      <div>
-        <h2 className="text-lg font-bold">Configurações</h2>
-        <p className="text-sm text-muted-foreground">Personalize o módulo de Processos.</p>
-      </div>
+    <div className="w-full space-y-5">
+      <PageHeader
+        icon={Settings2}
+        color={MODULE_COLOR}
+        title="Configurações"
+        description="Personalize o módulo de Processos."
+      />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {sections.map(({ to, icon: Icon, title, description }) => (
-          <Card
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {sections.map(({ to, icon, title, description }) => (
+          <button
             key={to}
-            className="cursor-pointer transition-shadow hover:shadow-md group"
+            type="button"
             onClick={() => navigate(to)}
+            className="group flex h-full flex-col gap-3 rounded-2xl border bg-card p-5 text-left shadow-sm transition-all hover:border-primary/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <div className="h-9 w-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
-                  <Icon size={17} />
-                </div>
-                <ArrowRight size={15} className="text-muted-foreground transition-colors group-hover:text-primary" />
-              </div>
-              <CardTitle className="text-sm mt-2">{title}</CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <CardDescription className="text-xs">{description}</CardDescription>
-            </CardContent>
-          </Card>
+            <span className="flex w-full items-start justify-between gap-3">
+              <SectionTile icon={icon} />
+              <ArrowRight size={16} className="text-muted-foreground transition-colors group-hover:text-primary" />
+            </span>
+            <span className="block min-w-0">
+              <span className="block font-semibold">{title}</span>
+              <span className="mt-1 block text-sm text-muted-foreground">{description}</span>
+            </span>
+          </button>
         ))}
       </div>
     </div>

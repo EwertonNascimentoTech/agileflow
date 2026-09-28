@@ -4,13 +4,12 @@ import { ArrowLeft, Check, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUp
 
 import { projetosApi, type DefaultFormFieldKey, type PriorityMode, type ProjectDefaultFormField, type ProjectDemandFormField, type ProjectDemandFormSection, type ProjectDemandType, type ProjectFunnel, type ProjectStatus, type ProjectStatusDefaultFormLink, type ProjectStatusSectionLink } from "@/api/projetos"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
+import { Card, PageHeader, Pill, TABLE } from "@/components/ds"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { EmptyState } from "@/components/EmptyState"
 import { getFieldVisibility, type FieldVisibilityMode } from "@/modules/projetos/FormFieldRenderer"
@@ -609,101 +608,138 @@ export default function ProjectStatusesConfigPage() {
     }
   }
 
-  if (loading) {
-    return <Skeleton className="h-36 rounded-lg" />
-  }
-
-  if (!selectedProjectId) {
+  function renderHeader(withActions: boolean) {
     return (
-      <EmptyState
+      <PageHeader
+        crumbs={[{ label: "Configurações", to: "/app/modules/projetos/config" }, { label: "Etapas" }]}
         icon={KanbanSquare}
-        title="Não foi possível carregar"
-        description="Recarregue a página em instantes."
+        color="#2563EB"
+        title="Etapas Kanban"
+        description="Configure as colunas de cada funil e o formulário em cada etapa."
+        actions={
+          <>
+            <Button variant="outline" className="h-10 gap-1.5" onClick={() => navigate("/app/modules/projetos/config")}>
+              <ArrowLeft size={16} />
+              Voltar às Configurações
+            </Button>
+            {withActions && statuses.length > 0 && (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 gap-1.5"
+                  onClick={collapseAll}
+                  title="Minimizar todas as etapas"
+                >
+                  <ChevronsDownUp size={16} />
+                  Minimizar todas
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 gap-1.5"
+                  onClick={expandAll}
+                  title="Expandir todas as etapas"
+                >
+                  <ChevronsUpDown size={16} />
+                  Expandir todas
+                </Button>
+              </>
+            )}
+            {withActions && (
+              <Button
+                type="button"
+                className="h-10 gap-1.5"
+                onClick={openCreateDialog}
+                disabled={!selectedFunnelId}
+              >
+                <Plus size={16} />
+                Nova Etapa
+              </Button>
+            )}
+          </>
+        }
       />
     )
   }
 
-  return (
-    <div className="w-full space-y-4">
-      <div className="flex items-center gap-2">
-        <Button variant="ghost" size="icon" onClick={() => navigate("/app/modules/projetos/config")}>
-          <ArrowLeft size={16} />
-        </Button>
-        <div className="flex-1">
-          <h2 className="text-lg font-bold">Etapas Kanban</h2>
-          <p className="text-sm text-muted-foreground">Configure as colunas de cada funil e o formulário em cada etapa.</p>
-        </div>
-        {statuses.length > 0 && (
-          <>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              onClick={collapseAll}
-              title="Minimizar todas as etapas"
-            >
-              <ChevronsDownUp size={14} />
-              Minimizar todas
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              onClick={expandAll}
-              title="Expandir todas as etapas"
-            >
-              <ChevronsUpDown size={14} />
-              Expandir todas
-            </Button>
-          </>
-        )}
-        <Button
-          type="button"
-          className="gap-1.5"
-          onClick={openCreateDialog}
-          disabled={!selectedFunnelId}
-        >
-          <Plus size={14} />
-          Nova Etapa
-        </Button>
+  if (loading) {
+    return (
+      <div className="w-full space-y-5">
+        {renderHeader(false)}
+        <Skeleton className="h-36 rounded-2xl" />
       </div>
+    )
+  }
 
-      <div className="max-w-sm">
-        <Label>Funil</Label>
-        <Select value={selectedFunnelId} onValueChange={setSelectedFunnelId}>
-          <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
-          <SelectContent>
-            {funnels.map((funnel) => (
-              <SelectItem key={funnel.id} value={funnel.id}>{funnel.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {selectedFunnel && eligibleDemandTypes.length > 0 && (
-          <p className="text-xs text-muted-foreground mt-1">
-            Tipos vinculados: {eligibleDemandTypes.map((t) => t.name).join(", ")}
-          </p>
-        )}
+  if (!selectedProjectId) {
+    return (
+      <div className="w-full space-y-5">
+        {renderHeader(false)}
+        <Card>
+          <EmptyState
+            icon={KanbanSquare}
+            title="Não foi possível carregar"
+            description="Recarregue a página em instantes."
+          />
+        </Card>
       </div>
+    )
+  }
+
+  return (
+    <div className="w-full space-y-5">
+      {renderHeader(true)}
+
+      <Card className="p-4">
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+          <div className="w-full max-w-sm space-y-1">
+            <span className="text-xs text-muted-foreground">Funil</span>
+            <Select value={selectedFunnelId} onValueChange={setSelectedFunnelId}>
+              <SelectTrigger className="h-10 bg-background"><SelectValue placeholder="Selecione" /></SelectTrigger>
+              <SelectContent>
+                {funnels.map((funnel) => (
+                  <SelectItem key={funnel.id} value={funnel.id}>{funnel.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {selectedFunnel && eligibleDemandTypes.length > 0 && (
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 pb-2">
+              <span className="mr-1 text-xs text-muted-foreground">Tipos vinculados</span>
+              {eligibleDemandTypes.map((t) => (
+                <Pill key={t.id} tone="blue">{t.name}</Pill>
+              ))}
+            </div>
+          )}
+          {selectedFunnelId && (
+            <span className="ml-auto pb-2 text-sm text-muted-foreground">
+              <strong className="font-semibold text-foreground tabular-nums">{statuses.length}</strong>{" "}
+              {statuses.length === 1 ? "etapa" : "etapas"}
+            </span>
+          )}
+        </div>
+      </Card>
 
       {statuses.length === 0 ? (
-        <EmptyState
-          icon={KanbanSquare}
-          title="Nenhuma etapa configurada"
-          description={selectedFunnelId
-            ? "Crie a primeira etapa para começar a configurar o kanban."
-            : "Selecione um funil para configurar as etapas."}
-          action={selectedFunnelId ? { label: "Nova Etapa", onClick: openCreateDialog } : undefined}
-        />
+        <Card>
+          <EmptyState
+            icon={KanbanSquare}
+            title="Nenhuma etapa configurada"
+            description={selectedFunnelId
+              ? "Crie a primeira etapa para começar a configurar o kanban."
+              : "Selecione um funil para configurar as etapas."}
+            action={selectedFunnelId ? { label: "Nova Etapa", onClick: openCreateDialog } : undefined}
+          />
+        </Card>
       ) : (
-      <div className="space-y-2">
+      <div className="space-y-3">
         {statuses.map((status) => {
           const isDragging = draggingStatusId === status.id
           const isDropTarget = dragOverStatusId === status.id && draggingStatusId !== status.id
           const isCollapsed = collapsedStatusIds.has(status.id)
           return (
-          <Card
+          <div
             key={status.id}
             onDragOver={(e) => {
               if (!draggingStatusId || draggingStatusId === status.id) return
@@ -715,31 +751,36 @@ export default function ProjectStatusesConfigPage() {
             }}
             onDrop={() => { void handleDropStatus(status.id) }}
             className={[
-              "transition-all",
+              "rounded-2xl border bg-card text-card-foreground shadow-sm transition-all",
               isDragging ? "opacity-50" : "",
               isDropTarget ? "ring-2 ring-primary ring-offset-1" : "",
             ].filter(Boolean).join(" ")}
           >
-            <CardContent className="p-3">
+            <div className="p-4">
               {editingStatusId === status.id ? (
-                <div className="flex w-full items-center gap-2">
-                  <Input value={statusDraftName} onChange={(e) => setStatusDraftName(e.target.value)} />
-                  <Input className="w-16" type="color" value={statusDraftColor} onChange={(e) => setStatusDraftColor(e.target.value)} />
-                  <div className="flex items-center gap-1 rounded-md border px-2 py-1">
-                    <Label className="text-xs">Ativa</Label>
+                <div className="flex w-full flex-wrap items-center gap-2">
+                  <Input
+                    className="h-10 min-w-[12rem] flex-1"
+                    aria-label="Nome da etapa"
+                    value={statusDraftName}
+                    onChange={(e) => setStatusDraftName(e.target.value)}
+                  />
+                  <Input className="h-10 w-16 p-1" type="color" aria-label="Cor da etapa" value={statusDraftColor} onChange={(e) => setStatusDraftColor(e.target.value)} />
+                  <div className="flex h-10 items-center gap-2 rounded-md border bg-background px-3">
+                    <Label className="text-sm">Ativa</Label>
                     <Switch checked={statusDraftActive} onCheckedChange={setStatusDraftActive} />
                   </div>
-                  <Button type="button" size="icon" variant="ghost" onClick={() => void saveEditStatus(status.id)}>
-                    <Check size={14} />
+                  <Button type="button" size="icon" variant="ghost" className="h-10 w-10" title="Salvar" onClick={() => void saveEditStatus(status.id)}>
+                    <Check size={16} />
                   </Button>
-                  <Button type="button" size="icon" variant="ghost" onClick={() => setEditingStatusId(null)}>
-                    <X size={14} />
+                  <Button type="button" size="icon" variant="ghost" className="h-10 w-10" title="Cancelar" onClick={() => setEditingStatusId(null)}>
+                    <X size={16} />
                   </Button>
                 </div>
               ) : (
                 <>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
                     <span
                       draggable
                       onDragStart={(e) => {
@@ -747,16 +788,16 @@ export default function ProjectStatusesConfigPage() {
                         e.dataTransfer.effectAllowed = "move"
                       }}
                       onDragEnd={() => { setDraggingStatusId(null); setDragOverStatusId(null) }}
-                      className="flex h-6 w-6 cursor-grab items-center justify-center rounded-md text-muted-foreground hover:bg-muted active:cursor-grabbing"
+                      className="flex h-8 w-8 cursor-grab items-center justify-center rounded-md text-muted-foreground hover:bg-muted active:cursor-grabbing"
                       title="Arraste para reordenar"
                     >
-                      <GripVertical size={14} />
+                      <GripVertical size={16} />
                     </span>
-                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: status.color }} />
-                    <span className="font-medium">{status.name}</span>
-                    {status.is_initial && <Badge variant="outline" className="text-[10px]">inicial</Badge>}
-                    {status.is_final && <Badge variant="outline" className="text-[10px]">final</Badge>}
-                    {!status.is_active && <Badge variant="secondary">inativa</Badge>}
+                    <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: status.color }} />
+                    <span className="text-base font-semibold">{status.name}</span>
+                    {status.is_initial && <Pill tone="blue">inicial</Pill>}
+                    {status.is_final && <Pill tone="emerald">final</Pill>}
+                    {!status.is_active && <Pill tone="slate">inativa</Pill>}
                   </div>
                   <div className="flex items-center gap-1">
                     <Button
@@ -768,29 +809,37 @@ export default function ProjectStatusesConfigPage() {
                     >
                       {isCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
                     </Button>
-                    <Button type="button" variant="ghost" size="icon" onClick={() => beginEditStatus(status)}>
+                    <Button type="button" variant="ghost" size="icon" title="Editar" onClick={() => beginEditStatus(status)}>
                       <Pencil size={14} />
                     </Button>
                     <Button type="button" variant="ghost" size="sm" onClick={() => void handleToggleStatusActive(status)}>
                       {status.is_active ? "Inativar" : "Ativar"}
                     </Button>
-                    <Button type="button" variant="ghost" size="icon" onClick={() => void handleDeleteStatus(status.id)}>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="text-muted-foreground hover:text-destructive"
+                      title="Excluir"
+                      onClick={() => void handleDeleteStatus(status.id)}
+                    >
                       <Trash2 size={14} />
                     </Button>
                   </div>
                 </div>
                 {!isCollapsed && (
-                <>
-                <div className="mt-2 space-y-2 rounded-md border bg-muted/30 p-2">
+                <div className="mt-4 space-y-3 border-t pt-4">
+                <div className="divide-y rounded-xl border bg-muted/30">
+                <div className="space-y-2 p-3">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Label className="text-xs whitespace-nowrap text-muted-foreground">
+                    <Label className="text-sm font-normal text-muted-foreground">
                       Ao entrar nesta etapa, gerar card do tipo
                     </Label>
                     <Select
                       value={status.creates_demand_type_id ?? "__none__"}
                       onValueChange={(v) => void handleSetCreatesType(status, v === "__none__" ? null : v)}
                     >
-                      <SelectTrigger className="h-8 text-xs max-w-xs">
+                      <SelectTrigger className="h-10 max-w-xs bg-background">
                         <SelectValue placeholder="Não converte" />
                       </SelectTrigger>
                       <SelectContent>
@@ -804,13 +853,13 @@ export default function ProjectStatusesConfigPage() {
                       </SelectContent>
                     </Select>
                     {status.creates_demand_type_id && (
-                      <Badge variant="info" className="text-[10px]">conversão automática</Badge>
+                      <Pill tone="blue">conversão automática</Pill>
                     )}
                     {stagesWithConversion.filter((s) => s.id !== status.id).length > 0 && (
                       <>
-                        <Label className="text-xs whitespace-nowrap text-muted-foreground">Replicar de</Label>
+                        <Label className="text-sm font-normal text-muted-foreground">Replicar de</Label>
                         <Select onValueChange={(v) => void handleCopyConversionFrom(status, v)}>
-                          <SelectTrigger className="h-8 text-xs max-w-[11rem]">
+                          <SelectTrigger className="h-10 max-w-[13rem] bg-background">
                             <SelectValue placeholder="Outra etapa…" />
                           </SelectTrigger>
                           <SelectContent>
@@ -830,20 +879,20 @@ export default function ProjectStatusesConfigPage() {
                     )}
                   </div>
                   {status.is_final && (
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-xs text-muted-foreground">
                       Etapas finais também podem disparar a criação de Projeto/Programa ao mover o card para esta raia.
                     </p>
                   )}
                 </div>
-                <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-2">
-                  <Label className="text-xs whitespace-nowrap text-muted-foreground">
+                <div className="flex flex-wrap items-center gap-2 p-3">
+                  <Label className="text-sm font-normal text-muted-foreground">
                     Ao entrar nesta etapa, mover o card para o kanban
                   </Label>
                   <Select
                     value={status.moves_to_funnel_id ?? "__none__"}
                     onValueChange={(v) => void handleSetMovesToFunnel(status, v === "__none__" ? null : v)}
                   >
-                    <SelectTrigger className="h-8 text-xs max-w-xs">
+                    <SelectTrigger className="h-10 max-w-xs bg-background">
                       <SelectValue placeholder="Não move" />
                     </SelectTrigger>
                     <SelectContent>
@@ -854,10 +903,10 @@ export default function ProjectStatusesConfigPage() {
                     </SelectContent>
                   </Select>
                   {status.moves_to_funnel_id && (
-                    <Badge variant="success" className="text-[10px]">transição automática</Badge>
+                    <Pill tone="emerald">transição automática</Pill>
                   )}
                   {status.moves_to_funnel_id && (
-                    <label className="flex items-center gap-2 text-xs text-muted-foreground" title="Leva as etapas/atividades filhas junto para o kanban de destino">
+                    <label className="flex items-center gap-2 text-sm text-muted-foreground" title="Leva as etapas/atividades filhas junto para o kanban de destino">
                       <input
                         type="checkbox"
                         className="h-4 w-4 cursor-pointer rounded border-input accent-primary"
@@ -868,42 +917,16 @@ export default function ProjectStatusesConfigPage() {
                     </label>
                   )}
                 </div>
-                <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-2">
-                  <label
-                    className="flex items-center gap-2 text-xs text-muted-foreground"
-                    title="Quando o projeto-raiz entra nesta etapa, o cronograma é comprometido (entrada em desenvolvimento): alterações passam a exigir salvar um baseline + justificativa."
-                  >
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 cursor-pointer rounded border-input accent-primary"
-                      checked={status.locks_schedule}
-                      onChange={(e) => void handleSetLocksSchedule(status, e.target.checked)}
-                    />
-                    Trava o cronograma (entrada = desenvolvimento)
-                  </label>
-                  {status.locks_schedule && <Badge variant="warning" className="text-[10px]">congela baseline</Badge>}
-                  <label
-                    className="flex items-center gap-2 text-xs text-muted-foreground"
-                    title="Pós-entrega: o projeto conta como entregue nos relatórios e os clientes vinculados podem abrir Ocorrências. Ir a Concluído sem passar por aqui exige justificativa."
-                  >
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 cursor-pointer rounded border-input accent-primary"
-                      checked={!!status.is_assisted_operation}
-                      onChange={(e) => void handleSetAssistedOperation(status, e.target.checked)}
-                    />
-                    Raia de Operação Assistida
-                  </label>
-                </div>
+                <div className="space-y-2 p-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <Label className="text-xs whitespace-nowrap text-muted-foreground">
+                  <Label className="text-sm font-normal text-muted-foreground">
                     Ao entrar nesta etapa, enviar as tarefas (filhos) para o kanban
                   </Label>
                   <Select
                     value={status.children_to_funnel_id ?? "__none__"}
                     onValueChange={(v) => void handleSetChildrenToFunnel(status, v === "__none__" ? null : v)}
                   >
-                    <SelectTrigger className="h-8 text-xs max-w-xs">
+                    <SelectTrigger className="h-10 max-w-xs bg-background">
                       <SelectValue placeholder="Não envia" />
                     </SelectTrigger>
                     <SelectContent>
@@ -914,19 +937,19 @@ export default function ProjectStatusesConfigPage() {
                     </SelectContent>
                   </Select>
                   {status.children_to_funnel_id && (
-                    <Badge variant="success" className="text-[10px]">tarefas → execução</Badge>
+                    <Pill tone="emerald">tarefas → execução</Pill>
                   )}
                 </div>
                 {status.children_to_funnel_id && (
                   <div className="flex flex-wrap items-center gap-2">
-                    <Label className="text-xs whitespace-nowrap text-muted-foreground">
+                    <Label className="text-sm font-normal text-muted-foreground">
                       …e enviar os netos (filhos dos filhos) para o kanban
                     </Label>
                     <Select
                       value={status.grandchildren_to_funnel_id ?? "__none__"}
                       onValueChange={(v) => void handleSetGrandchildrenToFunnel(status, v === "__none__" ? null : v)}
                     >
-                      <SelectTrigger className="h-8 text-xs max-w-xs">
+                      <SelectTrigger className="h-10 max-w-xs bg-background">
                         <SelectValue placeholder="Seguem os filhos" />
                       </SelectTrigger>
                       <SelectContent>
@@ -939,25 +962,57 @@ export default function ProjectStatusesConfigPage() {
                       </SelectContent>
                     </Select>
                     {status.grandchildren_to_funnel_id && (
-                      <Badge variant="success" className="text-[10px]">netos → 2º kanban</Badge>
+                      <Pill tone="emerald">netos → 2º kanban</Pill>
                     )}
                   </div>
                 )}
+                </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border bg-muted/30 p-3">
+                  <span className="flex flex-wrap items-center gap-2">
+                  <label
+                    className="flex items-center gap-2 text-sm text-muted-foreground"
+                    title="Quando o projeto-raiz entra nesta etapa, o cronograma é comprometido (entrada em desenvolvimento): alterações passam a exigir salvar um baseline + justificativa."
+                  >
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 cursor-pointer rounded border-input accent-primary"
+                      checked={status.locks_schedule}
+                      onChange={(e) => void handleSetLocksSchedule(status, e.target.checked)}
+                    />
+                    Trava o cronograma (entrada = desenvolvimento)
+                  </label>
+                  {status.locks_schedule && <Pill tone="amber">congela baseline</Pill>}
+                  </span>
+                  <label
+                    className="flex items-center gap-2 text-sm text-muted-foreground"
+                    title="Pós-entrega: o projeto conta como entregue nos relatórios e os clientes vinculados podem abrir Ocorrências. Ir a Concluído sem passar por aqui exige justificativa."
+                  >
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 cursor-pointer rounded border-input accent-primary"
+                      checked={!!status.is_assisted_operation}
+                      onChange={(e) => void handleSetAssistedOperation(status, e.target.checked)}
+                    />
+                    Raia de Operação Assistida
+                  </label>
+                </div>
                 <StatusAutomationsManager projectId={selectedProjectId} statusId={status.id} users={users} />
                 {roles.length > 0 && (
-                  <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-md border bg-muted/30 p-2">
-                    <span className="text-xs text-muted-foreground">Quem pode mover para esta etapa:</span>
+                  <div className="flex flex-wrap items-center gap-1.5 rounded-xl border bg-muted/30 p-3">
+                    <span className="mr-1 text-sm text-muted-foreground">Quem pode mover para esta etapa:</span>
                     {roles.map((r) => {
                       const selected = (status.move_in_role_ids ?? []).includes(r.id)
                       return (
                         <button
                           key={r.id}
                           type="button"
+                          aria-pressed={selected}
                           onClick={() => void handleToggleMoveRole(status, r.id)}
-                          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] transition ${
+                          className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                             selected
-                              ? "border-primary bg-primary/10 text-primary font-medium"
-                              : "border-border text-muted-foreground hover:bg-muted"
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "bg-background text-muted-foreground hover:bg-muted hover:text-foreground"
                           }`}
                         >
                           {r.name}
@@ -965,17 +1020,20 @@ export default function ProjectStatusesConfigPage() {
                       )
                     })}
                     {(status.move_in_role_ids ?? []).length === 0 && (
-                      <span className="text-[11px] italic text-muted-foreground/70">todos (sem restrição)</span>
+                      <span className="text-xs italic text-muted-foreground">todos (sem restrição)</span>
                     )}
                   </div>
                 )}
-                <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-2">
-                  <span className="text-xs text-muted-foreground">SLA:</span>
+                <div className="grid gap-3 lg:grid-cols-2">
+                <div className="rounded-xl border bg-muted/30 p-3">
+                  <p className="text-sm font-medium">SLA</p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
                   <Input
                     type="number"
                     min={0}
-                    className="h-8 w-24 text-xs"
+                    className="h-10 w-24"
                     placeholder="horas"
+                    aria-label="SLA em horas"
                     defaultValue={status.sla_hours ?? ""}
                     onBlur={(e) => {
                       const v = e.target.value.trim()
@@ -983,12 +1041,13 @@ export default function ProjectStatusesConfigPage() {
                       if ((status.sla_hours ?? null) !== hours) void handleSetSla(status, hours, status.sla_warning_pct)
                     }}
                   />
-                  <span className="text-xs text-muted-foreground">h · alerta em</span>
+                  <span className="text-sm text-muted-foreground">h · alerta em</span>
                   <Input
                     type="number"
                     min={1}
                     max={100}
-                    className="h-8 w-16 text-xs"
+                    className="h-10 w-20"
+                    aria-label="Alerta do SLA em %"
                     defaultValue={status.sla_warning_pct}
                     disabled={!status.sla_hours}
                     onBlur={(e) => {
@@ -996,18 +1055,19 @@ export default function ProjectStatusesConfigPage() {
                       if (status.sla_warning_pct !== pct) void handleSetSla(status, status.sla_hours, pct)
                     }}
                   />
-                  <span className="text-xs text-muted-foreground">%</span>
-                  {!status.sla_hours && <span className="text-[11px] italic text-muted-foreground/70">sem SLA</span>}
+                  <span className="text-sm text-muted-foreground">%</span>
+                  {!status.sla_hours && <span className="text-xs italic text-muted-foreground">sem SLA</span>}
+                  </div>
                 </div>
-                <div className="mt-2 flex flex-wrap items-center gap-4 rounded-md border bg-muted/30 p-2">
-                  <span className="text-xs text-muted-foreground">Priorização (Impacto × Esforço):</span>
+                <div className="rounded-xl border bg-muted/30 p-3">
+                  <p className="text-sm font-medium">Priorização (Impacto × Esforço)</p>
+                  <div className="mt-2 flex min-h-10 flex-wrap items-center gap-x-5 gap-y-2">
                   {([
-                    { key: "required" as const, label: "OBRIG.", checked: status.priority_required, disabled: status.priority_mode === "hidden", title: "Exige pontuar para sair desta etapa" },
-                    { key: "editable" as const, label: "EDIT.", checked: status.priority_mode === "edit", disabled: status.priority_mode === "hidden", title: "Permite preencher/editar a pontuação" },
-                    { key: "visible" as const, label: "VISIB.", checked: status.priority_mode !== "hidden", disabled: false, title: "Mostra a priorização nos cards desta etapa" },
+                    { key: "required" as const, label: "Obrigatória", checked: status.priority_required, disabled: status.priority_mode === "hidden", title: "Exige pontuar para sair desta etapa" },
+                    { key: "editable" as const, label: "Editável", checked: status.priority_mode === "edit", disabled: status.priority_mode === "hidden", title: "Permite preencher/editar a pontuação" },
+                    { key: "visible" as const, label: "Visível", checked: status.priority_mode !== "hidden", disabled: false, title: "Mostra a priorização nos cards desta etapa" },
                   ]).map((col) => (
-                    <label key={col.key} className="flex flex-col items-center gap-1" title={col.title}>
-                      <span className="text-[10px] font-semibold tracking-wide text-muted-foreground">{col.label}</span>
+                    <label key={col.key} className="flex items-center gap-2 text-sm text-muted-foreground" title={col.title}>
                       <input
                         type="checkbox"
                         className="h-4 w-4 cursor-pointer rounded border-input accent-primary disabled:opacity-40"
@@ -1015,11 +1075,14 @@ export default function ProjectStatusesConfigPage() {
                         disabled={col.disabled}
                         onChange={(e) => void handleSetPriorityFlags(status, { [col.key]: e.target.checked })}
                       />
+                      {col.label}
                     </label>
                   ))}
+                  </div>
+                </div>
                 </div>
                 {status.is_initial && (
-                  <div className="mt-2 space-y-2 rounded-md border bg-muted/30 p-2">
+                  <div className="space-y-2 rounded-xl border bg-muted/30 p-3">
                     <label className="flex cursor-pointer items-center gap-2" title="Marca a etapa backlog como exigindo classificação ao sair">
                       <input
                         type="checkbox"
@@ -1027,7 +1090,7 @@ export default function ProjectStatusesConfigPage() {
                         checked={status.classification_required}
                         onChange={(e) => void handleSetClassificationRequired(status, e.target.checked)}
                       />
-                      <span className="text-xs text-muted-foreground">
+                      <span className="text-sm text-muted-foreground">
                         Exigir classificação + vínculo ao portfólio de Produtos para sair do backlog
                       </span>
                     </label>
@@ -1040,12 +1103,12 @@ export default function ProjectStatusesConfigPage() {
                             checked={selectedFunnel.classification_enforcement_enabled}
                             onChange={(e) => void handleSetClassificationEnforcement(e.target.checked)}
                           />
-                          <span className="text-xs text-muted-foreground">
+                          <span className="text-sm text-muted-foreground">
                             Bloquear saída do backlog sem classificação (ativar após classificar projetos legados)
                           </span>
                         </label>
                         {unclassifiedCount > 0 && (
-                          <p className="text-[11px] text-amber-700">
+                          <p className="text-xs text-amber-700 dark:text-amber-400">
                             {unclassifiedCount} projeto(s) fora do backlog ainda sem classificação — classifique antes de ativar o bloqueio.
                           </p>
                         )}
@@ -1053,31 +1116,32 @@ export default function ProjectStatusesConfigPage() {
                     )}
                   </div>
                 )}
-                <div className="mt-2 rounded-md border bg-muted/30 p-2 space-y-2">
-                  <p className="text-xs font-medium">Formulário nesta etapa</p>
+                <div className="space-y-3 rounded-xl border bg-muted/30 p-3">
+                  <p className="text-sm font-semibold">Formulário nesta etapa</p>
                   <div className="space-y-3">
                     {defaultFormFields.length > 0 && (
-                      <div className="rounded-md border bg-background overflow-hidden">
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="border-b text-[10px] uppercase tracking-wide text-muted-foreground">
-                              <th className="px-3 py-1.5 text-left font-medium">Campo</th>
-                              <th className="w-16 px-1 py-1.5 text-center font-medium" title="Obrigatório">Obrig.</th>
-                              <th className="w-16 px-1 py-1.5 text-center font-medium" title="Editável">Edit.</th>
-                              <th className="w-16 px-1 py-1.5 text-center font-medium" title="Visível">Visib.</th>
-                              <th className="w-10 px-1 py-1.5"></th>
+                      <div className="overflow-hidden rounded-xl border bg-card">
+                        <div className={TABLE.wrap}>
+                        <table className={TABLE.table}>
+                          <thead className={TABLE.thead}>
+                            <tr>
+                              <th className={TABLE.thFirst}>Campo</th>
+                              <th className={`${TABLE.th} w-20 text-center`} title="Obrigatório">Obrig.</th>
+                              <th className={`${TABLE.th} w-20 text-center`} title="Editável">Edit.</th>
+                              <th className={`${TABLE.th} w-20 text-center`} title="Visível">Visib.</th>
+                              <th className={`${TABLE.th} w-14`}><span className="sr-only">Ações</span></th>
                             </tr>
                           </thead>
                           <tbody>
-                            <tr className="border-b bg-muted/20">
-                              <td className="px-3 py-2 text-xs font-bold uppercase tracking-wide">
+                            <tr className="border-t bg-muted/30">
+                              <td className="py-2 pl-4 pr-3 text-sm font-semibold">
                                 Dados do Projeto
                               </td>
                               <td colSpan={4} className="px-3 py-2 text-right">
                                 <Button
                                   type="button"
                                   variant="link"
-                                  className="h-auto p-0 text-[11px]"
+                                  className="h-auto p-0 text-xs"
                                   onClick={() => navigate("/app/modules/projetos/config/default-form")}
                                 >
                                   Editar formulário padrão
@@ -1088,15 +1152,15 @@ export default function ProjectStatusesConfigPage() {
                               const flags = defaultFieldFlags(status.id, field)
                               const locked = field.field_key === "title"
                               return (
-                                <tr key={field.field_key} className="border-b last:border-b-0">
-                                  <td className="px-3 py-1.5">
+                                <tr key={field.field_key} className={TABLE.tr}>
+                                  <td className="py-2 pl-4 pr-3">
                                     <span className="text-sm">{field.label}</span>
                                     <span className="ml-1.5 text-xs text-muted-foreground">({field.field_key})</span>
                                     {!field.is_visible && (
-                                      <Badge variant="secondary" className="ml-1.5 text-[10px]">oculto global</Badge>
+                                      <Pill tone="slate" className="ml-1.5">oculto global</Pill>
                                     )}
                                   </td>
-                                  <td className="text-center">
+                                  <td className="py-2 text-center">
                                     <input
                                       type="checkbox"
                                       className="h-4 w-4 cursor-pointer rounded border-input accent-primary disabled:opacity-40"
@@ -1105,7 +1169,7 @@ export default function ProjectStatusesConfigPage() {
                                       onChange={(e) => void handleToggleDefaultFormFlag(status.id, field, "required", e.target.checked)}
                                     />
                                   </td>
-                                  <td className="text-center">
+                                  <td className="py-2 text-center">
                                     <input
                                       type="checkbox"
                                       className="h-4 w-4 cursor-pointer rounded border-input accent-primary disabled:opacity-40"
@@ -1114,7 +1178,7 @@ export default function ProjectStatusesConfigPage() {
                                       onChange={(e) => void handleToggleDefaultFormFlag(status.id, field, "editable", e.target.checked)}
                                     />
                                   </td>
-                                  <td className="text-center">
+                                  <td className="py-2 text-center">
                                     <input
                                       type="checkbox"
                                       className="h-4 w-4 cursor-pointer rounded border-input accent-primary disabled:opacity-40"
@@ -1129,34 +1193,36 @@ export default function ProjectStatusesConfigPage() {
                             })}
                           </tbody>
                         </table>
+                        </div>
                       </div>
                     )}
 
                     {eligibleDemandTypes.length === 0 ? (
-                      <p className="text-[11px] text-muted-foreground italic">
+                      <p className="text-xs text-muted-foreground italic">
                         Nenhum tipo de demanda está vinculado a este kanban. Vincule em <span className="underline">Configurações → Tipos de Demanda</span>.
                       </p>
                     ) : sections.length === 0 ? (
-                      <p className="text-[11px] text-muted-foreground italic">Os tipos vinculados não têm sessões configuradas.</p>
+                      <p className="text-xs text-muted-foreground italic">Os tipos vinculados não têm sessões configuradas.</p>
                     ) : (
                       eligibleDemandTypes.map((dt) => {
                         const dtSections = sectionsByDemandType.get(dt.id) ?? []
                         if (dtSections.length === 0) return null
                         return (
-                          <div key={dt.id} className="rounded-md border bg-background overflow-hidden">
+                          <div key={dt.id} className="overflow-hidden rounded-xl border bg-card">
                             {eligibleDemandTypes.length > 1 && (
-                              <p className="border-b bg-muted/40 px-3 py-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+                              <p className="border-b px-4 py-2.5 text-sm font-semibold">
                                 Tipo · {dt.name}
                               </p>
                             )}
-                            <table className="w-full text-sm">
-                              <thead>
-                                <tr className="border-b text-[10px] uppercase tracking-wide text-muted-foreground">
-                                  <th className="px-3 py-1.5 text-left font-medium">Campo</th>
-                                  <th className="w-16 px-1 py-1.5 text-center font-medium" title="Obrigatório">Obrig.</th>
-                                  <th className="w-16 px-1 py-1.5 text-center font-medium" title="Editável">Edit.</th>
-                                  <th className="w-16 px-1 py-1.5 text-center font-medium" title="Visível">Visib.</th>
-                                  <th className="w-10 px-1 py-1.5"></th>
+                            <div className={TABLE.wrap}>
+                            <table className={TABLE.table}>
+                              <thead className={TABLE.thead}>
+                                <tr>
+                                  <th className={TABLE.thFirst}>Campo</th>
+                                  <th className={`${TABLE.th} w-20 text-center`} title="Obrigatório">Obrig.</th>
+                                  <th className={`${TABLE.th} w-20 text-center`} title="Editável">Edit.</th>
+                                  <th className={`${TABLE.th} w-20 text-center`} title="Visível">Visib.</th>
+                                  <th className={`${TABLE.th} w-14`}><span className="sr-only">Ações</span></th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -1165,11 +1231,11 @@ export default function ProjectStatusesConfigPage() {
                                   const fields = fieldsBySection[section.id] ?? []
                                   return (
                                     <Fragment key={section.id}>
-                                      <tr className="border-b bg-muted/20">
-                                        <td className="px-3 py-2 text-xs font-bold uppercase tracking-wide">
+                                      <tr className="border-t bg-muted/30">
+                                        <td className="py-2 pl-4 pr-3 text-sm font-semibold">
                                           {section.title}
                                         </td>
-                                        <td className="text-center">
+                                        <td className="py-2 text-center">
                                           <input
                                             type="checkbox"
                                             className="h-4 w-4 cursor-pointer rounded border-input accent-primary"
@@ -1177,7 +1243,7 @@ export default function ProjectStatusesConfigPage() {
                                             onChange={(e) => void handleToggleSectionFlag(status.id, section.id, "required", e.target.checked)}
                                           />
                                         </td>
-                                        <td className="text-center">
+                                        <td className="py-2 text-center">
                                           <input
                                             type="checkbox"
                                             className="h-4 w-4 cursor-pointer rounded border-input accent-primary"
@@ -1185,7 +1251,7 @@ export default function ProjectStatusesConfigPage() {
                                             onChange={(e) => void handleToggleSectionFlag(status.id, section.id, "editable", e.target.checked)}
                                           />
                                         </td>
-                                        <td className="text-center">
+                                        <td className="py-2 text-center">
                                           <input
                                             type="checkbox"
                                             className="h-4 w-4 cursor-pointer rounded border-input accent-primary"
@@ -1198,14 +1264,14 @@ export default function ProjectStatusesConfigPage() {
                                       {fields.map((field) => {
                                         const flags = modeToFlags(fieldModeFor(status.id, field))
                                         return (
-                                          <tr key={field.id} className="border-b last:border-b-0">
-                                            <td className="px-3 py-1.5">
+                                          <tr key={field.id} className={TABLE.tr}>
+                                            <td className="py-2 pl-4 pr-3">
                                               <span className="text-sm text-primary">{field.field_key}</span>
                                               {!field.is_active && (
-                                                <Badge variant="secondary" className="ml-1.5 text-[10px]">inativo</Badge>
+                                                <Pill tone="slate" className="ml-1.5">inativo</Pill>
                                               )}
                                             </td>
-                                            <td className="text-center">
+                                            <td className="py-2 text-center">
                                               <input
                                                 type="checkbox"
                                                 className="h-4 w-4 cursor-pointer rounded border-input accent-primary"
@@ -1213,7 +1279,7 @@ export default function ProjectStatusesConfigPage() {
                                                 onChange={(e) => void handleToggleFieldFlag(status.id, dt.id, section.id, field, "required", e.target.checked)}
                                               />
                                             </td>
-                                            <td className="text-center">
+                                            <td className="py-2 text-center">
                                               <input
                                                 type="checkbox"
                                                 className="h-4 w-4 cursor-pointer rounded border-input accent-primary"
@@ -1221,7 +1287,7 @@ export default function ProjectStatusesConfigPage() {
                                                 onChange={(e) => void handleToggleFieldFlag(status.id, dt.id, section.id, field, "editable", e.target.checked)}
                                               />
                                             </td>
-                                            <td className="text-center">
+                                            <td className="py-2 text-center">
                                               <input
                                                 type="checkbox"
                                                 className="h-4 w-4 cursor-pointer rounded border-input accent-primary"
@@ -1229,12 +1295,12 @@ export default function ProjectStatusesConfigPage() {
                                                 onChange={(e) => void handleToggleFieldFlag(status.id, dt.id, section.id, field, "visible", e.target.checked)}
                                               />
                                             </td>
-                                            <td className="text-center">
+                                            <td className="py-2 pr-3 text-center">
                                               <Button
                                                 type="button"
                                                 variant="outline"
                                                 size="icon"
-                                                className="h-7 w-9"
+                                                className="h-8 w-9"
                                                 title="Editar campo no formulário"
                                                 onClick={() => navigate(`/app/modules/projetos/config/demand-types/${dt.id}`)}
                                               >
@@ -1249,18 +1315,19 @@ export default function ProjectStatusesConfigPage() {
                                 })}
                               </tbody>
                             </table>
+                            </div>
                           </div>
                         )
                       })
                     )}
                   </div>
                 </div>
-                </>
+                </div>
                 )}
                 </>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </div>
           )
         })}
       </div>
@@ -1313,14 +1380,14 @@ export default function ProjectStatusesConfigPage() {
                 <Switch checked={newStatusInitial} onCheckedChange={setNewStatusInitial} />
                 <div className="leading-tight">
                   <Label className="text-sm">Etapa inicial</Label>
-                  <p className="text-[11px] text-muted-foreground">Novas demandas começam aqui.</p>
+                  <p className="text-xs text-muted-foreground">Novas demandas começam aqui.</p>
                 </div>
               </div>
               <div className="flex items-center gap-2 rounded-md border px-3 py-2">
                 <Switch checked={newStatusFinal} onCheckedChange={setNewStatusFinal} />
                 <div className="leading-tight">
                   <Label className="text-sm">Etapa final</Label>
-                  <p className="text-[11px] text-muted-foreground">Considera a demanda concluída.</p>
+                  <p className="text-xs text-muted-foreground">Considera a demanda concluída.</p>
                 </div>
               </div>
             </div>

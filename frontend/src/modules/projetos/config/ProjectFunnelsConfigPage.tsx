@@ -5,14 +5,13 @@ import { ArrowLeft, Check, ChevronDown, ChevronUp, GitBranch, GripVertical, Load
 import { projetosApi, type ProjectFunnel, type ProjectDemandType, type FunnelAccessLevel } from "@/api/projetos"
 import { teamopsApi, type Position } from "@/api/teamops"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { Card, PageHeader, Pill, SectionCard } from "@/components/ds"
 import { EmptyState } from "@/components/EmptyState"
 import { toast } from "@/lib/toast"
 
@@ -218,77 +217,115 @@ export default function ProjectFunnelsConfigPage() {
     await persistOrder(moveItem(funnels, index, to))
   }
 
-  if (loading) {
-    return <Skeleton className="h-36 rounded-lg" />
-  }
-
-  if (!selectedProjectId) {
+  function renderHeader(withCreate: boolean) {
     return (
-      <EmptyState
+      <PageHeader
+        crumbs={[{ label: "Configurações", to: "/app/modules/projetos/config" }, { label: "Funis" }]}
         icon={GitBranch}
-        title="Não foi possível carregar"
-        description="Recarregue a página em instantes."
+        color="#2563EB"
+        title="Funis"
+        description="Crie e gerencie os funis do kanban."
+        actions={
+          <>
+            <Button variant="outline" className="h-10 gap-1.5" onClick={() => navigate("/app/modules/projetos/config")}>
+              <ArrowLeft size={16} />
+              Voltar às Configurações
+            </Button>
+            {withCreate && (
+              <Button type="button" className="h-10 gap-1.5" onClick={openCreateDialog}>
+                <Plus size={16} />
+                Novo Funil
+              </Button>
+            )}
+          </>
+        }
       />
     )
   }
 
-  return (
-    <div className="w-full space-y-4">
-      <div className="flex items-center gap-2">
-        <Button variant="ghost" size="icon" onClick={() => navigate("/app/modules/projetos/config")}>
-          <ArrowLeft size={16} />
-        </Button>
-        <div className="flex-1">
-          <h2 className="text-lg font-bold">Funis</h2>
-          <p className="text-sm text-muted-foreground">Crie e gerencie os funis do kanban.</p>
-        </div>
-        <Button type="button" className="gap-1.5" onClick={openCreateDialog}>
-          <Plus size={14} />
-          Novo Funil
-        </Button>
+  if (loading) {
+    return (
+      <div className="w-full space-y-5">
+        {renderHeader(false)}
+        <Skeleton className="h-36 rounded-2xl" />
       </div>
+    )
+  }
+
+  if (!selectedProjectId) {
+    return (
+      <div className="w-full space-y-5">
+        {renderHeader(false)}
+        <Card>
+          <EmptyState
+            icon={GitBranch}
+            title="Não foi possível carregar"
+            description="Recarregue a página em instantes."
+          />
+        </Card>
+      </div>
+    )
+  }
+
+  return (
+    <div className="w-full space-y-5">
+      {renderHeader(true)}
 
       {funnels.length === 0 ? (
-        <EmptyState
-          icon={GitBranch}
-          title="Nenhum funil cadastrado"
-          description="Crie o primeiro funil para começar a organizar suas demandas."
-          action={{ label: "Novo Funil", onClick: openCreateDialog }}
-        />
+        <Card>
+          <EmptyState
+            icon={GitBranch}
+            title="Nenhum funil cadastrado"
+            description="Crie o primeiro funil para começar a organizar suas demandas."
+            action={{ label: "Novo Funil", onClick: openCreateDialog }}
+          />
+        </Card>
       ) : (
-      <div className="space-y-2">
+      <SectionCard
+        title="Funis do kanban"
+        subtitle="Arraste pela alça ou use as setas para mudar a ordem."
+        icon={GitBranch}
+        right={<Pill tone="slate">{funnels.length} {funnels.length === 1 ? "funil" : "funis"}</Pill>}
+        flush
+      >
+        <ul className="divide-y">
         {funnels.map((funnel, index) => (
-          <Card
+          <li
             key={funnel.id}
             onDragOver={(e) => e.preventDefault()}
             onDrop={() => { void handleDropFunnel(funnel.id) }}
-            className={draggingFunnelId === funnel.id ? "opacity-50" : undefined}
+            className={`px-5 py-4 transition-opacity ${draggingFunnelId === funnel.id ? "opacity-50" : ""}`}
           >
-            <CardContent className="p-3">
               {editingFunnelId === funnel.id ? (
                 <div className="w-full space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Input value={funnelDraftName} onChange={(e) => setFunnelDraftName(e.target.value)} />
-                    <Input className="w-16" type="color" value={funnelDraftColor} onChange={(e) => setFunnelDraftColor(e.target.value)} />
-                    <div className="flex items-center gap-1 rounded-md border px-2 py-1">
-                      <Label className="text-xs">Ativo</Label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Input
+                      className="h-10 min-w-[12rem] flex-1"
+                      aria-label="Nome do funil"
+                      value={funnelDraftName}
+                      onChange={(e) => setFunnelDraftName(e.target.value)}
+                    />
+                    <Input className="h-10 w-16 p-1" type="color" aria-label="Cor do funil" value={funnelDraftColor} onChange={(e) => setFunnelDraftColor(e.target.value)} />
+                    <div className="flex h-10 items-center gap-2 rounded-md border bg-background px-3">
+                      <Label className="text-sm">Ativo</Label>
                       <Switch checked={funnelDraftActive} onCheckedChange={setFunnelDraftActive} />
                     </div>
-                    <Button type="button" size="icon" variant="ghost" onClick={() => void saveEditFunnel(funnel.id)}>
-                      <Check size={14} />
+                    <Button type="button" size="icon" variant="ghost" className="h-10 w-10" title="Salvar" onClick={() => void saveEditFunnel(funnel.id)}>
+                      <Check size={16} />
                     </Button>
-                    <Button type="button" size="icon" variant="ghost" onClick={() => setEditingFunnelId(null)}>
-                      <X size={14} />
+                    <Button type="button" size="icon" variant="ghost" className="h-10 w-10" title="Cancelar" onClick={() => setEditingFunnelId(null)}>
+                      <X size={16} />
                     </Button>
                   </div>
                   <Input
+                    className="h-10"
                     value={funnelDraftDescription}
                     onChange={(e) => setFunnelDraftDescription(e.target.value)}
                     placeholder="Descrição do funil"
                   />
                 </div>
               ) : (
-                <div className="flex items-start gap-2">
+                <div className="flex items-start gap-3">
                   <div className="flex flex-col items-center gap-0.5 pt-0.5 shrink-0">
                     <button
                       type="button"
@@ -318,30 +355,33 @@ export default function ProjectFunnelsConfigPage() {
                       <ChevronDown size={15} />
                     </button>
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 text-sm flex-wrap">
-                      <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: funnel.color }} />
-                      <span className="font-medium break-words">{funnel.name}</span>
-                      {funnel.is_default && <Badge variant="outline">padrão</Badge>}
-                      {!funnel.is_active && <Badge variant="secondary">inativo</Badge>}
+                  <div className="min-w-0 flex-1 space-y-3">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: funnel.color }} />
+                        <span className="break-words text-base font-semibold">{funnel.name}</span>
+                        {funnel.is_default && <Pill tone="blue">padrão</Pill>}
+                        {!funnel.is_active && <Pill tone="slate">inativo</Pill>}
+                      </div>
+                      {funnel.description && (
+                        <p className="mt-1 whitespace-pre-wrap break-words text-sm text-muted-foreground">{funnel.description}</p>
+                      )}
                     </div>
-                    {funnel.description && (
-                      <p className="text-xs text-muted-foreground mt-1 break-words whitespace-pre-wrap">{funnel.description}</p>
-                    )}
                     {demandTypes.length > 0 && (
-                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                        <span className="text-[11px] text-muted-foreground">Tipos permitidos:</span>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="mr-1 text-xs text-muted-foreground">Tipos permitidos</span>
                         {demandTypes.map((t) => {
                           const selected = (funnel.allowed_demand_type_ids ?? []).includes(t.id)
                           return (
                             <button
                               key={t.id}
                               type="button"
+                              aria-pressed={selected}
                               onClick={() => void handleToggleAllowedType(funnel, t.id)}
-                              className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] transition ${
+                              className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                                 selected
-                                  ? "border-primary bg-primary/10 text-primary font-medium"
-                                  : "border-border text-muted-foreground hover:bg-muted"
+                                  ? "border-primary bg-primary/10 text-primary"
+                                  : "bg-background text-muted-foreground hover:bg-muted hover:text-foreground"
                               }`}
                             >
                               {t.name}
@@ -349,23 +389,21 @@ export default function ProjectFunnelsConfigPage() {
                           )
                         })}
                         {(funnel.allowed_demand_type_ids ?? []).length === 0 && (
-                          <span className="text-[11px] italic text-muted-foreground/70">todos (sem restrição)</span>
+                          <span className="text-xs italic text-muted-foreground">todos (sem restrição)</span>
                         )}
                       </div>
                     )}
                     {positions.length > 0 && (
-                      <div className="mt-2 rounded-md border bg-muted/30 p-2">
-                        <span className="text-[11px] text-muted-foreground">
-                          Acesso por cargo a este kanban:
-                        </span>
-                        <div className="mt-1.5 space-y-1">
+                      <div className="rounded-xl border bg-muted/30 p-3">
+                        <p className="text-sm font-medium">Acesso por cargo a este kanban</p>
+                        <div className="mt-2 divide-y">
                           {positions.map((p) => {
                             const level: FunnelAccessLevel =
                               (p.role_id ? (funnel.access_control ?? {})[p.role_id] : undefined) ?? "manage"
                             return (
-                              <div key={p.id} className="flex items-center justify-between gap-2">
-                                <span className="min-w-0 flex-1 truncate text-[11px]">{p.name}</span>
-                                <div className="flex shrink-0 items-center rounded-md border bg-background p-0.5">
+                              <div key={p.id} className="flex items-center justify-between gap-2 py-1.5">
+                                <span className="min-w-0 flex-1 truncate text-sm">{p.name}</span>
+                                <div className="inline-flex shrink-0 rounded-lg border bg-background p-0.5">
                                   {ACCESS_OPTIONS.map((opt) => {
                                     const selected = level === opt.value
                                     return (
@@ -373,11 +411,12 @@ export default function ProjectFunnelsConfigPage() {
                                         key={opt.value}
                                         type="button"
                                         title={opt.hint}
+                                        aria-pressed={selected}
                                         onClick={() => void handleSetFunnelAccess(funnel, p, opt.value)}
-                                        className={`rounded px-2 py-0.5 text-[11px] transition ${
+                                        className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
                                           selected
-                                            ? "bg-primary text-primary-foreground font-medium"
-                                            : "text-muted-foreground hover:bg-muted"
+                                            ? "bg-primary text-primary-foreground shadow-sm"
+                                            : "text-muted-foreground hover:text-foreground"
                                         }`}
                                       >
                                         {opt.label}
@@ -392,28 +431,35 @@ export default function ProjectFunnelsConfigPage() {
                       </div>
                     )}
                   </div>
-                  <div className="flex items-center gap-1 shrink-0">
+                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
                     {!funnel.is_default && (
                       <Button type="button" variant="ghost" size="sm" onClick={() => void handleSetDefaultFunnel(funnel.id)}>
                         Padrão
                       </Button>
                     )}
-                    <Button type="button" variant="ghost" size="icon" onClick={() => beginEditFunnel(funnel)}>
+                    <Button type="button" variant="ghost" size="icon" title="Editar" onClick={() => beginEditFunnel(funnel)}>
                       <Pencil size={14} />
                     </Button>
                     <Button type="button" variant="ghost" size="sm" onClick={() => void handleToggleActive(funnel)}>
                       {funnel.is_active ? "Inativar" : "Ativar"}
                     </Button>
-                    <Button type="button" variant="ghost" size="icon" onClick={() => void handleDeleteFunnel(funnel.id)}>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="text-muted-foreground hover:text-destructive"
+                      title="Excluir"
+                      onClick={() => void handleDeleteFunnel(funnel.id)}
+                    >
                       <Trash2 size={14} />
                     </Button>
                   </div>
                 </div>
               )}
-            </CardContent>
-          </Card>
+          </li>
         ))}
-      </div>
+        </ul>
+      </SectionCard>
       )}
 
       <Dialog open={openCreate} onOpenChange={setOpenCreate}>

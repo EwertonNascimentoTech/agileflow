@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react"
-import { ChevronDown, ChevronRight, Minus, Plus, Sparkles, Trash2, TrendingDown, TrendingUp } from "lucide-react"
+import { Camera, ChevronDown, ChevronRight, Minus, Plus, Sparkles, Trash2, TrendingDown, TrendingUp } from "lucide-react"
 import {
   Bar, BarChart, CartesianGrid, Cell, LabelList, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts"
@@ -11,7 +11,7 @@ import {
   type IndicadorPeriodoStatus,
   type PersonMini,
 } from "@/api/rtd"
-import { Badge } from "@/components/ui/badge"
+import { Notice, Pill, type Tone } from "@/components/ds"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -21,11 +21,11 @@ import { toast } from "@/lib/toast"
 
 const NONE = "__none__" // sentinela: Radix proíbe value=""
 
-const STATUS_FAROL: Record<IndicadorPeriodoStatus, { label: string; dot: string; text: string }> = {
-  atingido: { label: "Atingido", dot: "bg-emerald-500", text: "text-emerald-600" },
-  em_atencao: { label: "Em atenção", dot: "bg-amber-500", text: "text-amber-600" },
-  nao_atingido: { label: "Não atingido", dot: "bg-red-500", text: "text-destructive" },
-  pendente: { label: "Pendente", dot: "bg-slate-400", text: "text-muted-foreground" },
+const STATUS_FAROL: Record<IndicadorPeriodoStatus, { label: string; tone: Tone; text: string }> = {
+  atingido: { label: "Atingido", tone: "emerald", text: "text-emerald-600 dark:text-emerald-400" },
+  em_atencao: { label: "Em atenção", tone: "amber", text: "text-amber-600 dark:text-amber-400" },
+  nao_atingido: { label: "Não atingido", tone: "red", text: "text-destructive" },
+  pendente: { label: "Pendente", tone: "slate", text: "text-muted-foreground" },
 }
 
 const SENTIDO_LABEL: Record<string, string> = {
@@ -54,6 +54,9 @@ const STATUS_BAR_COLOR: Record<IndicadorPeriodoStatus, string> = {
   nao_atingido: REALIZADO_COLOR,
   pendente: "#94a3b8",
 }
+
+// Cartões de número do período (mesmo contorno dos cartões de indicador do Portal).
+const TILE = "rounded-xl border bg-card px-4 py-3 shadow-sm"
 
 const MESES_CURTOS = ["", "Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
 
@@ -188,7 +191,7 @@ function Tendencia({ det }: { det: IndicadorDetalhe }) {
   const t = det.tendencia
   if (!t?.direcao) return <span className="text-xs text-muted-foreground">tendência —</span>
   const cfg = {
-    melhorando: { Icon: TrendingUp, cls: "text-emerald-600", label: "melhorando" },
+    melhorando: { Icon: TrendingUp, cls: "text-emerald-600 dark:text-emerald-400", label: "melhorando" },
     piorando: { Icon: TrendingDown, cls: "text-destructive", label: "piorando" },
     estavel: { Icon: Minus, cls: "text-muted-foreground", label: "estável" },
   }[t.direcao]
@@ -357,33 +360,28 @@ function IndicadorCard({
     }
   }
 
-  const FAROL_PILL: Record<IndicadorPeriodoStatus, string> = {
-    atingido: "bg-emerald-100 text-emerald-800",
-    em_atencao: "bg-amber-100 text-amber-800",
-    nao_atingido: "bg-red-100 text-red-800",
-    pendente: "bg-slate-100 text-slate-600",
-  }
   const delta =
     det.periodo?.realizado != null && det.periodo?.meta != null
       ? det.periodo.realizado - det.periodo.meta
       : null
 
   return (
-    <div className="overflow-hidden rounded-xl border bg-background shadow-sm">
+    <div className="overflow-hidden rounded-2xl border bg-card shadow-sm">
       {/* Header: nome + farol em destaque — clique expande/minimiza */}
       <button
         type="button"
         onClick={() => setExpandido((v) => !v)}
-        className={`flex w-full flex-wrap items-center justify-between gap-2 bg-slate-50/70 px-4 py-3 text-left transition-colors hover:bg-slate-100 ${expandido ? "border-b" : ""}`}
+        className={`flex w-full flex-wrap items-center justify-between gap-2 bg-muted/40 px-4 py-3 text-left transition-colors hover:bg-muted/70 ${expandido ? "border-b" : ""}`}
         title={expandido ? "Minimizar" : "Expandir"}
+        aria-expanded={expandido}
       >
         <div className="flex min-w-0 items-center gap-2">
           {expandido
             ? <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
             : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
           <div className="min-w-0">
-            <p className="text-base font-bold leading-tight text-blue-950">{det.nome}</p>
-            <p className="mt-0.5 truncate text-[11px] text-muted-foreground" title={det.formula_calculo ?? undefined}>
+            <p className="text-base font-semibold leading-tight">{det.nome}</p>
+            <p className="mt-0.5 truncate text-xs text-muted-foreground" title={det.formula_calculo ?? undefined}>
               {det.sentido ? SENTIDO_LABEL[det.sentido] : ""}
               {det.area_name ? ` · ${det.area_name}` : ""}
               {det.formula_calculo ? ` · ${det.formula_calculo}` : ""}
@@ -393,14 +391,11 @@ function IndicadorCard({
         <div className="flex shrink-0 items-center gap-3">
           {det.periodo && (
             <span className="text-sm tabular-nums text-muted-foreground">
-              <b className="text-blue-950">{fmtNum(det.periodo.realizado, unit)}</b>
+              <b className="font-semibold text-foreground">{fmtNum(det.periodo.realizado, unit)}</b>
               {" "}· meta {metaLabel}
             </span>
           )}
-          <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold ${FAROL_PILL[status]}`}>
-            <span className={`inline-block h-2 w-2 rounded-full ${farol.dot}`} />
-            {farol.label}
-          </span>
+          <Pill tone={farol.tone} dot>{farol.label}</Pill>
         </div>
       </button>
 
@@ -411,67 +406,58 @@ function IndicadorCard({
         ) : (
           <>
             {/* KPI tiles: realizado · meta · atingimento · tendência */}
-            <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-              <div className="rounded-lg border bg-slate-50/60 p-3">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-                  Resultado realizado
-                </p>
-                <p className="mt-1 text-2xl font-extrabold tabular-nums text-blue-950">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <div className={TILE}>
+                <p className="text-sm text-muted-foreground">Resultado realizado</p>
+                <p className="mt-1 text-2xl font-bold leading-none tabular-nums">
                   {fmtNum(det.periodo.realizado, unit)}
                 </p>
-                <p className="text-[11px] text-muted-foreground">{det.periodo.competencia}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{det.periodo.competencia}</p>
               </div>
-              <div className="rounded-lg border bg-slate-50/60 p-3">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Meta</p>
-                <p className="mt-1 text-2xl font-extrabold tabular-nums text-sky-600">{metaLabel}</p>
-                <p className="text-[11px] text-muted-foreground">
+              <div className={TILE}>
+                <p className="text-sm text-muted-foreground">Meta</p>
+                <p className="mt-1 text-2xl font-bold leading-none tabular-nums text-sky-600 dark:text-sky-400">{metaLabel}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
                   {delta != null ? `Δ ${delta > 0 ? "+" : ""}${fmtNum(delta, unit)}` : "—"}
                 </p>
               </div>
-              <div className="rounded-lg border bg-slate-50/60 p-3">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Atingimento</p>
-                <p className={`mt-1 text-2xl font-extrabold tabular-nums ${farol.text}`}>
+              <div className={TILE}>
+                <p className="text-sm text-muted-foreground">Atingimento</p>
+                <p className={`mt-1 text-2xl font-bold leading-none tabular-nums ${farol.text}`}>
                   {det.periodo.percentual_atingimento != null
                     ? `${det.periodo.percentual_atingimento.toFixed(0)}%` : "—"}
                 </p>
-                <p className="text-[11px] text-muted-foreground">{farol.label}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{farol.label}</p>
               </div>
-              <div className="rounded-lg border bg-slate-50/60 p-3">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-                  Tendência de evolução
-                </p>
+              <div className={TILE}>
+                <p className="text-sm text-muted-foreground">Tendência de evolução</p>
                 <div className="mt-1.5"><Tendencia det={det} /></div>
-                <p className="text-[11px] text-muted-foreground">vs período anterior</p>
+                <p className="mt-1 text-xs text-muted-foreground">vs período anterior</p>
               </div>
             </div>
 
             {/* Faixas de futuro: tendência (ritmo) e projeção (melhor cenário) */}
             {det.tendencia_futura && (
-              <div
-                className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs ${
-                  det.tendencia_futura.atinge_meta === false
-                    ? "border-red-200 bg-red-50 text-red-900"
-                    : "border-emerald-200 bg-emerald-50 text-emerald-900"
-                }`}
-                title="Cenário 'mantido o ritmo': extrapolação do Δ médio dos últimos períodos realizados."
-              >
-                {det.tendencia_futura.direcao === "piorando"
-                  ? <TrendingDown className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  : det.tendencia_futura.direcao === "estavel"
-                    ? <Minus className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                    : <TrendingUp className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
-                <span>
-                  <b>Tendência {det.tendencia_futura.competencia}:</b> {det.tendencia_futura.texto}
-                </span>
+              <div title="Cenário 'mantido o ritmo': extrapolação do Δ médio dos últimos períodos realizados.">
+                <Notice
+                  tone={det.tendencia_futura.atinge_meta === false ? "red" : "emerald"}
+                  icon={det.tendencia_futura.direcao === "piorando"
+                    ? TrendingDown
+                    : det.tendencia_futura.direcao === "estavel" ? Minus : TrendingUp}
+                >
+                  <span className="min-w-0 flex-1">
+                    <b className="font-semibold">Tendência {det.tendencia_futura.competencia}:</b> {det.tendencia_futura.texto}
+                  </span>
+                </Notice>
               </div>
             )}
             {det.projecao && (
-              <div
-                className="flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900"
-                title="Melhor cenário do próximo período: se tudo que está planejado for entregue no prazo."
-              >
-                <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                <span><b>Projeção {det.projecao.competencia}:</b> {det.projecao.texto}</span>
+              <div title="Melhor cenário do próximo período: se tudo que está planejado for entregue no prazo.">
+                <Notice tone="blue" icon={Sparkles}>
+                  <span className="min-w-0 flex-1">
+                    <b className="font-semibold">Projeção {det.projecao.competencia}:</b> {det.projecao.texto}
+                  </span>
+                </Notice>
               </div>
             )}
           </>
@@ -528,21 +514,18 @@ function IndicadorCard({
         if (hideEmpty && acoesComConteudo.length === 0) return null
         const lista = hideEmpty ? acoesComConteudo : st.acoes
         return (
-        <div className="mt-3 rounded-md border border-dashed border-destructive/40 p-2.5">
+        <div className="mt-3 rounded-xl border border-dashed border-destructive/40 p-3">
           <button
             type="button"
-            className="flex w-full items-center gap-1.5 text-left text-xs font-semibold"
+            className="flex w-full flex-wrap items-center gap-2 text-left text-sm font-semibold"
             onClick={() => setReversaoAberta((v) => !v)}
+            aria-expanded={reversaoAberta}
           >
-            {reversaoAberta ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+            {reversaoAberta ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
             Plano de ação para reverter
-            {lista.length > 0 && (
-              <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                {lista.length} ação(ões)
-              </span>
-            )}
+            {lista.length > 0 && <Pill>{lista.length} ação(ões)</Pill>}
             {!hideEmpty && status === "em_atencao" && (
-              <span className="font-normal text-muted-foreground">(opcional — em atenção)</span>
+              <span className="text-xs font-normal text-muted-foreground">(opcional — em atenção)</span>
             )}
           </button>
           {reversaoAberta && (
@@ -562,13 +545,13 @@ function IndicadorCard({
                 const showResp = !hideEmpty || Boolean(respNome)
                 const showPrazo = !hideEmpty || hasText(acao.prazo)
                 return (
-                <div key={i} className="space-y-2 rounded-md border bg-background p-2.5">
+                <div key={i} className="space-y-2 rounded-lg border bg-background p-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                    <span className="text-sm font-semibold">
                       Ação {i + 1}
                     </span>
                     {!readOnly && (
-                      <Button variant="ghost" size="icon" className="h-6 w-6" title="Remover ação"
+                      <Button variant="ghost" size="icon" className="h-7 w-7" title="Remover ação" aria-label="Remover ação"
                         onClick={() => rmAcao(idx)}>
                         <Trash2 className="h-3.5 w-3.5 text-destructive" />
                       </Button>
@@ -668,9 +651,9 @@ function IndicadorCard({
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
           <div>
             {sugestaoPendente && (
-              <Badge variant="warning" title="O texto abaixo foi gerado por IA e ainda não foi salvo.">
-                <Sparkles className="mr-1 h-3 w-3" /> Sugestão de IA — revise e salve
-              </Badge>
+              <span title="O texto abaixo foi gerado por IA e ainda não foi salvo.">
+                <Pill tone="amber"><Sparkles size={12} /> Sugestão de IA — revise e salve</Pill>
+              </span>
             )}
           </div>
           <div className="flex gap-2">
@@ -679,8 +662,7 @@ function IndicadorCard({
               <Sparkles className="mr-1.5 h-3.5 w-3.5" />
               {gerando ? "Gerando… (pode levar ~1 min)" : "Gerar com IA"}
             </Button>
-            <Button size="sm" onClick={salvar} disabled={saving || gerando}
-              className="bg-blue-800 hover:bg-blue-900">
+            <Button size="sm" onClick={salvar} disabled={saving || gerando}>
               {saving ? "Salvando…" : "Salvar análise"}
             </Button>
           </div>
@@ -748,9 +730,9 @@ export function RtdIndicadoresSection({
   return (
     <div className="space-y-5">
       {snapshotAt && (
-        <Badge variant="secondary" title="Reunião fechada: os números abaixo são a foto congelada no fechamento.">
-          📸 Foto congelada em {new Date(snapshotAt).toLocaleString("pt-BR")}
-        </Badge>
+        <span className="inline-block" title="Reunião fechada: os números abaixo são a foto congelada no fechamento.">
+          <Pill tone="blue"><Camera size={12} /> Foto congelada em {new Date(snapshotAt).toLocaleString("pt-BR")}</Pill>
+        </span>
       )}
 
       {categoria !== "tatico" && grupos.estrategicos.length > 0 && (
@@ -767,8 +749,8 @@ export function RtdIndicadoresSection({
         <div className="space-y-3">
           {[...grupos.taticos.entries()].map(([sp, list]) => (
             <div key={sp} className="space-y-2">
-              <h5 className="border-l-4 border-primary pl-2 text-xs font-semibold uppercase tracking-wide text-primary">
-                Sub. Processo: {sp}
+              <h5 className="border-l-4 border-primary pl-2 text-sm font-semibold">
+                <span className="font-normal text-muted-foreground">Sub. Processo:</span> {sp}
               </h5>
               <div className="space-y-3">
                 {list.map((d) => (

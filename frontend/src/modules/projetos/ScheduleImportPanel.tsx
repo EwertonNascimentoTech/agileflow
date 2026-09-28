@@ -143,7 +143,7 @@ export function ScheduleImportPanel({
           <div className="space-y-1">
             <label className="text-xs text-muted-foreground">Projeto/Programa de destino</label>
             <Select value={parentTaskId} onValueChange={setParentTaskId}>
-              <SelectTrigger className="w-64"><SelectValue placeholder="Onde criar as Features" /></SelectTrigger>
+              <SelectTrigger className="h-10 w-64 bg-background"><SelectValue placeholder="Onde criar as Features" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="__top__">- Topo do projeto (sem pai) -</SelectItem>
                 {nodes.map((n) => (
@@ -156,7 +156,7 @@ export function ScheduleImportPanel({
         <div className="space-y-1">
           <label className="text-xs text-muted-foreground">Etapa das Features</label>
           <Select value={featureStatusId} onValueChange={setFeatureStatusId}>
-            <SelectTrigger className={compact ? "w-56" : "w-64"}><SelectValue placeholder="Selecione a etapa" /></SelectTrigger>
+            <SelectTrigger className={`h-10 bg-background ${compact ? "w-56" : "w-64"}`}><SelectValue placeholder="Selecione a etapa" /></SelectTrigger>
             <SelectContent>
               {ordered.map((s) => (
                 <SelectItem key={s.id} value={s.id}>{funnelName.get(s.funnel_id) ? `${funnelName.get(s.funnel_id)} > ` : ""}{s.name}</SelectItem>
@@ -167,7 +167,7 @@ export function ScheduleImportPanel({
         <div className="space-y-1">
           <label className="text-xs text-muted-foreground">Etapa das US</label>
           <Select value={usStatusId} onValueChange={setUsStatusId}>
-            <SelectTrigger className={compact ? "w-56" : "w-64"}><SelectValue placeholder="Selecione a etapa" /></SelectTrigger>
+            <SelectTrigger className={`h-10 bg-background ${compact ? "w-56" : "w-64"}`}><SelectValue placeholder="Selecione a etapa" /></SelectTrigger>
             <SelectContent>
               {ordered.map((s) => (
                 <SelectItem key={s.id} value={s.id}>{funnelName.get(s.funnel_id) ? `${funnelName.get(s.funnel_id)} > ` : ""}{s.name}</SelectItem>
@@ -175,25 +175,25 @@ export function ScheduleImportPanel({
             </SelectContent>
           </Select>
         </div>
-        <Button type="button" variant="outline" className="gap-1.5" onClick={() => void projetosApi.downloadImportTemplate(projectId)} disabled={!projectId}>
+        <Button type="button" variant="outline" className="h-10 gap-1.5" onClick={() => void projetosApi.downloadImportTemplate(projectId)} disabled={!projectId}>
           <Download size={14} /> Baixar modelo (.xlsx)
         </Button>
         <input ref={fileRef} type="file" accept=".xlsx" className="hidden" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-        <Button type="button" variant="outline" className="gap-1.5" onClick={() => fileRef.current?.click()}>
+        <Button type="button" variant="outline" className="h-10 gap-1.5" onClick={() => fileRef.current?.click()}>
           <FileSpreadsheet size={14} /> {file ? file.name : "Escolher arquivo"}
         </Button>
-        <Button type="button" className="gap-1.5" onClick={() => void runImport()} disabled={!file || !featureStatusId || !usStatusId || importing}>
+        <Button type="button" className="h-10 gap-1.5" onClick={() => void runImport()} disabled={!file || !featureStatusId || !usStatusId || importing}>
           {importing ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} Importar
         </Button>
       </div>
 
       {result && (
-        <div className="rounded-md border p-3 text-sm">
+        <div className="rounded-xl border bg-card p-4 text-sm">
           <p className="font-medium">{result.features_created} Feature(s) e {result.us_created} US criadas{result.skipped > 0 ? ` / ${result.skipped} puladas` : ""}.</p>
           {result.warnings.length > 0 && (
             <div className="mt-2 space-y-1">
-              <p className="flex items-center gap-1.5 text-xs font-semibold text-amber-600"><AlertTriangle size={12} /> Avisos ({result.warnings.length})</p>
-              <ul className="max-h-40 space-y-0.5 overflow-y-auto text-[11px] text-muted-foreground">
+              <p className="flex items-center gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400"><AlertTriangle size={12} /> Avisos ({result.warnings.length})</p>
+              <ul className="max-h-40 space-y-0.5 overflow-y-auto text-xs text-muted-foreground">
                 {result.warnings.map((w, i) => <li key={i}>- {w}</li>)}
               </ul>
             </div>

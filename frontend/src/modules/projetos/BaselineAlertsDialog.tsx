@@ -2,7 +2,7 @@ import type { ReactNode } from "react"
 import { ArrowRight, CalendarClock, GitBranch, ListPlus, ListX, Timer, User, Workflow } from "lucide-react"
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Badge } from "@/components/ui/badge"
+import { Pill } from "@/components/ds"
 import type { BaselineDiff } from "@/modules/projetos/baselineDiff"
 
 function fmtDay(iso: string | null): string {
@@ -13,17 +13,17 @@ function fmtDay(iso: string | null): string {
 
 function DeltaTag({ d }: { d?: number }) {
   if (d === undefined) return null
-  if (d > 0) return <Badge variant="destructive">+{d}d</Badge>
-  if (d < 0) return <Badge variant="success">{d}d</Badge>
-  return <Badge variant="secondary">0d</Badge>
+  if (d > 0) return <Pill tone="red">+{d}d</Pill>
+  if (d < 0) return <Pill tone="emerald">{d}d</Pill>
+  return <Pill tone="slate">0d</Pill>
 }
 
 function Section({ icon, title, count, children }: { icon: ReactNode; title: string; count: number; children: ReactNode }) {
   if (count === 0) return null
   return (
-    <div className="rounded-lg border">
-      <div className="flex items-center gap-2 border-b bg-muted/40 px-3 py-2 text-sm font-medium">
-        {icon} {title} <Badge variant="secondary" className="ml-auto">{count}</Badge>
+    <div className="overflow-hidden rounded-xl border">
+      <div className="flex items-center gap-2 border-b bg-muted/60 px-3 py-2 text-sm font-semibold">
+        {icon} {title} <Pill tone="slate" className="ml-auto">{count}</Pill>
       </div>
       <div className="divide-y">{children}</div>
     </div>

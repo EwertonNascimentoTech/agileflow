@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { ArrowDown, ArrowUp, Eye, EyeOff, LayoutGrid, Loader2, Plus, Save, Trash2 } from "lucide-react"
+import { ArrowDown, ArrowUp, Eye, EyeOff, LayoutGrid, ListOrdered, Loader2, Plus, Save, Trash2 } from "lucide-react"
 
 import { projetosApi, type CardFieldKey, type Project, type ProjectCardAvailableField, type ProjectCardField, type ProjectFunnel } from "@/api/projetos"
 import { Button } from "@/components/ui/button"
@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyState } from "@/components/EmptyState"
+import { Card, PageHeader, Pill, SectionCard } from "@/components/ds"
 import { toast } from "@/lib/toast"
 
 const CUSTOM_PREFIX = "form:"
@@ -142,108 +143,138 @@ export default function ProjectCardLayoutConfigPage() {
     }
   }
 
-  if (loading) return <Skeleton className="h-72 w-full" />
+  const header = (
+    <PageHeader
+      icon={LayoutGrid}
+      color="#2563EB"
+      crumbs={[{ label: "Configurações", to: "/app/modules/projetos/config" }, { label: "Layout do card" }]}
+      title="Layout do card"
+      description={
+        <>
+          O layout é definido <strong>por kanban</strong>: escolha o projeto e o funil, defina o que aparece nos cards, a ordem e os rótulos.
+        </>
+      }
+    />
+  )
+
+  if (loading) {
+    return (
+      <div className="w-full space-y-5">
+        {header}
+        <Skeleton className="h-72 w-full rounded-2xl" />
+      </div>
+    )
+  }
+
+  const visibleCount = fields.filter((f) => f.is_visible).length
 
   return (
-    <div className="w-full space-y-4">
-      <div>
-        <h2 className="text-lg font-bold">Layout do card</h2>
-        <p className="text-sm text-muted-foreground">
-          O layout é definido <strong>por kanban</strong>: escolha o projeto e o funil, defina o que aparece nos cards, a ordem e os rótulos.
-        </p>
-      </div>
+    <div className="w-full space-y-5">
+      {header}
 
-      <div className="flex flex-wrap gap-3">
-        <div>
-          <p className="mb-1 text-[11px] font-semibold text-muted-foreground">Projeto</p>
-          <Select value={projectId} onValueChange={setProjectId}>
-            <SelectTrigger className="h-9 w-56"><SelectValue placeholder="Selecione" /></SelectTrigger>
-            <SelectContent>
-              {projects.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+      <Card className="p-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="block space-y-1">
+            <span className="text-xs text-muted-foreground">Projeto</span>
+            <Select value={projectId} onValueChange={setProjectId}>
+              <SelectTrigger className="h-10 w-56 bg-background"><SelectValue placeholder="Selecione" /></SelectTrigger>
+              <SelectContent>
+                {projects.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </label>
+          <label className="block space-y-1">
+            <span className="text-xs text-muted-foreground">Kanban (funil)</span>
+            <Select value={funnelId} onValueChange={setFunnelId}>
+              <SelectTrigger className="h-10 w-56 bg-background"><SelectValue placeholder="Selecione" /></SelectTrigger>
+              <SelectContent>
+                {funnels.map((f) => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </label>
         </div>
-        <div>
-          <p className="mb-1 text-[11px] font-semibold text-muted-foreground">Kanban (funil)</p>
-          <Select value={funnelId} onValueChange={setFunnelId}>
-            <SelectTrigger className="h-9 w-56"><SelectValue placeholder="Selecione" /></SelectTrigger>
-            <SelectContent>
-              {funnels.map((f) => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+      </Card>
 
       {!funnelId ? (
-        <EmptyState icon={LayoutGrid} title="Selecione um kanban" description="Escolha o projeto e o funil para configurar o layout dos cards." />
+        <Card>
+          <EmptyState icon={LayoutGrid} title="Selecione um kanban" description="Escolha o projeto e o funil para configurar o layout dos cards." />
+        </Card>
       ) : loadingFields ? (
-        <Skeleton className="h-72 w-full" />
+        <Skeleton className="h-72 w-full rounded-2xl" />
       ) : (
         <>
-          <div className="space-y-2">
-            {fields.map((f, idx) => (
-              <div
-                key={f.field_key}
-                className={`grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-md border p-2 ${f.is_visible ? "" : "opacity-60"}`}
-              >
-                <div className="flex flex-col">
-                  <button type="button" onClick={() => move(idx, -1)} disabled={idx === 0} className="text-muted-foreground hover:text-foreground disabled:opacity-30">
-                    <ArrowUp size={14} />
-                  </button>
-                  <button type="button" onClick={() => move(idx, 1)} disabled={idx === fields.length - 1} className="text-muted-foreground hover:text-foreground disabled:opacity-30">
-                    <ArrowDown size={14} />
-                  </button>
-                </div>
-                <div className="min-w-0">
-                  <Input value={f.label} onChange={(e) => patch(f.field_key, { label: e.target.value })} className="h-8 text-sm" />
-                  <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                    {isCustomKey(f.field_key) ? "Campo personalizado do formulário" : (HINTS[f.field_key] ?? f.field_key)}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                    {f.is_visible ? <Eye size={14} /> : <EyeOff size={14} />}
-                    <Switch checked={f.is_visible} onCheckedChange={(v) => patch(f.field_key, { is_visible: v })} />
-                  </label>
-                  {isCustomKey(f.field_key) && (
-                    <button
-                      type="button"
-                      onClick={() => removeField(f.field_key)}
-                      className="text-muted-foreground hover:text-destructive"
-                      title="Remover campo personalizado do layout"
-                    >
-                      <Trash2 size={14} />
+          <SectionCard
+            title="Campos do card"
+            subtitle="Ordem, rótulo e visibilidade de cada informação no card do quadro."
+            icon={ListOrdered}
+            right={<Pill tone="blue">{visibleCount} de {fields.length} visíveis</Pill>}
+            flush
+          >
+            <ul className="divide-y">
+              {fields.map((f, idx) => (
+                <li
+                  key={f.field_key}
+                  className={`grid grid-cols-[auto_1fr_auto] items-center gap-3 px-5 py-3 transition-colors hover:bg-muted/40 ${f.is_visible ? "" : "opacity-60"}`}
+                >
+                  <div className="flex flex-col">
+                    <button type="button" onClick={() => move(idx, -1)} disabled={idx === 0} className="text-muted-foreground hover:text-foreground disabled:opacity-30">
+                      <ArrowUp size={14} />
                     </button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
+                    <button type="button" onClick={() => move(idx, 1)} disabled={idx === fields.length - 1} className="text-muted-foreground hover:text-foreground disabled:opacity-30">
+                      <ArrowDown size={14} />
+                    </button>
+                  </div>
+                  <div className="min-w-0">
+                    <Input value={f.label} onChange={(e) => patch(f.field_key, { label: e.target.value })} className="h-9 text-sm" />
+                    <p className="mt-1 truncate text-xs text-muted-foreground">
+                      {isCustomKey(f.field_key) ? "Campo personalizado do formulário" : (HINTS[f.field_key] ?? f.field_key)}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                      {f.is_visible ? <Eye size={14} /> : <EyeOff size={14} />}
+                      <Switch checked={f.is_visible} onCheckedChange={(v) => patch(f.field_key, { is_visible: v })} />
+                    </label>
+                    {isCustomKey(f.field_key) && (
+                      <button
+                        type="button"
+                        onClick={() => removeField(f.field_key)}
+                        className="text-muted-foreground hover:text-destructive"
+                        title="Remover campo personalizado do layout"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
 
-          <div className="flex flex-wrap items-end gap-2 rounded-md border border-dashed p-3">
-            <div className="min-w-0 flex-1">
-              <p className="mb-1 text-[11px] font-semibold text-muted-foreground">
-                <Plus size={12} className="mr-1 inline" />
-                Adicionar campo personalizado
+            <div className="space-y-2 border-t bg-muted/40 px-5 py-4">
+              <label className="block space-y-1">
+                <span className="flex items-center gap-1 text-sm font-semibold">
+                  <Plus size={14} />
+                  Adicionar campo personalizado
+                </span>
+                <Select value={addKey} onValueChange={addCustomField} disabled={availableToAdd.length === 0}>
+                  <SelectTrigger className="h-10 w-full bg-background sm:w-72">
+                    <SelectValue placeholder={availableToAdd.length === 0 ? "Nenhum campo disponível" : "Selecione para adicionar…"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableToAdd.map((a) => (
+                      <SelectItem key={a.field_key} value={a.field_key}>{a.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
+              <p className="text-xs text-muted-foreground">
+                Os campos personalizados vêm dos formulários dos tipos de demanda deste kanban (ex.: “Requisitante”). O valor preenchido em cada card aparecerá no quadro.
               </p>
-              <Select value={addKey} onValueChange={addCustomField} disabled={availableToAdd.length === 0}>
-                <SelectTrigger className="h-9 w-full sm:w-72">
-                  <SelectValue placeholder={availableToAdd.length === 0 ? "Nenhum campo disponível" : "Selecione para adicionar…"} />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableToAdd.map((a) => (
-                    <SelectItem key={a.field_key} value={a.field_key}>{a.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
-          </div>
-          <p className="text-[11px] text-muted-foreground">
-            Os campos personalizados vêm dos formulários dos tipos de demanda deste kanban (ex.: “Requisitante”). O valor preenchido em cada card aparecerá no quadro.
-          </p>
+          </SectionCard>
 
-          <Button onClick={() => void save()} disabled={saving}>
-            {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Salvar layout deste kanban
+          <Button className="h-10 gap-1.5" onClick={() => void save()} disabled={saving}>
+            {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} Salvar layout deste kanban
           </Button>
         </>
       )}

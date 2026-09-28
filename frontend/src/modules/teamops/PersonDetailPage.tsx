@@ -2,14 +2,11 @@ import { useEffect, useMemo, useState } from "react"
 import { FirstAccessLinkButton } from "@/components/FirstAccessLinkButton"
 import { AllocationSplitBar, allocationSplit } from "@/modules/teamops/AllocationSplit"
 import { useNavigate, useParams } from "react-router-dom"
-import { ArrowLeft, Plus, Trash2, Pencil, UserMinus } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Skeleton } from "@/components/ui/skeleton"
 import {
-  Tabs, TabsContent, TabsList, TabsTrigger,
-} from "@/components/ui/tabs"
+  Briefcase, Building2, CalendarOff, Clock, FileText, KeyRound, Layers, Network, Plus, Trash2, Pencil, UserMinus,
+} from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
@@ -19,6 +16,11 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { EmptyState } from "@/components/EmptyState"
+import {
+  DetailHeader, DetailTabs, Field, KpiCount, KpiPerson, KpiRow, KpiText, Pill, SectionCard, TABLE,
+  type MenuAction, type TabDef, type Tone,
+} from "@/components/ds"
 import {
   teamopsApi,
   PERSON_STATUS_LABELS,
@@ -28,16 +30,31 @@ import {
   personAreasLabel,
   personPosLabel,
   type Absence,
+  type AbsenceStatus,
   type AbsenceType,
   type Area,
   type Person,
   type PersonStack,
+  type PersonStatus,
   type Stack,
   type StackLevel,
 } from "@/api/teamops"
 import { PersonFormDialog } from "./PersonFormDialog"
 import { useAuth } from "@/contexts/AuthContext"
 import { canManageTeamopsPeople } from "@/lib/permissions"
+
+type PersonTab = "org" | "stacks" | "absences"
+
+// Selos (Pill do design system do Portal): mesmas cores dos antigos Badges.
+const STATUS_TONE: Record<PersonStatus, Tone> = { ativo: "emerald", ferias: "amber", afastado: "amber", desligado: "red" }
+const ABSENCE_TONE: Record<AbsenceStatus, Tone> = { aprovada: "emerald", recusada: "red", pendente: "amber", cancelada: "slate" }
+
+const DL = "grid gap-x-6 gap-y-4 sm:grid-cols-2"
+
+/** "2026-08-01" → "01/08/2026" (sem passar por Date, para não virar o dia no fuso). */
+function fmtYmd(value: string | null | undefined): string | null {
+  return value ? value.slice(0, 10).split("-").reverse().join("/") : null
+}
 
 export default function PersonDetailPage() {
   const { user } = useAuth()
@@ -54,6 +71,7 @@ export default function PersonDetailPage() {
   const [stacks, setStacks] = useState<Stack[]>([])
   const [absenceTypes, setAbsenceTypes] = useState<AbsenceType[]>([])
   const [areas, setAreas] = useState<Area[]>([])
+  const [tab, setTab] = useState<PersonTab>("org")
 
   async function refresh() {
     if (!personId) return
@@ -83,165 +101,208 @@ export default function PersonDetailPage() {
 
   if (loading || !person) {
     return (
-      <div className="space-y-4 p-6">
-        <Skeleton className="h-12 w-1/3" />
-        <Skeleton className="h-40" />
+      <div className="space-y-5 p-4">
+        <Skeleton className="h-20 w-2/3 rounded-xl" />
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+          {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-[74px] rounded-xl" />)}
+        </div>
+        <Skeleton className="h-72 rounded-2xl" />
       </div>
     )
   }
 
-  return (
-    <div className="space-y-4 p-6">
-      <div className="flex items-center justify-between">
-        <Button variant="ghost" size="sm" onClick={() => navigate("/app/modules/teamops/people")}>
-          <ArrowLeft className="mr-2 h-4 w-4" /> Voltar
-        </Button>
-        {canManage && (
-          <div className="flex gap-2">
-            {person.status === "ativo" && (
-              <FirstAccessLinkButton
-                personName={person.full_name}
-                generate={() => teamopsApi.personFirstAccessLink(person.id)}
-              />
-            )}
-            <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
-              <Pencil className="mr-2 h-4 w-4" /> Editar
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-              onClick={async () => {
-                if (!confirm(`Excluir permanentemente "${person.full_name}"?\n\nEsta ação remove a pessoa do sistema e desfaz seus vínculos no organograma. Ausências e stacks vinculadas também serão removidas.`)) return
-                try {
-                  await teamopsApi.deletePerson(person.id)
-                  navigate("/app/modules/teamops/people")
-                } catch (err: any) {
-                  alert(err?.response?.data?.detail ?? "Erro ao excluir.")
-                }
-              }}
-            >
-              <UserMinus className="mr-2 h-4 w-4" /> Excluir
-            </Button>
-          </div>
-        )}
-      </div>
+  async function removePerson() {
+    if (!person) return
+    if (!confirm(`Excluir permanentemente "${person.full_name}"?\n\nEsta ação remove a pessoa do sistema e desfaz seus vínculos no organograma. Ausências e stacks vinculadas também serão removidas.`)) return
+    try {
+      await teamopsApi.deletePerson(person.id)
+      navigate("/app/modules/teamops/people")
+    } catch (err: any) {
+      alert(err?.response?.data?.detail ?? "Erro ao excluir.")
+    }
+  }
 
-      <Card>
-        <CardHeader>
-          <div className="flex flex-col gap-1">
-            <CardTitle className="text-2xl">{person.full_name}</CardTitle>
-            <CardDescription>
-              {person.position?.name ?? "—"} · {person.email}
-            </CardDescription>
+  const actions: MenuAction[] = canManage
+    ? [
+        { label: "Editar", icon: Pencil, onClick: () => setEditing(true) },
+        { label: "Excluir", icon: UserMinus, onClick: () => void removePerson() },
+      ]
+    : []
+  const tabs: TabDef<PersonTab>[] = [
+    { value: "org", label: "Organização", icon: Network },
+    { value: "stacks", label: `Stacks (${personStacks.length})`, icon: Layers },
+    { value: "absences", label: `Ausências (${absences.length})`, icon: CalendarOff },
+  ]
+  const posLabel = personPosLabel(person)
+
+  return (
+    <div className="space-y-5 p-4">
+      <DetailHeader
+        crumbs={[{ label: "Pessoas", to: "/app/modules/teamops/people" }, { label: person.full_name }]}
+        icon="Users"
+        color="#0891B2"
+        title={person.full_name}
+        badge={
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Pill tone={STATUS_TONE[person.status]} dot>{PERSON_STATUS_LABELS[person.status]}</Pill>
+            {person.access_level !== "none" && (
+              <Pill tone={person.user_active === false ? "slate" : "blue"}>
+                Com acesso{person.user_active === false ? " (inativo)" : ""}
+              </Pill>
+            )}
           </div>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 gap-4 text-sm md:grid-cols-4">
-            <div>
-              <p className="text-xs text-muted-foreground">Status</p>
-              <Badge variant={person.status === "ativo" ? "success" : person.status === "desligado" ? "destructive" : "warning"}>
-                {PERSON_STATUS_LABELS[person.status]}
-              </Badge>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Área</p>
-              <p className="font-medium">{personAreasLabel(person)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Vínculo</p>
-              <p className="font-medium">{EMPLOYMENT_TYPE_LABELS[person.employment_type]}</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Carga</p>
-              <p className="font-medium">
-                {person.daily_hours}h/dia · {person.weekly_hours}h/sem
-              </p>
-              <div className="mt-1.5">
+        }
+        description={<>{person.position?.name ?? "—"} · {person.email}</>}
+        updatedAt={person.updated_at ?? null}
+        actions={actions}
+      />
+
+      <KpiRow className="sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+        <KpiText icon={Building2} value={<span title={personAreasLabel(person)}>{personAreasLabel(person)}</span>} label="Área" />
+        <KpiText icon={Briefcase} value={EMPLOYMENT_TYPE_LABELS[person.employment_type]} label="Vínculo" />
+        <KpiText icon={Clock} value={`${person.daily_hours}h/dia · ${person.weekly_hours}h/sem`} label="Carga" />
+        <KpiPerson name={person.manager_person?.full_name} role="Superior imediato" />
+        <KpiCount icon={Layers} value={personStacks.length} label="Stacks" onClick={() => setTab("stacks")} active={tab === "stacks"} />
+        <KpiCount
+          icon={CalendarOff} value={absences.length} label="Ausências" tone="violet"
+          onClick={() => setTab("absences")} active={tab === "absences"}
+        />
+      </KpiRow>
+
+      <DetailTabs tabs={tabs} value={tab} onChange={setTab} />
+
+      {tab === "org" && (
+        <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+          <div className="min-w-0 space-y-4">
+            <SectionCard
+              title="Organização"
+              icon={Network}
+              right={canManage ? (
+                <Button variant="outline" className="h-9 gap-1.5" onClick={() => setEditing(true)}>
+                  <Pencil size={14} /> Editar
+                </Button>
+              ) : undefined}
+            >
+              <dl className={DL}>
+                <Field label="Cargo">{person.position?.name ?? "—"}</Field>
+                <Field label="Área">{personAreasLabel(person)}</Field>
+                <Field label="PO vinculado">{posLabel}</Field>
+                <Field label="Referência técnica">{person.tech_reference_person?.full_name ?? "—"}</Field>
+                <Field label="Superior imediato">{person.manager_person?.full_name ?? "—"}</Field>
+                <Field label="Data de entrada">{fmtYmd(person.start_date) ?? "—"}</Field>
+              </dl>
+            </SectionCard>
+
+            {person.payroll && (
+              <SectionCard
+                title="Dados da folha"
+                icon={FileText}
+                subtitle={
+                  <>
+                    Do Genus, no 1º login pelo IDigital
+                    {person.payroll.fetched_at && ` em ${fmtYmd(person.payroll.fetched_at)}`}.
+                  </>
+                }
+              >
+                <dl className={DL}>
+                  <Field label="Matrícula">{person.payroll.employee_number ?? "—"}</Field>
+                  <Field label="Cargo funcional">{person.payroll.job_title ?? "—"}</Field>
+                  <Field label="Departamento">{person.payroll.department ?? "—"}</Field>
+                  <Field label="Função de confiança">{person.payroll.trust_role ?? "—"}</Field>
+                  <Field label="Organização">{person.payroll.organization ?? "—"}</Field>
+                </dl>
+              </SectionCard>
+            )}
+          </div>
+
+          <div className="min-w-0 space-y-4">
+            <SectionCard title="Jornada" icon={Clock} subtitle="Divisão entre Projetos, Operação Assistida e Chamados (o que sobra).">
+              <dl className={DL}>
+                <Field label="Carga">{person.daily_hours}h/dia · {person.weekly_hours}h/sem</Field>
+                <Field label="Vínculo">{EMPLOYMENT_TYPE_LABELS[person.employment_type]}</Field>
+              </dl>
+              <div className="mt-4 border-t pt-4">
                 <AllocationSplitBar
                   split={allocationSplit(person.daily_hours, person.project_allocation_pct, person.assisted_ops_allocation_pct)}
                 />
               </div>
-            </div>
+            </SectionCard>
+
+            <SectionCard
+              title="Acesso ao sistema"
+              icon={KeyRound}
+              right={canManage && person.status === "ativo" ? (
+                <FirstAccessLinkButton
+                  personName={person.full_name}
+                  generate={() => teamopsApi.personFirstAccessLink(person.id)}
+                />
+              ) : undefined}
+            >
+              <dl className={DL}>
+                <Field label="Acesso">
+                  {person.access_level === "none" ? (
+                    <span className="font-normal text-muted-foreground">Sem acesso (só ficha)</span>
+                  ) : (
+                    <Pill tone={person.user_active === false ? "slate" : "blue"}>
+                      Com acesso{person.user_active === false ? " (inativo)" : ""}
+                    </Pill>
+                  )}
+                </Field>
+              </dl>
+              <p className="mt-3 text-xs text-muted-foreground">
+                O que a pessoa pode fazer vem do cargo — Configurações → Cargos → Acesso.
+              </p>
+            </SectionCard>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      )}
 
-      <Tabs defaultValue="org">
-        <TabsList>
-          <TabsTrigger value="org">Organização</TabsTrigger>
-          <TabsTrigger value="stacks">Stacks ({personStacks.length})</TabsTrigger>
-          <TabsTrigger value="absences">Ausências ({absences.length})</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="org" className="mt-4">
-          <Card>
-            <CardContent className="grid gap-4 p-6 md:grid-cols-2">
-              <Field label="Cargo" value={person.position?.name} />
-              <Field label="Área" value={personAreasLabel(person)} />
-              <Field label="PO vinculado" value={personPosLabel(person)} />
-              <Field label="Referência técnica" value={person.tech_reference_person?.full_name} />
-              <Field label="Superior imediato" value={person.manager_person?.full_name} />
-              <Field label="Data de entrada" value={person.start_date ?? null} />
-            </CardContent>
-          </Card>
-          {person.payroll && (
-            <Card className="mt-4">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Dados da folha</CardTitle>
-                <CardDescription>
-                  Do Genus, no 1º login pelo IDigital
-                  {person.payroll.fetched_at && ` em ${person.payroll.fetched_at.slice(0, 10).split("-").reverse().join("/")}`}.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-4 md:grid-cols-2">
-                <Field label="Matrícula" value={person.payroll.employee_number} />
-                <Field label="Cargo funcional" value={person.payroll.job_title} />
-                <Field label="Departamento" value={person.payroll.department} />
-                <Field label="Função de confiança" value={person.payroll.trust_role} />
-                <Field label="Organização" value={person.payroll.organization} />
-              </CardContent>
-            </Card>
-          )}
-        </TabsContent>
-
-        <TabsContent value="stacks" className="mt-4">
-          <div className="mb-3 flex justify-end">
-            <Button size="sm" onClick={() => setShowStackDlg(true)}>
-              <Plus className="mr-2 h-4 w-4" /> Adicionar stack
+      {tab === "stacks" && (
+        <SectionCard
+          title="Stacks"
+          icon={Layers}
+          subtitle="Competências mapeadas da pessoa."
+          right={
+            <Button className="h-9 gap-1.5" onClick={() => setShowStackDlg(true)}>
+              <Plus size={14} /> Adicionar stack
             </Button>
-          </div>
+          }
+          flush
+        >
           {personStacks.length === 0 ? (
-            <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">
-              Nenhuma stack vinculada. Adicione para mapear competências.
-            </CardContent></Card>
+            <EmptyState icon={Layers} title="Nenhuma stack vinculada." description="Adicione para mapear competências." compact />
           ) : (
-            <Card><CardContent className="p-0">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
+            <div className={TABLE.wrap}>
+              <table className={TABLE.table}>
+                <thead className={TABLE.thead}>
                   <tr>
-                    <th className="px-4 py-2 text-left">Stack</th>
-                    <th className="px-4 py-2 text-left">Nível</th>
-                    <th className="px-4 py-2 text-left">Experiência</th>
-                    <th className="px-4 py-2 text-left">Referência</th>
-                    <th className="px-4 py-2"></th>
+                    <th className={TABLE.thFirst}>Stack</th>
+                    <th className={TABLE.th}>Nível</th>
+                    <th className={TABLE.th}>Experiência</th>
+                    <th className={TABLE.th}>Referência</th>
+                    <th className={TABLE.th}><span className="sr-only">Ações</span></th>
                   </tr>
                 </thead>
                 <tbody>
                   {personStacks.map((ps) => (
-                    <tr key={ps.id} className="border-t">
-                      <td className="px-4 py-2 font-medium">
-                        {ps.stack?.name}
-                        {ps.stack?.is_critical && <Badge variant="warning" className="ml-2">Crítica</Badge>}
+                    <tr key={ps.id} className={TABLE.tr}>
+                      <td className={`${TABLE.tdFirst} font-medium`}>
+                        <span className="inline-flex flex-wrap items-center gap-2">
+                          {ps.stack?.name}
+                          {ps.stack?.is_critical && <Pill tone="amber">Crítica</Pill>}
+                        </span>
                       </td>
-                      <td className="px-4 py-2">{STACK_LEVEL_LABELS[ps.level]}</td>
-                      <td className="px-4 py-2">{ps.years_experience} ano(s)</td>
-                      <td className="px-4 py-2">
-                        {ps.is_reference ? <Badge variant="success">Sim</Badge> : "—"}
+                      <td className={TABLE.td}>{STACK_LEVEL_LABELS[ps.level]}</td>
+                      <td className={`${TABLE.td} tabular-nums text-muted-foreground`}>{ps.years_experience} ano(s)</td>
+                      <td className={TABLE.td}>
+                        {ps.is_reference ? <Pill tone="emerald" dot>Sim</Pill> : <span className="text-muted-foreground">—</span>}
                       </td>
-                      <td className="px-4 py-2 text-right">
+                      <td className={`${TABLE.td} text-right`}>
                         <Button
                           variant="ghost" size="sm"
+                          className="text-muted-foreground hover:text-destructive"
+                          title="Remover stack"
+                          aria-label={`Remover ${ps.stack?.name ?? "stack"}`}
                           onClick={async () => {
                             if (!confirm("Remover esta stack da pessoa?")) return
                             await teamopsApi.deletePersonStack(person.id, ps.id)
@@ -255,48 +316,58 @@ export default function PersonDetailPage() {
                   ))}
                 </tbody>
               </table>
-            </CardContent></Card>
+            </div>
           )}
-        </TabsContent>
+        </SectionCard>
+      )}
 
-        <TabsContent value="absences" className="mt-4">
-          <div className="mb-3 flex justify-end">
-            <Button size="sm" onClick={() => setShowAbsenceDlg(true)}>
-              <Plus className="mr-2 h-4 w-4" /> Registrar ausência
+      {tab === "absences" && (
+        <SectionCard
+          title="Ausências"
+          icon={CalendarOff}
+          subtitle="Férias, afastamentos e demais ausências da pessoa."
+          right={
+            <Button className="h-9 gap-1.5" onClick={() => setShowAbsenceDlg(true)}>
+              <Plus size={14} /> Registrar ausência
             </Button>
-          </div>
+          }
+          flush
+        >
           {absences.length === 0 ? (
-            <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">
-              Nenhuma ausência registrada.
-            </CardContent></Card>
+            <EmptyState icon={CalendarOff} title="Nenhuma ausência registrada." compact />
           ) : (
-            <Card><CardContent className="p-0">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
+            <div className={TABLE.wrap}>
+              <table className={TABLE.table}>
+                <thead className={TABLE.thead}>
                   <tr>
-                    <th className="px-4 py-2 text-left">Tipo</th>
-                    <th className="px-4 py-2 text-left">Período</th>
-                    <th className="px-4 py-2 text-left">Status</th>
+                    <th className={TABLE.thFirst}>Tipo</th>
+                    <th className={TABLE.th}>Período</th>
+                    <th className={TABLE.th}>Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {absences.map((a) => (
-                    <tr key={a.id} className="border-t">
-                      <td className="px-4 py-2">{a.absence_type?.name ?? "—"}</td>
-                      <td className="px-4 py-2">{a.start_date} → {a.end_date}</td>
-                      <td className="px-4 py-2">
-                        <Badge variant={a.status === "aprovada" ? "success" : a.status === "recusada" ? "destructive" : "secondary"}>
-                          {ABSENCE_STATUS_LABELS[a.status]}
-                        </Badge>
+                    <tr key={a.id} className={TABLE.tr}>
+                      <td className={TABLE.tdFirst}>
+                        <span className="inline-flex items-center gap-2">
+                          {a.absence_type?.color && (
+                            <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: a.absence_type.color }} aria-hidden />
+                          )}
+                          {a.absence_type?.name ?? "—"}
+                        </span>
+                      </td>
+                      <td className={`${TABLE.td} whitespace-nowrap tabular-nums`}>{fmtYmd(a.start_date)} → {fmtYmd(a.end_date)}</td>
+                      <td className={TABLE.td}>
+                        <Pill tone={ABSENCE_TONE[a.status]} dot>{ABSENCE_STATUS_LABELS[a.status]}</Pill>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </CardContent></Card>
+            </div>
           )}
-        </TabsContent>
-      </Tabs>
+        </SectionCard>
+      )}
 
       {canManage && editing && (
         <PersonFormDialog
@@ -325,15 +396,6 @@ export default function PersonDetailPage() {
           onSaved={() => { setShowAbsenceDlg(false); refresh() }}
         />
       )}
-    </div>
-  )
-}
-
-function Field({ label, value }: { label: string; value?: string | null }) {
-  return (
-    <div>
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="font-medium">{value ?? "—"}</p>
     </div>
   )
 }

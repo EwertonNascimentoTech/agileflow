@@ -1,6 +1,8 @@
 import { NavLink, Outlet } from "react-router-dom"
+import { Settings } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import { cn } from "@/lib/utils"
+import { PageHeader } from "@/components/ds"
 import { settingsNav } from "@/modules/crm/admin/settingsNav"
 
 export default function SettingsLayout() {
@@ -9,15 +11,17 @@ export default function SettingsLayout() {
   const visible = settingsNav.filter(t => !t.adminOnly || isAdmin)
 
   return (
-    <div className="flex min-h-0 h-full flex-col gap-4">
-      <div>
-        <h1 className="text-2xl font-bold">Configurações</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Gerencie sua conta, empresa, usuários e funções.</p>
-      </div>
+    <div className="flex min-h-0 h-full flex-col gap-5">
+      <PageHeader
+        icon={Settings}
+        color="#4F46E5"
+        title="Configurações"
+        description="Gerencie sua conta, empresa, usuários e funções."
+      />
 
-      {/* Sub-nav */}
-      <div className="relative">
-        <div className="flex overflow-x-auto scrollbar-none border-b -mx-4 px-4 md:-mx-6 md:px-6 gap-0">
+      {/* Sub-nav: abas sublinhadas no mesmo desenho do DetailTabs do Portal */}
+      <nav className="border-b" aria-label="Configurações">
+        <div className="-mb-px flex overflow-x-auto scrollbar-none">
           {visible.map(({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
@@ -25,19 +29,19 @@ export default function SettingsLayout() {
               end={to === "/app/settings"}
               className={({ isActive }) =>
                 cn(
-                  "flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 -mb-px whitespace-nowrap shrink-0 transition-colors",
+                  "inline-flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-4 py-3 text-sm font-medium transition-colors",
                   isActive
                     ? "border-primary text-primary"
-                    : "border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/40"
+                    : "border-transparent text-muted-foreground hover:border-border hover:text-foreground"
                 )
               }
             >
-              <Icon size={14} />
+              <Icon size={16} />
               {label}
             </NavLink>
           ))}
         </div>
-      </div>
+      </nav>
 
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         <Outlet />
