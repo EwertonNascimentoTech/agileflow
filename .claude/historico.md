@@ -14,6 +14,14 @@ Modelo:
 
 ---
 
+## 2026-09-27 — Kanban Soluções com IA: nome do solicitante no card
+
+- **Pedido:** o card do kanban de Soluções com IA deve mostrar o nome de quem pediu.
+- **Causa:** o campo "Solicitante" do layout do card nasce oculto (padrão pensado para Projetos/Programas) e estava oculto nesse funil; o avatar que aparecia era o do Responsável.
+- **Feito:** `ProjectCardFieldService.ensure_seeded` agora força campos obrigatórios por tipo de kanban (descrição na User Story; `requester` no funil `is_ai_solutions`), no seed e ao carregar/salvar o layout. Nome vem de `created_by` (= quem pediu, cliente ou equipe).
+- **Testado:** kanban Soluções com IA no navegador: IA-0001 Carlos David Veras Silver, IA-0002 Fernando Romeiro, IA-0003 Doris Carvalho.
+- **Arquivos:** `backend/app/modules/projetos/service.py`.
+
 ## 2026-09-27 — Todos os módulos ativos no design system do Portal do Cliente
 
 - **Pedido:** aplicar o design system do Portal em todos os módulos, exceto Produtos e Clientes (Portal), que já estavam.

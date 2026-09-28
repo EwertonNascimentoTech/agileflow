@@ -115,6 +115,7 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 - Apresentação exige Responsável (PO) — vínculo do campo padrão. Formulário por etapa: seção editável na sua etapa e visível depois.
 - Não entra em Capacidade nem no PO Sync/Status Report. Avisos de coordenação vão só aos cargos coordenador, administrativo_coordenacao, coord_de_arq_dev_e_sustenta_o.
 
+- Card do kanban Soluções com IA sempre mostra o Solicitante (quem pediu, `created_by` = `opened_by_user_id`): `ProjectCardFieldService.ensure_seeded` força `requester` visível no funil `is_ai_solutions` (mesmo esquema da descrição na User Story); desligar no Layout do card não vale.
 ## Permissões sensíveis (auditoria 2026-09-23)
 
 - Admin da empresa só atribui `company_admin`/`company_user` e Funções do próprio tenant; `super_admin` só via /super-admin.

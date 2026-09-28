@@ -12515,12 +12515,19 @@ class ProjectCardFieldService:
 
     @staticmethod
     async def ensure_seeded(db: AsyncSession, funnel_id: uuid.UUID) -> None:
-        funnel_name = (
+        funnel = (
             await db.execute(
-                select(ProjectFunnel.name).where(ProjectFunnel.id == funnel_id)
+                select(ProjectFunnel.name, ProjectFunnel.is_ai_solutions).where(ProjectFunnel.id == funnel_id)
             )
-        ).scalar_one_or_none()
-        force_us_description = ProjectTaskService._is_user_story_funnel_name(funnel_name)
+        ).one_or_none()
+        funnel_name = funnel.name if funnel else None
+        # Campos obrigatórios por tipo de kanban (sempre visíveis, mesmo que um layout antigo
+        # os tenha salvo como ocultos): descrição na User Story; quem pediu em Soluções com IA.
+        forced: set[str] = set()
+        if ProjectTaskService._is_user_story_funnel_name(funnel_name):
+            forced.add("description")
+        if funnel is not None and funnel.is_ai_solutions:
+            forced.add("requester")
 
         res = await db.execute(
             select(ProjectCardField.field_key).where(ProjectCardField.funnel_id == funnel_id)
@@ -12530,25 +12537,24 @@ class ProjectCardFieldService:
         for row in _CARD_FIELDS_SEED:
             if row["field_key"] not in existing:
                 values = dict(row)
-                if force_us_description and values["field_key"] == "description":
+                if values["field_key"] in forced:
                     values["is_visible"] = True
                 db.add(ProjectCardField(funnel_id=funnel_id, **values))
                 changed = True
 
-        # Descrição é parte obrigatória do card de User Story. Mesmo que um layout
-        # antigo tenha salvo o campo como oculto, reativa ao carregar/salvar o layout.
-        if force_us_description and "description" in existing:
-            description_row = (
+        # Reativa ao carregar/salvar o layout.
+        for key in forced & existing:
+            forced_row = (
                 await db.execute(
                     select(ProjectCardField).where(
                         ProjectCardField.funnel_id == funnel_id,
-                        ProjectCardField.field_key == "description",
+                        ProjectCardField.field_key == key,
                     )
                 )
             ).scalar_one_or_none()
-            if description_row is not None and not description_row.is_visible:
-                description_row.is_visible = True
-                description_row.updated_at = datetime.utcnow()
+            if forced_row is not None and not forced_row.is_visible:
+                forced_row.is_visible = True
+                forced_row.updated_at = datetime.utcnow()
                 changed = True
 
         if changed:
