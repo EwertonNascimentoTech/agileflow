@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-28 — Nova logo e favicon (AgileFlow com (infinito))
+
+- **Pedido:** trocar a logo pela anexada (AgileFlow, "Agile" #164194 + "Flow" #008bd2) e o ícone pelo favicon anexado ((infinito)).
+- **Feito:** `frontend/src/assets/brand/` com `agileflow-logo.png` (colorida), `agileflow-logo-light.png` ("Agile" em branco, para fundo escuro) e `agileflow-mark.png` ((infinito)); componente `components/BrandLogo.tsx` (`BrandLogo` variant auto/color/light — auto troca no tema escuro — e `BrandMark`). O selo "A" + texto saiu de: menu lateral ((infinito)), login, primeiro acesso, esqueci a senha, retorno do IDigital, Portal do Cliente (versão clara) e Super Admin. Favicons em `public/`: `favicon.png` (64), `favicon.ico` (16/32/48), `apple-touch-icon.png` (180), `icon-512.png`; `favicon.svg` (padrão do Vite) removido; `index.html` aponta para os novos.
+- **Conferido:** navegador claro/escuro (login, esqueci a senha, app, Portal), favicons HTTP 200, sem erro de console.
+- **Arquivos:** `frontend/index.html`, `frontend/public/*`, `frontend/src/assets/brand/*`, `components/BrandLogo.tsx`, `modules/{crm,company}/shell/ModuleRail.tsx`, `modules/auth/{LoginPage,SsoCallbackPage,FirstAccessPage,ForgotPasswordPage}.tsx`, `modules/portal/ClientPortalLayout.tsx`, `modules/super-admin/AdminLayout.tsx`.
+
 ## 2026-09-28 — Capacidade: quem está de férias aparece, sinalizado
 
 - **Pedido:** usuários de férias devem aparecer na capacidade, com a informação de que estão de férias.

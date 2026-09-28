@@ -6,6 +6,7 @@ import { useAuth } from "@/contexts/AuthContext"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { ssoHandleCallback } from "@/lib/sso"
+import { BrandLogo } from "@/components/BrandLogo"
 
 /** Retorno do IDigital: troca o login do IdP pela sessão AgileFlow e segue para a área do usuário. */
 export default function SsoCallbackPage() {
@@ -29,9 +30,8 @@ export default function SsoCallbackPage() {
   return (
     <div className="flex min-h-screen items-center justify-center p-6">
       <div className="w-full max-w-sm space-y-6 text-center">
-        <div className="flex items-center justify-center gap-2">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-lg font-bold text-primary-foreground">A</span>
-          <span className="text-xl font-bold tracking-tight">AgileFlow</span>
+        <div className="flex justify-center">
+          <BrandLogo className="h-10" />
         </div>
         {error ? (
           <div className="space-y-4 text-left">

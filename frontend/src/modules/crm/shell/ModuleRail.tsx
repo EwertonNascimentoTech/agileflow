@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom"
 import type { ElementType } from "react"
 import { cn } from "@/lib/utils"
+import { BrandMark } from "@/components/BrandLogo"
 
 export type RailItem = {
   key: string
@@ -62,8 +63,8 @@ export function ModuleRail({
 
   return (
     <nav className="rail-surface flex w-16 shrink-0 flex-col items-center gap-1 py-3">
-      <span className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-primary font-bold text-primary-foreground">
-        A
+      <span className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-white/10" title="AgileFlow">
+        <BrandMark className="w-8" />
       </span>
       {top.map(renderItem)}
       <div className="flex-1" />

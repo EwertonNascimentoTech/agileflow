@@ -14,6 +14,7 @@ import { ClientModeBanner } from "@/modules/portal/ClientModeBanner"
 import { PortalAssistant } from "@/modules/portal/PortalAssistant"
 import { PortalTour } from "@/modules/portal/tour/PortalTour"
 import { startPortalTour } from "@/modules/portal/tour/tourSteps"
+import { BrandLogo } from "@/components/BrandLogo"
 
 // `client`: só para quem é cliente (ocorrências e soluções são ações do cliente; a equipe em
 // "modo cliente" vê o acompanhamento dos projetos).
@@ -32,10 +33,9 @@ function SideNav({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <div className="flex h-full flex-col">
       <Link to="/portal" onClick={onNavigate} className="flex items-center gap-2.5 px-5 py-5" aria-label="Portal do Cliente — início">
-        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-base font-bold">A</span>
         <span className="leading-none">
-          <span className="block text-base font-bold tracking-tight">AgileFlow</span>
-          <span className="mt-0.5 block text-[11px] text-white/60">Portal do Cliente</span>
+          <BrandLogo variant="light" className="h-7" />
+          <span className="mt-1.5 block text-[11px] text-white/60">Portal do Cliente</span>
         </span>
       </Link>
       <nav data-tour="portal-nav" className="flex-1 space-y-1 px-3" aria-label="Navegação do portal">

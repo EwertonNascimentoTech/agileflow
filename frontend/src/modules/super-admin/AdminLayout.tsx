@@ -8,6 +8,7 @@ import { useAuth } from "@/contexts/AuthContext"
 import { useTheme } from "@/contexts/ThemeContext"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { BrandLogo } from "@/components/BrandLogo"
 
 const navItems = [
   { to: "/admin/dashboard", icon: LayoutDashboard, label: "Dashboard" },
@@ -54,12 +55,9 @@ export default function AdminLayout() {
       >
         {/* Logo */}
         <div className="flex h-14 items-center gap-2.5 px-4 border-b border-border">
-          <div className="h-9 w-9 rounded-xl bg-primary text-primary-foreground flex items-center justify-center font-bold">
-            A
-          </div>
           <div className="leading-tight">
-            <p className="text-sm font-semibold">AgileFlow</p>
-            <p className="text-[10px] text-muted-foreground">Super Admin</p>
+            <BrandLogo className="h-6" />
+            <p className="mt-0.5 text-[10px] text-muted-foreground">Super Admin</p>
           </div>
           <Button
             variant="ghost"
@@ -132,7 +130,10 @@ export default function AdminLayout() {
           <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(true)}>
             <Menu size={18} />
           </Button>
-          <span className="font-semibold text-sm">AgileFlow Admin</span>
+          <span className="flex items-center gap-1.5">
+            <BrandLogo className="h-5" />
+            <span className="text-sm font-semibold">Admin</span>
+          </span>
         </header>
 
         {/* Conteúdo */}

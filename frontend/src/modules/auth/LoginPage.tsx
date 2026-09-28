@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { IDigitalButton } from "@/modules/auth/IDigitalButton"
 import { loadSsoConfig } from "@/lib/sso"
+import { BrandLogo } from "@/components/BrandLogo"
 
 const schema = z.object({
   email: z.string().email("E-mail inválido"),
@@ -69,11 +70,8 @@ export default function LoginPage() {
       {/* Formulário */}
       <div className="flex items-center justify-center p-8">
         <div className="w-full max-w-sm">
-          <div className="mb-8 flex items-center gap-2">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-lg font-bold text-primary-foreground">
-              A
-            </span>
-            <span className="text-xl font-bold tracking-tight">AgileFlow</span>
+          <div className="mb-8">
+            <BrandLogo className="h-10" />
           </div>
 
           <h1 className="text-2xl font-bold tracking-tight">Bem-vindo de volta</h1>
