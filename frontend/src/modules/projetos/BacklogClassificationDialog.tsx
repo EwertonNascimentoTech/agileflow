@@ -29,7 +29,8 @@ type ClassificationResult = {
 interface Props {
   open: boolean
   task: ProjectTask | null
-  mode?: "backlog_exit" | "late"
+  /** change_product: card já classificado, o PO troca só o produto (tipo e resposta de IA ficam). */
+  mode?: "backlog_exit" | "late" | "change_product"
   onCancel: () => void
   onConfirm: (result: ClassificationResult) => Promise<void> | void
 }
@@ -227,8 +228,12 @@ export function BacklogClassificationDialog({ open, task, mode = "backlog_exit",
     !!task?.linked_release_id &&
     selectedProductId === task?.linked_product_id
 
+  const changingProduct = mode === "change_product"
+
   const canConfirm = useMemo(() => {
     if (!classification || moduleError) return false
+    // Trocar produto: só confirma com outro produto (ou um produto novo).
+    if (changingProduct && productMode === "select" && selectedProductId === task?.linked_product_id) return false
     // Pergunta IA é obrigatória para os três tipos.
     if (iaAssisted === null) return false
     if (askProcurement && procurementRequired === null) return false
@@ -238,7 +243,7 @@ export function BacklogClassificationDialog({ open, task, mode = "backlog_exit",
     }
     // melhoria: produto existente + release (existente ou nova).
     return !!selectedProductId && (reuseExistingRelease || relVersao.trim().length >= 1)
-  }, [classification, iaAssisted, moduleError, askProcurement, procurementRequired, allowNewProduct, productMode, newName, selectedProductId, relVersao, reuseExistingRelease])
+  }, [classification, iaAssisted, moduleError, askProcurement, procurementRequired, allowNewProduct, productMode, newName, selectedProductId, relVersao, reuseExistingRelease, changingProduct, task?.linked_product_id])
 
   async function handleConfirm() {
     if (!task || !classification || iaAssisted === null) return
@@ -299,14 +304,17 @@ export function BacklogClassificationDialog({ open, task, mode = "backlog_exit",
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            {mode === "late" ? "Classificar projeto" : "Classificar card para sair do backlog"}
+            {changingProduct ? "Trocar produto vinculado" : mode === "late" ? "Classificar projeto" : "Classificar card para sair do backlog"}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            {mode === "late"
-              ? "Este projeto avançou sem classificação. Vincule-o ao portfólio de Produtos."
-              : "Para avançar este card é preciso classificá-lo e vinculá-lo ao portfólio de Produtos."}
+            {changingProduct
+              ? `O projeto continua como ${CLASSIFICATIONS.find((c) => c.value === classification)?.label ?? "classificado"}. `
+                + "Escolha o produto certo: a troca fica registrada nos comentários do card."
+              : mode === "late"
+                ? "Este projeto avançou sem classificação. Vincule-o ao portfólio de Produtos."
+                : "Para avançar este card é preciso classificá-lo e vinculá-lo ao portfólio de Produtos."}
           </p>
 
           {moduleError && (
@@ -315,8 +323,8 @@ export function BacklogClassificationDialog({ open, task, mode = "backlog_exit",
             </div>
           )}
 
-          {/* Tipo de classificação */}
-          <div className="space-y-1.5">
+          {/* Tipo de classificação (na troca de produto o tipo não muda) */}
+          <div className={changingProduct ? "hidden" : "space-y-1.5"}>
             <Label>Tipo</Label>
             <div className="flex gap-2">
               {CLASSIFICATIONS.map((c) => (
@@ -339,8 +347,8 @@ export function BacklogClassificationDialog({ open, task, mode = "backlog_exit",
             )}
           </div>
 
-          {/* Pergunta IA — obrigatória para os três tipos */}
-          {classification && (
+          {/* Pergunta IA — obrigatória para os três tipos (na troca de produto, só se faltar) */}
+          {classification && (!changingProduct || task?.ia_assisted == null) && (
             <div className="space-y-1.5">
               <Label>Será feito com IA ou auxílio de IA?</Label>
               <div className="flex gap-2">
@@ -528,7 +536,7 @@ export function BacklogClassificationDialog({ open, task, mode = "backlog_exit",
           <Button variant="ghost" onClick={onCancel} disabled={saving}>Cancelar</Button>
           <Button onClick={() => void handleConfirm()} disabled={!canConfirm || saving}>
             {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Classificar e avançar
+            {changingProduct ? "Trocar produto" : "Classificar e avançar"}
           </Button>
         </DialogFooter>
       </DialogContent>

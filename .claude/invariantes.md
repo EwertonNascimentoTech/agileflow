@@ -53,6 +53,7 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 - Produto externo + “Ser? contratado? = Sim” trava a origem e nasce card no kanban Contratar. N?o duplicar.
 - Ganhou ? libera origem + contrato no Produto. Perdeu ? origem Cancelado.
 - Aprovado em Prospectar converte em Projeto ou Programa (`origin_task_id` + `planning_kind`). N?o perder o v?nculo Origem ? Criados.
+- Troca do produto vinculado de um projeto já classificado (botão "Trocar" em Dados do Projeto, kanban Projetos e Programas; PO/gestão): barrada (400) quando o card tem contratação (`procurement_task_id` ou `procurement_locked`), porque o card de Contratar copiou o produto; a troca vira comentário interno no card (`ProjectTaskService._record_product_change`).
 
 ## Deploy
 

@@ -14,6 +14,14 @@ Modelo:
 
 ---
 
+## 2026-09-28 — PO troca o produto vinculado ao projeto
+
+- **Pedido:** dar ao PO a possibilidade de mudar o produto vinculado ao projeto no kanban Projetos e Programas.
+- **Antes:** o produto só era escolhido na classificação (saída do backlog ou classificação tardia); depois ficava somente leitura em "Dados do Projeto".
+- **Feito:** botão "Trocar" ao lado de "Produto vinculado"/"Produto" no drawer, para quem edita o card (o PO, responsável pelo card-raiz, ou a gestão — mesma regra da API), em card-raiz de projeto/programa já classificado e com a pergunta de IA respondida. Abre o `BacklogClassificationDialog` em modo `change_product`: o tipo não muda, a pergunta de IA só aparece se faltar, só confirma com outro produto (ou produto novo); melhoria pede release do novo produto; produto externo em implantação/melhoria pergunta "Será contratado?" (sim = fluxo de Contratação normal). Backend (`ProjectTaskService.update` -> `_record_product_change`): com contratação no kanban Contratar a troca é barrada (400, botão desabilitado com o motivo); a troca vira comentário interno "Produto vinculado alterado: A -> B" (com aviso da release antiga, em melhoria).
+- **Conferido:** navegador no card "Saúde Assistencial" (Sesi Saúde (VITA) -> Metrolims -> de volta), comentário registrado, sem erro de console; API recusa a troca em card com contratação e não altera nada; teste `test_troca_produto.py`. Card de teste restaurado (produto, updated_at, comentários apagados).
+- **Arquivos:** `backend/app/modules/projetos/service.py`; `backend/tests/test_troca_produto.py`; `frontend/src/modules/projetos/BacklogClassificationDialog.tsx`, `ProjectTaskDrawer.tsx`.
+
 ## 2026-09-28 — Nova logo e favicon (AgileFlow com (infinito))
 
 - **Pedido:** trocar a logo pela anexada (AgileFlow, "Agile" #164194 + "Flow" #008bd2) e o ícone pelo favicon anexado ((infinito)).

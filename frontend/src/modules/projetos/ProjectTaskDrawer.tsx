@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { ArrowUpRight, CalendarRange, Check, ChevronDown, Clock, FileText, GitBranch, Link as LinkIcon, Loader2, Pencil, Plus, Trash2, X } from "lucide-react"
+import { AlertTriangle, ArrowUpRight, CalendarRange, Check, ChevronDown, ClipboardList, Clock, FileText, GitBranch, History, Link as LinkIcon, Loader2, Lock, MessageSquare, Network, Pencil, Plus, Trash2, X } from "lucide-react"
 import { formatApiDateTime } from "@/lib/utils"
 
 import { projetosApi, STATUS_HISTORY_SOURCE_LABELS, type CardClassification, type PriorityMode, type ProjectDemandFormField, type ProjectDemandFormSection, type ProjectDemandType, type ProjectFunnel, type ProjectStatus, type ProjectStatusDefaultFormLink, type ProjectStatusSectionLink, type ProjectTask, type ProjectTaskComment, type ProjectTaskStatusHistory, type ProjectUpload, type ScheduleLockState, type UsChecklistItem } from "@/api/projetos"
 import { ScheduleLockBanner } from "@/modules/projetos/ScheduleLockBanner"
 import { produtosApi } from "@/api/produtos"
-import { Badge } from "@/components/ui/badge"
+import { Field, Notice, Pill, type Tone } from "@/components/ds"
 import { teamopsApi } from "@/api/teamops"
 import type { User } from "@/types"
 import { Button } from "@/components/ui/button"
@@ -47,6 +47,7 @@ import { AssistedOpsRitesSection } from "@/modules/projetos/AssistedOpsRitesSect
 import { AssistedOpsIndicatorsSection } from "@/modules/projetos/AssistedOpsIndicatorsSection"
 import { AssistedOpsClosureSection } from "@/modules/projetos/AssistedOpsClosureSection"
 import { ProjectClientsSection } from "@/modules/projetos/ProjectClientsSection"
+import { DrawerSection } from "@/modules/projetos/CollapsibleFormSection"
 import { AttachmentField, type Attachment } from "@/components/AttachmentField"
 import { fmtEstimatedHours, isFeatureOrUsKanbanFunnel, isPlanningRootTask, isProjectOrProgramKanbanFunnel, isUserStoryDemandType, isUserStoryKanbanFunnel } from "@/modules/projetos/kanbanDisplay"
 
@@ -59,37 +60,61 @@ const CLASSIFICATION_LABELS: Record<CardClassification, string> = {
   melhoria: "Melhoria",
 }
 
+const SLA_PILL: Record<"breached" | "warning" | "ok", { tone: Tone; label: string }> = {
+  breached: { tone: "red", label: "SLA estourado" },
+  warning: { tone: "amber", label: "SLA em alerta" },
+  ok: { tone: "emerald", label: "No prazo" },
+}
+
 function ClassificationReadonlyField({
   label,
   value,
   href,
   onOpen,
+  onChange,
+  changeBlockedReason,
 }: {
   label: string
   value: string | null
   href?: string | null
   onOpen?: (href: string) => void
+  /** Troca do valor (ex.: o PO trocando o produto vinculado). */
+  onChange?: () => void
+  /** Troca indisponível: botão desabilitado com o motivo no título. */
+  changeBlockedReason?: string | null
 }) {
   const canOpen = !!href && !!value
   return (
-    <div className="space-y-1.5">
-      <Label className="text-xs font-medium">{label}</Label>
-      <div className="flex items-center gap-1 rounded-md border bg-muted/30 pl-3 pr-1 py-1 text-sm text-foreground">
-        <span className="min-w-0 flex-1 truncate py-1">{value ?? "—"}</span>
+    <Field label={label}>
+      <span className="inline-flex max-w-full items-center gap-1">
+        <span className="min-w-0 truncate">{value ?? "—"}</span>
         {canOpen && (
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            className="h-7 w-7 shrink-0 text-muted-foreground hover:text-primary"
+            className="h-6 w-6 shrink-0 text-muted-foreground hover:text-primary"
             title={`Abrir ${label.toLowerCase()}`}
             onClick={() => onOpen?.(href!)}
           >
             <ArrowUpRight size={14} />
           </Button>
         )}
-      </div>
-    </div>
+        {onChange && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-6 shrink-0 gap-1 px-1.5 text-xs text-muted-foreground hover:text-primary"
+            title={changeBlockedReason ?? `Trocar ${label.toLowerCase()}`}
+            disabled={!!changeBlockedReason}
+            onClick={onChange}
+          >
+            <Pencil size={12} /> Trocar
+          </Button>
+        )}
+      </span>
+    </Field>
   )
 }
 
@@ -191,6 +216,7 @@ export function ProjectTaskDrawer({
   const [oaDevsRefresh, setOaDevsRefresh] = useState(0)
   const [oaPrereqsStatusId, setOaPrereqsStatusId] = useState<string | null>(null)
   const [classifyOpen, setClassifyOpen] = useState(false)
+  const [changeProductOpen, setChangeProductOpen] = useState(false)
   const [statusConvPrompt, setStatusConvPrompt] = useState<{ newStatusId: string; typeName: string; name: string } | null>(null)
   const [assigneeMenuOpen, setAssigneeMenuOpen] = useState(false)
   const [assigneeSearch, setAssigneeSearch] = useState("")
@@ -373,6 +399,18 @@ export function ProjectTaskDrawer({
     !currentStatusConfig.is_initial &&
     isPlanningRootTask(task?.planning_kind) &&
     isProjectOrProgramKanbanFunnel(kanbanFunnelName)
+  // Trocar o produto de um projeto já classificado: quem edita o card (o PO, responsável pelo
+  // card-raiz, ou a gestão) no kanban Projetos e Programas. Com contratação, a troca é barrada.
+  const canChangeProduct =
+    !readOnly &&
+    !!task?.card_classification &&
+    !!task?.linked_product_id &&
+    !missingIaAnswer &&
+    isPlanningRootTask(task?.planning_kind) &&
+    isProjectOrProgramKanbanFunnel(kanbanFunnelName)
+  const productChangeBlocked = task?.procurement_task_id || task?.procurement_locked
+    ? "Há contratação no kanban Contratar ligada a este produto. Fale com a coordenação para trocar."
+    : null
   const statusLabel = currentStatus?.name ?? "Sem etapa"
   const assigneeCandidates = users.filter((u) => {
     const q = assigneeSearch.trim().toLowerCase()
@@ -540,7 +578,7 @@ export function ProjectTaskDrawer({
     const typeName = demandTypeName(t.demand_type_id)
     const canClick = clickable && t.id !== task?.id
     return (
-      <div className="flex items-center justify-between gap-2 rounded-md border bg-card px-2.5 py-1.5">
+      <div className="flex items-center justify-between gap-2 rounded-lg border bg-card px-3 py-2">
         <div
           className={`flex min-w-0 items-center gap-2 ${canClick ? "cursor-pointer rounded hover:text-primary" : ""}`}
           {...(canClick
@@ -550,7 +588,7 @@ export function ProjectTaskDrawer({
           <FileText size={14} className="shrink-0 text-muted-foreground" />
           <div className="min-w-0">
             <p className={`truncate text-sm font-medium ${canClick ? "hover:underline" : ""}`}>{t.title}</p>
-            <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
               {typeName && <span>{typeName}</span>}
               {st && (
                 <>
@@ -569,11 +607,11 @@ export function ProjectTaskDrawer({
             type="button"
             variant="ghost"
             size="icon"
-            className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
+            className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
             onClick={onRemove}
             title="Remover vínculo"
           >
-            <X size={13} />
+            <X size={14} />
           </Button>
         )}
       </div>
@@ -894,6 +932,36 @@ export function ProjectTaskDrawer({
     }
   }
 
+  async function confirmProductChange(result: {
+    iaAssisted: boolean
+    productId: string
+    releaseId: string | null
+    procurementRequired: boolean | null
+  }) {
+    if (!task) return
+    try {
+      const updated = await projetosApi.updateTask(projectId, task.id, {
+        linked_product_id: result.productId,
+        linked_release_id: result.releaseId,
+        ...(task.ia_assisted == null ? { ia_assisted: result.iaAssisted } : {}),
+        ...(result.procurementRequired !== null ? { procurement_required: result.procurementRequired } : {}),
+      })
+      onSaved(updated)
+      setChangeProductOpen(false)
+      // O registro da troca entra como comentário no card.
+      projetosApi.listTaskComments(projectId, task.id).then(setComments).catch(() => null)
+      toast.success(
+        result.procurementRequired
+          ? "Produto trocado — card na Contratação e demanda criada em Contratar."
+          : "Produto trocado. A troca ficou registrada nos comentários.",
+      )
+    } catch (err) {
+      const e = err as { response?: { data?: { detail?: unknown } } }
+      const d = e.response?.data?.detail
+      toast.error(typeof d === "string" ? d : "Não foi possível trocar o produto.")
+    }
+  }
+
   async function confirmLateClassification(result: {
     classification: CardClassification
     iaAssisted: boolean
@@ -982,12 +1050,11 @@ export function ProjectTaskDrawer({
             </div>
             <span className="spacer" />
             {showEstimatedHoursHeader ? (
-              <span
-                className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 text-xs text-muted-foreground"
-                title="Horas estimadas"
-              >
-                <Clock size={14} />
-                {fmtEstimatedHours(task.estimated_hours) ?? "—"}
+              <span title="Horas estimadas">
+                <Pill className="tabular-nums">
+                  <Clock size={13} />
+                  {fmtEstimatedHours(task.estimated_hours) ?? "—"}
+                </Pill>
               </span>
             ) : (
               <button
@@ -1008,7 +1075,7 @@ export function ProjectTaskDrawer({
           </div>
 
           <div className="drawer-body">
-          <div className="space-y-5">
+          <div className="space-y-4">
             {scheduleLock && task && (
               <ScheduleLockBanner
                 projectId={projectId}
@@ -1018,28 +1085,30 @@ export function ProjectTaskDrawer({
               />
             )}
             {task.procurement_locked && (
-              <div className="rounded-md border border-orange-300 bg-orange-50 px-3 py-2 text-sm text-orange-900">
-                <div className="font-medium">Aguardando contratação</div>
-                <p className="mt-0.5 text-xs text-orange-800/80">
-                  Este card está travado na raia Contratação até o fluxo Contratar ser concluído ou cancelado.
-                </p>
+              <Notice tone="amber" icon={Lock}>
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium">Aguardando contratação</p>
+                  <p className="mt-0.5 text-xs opacity-90">
+                    Este card está travado na raia Contratação até o fluxo Contratar ser concluído ou cancelado.
+                  </p>
+                </div>
                 {task.procurement_task_id && (
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="mt-2 h-7 border-orange-300 text-orange-900 hover:bg-orange-100"
+                    className="h-8 gap-1 bg-background"
                     onClick={() => onOpenTask?.(task.procurement_task_id!)}
                   >
-                    <ArrowUpRight size={12} className="mr-1" />
+                    <ArrowUpRight size={13} />
                     Abrir card de contratação
                   </Button>
                 )}
-              </div>
+              </Notice>
             )}
             {task.origin_task_id && demandTypes.find((d) => d.id === task.demand_type_id)?.is_procurement && (
-              <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
-                <div className="text-xs text-muted-foreground">Card de origem</div>
+              <Notice tone="slate" icon={LinkIcon}>
+                <span className="text-xs">Card de origem</span>
                 <Button
                   type="button"
                   variant="link"
@@ -1048,40 +1117,36 @@ export function ProjectTaskDrawer({
                 >
                   Voltar ao card de origem
                 </Button>
-              </div>
+              </Notice>
             )}
             {/* Cabeçalho: tipo, estado, título e meta (estilo Azure DevOps) */}
-            <div className="space-y-2 border-b border-border pb-3">
+            <div className="space-y-2 border-b border-border pb-4">
               <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline" className="gap-1 uppercase tracking-wide">
+                <Pill>
                   <FileText size={12} />
                   {demandTypeName(task.demand_type_id) ?? "Card"}
-                </Badge>
+                </Pill>
                 {task.procurement_locked && (
-                  <Badge className="bg-orange-600 text-[10px] text-white hover:bg-orange-600">
+                  <Pill tone="amber" dot>
                     Aguardando contratação
-                  </Badge>
+                  </Pill>
                 )}
-                {task.sla_state && task.sla_state !== "none" && (
-                  <Badge variant={task.sla_state === "breached" ? "destructive" : "secondary"} className="text-[10px]">
-                    {task.sla_state === "breached" ? "SLA estourado" : task.sla_state === "warning" ? "SLA em alerta" : "No prazo"}
-                  </Badge>
-                )}
+                {task.sla_state && task.sla_state !== "none" && (() => {
+                  const sla = SLA_PILL[task.sla_state === "breached" ? "breached" : task.sla_state === "warning" ? "warning" : "ok"]
+                  return <Pill tone={sla.tone} dot>{sla.label}</Pill>
+                })()}
                 {task.card_classification && (
-                  <Badge variant="secondary" className="text-[10px]">
+                  <Pill>
                     {CLASSIFICATION_LABELS[task.card_classification]}
-                  </Badge>
+                  </Pill>
                 )}
                 {planningTarget && (
                   <span className="inline-flex items-center gap-1">
-                    <Badge
-                      className="text-[10px] text-white"
-                      style={{ backgroundColor: planningTarget.planning_kind === "programa" ? "#7c3aed" : "#0ea5e9" }}
-                    >
+                    <Pill tone={planningTarget.planning_kind === "programa" ? "violet" : "blue"} dot>
                       {planningTarget.planning_kind === "programa" ? "Programa" : "Projeto"}
-                    </Badge>
+                    </Pill>
                     {planningTarget.planning_kind === "programa" && planningProgramName && (
-                      <Badge variant="outline" className="text-[10px]">{planningProgramName}</Badge>
+                      <Pill>{planningProgramName}</Pill>
                     )}
                     {canEditPlanning && (
                       <Button
@@ -1098,11 +1163,11 @@ export function ProjectTaskDrawer({
                   </span>
                 )}
                 {isUserStoryCard && (task.us_checklist?.length || task.percent_complete > 0) && (
-                  <Badge variant="outline" className="text-[10px] tabular-nums">
+                  <Pill tone="blue" className="tabular-nums">
                     {task.percent_complete}% concluído
-                  </Badge>
+                  </Pill>
                 )}
-                <span className="ml-auto text-[11px] text-muted-foreground">
+                <span className="ml-auto text-xs text-muted-foreground">
                   Atualizado em {new Date(task.updated_at).toLocaleDateString("pt-BR")}
                 </span>
               </div>
@@ -1113,7 +1178,7 @@ export function ProjectTaskDrawer({
                     onChange={(e) => setTitle(e.target.value)}
                     rows={2}
                     readOnly={readOnly}
-                    className="min-h-0 resize-none border-0 px-0 text-lg font-bold shadow-none focus-visible:ring-0"
+                    className="min-h-0 resize-none border-0 bg-transparent px-0 text-xl font-bold tracking-tight shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
                     placeholder={defaultFieldsByKey.get("title")?.label ?? "Título do card"}
                   />
                 ) : (
@@ -1121,12 +1186,12 @@ export function ProjectTaskDrawer({
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     readOnly={readOnly}
-                    className="h-auto border-0 px-0 text-lg font-bold shadow-none focus-visible:ring-0"
+                    className="h-auto border-0 bg-transparent px-0 text-xl font-bold tracking-tight shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
                     placeholder={defaultFieldsByKey.get("title")?.label ?? "Título do card"}
                   />
                 )
               )}
-              <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+              <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
                 {/* Ocorrência: o responsável vem do "Assumir" (inicia as horas úteis e avisa o
                     cliente) — no cabeçalho ele só é exibido. */}
                 {defaultFieldsByKey.get("assigned_to") && isDefaultFieldShown(defaultFieldsByKey.get("assigned_to")!, defaultFormLinks) && ((readOnly || isOccurrence) ? (
@@ -1141,18 +1206,18 @@ export function ProjectTaskDrawer({
                     <button
                       type="button"
                       onClick={() => { setAssigneeMenuOpen((o) => !o); setStatusMenuOpen(false) }}
-                      className="inline-flex items-center gap-1.5 rounded-full border border-transparent px-1.5 py-0.5 hover:border-border hover:bg-muted"
+                      className="inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-foreground transition-colors hover:border-primary/40 hover:bg-muted"
                     >
                       <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
                         {assignedUser ? initials(assignedUser.full_name) : "?"}
                       </span>
-                      <span className={assignedUser ? "" : "italic"}>{assigneeLabel}</span>
+                      <span className={assignedUser ? "" : "italic text-muted-foreground"}>{assigneeLabel}</span>
                       <ChevronDown size={12} />
                     </button>
                     {assigneeMenuOpen && (
                       <>
                         <div className="fixed inset-0 z-10" onClick={() => setAssigneeMenuOpen(false)} />
-                        <div className="absolute left-0 z-20 mt-1 w-72 rounded-md border bg-popover shadow-md">
+                        <div className="absolute left-0 z-20 mt-1 w-72 rounded-lg border bg-popover shadow-lg">
                           <div className="border-b p-1.5">
                             <Input
                               value={assigneeSearch}
@@ -1184,13 +1249,13 @@ export function ProjectTaskDrawer({
                                 </span>
                                 <span className="min-w-0">
                                   <span className="block truncate text-sm text-foreground">{u.full_name}</span>
-                                  <span className="block truncate text-[11px] text-muted-foreground">{u.email}</span>
+                                  <span className="block truncate text-xs text-muted-foreground">{u.email}</span>
                                 </span>
                                 {assignedTo === u.id && <Check size={14} className="ml-auto shrink-0 text-primary" />}
                               </button>
                             ))}
                             {assigneeCandidates.length === 0 && (
-                              <p className="px-2 py-1.5 text-[11px] italic text-muted-foreground/70">Ninguém encontrado.</p>
+                              <p className="px-2 py-1.5 text-xs text-muted-foreground">Ninguém encontrado.</p>
                             )}
                           </div>
                         </div>
@@ -1219,7 +1284,7 @@ export function ProjectTaskDrawer({
                       type="button"
                       onClick={() => { setStatusMenuOpen((o) => !o); setAssigneeMenuOpen(false) }}
                       disabled={changingStatus}
-                      className="inline-flex items-center gap-1.5 rounded-full border border-transparent px-1.5 py-0.5 hover:border-border hover:bg-muted disabled:opacity-60"
+                      className="inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-foreground transition-colors hover:border-primary/40 hover:bg-muted disabled:opacity-60"
                     >
                       <span
                         className="flex h-5 w-5 items-center justify-center rounded-full"
@@ -1233,7 +1298,7 @@ export function ProjectTaskDrawer({
                     {statusMenuOpen && (
                       <>
                         <div className="fixed inset-0 z-10" onClick={() => setStatusMenuOpen(false)} />
-                        <div className="absolute left-0 z-20 mt-1 w-64 rounded-md border bg-popover shadow-md">
+                        <div className="absolute left-0 z-20 mt-1 w-64 rounded-lg border bg-popover shadow-lg">
                           <div className="max-h-60 overflow-y-auto p-1">
                             {currentFunnelStatuses.map((s) => (
                               <button
@@ -1253,7 +1318,7 @@ export function ProjectTaskDrawer({
                               </button>
                             ))}
                             {currentFunnelStatuses.length === 0 && (
-                              <p className="px-2 py-1.5 text-[11px] italic text-muted-foreground/70">Nenhuma etapa disponível.</p>
+                              <p className="px-2 py-1.5 text-xs text-muted-foreground">Nenhuma etapa disponível.</p>
                             )}
                           </div>
                         </div>
@@ -1339,49 +1404,45 @@ export function ProjectTaskDrawer({
                 if (patch.anexos !== undefined) setAnexos(patch.anexos ?? [])
               }
               return (
-                <div className="space-y-3 border-t border-border pt-4">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="h-4 w-1 rounded-full bg-primary" />
-                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">
-                      Dados do Projeto
-                    </p>
-                  </div>
+                <DrawerSection title="Dados do Projeto" icon={ClipboardList}>
                   <div className="space-y-4">
                     {canLateClassify && (
-                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300/60 bg-amber-50 px-3 py-2">
-                        <p className="text-xs text-amber-900">
+                      <Notice tone="amber" icon={AlertTriangle}>
+                        <p className="min-w-0 flex-1">
                           {missingIaAnswer
                             ? "Informe se este projeto será feito com IA ou auxílio de IA."
                             : "Este projeto ainda não foi classificado no portfólio de Produtos."}
                         </p>
-                        <Button type="button" size="sm" variant="outline" className="h-8" onClick={() => setClassifyOpen(true)}>
+                        <Button type="button" size="sm" variant="outline" className="h-8 bg-background" onClick={() => setClassifyOpen(true)}>
                           {missingIaAnswer ? "Responder agora" : "Classificar agora"}
                         </Button>
-                      </div>
+                      </Notice>
                     )}
                     {hasClassification && classification && (
-                      <div className="space-y-3">
-                        <div className="grid gap-3 md:grid-cols-2">
+                      <dl className="grid gap-x-6 gap-y-3 rounded-lg bg-muted/40 p-3 sm:grid-cols-2">
+                        <ClassificationReadonlyField
+                          label="Tipo"
+                          value={CLASSIFICATION_LABELS[classification]}
+                        />
+                        {(classification === "desenvolvimento" || classification === "implantacao") && (
                           <ClassificationReadonlyField
-                            label="Tipo"
-                            value={CLASSIFICATION_LABELS[classification]}
+                            label="Produto vinculado"
+                            value={linkedProductName}
+                            href={task.linked_product_id ? `/app/modules/produtos/produtos/${task.linked_product_id}` : null}
+                            onOpen={(path) => navigate(path)}
+                            onChange={canChangeProduct ? () => setChangeProductOpen(true) : undefined}
+                            changeBlockedReason={productChangeBlocked}
                           />
-                          {(classification === "desenvolvimento" || classification === "implantacao") && (
-                            <ClassificationReadonlyField
-                              label="Produto vinculado"
-                              value={linkedProductName}
-                              href={task.linked_product_id ? `/app/modules/produtos/produtos/${task.linked_product_id}` : null}
-                              onOpen={(path) => navigate(path)}
-                            />
-                          )}
-                        </div>
+                        )}
                         {classification === "melhoria" && (
-                          <div className="grid gap-3 md:grid-cols-2">
+                          <>
                             <ClassificationReadonlyField
                               label="Produto"
                               value={linkedProductName}
                               href={task.linked_product_id ? `/app/modules/produtos/produtos/${task.linked_product_id}` : null}
                               onOpen={(path) => navigate(path)}
+                              onChange={canChangeProduct ? () => setChangeProductOpen(true) : undefined}
+                              changeBlockedReason={productChangeBlocked}
                             />
                             <ClassificationReadonlyField
                               label="Release"
@@ -1393,7 +1454,7 @@ export function ProjectTaskDrawer({
                               }
                               onOpen={(path) => navigate(path)}
                             />
-                          </div>
+                          </>
                         )}
                         {task.ia_assisted !== null && task.ia_assisted !== undefined && (
                           <ClassificationReadonlyField
@@ -1401,7 +1462,7 @@ export function ProjectTaskDrawer({
                             value={task.ia_assisted ? "Sim" : "Não"}
                           />
                         )}
-                      </div>
+                      </dl>
                     )}
                     {groupDefaultFormFieldsIntoRows(planningFields, defaultFormLinks).map((row, rowIdx) => {
                       if (row.length === 1) {
@@ -1459,7 +1520,7 @@ export function ProjectTaskDrawer({
                       />
                     )}
                   </div>
-                </div>
+                </DrawerSection>
               )
             })()}
 
@@ -1470,19 +1531,17 @@ export function ProjectTaskDrawer({
                 .filter((f) => fieldMode(f, secMode) !== "hidden")
               if (visibleFields.length === 0) return null
               return (
-                <div key={section.id} className="space-y-3 border-t border-border pt-4">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="h-4 w-1 rounded-full bg-primary" />
-                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">
-                      {section.title}
-                    </p>
-                    {secMode === "visible" && (
-                      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">somente leitura</span>
-                    )}
-                    {secMode === "required" && (
-                      <span className="text-[10px] uppercase tracking-wide text-destructive">obrigatória</span>
-                    )}
-                  </div>
+                <DrawerSection
+                  key={section.id}
+                  title={section.title}
+                  icon={FileText}
+                  badges={
+                    <>
+                      {secMode === "visible" && <Pill>Somente leitura</Pill>}
+                      {secMode === "required" && <Pill tone="red">Obrigatória</Pill>}
+                    </>
+                  }
+                >
                   <div className="space-y-3">
                     {groupIntoRows(
                       visibleFields,
@@ -1500,7 +1559,7 @@ export function ProjectTaskDrawer({
                                 {field.label}
                                 {isRequired && <span className="ml-0.5 text-destructive">*</span>}
                                 {isReadOnly && (
-                                  <span className="ml-2 text-[10px] uppercase tracking-wide text-muted-foreground">só leitura</span>
+                                  <span className="ml-2 text-xs font-normal text-muted-foreground">(só leitura)</span>
                                 )}
                               </Label>
                               <div className={fieldError ? "rounded-md ring-2 ring-destructive/60" : ""}>
@@ -1522,7 +1581,7 @@ export function ProjectTaskDrawer({
                                 />
                               </div>
                               {fieldError && (
-                                <p className="text-[11px] text-destructive">{fieldError}</p>
+                                <p className="text-xs text-destructive">{fieldError}</p>
                               )}
                             </div>
                           )
@@ -1530,28 +1589,24 @@ export function ProjectTaskDrawer({
                       </div>
                     ))}
                   </div>
-                </div>
+                </DrawerSection>
               )
             })}
 
             {!isOccurrence && (
-            <div className="space-y-3 border-t border-border pt-4">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="h-4 w-1 rounded-full bg-primary" />
-                  <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">
-                    Trabalho relacionado
-                  </p>
-                </div>
-                {!readOnly && (
+            <DrawerSection
+              title="Trabalho relacionado"
+              icon={Network}
+              right={
+                !readOnly && (
                   <div className="relative">
-                    <Button type="button" variant="outline" size="icon" className="h-7 w-7" onClick={() => setLinkMenuOpen((o) => !o)} title="Adicionar vínculo">
-                      <Plus size={14} />
+                    <Button type="button" variant="outline" size="icon" className="h-8 w-8" onClick={() => setLinkMenuOpen((o) => !o)} title="Adicionar vínculo">
+                      <Plus size={15} />
                     </Button>
                     {linkMenuOpen && (
                       <>
                         <div className="fixed inset-0 z-10" onClick={() => setLinkMenuOpen(false)} />
-                        <div className="absolute right-0 z-20 mt-1 w-44 rounded-md border bg-popover p-1 shadow-md">
+                        <div className="absolute right-0 z-20 mt-1 w-44 rounded-lg border bg-popover p-1 shadow-lg">
                           <button
                             type="button"
                             className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted"
@@ -1570,28 +1625,28 @@ export function ProjectTaskDrawer({
                       </>
                     )}
                   </div>
-                )}
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-3">
+                )
+              }
+            >
+              <div className="grid gap-3 sm:grid-cols-3">
                 {originTask && (
-                  <div className="space-y-1.5 rounded-md border p-3">
-                    <p className="text-[11px] font-semibold text-muted-foreground">Origem</p>
+                  <div className="space-y-1.5 rounded-lg bg-muted/40 p-3">
+                    <p className="text-xs font-medium text-muted-foreground">Origem</p>
                     {relationRow(originTask)}
                   </div>
                 )}
 
-                <div className="space-y-1.5 rounded-md border p-3">
-                  <p className="text-[11px] font-semibold text-muted-foreground">Pai</p>
+                <div className="space-y-1.5 rounded-lg bg-muted/40 p-3">
+                  <p className="text-xs font-medium text-muted-foreground">Pai</p>
                   {parentTask
                     ? relationRow(parentTask, () => void handleUnlinkParent())
-                    : <p className="text-[11px] italic text-muted-foreground/70">Sem card pai.</p>}
+                    : <p className="text-sm text-muted-foreground">Sem card pai.</p>}
                 </div>
 
-                <div className="space-y-1.5 rounded-md border p-3 sm:col-span-2">
-                  <p className="text-[11px] font-semibold text-muted-foreground">Filhos ({children.length})</p>
+                <div className="space-y-1.5 rounded-lg bg-muted/40 p-3 sm:col-span-2">
+                  <p className="text-xs font-medium text-muted-foreground">Filhos ({children.length})</p>
                   {children.length === 0 ? (
-                    <p className="text-[11px] italic text-muted-foreground/70">Nenhum item filho.</p>
+                    <p className="text-sm text-muted-foreground">Nenhum item filho.</p>
                   ) : (
                     <div className="space-y-1.5">
                       {children.map((c) => {
@@ -1605,7 +1660,7 @@ export function ProjectTaskDrawer({
                               <button
                                 type="button"
                                 onClick={() => void handleSendChildToDev(c)}
-                                className="flex items-center gap-1 pl-1 text-[11px] font-medium text-primary hover:underline"
+                                className="flex items-center gap-1 pl-1 text-xs font-medium text-primary hover:underline"
                               >
                                 <ArrowUpRight size={12} /> Enviar para desenvolvimento
                               </button>
@@ -1618,8 +1673,8 @@ export function ProjectTaskDrawer({
                 </div>
 
                 {convertedCards.length > 0 && (
-                  <div className="space-y-1.5 rounded-md border p-3 sm:col-span-3">
-                    <p className="text-[11px] font-semibold text-muted-foreground">
+                  <div className="space-y-1.5 rounded-lg bg-muted/40 p-3 sm:col-span-3">
+                    <p className="text-xs font-medium text-muted-foreground">
                       Criados a partir deste ({convertedCards.length})
                     </p>
                     <div className="space-y-1">
@@ -1630,7 +1685,7 @@ export function ProjectTaskDrawer({
                   </div>
                 )}
               </div>
-            </div>
+            </DrawerSection>
             )}
 
             {task && isPlanningRootTask(task.planning_kind) && isProjectOrProgramKanbanFunnel(taskFunnelName) && (
@@ -1658,7 +1713,7 @@ export function ProjectTaskDrawer({
             )}
 
             {!readOnly && task && isPlanningRootTask(task.planning_kind) && canImportScheduleInStatus(statusLabel) && (
-              <div className="rounded-md border border-primary/20 bg-primary/5 p-3">
+              <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
                 <ScheduleImportPanel
                   projectId={projectId}
                   statuses={allStatuses}
@@ -1678,16 +1733,14 @@ export function ProjectTaskDrawer({
               <ProjectPriorityWidget taskId={task.id} mode={currentStatus?.priority_mode ?? "edit"} />
             )}
 
-            <div className="space-y-3 border-t border-border pt-4">
-              <div className="flex items-center gap-2">
-                <span className="h-4 w-1 rounded-full bg-primary" />
-                <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">
-                  Timeline de raias
-                </p>
-              </div>
-              <div className="max-h-64 overflow-y-auto space-y-0 rounded-md border p-2">
+            <DrawerSection
+              title="Timeline de raias"
+              icon={History}
+              badges={statusHistory.length > 0 && <Pill>{statusHistory.length}</Pill>}
+            >
+              <div className="max-h-64 overflow-y-auto space-y-0 pr-1">
                 {statusHistory.length === 0 ? (
-                  <p className="text-xs text-muted-foreground px-1 py-2">
+                  <p className="text-sm text-muted-foreground">
                     Nenhum movimento registrado ainda. A partir de agora, cada troca de raia aparece aqui.
                   </p>
                 ) : (
@@ -1704,13 +1757,13 @@ export function ProjectTaskDrawer({
                       return (
                         <li key={h.id} className="mb-3 last:mb-0">
                           <span className="absolute -start-[5px] mt-1.5 h-2.5 w-2.5 rounded-full border-2 border-background bg-primary" />
-                          <div className="rounded bg-muted/40 px-2.5 py-2">
+                          <div className="rounded-lg bg-muted/40 px-3 py-2">
                             <p className="text-sm font-medium leading-snug">
                               <span className="text-muted-foreground">{fromLabel}</span>
                               {" → "}
                               <span>{toLabel}</span>
                             </p>
-                            <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[11px] text-muted-foreground">
+                            <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
                               <GitBranch className="inline h-3 w-3 shrink-0" />
                               <span className="font-medium text-foreground">{who}</span>
                               <span>·</span>
@@ -1725,20 +1778,18 @@ export function ProjectTaskDrawer({
                   </ol>
                 )}
               </div>
-            </div>
+            </DrawerSection>
 
-            <div className="space-y-3 border-t border-border pt-4">
-              <div className="flex items-center gap-2">
-                <span className="h-4 w-1 rounded-full bg-primary" />
-                <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">
-                  Comentários
-                </p>
-              </div>
-              <div className="max-h-56 overflow-y-auto space-y-2 rounded-md border p-2">
+            <DrawerSection
+              title="Comentários"
+              icon={MessageSquare}
+              badges={comments.length > 0 && <Pill>{comments.length}</Pill>}
+            >
+              <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
                 {comments.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">Nenhum comentário ainda.</p>
+                  <p className="text-sm text-muted-foreground">Nenhum comentário ainda.</p>
                 ) : comments.map((c) => (
-                  <div key={c.id} className="flex gap-2 rounded bg-muted/40 p-2">
+                  <div key={c.id} className="flex gap-2.5 rounded-lg bg-muted/40 p-3">
                     <span
                       className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary"
                       title={c.author_name ?? "Sistema"}
@@ -1752,14 +1803,14 @@ export function ProjectTaskDrawer({
                           <AttachmentField value={c.anexos} onChange={() => {}} disabled />
                         </div>
                       )}
-                      <p className="text-[11px] text-muted-foreground mt-1">
+                      <p className="mt-1.5 text-xs text-muted-foreground">
                         <span className="font-medium text-foreground">{c.author_name ?? "Sistema"}</span>
                         {" · "}
                         {formatApiDateTime(c.created_at)}
                         {isOccurrence && (
-                          <span className={`ml-1.5 rounded px-1 py-0.5 text-[10px] font-medium ${c.visibility === "public" ? "bg-teal-100 text-teal-700" : "bg-muted text-muted-foreground"}`}>
+                          <Pill tone={c.visibility === "public" ? "teal" : "slate"} className="ml-1.5">
                             {c.visibility === "public" ? "visível ao cliente" : "interno"}
-                          </span>
+                          </Pill>
                         )}
                       </p>
                     </div>
@@ -1768,14 +1819,14 @@ export function ProjectTaskDrawer({
               </div>
               {clientFacingComments && (
                 <div className="space-y-2">
-                  <label className="flex items-center gap-2 text-xs">
+                  <label className="flex items-center gap-2 text-sm">
                     <input
                       type="checkbox"
                       className="h-4 w-4 rounded border-input accent-primary"
                       checked={commentPublic}
                       onChange={(e) => setCommentPublic(e.target.checked)}
                     />
-                    <span className={commentPublic ? "font-medium text-teal-700" : "text-muted-foreground"}>
+                    <span className={commentPublic ? "font-medium text-teal-700 dark:text-teal-300" : "text-muted-foreground"}>
                       {commentPublic ? "Visível ao cliente (ele é notificado)" : "Nota interna (só o time vê)"}
                     </span>
                   </label>
@@ -1789,22 +1840,28 @@ export function ProjectTaskDrawer({
                 submitting={sendingComment}
                 authorName={authUser?.full_name ?? authUser?.email ?? "Você"}
               />
-            </div>
+            </DrawerSection>
           </div>
           </div>
 
           <div className="modal-foot">
             {!readOnly && (
-              <button className="btn danger" onClick={handleDelete} disabled={removing}>
-                {removing ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />} Excluir
-              </button>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={handleDelete}
+                disabled={removing}
+              >
+                {removing ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} Excluir
+              </Button>
             )}
             <span className="spacer" />
-            <button className="btn" onClick={() => onOpenChange(false)}>Fechar</button>
+            <Button type="button" variant="outline" className="h-9" onClick={() => onOpenChange(false)}>Fechar</Button>
             {!readOnly && (
-              <button className="btn primary" onClick={handleSave} disabled={saving || !title.trim()}>
-                {saving && <Loader2 size={13} className="animate-spin" />} Salvar
-              </button>
+              <Button type="button" className="h-9 gap-1.5" onClick={handleSave} disabled={saving || !title.trim()}>
+                {saving && <Loader2 size={14} className="animate-spin" />} Salvar
+              </Button>
             )}
           </div>
         </div>
@@ -1868,7 +1925,7 @@ export function ProjectTaskDrawer({
                 </div>
               )}
               {childTypeOptions.length === 0 && (
-                <p className="text-[11px] text-destructive">
+                <p className="text-xs text-destructive">
                   O tipo deste card não aceita itens filhos. Configure em Tipos de Demanda → "Aceita como filhos".
                 </p>
               )}
@@ -1883,7 +1940,7 @@ export function ProjectTaskDrawer({
               />
               <div className="max-h-48 divide-y overflow-y-auto rounded-md border">
                 {linkCandidates.length === 0 ? (
-                  <p className="p-2 text-[11px] italic text-muted-foreground/70">
+                  <p className="p-2 text-xs text-muted-foreground">
                     {linkType === "child"
                       ? "Nenhum item compatível para ser filho deste card."
                       : "Nenhum item compatível para ser pai deste card."}
@@ -1898,7 +1955,7 @@ export function ProjectTaskDrawer({
                     <FileText size={13} className="shrink-0 text-muted-foreground" />
                     <span className="flex-1 truncate">{t.title}</span>
                     {demandTypeName(t.demand_type_id) && (
-                      <Badge variant="secondary" className="text-[10px]">{demandTypeName(t.demand_type_id)}</Badge>
+                      <Pill>{demandTypeName(t.demand_type_id)}</Pill>
                     )}
                   </button>
                 ))}
@@ -2015,6 +2072,14 @@ export function ProjectTaskDrawer({
       onConfirm={confirmLateClassification}
     />
 
+    <BacklogClassificationDialog
+      open={changeProductOpen}
+      task={task}
+      mode="change_product"
+      onCancel={() => setChangeProductOpen(false)}
+      onConfirm={confirmProductChange}
+    />
+
     <Dialog open={planningEditOpen} onOpenChange={setPlanningEditOpen}>
       <DialogContent className="max-w-md">
         <DialogHeader>
@@ -2040,7 +2105,7 @@ export function ProjectTaskDrawer({
                 </button>
               ))}
             </div>
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               Em <strong>Programa</strong>, é obrigatório vincular a um programa existente (ou cadastrar um novo).
             </p>
           </div>
@@ -2075,7 +2140,7 @@ export function ProjectTaskDrawer({
                     </SelectContent>
                   </Select>
                   {programs.length === 0 && (
-                    <p className="text-[11px] text-muted-foreground">Nenhum programa cadastrado ainda — use “Cadastrar novo”.</p>
+                    <p className="text-xs text-muted-foreground">Nenhum programa cadastrado ainda — use “Cadastrar novo”.</p>
                   )}
                 </>
               ) : (

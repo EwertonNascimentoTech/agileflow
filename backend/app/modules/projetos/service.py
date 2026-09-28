@@ -4432,6 +4432,39 @@ class ProjectTaskService:
             )
 
     @staticmethod
+    async def _record_product_change(db: AsyncSession, task: ProjectTask, new_product_id, current_user) -> None:
+        """Valida e registra (comentário interno no card) a troca do produto vinculado.
+        Com contratação no kanban Contratar a troca é barrada: o card de Contratar copiou o
+        produto e o contrato é lançado nele ao ganhar."""
+        if task.procurement_task_id or task.procurement_locked:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Este projeto tem contratação no kanban Contratar ligada ao produto atual; "
+                    "o produto não pode ser trocado por aqui. Fale com a coordenação."
+                ),
+            )
+        from html import escape
+        from app.modules.produtos.models import Product
+
+        names = {
+            pid: name for pid, name in (await db.execute(
+                select(Product.id, Product.name).where(Product.id.in_([task.linked_product_id, new_product_id]))
+            )).all()
+        }
+        if new_product_id not in names:
+            raise HTTPException(status_code=400, detail="Produto não encontrado no portfólio.")
+        old_name = escape(names.get(task.linked_product_id, "produto removido"))
+        new_name = escape(names[new_product_id])
+        extra = ""
+        if task.card_classification == "melhoria" and task.linked_release_id:
+            extra = "<p>A release criada no produto anterior continua lá; cancele no módulo Produtos se não for usada.</p>"
+        db.add(ProjectTaskComment(
+            task_id=task.id, author_id=getattr(current_user, "id", None), visibility="internal",
+            content=f"<p><strong>Produto vinculado alterado</strong>: {old_name} &rarr; {new_name}.</p>{extra}",
+        ))
+
+    @staticmethod
     async def update(
         db: AsyncSession,
         project_id: uuid.UUID,
@@ -4669,6 +4702,17 @@ class ProjectTaskService:
                     ),
                     requiring=True,
                 )
+
+        # Troca do produto de um card já vinculado (ex.: o PO corrigindo o vínculo no kanban
+        # Projetos e Programas): não desata uma contratação e fica registrada no card.
+        if (
+            "linked_product_id" in payload
+            and task.linked_product_id
+            and payload["linked_product_id"] != task.linked_product_id
+        ):
+            await ProjectTaskService._record_product_change(
+                db, task, payload["linked_product_id"], current_user,
+            )
 
         # Se inicia contratação, força a etapa Contratação (antes do setattr / hooks).
         will_start_procurement = (
