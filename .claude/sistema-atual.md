@@ -92,6 +92,10 @@ Pessoas, ?reas, cargos, organograma, stacks/compet?ncias, aus?ncias (tipos com `
 
 Telas: Dashboard, Organograma, Pessoas, Stacks, Aus?ncias, Config.
 
+Stacks: catálogo por categoria com uso (pessoas/produtos), editar e excluir; `GET /teamops/stacks/usage`, `DELETE /teamops/stacks/{id}?replace_with=` (substituta assume produtos e competências); categoria só exclui vazia.
+
+Minhas competências (`/app/modules/teamops/competencias`, menu para quem tem teamops.view ou absence.request): formulário por stack ativa com nível 1-4 + outras tecnologias; `GET/PUT /teamops/me/competencias`. Gestores: aba "Respostas do formulário" em Stacks (`GET /teamops/competencias/respostas`, `POST /teamops/competencias/lembrete`, `GET/PUT /teamops/persons/{id}/competencias`).
+
 ## Produtos
 
 Portf?lio derivado de projetos, ?reas/diretorias, fornecedores, documentos, processos, indicadores do produto, reposit?rios Azure DevOps (webhook sem JWT). P?blico: `PUBLIC_PRODUTOS_PORTFOLIO_TOKEN`.

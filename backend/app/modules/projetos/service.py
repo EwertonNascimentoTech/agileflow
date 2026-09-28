@@ -6993,12 +6993,10 @@ class CapacityService:
 
     # ── Fase 1: detecção de gargalos e finder de pessoas livres ──
     _STACK_ORDER = {
-        StackLevel.BASICO: 0,
-        StackLevel.JUNIOR: 1,
-        StackLevel.PLENO: 2,
-        StackLevel.SENIOR: 3,
-        StackLevel.ESPECIALISTA: 4,
-        StackLevel.REFERENCIA: 5,
+        StackLevel.CONHECE: 0,
+        StackLevel.COM_APOIO: 1,
+        StackLevel.AUTONOMO: 2,
+        StackLevel.REFERENCIA: 3,
     }
 
     @staticmethod

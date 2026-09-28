@@ -29,6 +29,10 @@ from app.modules.teamops.schemas import (
     OrgTreeResponse,
     PersonCreate,
     PersonResponse,
+    CompetenciasIn,
+    CompetenciasLembreteOut,
+    CompetenciasOut,
+    CompetenciasRespostasOut,
     PersonStackCreate,
     PersonStackResponse,
     PersonStackUpdate,
@@ -46,6 +50,7 @@ from app.modules.teamops.schemas import (
     StackCreate,
     StackResponse,
     StackUpdate,
+    StackUsage,
     WorkCalendarResponse,
     WorkCalendarUpdate,
 )
@@ -58,6 +63,7 @@ from app.modules.teamops.service import (
     DashboardService,
     OrgService,
     PersonService,
+    CompetenciaFormService,
     PersonStackService,
     PositionService,
     StackCategoryService,
@@ -82,6 +88,10 @@ _can_view = require_any_permission("teamops.view", "teamops.person.manage")
 _can_org_view = require_any_permission("teamops.org.view", "teamops.org.manage")
 _can_person_view = require_any_permission("teamops.person.view", "teamops.person.manage")
 _can_stack_view = require_any_permission("teamops.stack.view", "teamops.stack.manage", "teamops.person_stack.manage")
+# Acompanhar respostas do formulário de competências e preencher por quem não tem login.
+_can_competencias_manage = require_any_permission(
+    "teamops.person_stack.manage", "teamops.stack.manage", "teamops.person.manage",
+)
 _PEOPLE_MANAGER_POSITION_SLUGS = {
     "coordenador",
     "administrativo_coordenacao",
@@ -319,6 +329,11 @@ async def list_stacks(
     return await StackService.list(ctx.db, category_id=category_id, active_only=active_only)
 
 
+@router.get("/stacks/usage", response_model=list[StackUsage])
+async def stacks_usage(ctx: ModuleContext = Depends(_ctx), _v=Depends(_can_stack_view)):
+    return await StackService.usage(ctx.db)
+
+
 @router.post("/stacks", response_model=StackResponse, status_code=201)
 async def create_stack(
     data: StackCreate,
@@ -341,10 +356,11 @@ async def update_stack(
 @router.delete("/stacks/{stack_id}", status_code=204)
 async def delete_stack(
     stack_id: uuid.UUID,
+    replace_with: Optional[uuid.UUID] = Query(None, description="Stack que assume produtos e competências"),
     ctx: ModuleContext = Depends(_ctx),
     _=Depends(_can_stack_manage),
 ):
-    await StackService.delete(ctx.db, stack_id)
+    await StackService.delete(ctx.db, stack_id, replace_with)
 
 
 # ─────────────────────────────────────────────
@@ -396,6 +412,50 @@ async def get_my_person(ctx: ModuleContext = Depends(_ctx)):
     if not person_id:
         raise HTTPException(status_code=404, detail="Nenhuma pessoa vinculada ao usuário autenticado.")
     return await PersonService.get(ctx.db, person_id)
+
+
+# ─────────────────────────────────────────────
+# Formulário "Minhas competências"
+# ─────────────────────────────────────────────
+
+
+async def _my_person_or_404(ctx: ModuleContext) -> uuid.UUID:
+    person_id = await _current_person_id(ctx)
+    if not person_id:
+        raise HTTPException(status_code=404, detail="Seu usuário não está vinculado a uma pessoa do Times. Fale com a coordenação.")
+    return person_id
+
+
+@router.get("/me/competencias", response_model=CompetenciasOut)
+async def get_my_competencias(ctx: ModuleContext = Depends(_ctx)):
+    return await CompetenciaFormService.get(ctx.db, await _my_person_or_404(ctx))
+
+
+@router.put("/me/competencias", response_model=CompetenciasOut)
+async def save_my_competencias(data: CompetenciasIn, ctx: ModuleContext = Depends(_ctx)):
+    return await CompetenciaFormService.save(ctx.db, await _my_person_or_404(ctx), data)
+
+
+@router.get("/competencias/respostas", response_model=CompetenciasRespostasOut)
+async def competencias_respostas(ctx: ModuleContext = Depends(_ctx), _=Depends(_can_competencias_manage)):
+    return await CompetenciaFormService.respostas(ctx.db)
+
+
+@router.post("/competencias/lembrete", response_model=CompetenciasLembreteOut)
+async def competencias_lembrete(ctx: ModuleContext = Depends(_ctx), _=Depends(_can_competencias_manage)):
+    return await CompetenciaFormService.lembrar_pendentes(ctx.db, ctx.user.id)
+
+
+@router.get("/persons/{person_id}/competencias", response_model=CompetenciasOut)
+async def get_person_competencias(person_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_competencias_manage)):
+    return await CompetenciaFormService.get(ctx.db, person_id)
+
+
+@router.put("/persons/{person_id}/competencias", response_model=CompetenciasOut)
+async def save_person_competencias(
+    person_id: uuid.UUID, data: CompetenciasIn, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_competencias_manage),
+):
+    return await CompetenciaFormService.save(ctx.db, person_id, data)
 
 
 @router.get("/persons", response_model=list[PersonResponse])

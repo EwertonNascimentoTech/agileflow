@@ -1658,7 +1658,7 @@ async def get_available_people(
     position: Optional[str] = Query(None, description="Slug do cargo"),
     area: Optional[uuid.UUID] = Query(None),
     stack: Optional[uuid.UUID] = Query(None, description="ID da competência (skill)"),
-    min_level: Optional[str] = Query(None, description="Nível mínimo na skill (basico..referencia)"),
+    min_level: Optional[str] = Query(None, description="Nível mínimo na skill (conhece, com_apoio, autonomo, referencia)"),
     min_free_hours: float = Query(0.0, description="Folga total mínima no período (h)"),
     ctx: ModuleContext = Depends(_ctx),
     _po_ext=Depends(_deny_po_external),
@@ -1667,7 +1667,10 @@ async def get_available_people(
     from datetime import date as _date
     from app.modules.teamops.models import StackLevel
 
-    level = StackLevel(min_level) if min_level else None
+    try:
+        level = StackLevel(min_level) if min_level else None
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Nível inválido: use conhece, com_apoio, autonomo ou referencia.")
     return await CapacityService.find_available_people(
         ctx.db,
         _date.fromisoformat(date_from),

@@ -49,9 +49,21 @@ Menu típico:
 - **Dashboard** — pessoas, férias, alertas
 - **Organograma**
 - **Pessoas** (ficha do colaborador)
-- **Stacks** — competências
+- **Stacks** — catálogo de tecnologias, mapa de competências e respostas do formulário
+- **Minhas competências** — formulário em que cada pessoa marca as stacks que conhece e o nível
 - **Ausências** — pedidos e aprovações
 - **Configurações** — áreas, cargos, feriados, calendário
+
+### Minhas competências
+
+1. Em **Gestão de Times > Minhas competências**, marque cada tecnologia que você conhece com o nível:
+   **1 Conheço / estudei**, **2 Faço com apoio**, **3 Faço sozinho** ou **4 Domino e oriento**. Deixe "Não conheço" no resto.
+2. Tecnologia que não está na lista vai em **Outras tecnologias**.
+3. Responda pelo que você faz hoje, não pelo cargo. Pode atualizar quando quiser.
+
+Quem gerencia o time acompanha em **Stacks > Respostas do formulário**: quem respondeu, o botão **Lembrar pendentes**
+(notificação no sino) e **Preencher** para quem não tem login. No mapa de competências, só os níveis 3 e 4 contam como
+backup de uma stack.
 
 ### Ausências
 

@@ -138,6 +138,7 @@ const TeamopsOrgPage = lazy(() => import("@/modules/teamops/OrgPage"))
 const TeamopsPeoplePage = lazy(() => import("@/modules/teamops/PeoplePage"))
 const TeamopsPersonDetailPage = lazy(() => import("@/modules/teamops/PersonDetailPage"))
 const TeamopsStacksPage = lazy(() => import("@/modules/teamops/StacksPage"))
+const TeamopsMinhasCompetenciasPage = lazy(() => import("@/modules/teamops/MinhasCompetenciasPage"))
 const TeamopsAbsencesPage = lazy(() => import("@/modules/teamops/AbsencesPage"))
 const TeamopsConfigPage = lazy(() => import("@/modules/teamops/ConfigPage"))
 const ProdutosLayout = lazy(() => import("@/modules/produtos/ProdutosLayout"))
@@ -386,6 +387,7 @@ export default function App() {
                       <Route path="people"        element={<TeamopsPeoplePage />} />
                       <Route path="people/:personId" element={<TeamopsPersonDetailPage />} />
                       <Route path="stacks"        element={<TeamopsStacksPage />} />
+                      <Route path="competencias"  element={<TeamopsMinhasCompetenciasPage />} />
                       <Route path="absences"      element={<TeamopsAbsencesPage />} />
                       <Route element={<ModuleConfigGuard moduleSlug="teamops" />}>
                         <Route path="config"        element={<TeamopsConfigPage />} />

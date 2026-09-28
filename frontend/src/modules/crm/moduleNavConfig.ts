@@ -8,7 +8,7 @@ import {
   FileText, FileSignature,
   Package, Boxes, ArrowLeftRight, Layers, BadgeCheck,
   ShoppingCart, Wallet, ReceiptText,
-  Network, Code2, CalendarOff,
+  Network, Code2, CalendarOff, ClipboardCheck,
   CirclePlus, ClipboardList, Gauge, TrendingUp, ListChecks, PackageCheck,
   Gavel, BookOpen, GitBranch, Wrench, Contact,
   LayoutDashboard, FolderKanban, Flag, LifeBuoy, Sparkles,
@@ -98,6 +98,8 @@ export const moduleNavConfig: Record<string, ModuleNavItem[]> = {
     { to: "/app/modules/teamops/org",      icon: Network,     label: "Organograma",  requiredAnyPermission: ["teamops.org.view"] },
     { to: "/app/modules/teamops/people",   icon: Users,       label: "Pessoas",      requiredAnyPermission: ["teamops.person.view"] },
     { to: "/app/modules/teamops/stacks",   icon: Code2,       label: "Stacks",       requiredAnyPermission: ["teamops.stack.view"] },
+    // Autoavaliação: quem enxerga o TeamOps (inclui POs, que entram por Ausências); PO Externo fica de fora.
+    { to: "/app/modules/teamops/competencias", icon: ClipboardCheck, label: "Minhas competências", requiredAnyPermission: ["teamops.view", "teamops.absence.request"], hiddenForExternalPO: true },
     { to: "/app/modules/teamops/absences", icon: CalendarOff, label: "Ausências",    requiredAnyPermission: ["teamops.absence.view_own", "teamops.absence.view_team", "teamops.absence.request"] },
     { to: "/app/modules/teamops/config",   icon: Settings2,   label: "Configurações" },
   ],

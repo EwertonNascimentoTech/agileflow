@@ -410,7 +410,7 @@ function AddStackDialog({
   onSaved: () => void
 }) {
   const [stackId, setStackId] = useState<string>("")
-  const [level, setLevel] = useState<StackLevel>("pleno")
+  const [level, setLevel] = useState<StackLevel>("autonomo")
   const [years, setYears] = useState<string>("1")
   const [isReference, setIsReference] = useState(false)
   const [saving, setSaving] = useState(false)

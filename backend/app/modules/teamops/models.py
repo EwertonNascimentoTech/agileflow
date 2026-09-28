@@ -108,12 +108,16 @@ class PersonStatus(str, enum.Enum):
 
 
 class StackLevel(str, enum.Enum):
-    BASICO = "basico"
-    JUNIOR = "junior"
-    PLENO = "pleno"
-    SENIOR = "senior"
-    ESPECIALISTA = "especialista"
-    REFERENCIA = "referencia"
+    """Domínio da pessoa na stack (autoavaliação do formulário "Minhas competências").
+    Escala descritiva de 4 níveis — a antiga (básico..especialista) misturava cargo com domínio."""
+    CONHECE = "conhece"          # 1. Conheço / estudei
+    COM_APOIO = "com_apoio"      # 2. Faço com apoio
+    AUTONOMO = "autonomo"        # 3. Faço sozinho
+    REFERENCIA = "referencia"    # 4. Domino e oriento outros
+
+
+# Níveis que contam como "habilitado" (backup) no mapa de competências e nos alertas.
+STACK_LEVELS_HABILITADOS = (StackLevel.AUTONOMO, StackLevel.REFERENCIA)
 
 
 class AbsenceStatus(str, enum.Enum):
@@ -302,6 +306,9 @@ class Person(TenantBase):
     )
     visible_in_org_chart: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Formulário "Minhas competências": quando respondeu e as tecnologias que faltam no catálogo.
+    competencias_respondidas_em: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    competencias_outras: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -350,7 +357,7 @@ class PersonStack(TenantBase):
     level: Mapped[StackLevel] = mapped_column(
         SAEnum(StackLevel, native_enum=False, values_callable=_enum_values),
         nullable=False,
-        default=StackLevel.PLENO,
+        default=StackLevel.AUTONOMO,
     )
     years_experience: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     is_reference: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

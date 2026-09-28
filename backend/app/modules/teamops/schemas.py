@@ -127,6 +127,12 @@ class StackCategoryMini(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class StackUsage(BaseModel):
+    stack_id: uuid.UUID
+    person_count: int = 0
+    product_count: int = 0
+
+
 class StackResponse(BaseModel):
     id: uuid.UUID
     category_id: uuid.UUID
@@ -442,9 +448,50 @@ class TeamMemberResponse(BaseModel):
 # ─────────────────────────────────────────────
 
 
+# Formulário "Minhas competências" (autoavaliação): a lista enviada é a resposta completa.
+class CompetenciaItem(BaseModel):
+    stack_id: uuid.UUID
+    level: StackLevel
+
+
+class CompetenciasIn(BaseModel):
+    itens: list[CompetenciaItem] = Field(default_factory=list, max_length=300)
+    outras: Optional[str] = Field(None, max_length=2000)
+
+
+class CompetenciasOut(BaseModel):
+    person_id: uuid.UUID
+    full_name: str
+    respondido_em: Optional[datetime] = None
+    outras: Optional[str] = None
+    itens: list[CompetenciaItem] = Field(default_factory=list)
+
+
+class CompetenciaRespostaRow(BaseModel):
+    person_id: uuid.UUID
+    full_name: str
+    position_name: Optional[str] = None
+    has_login: bool
+    respondido_em: Optional[datetime] = None
+    total: int = 0                # stacks marcadas
+    autonomas: int = 0            # faz sozinho ou domina
+    outras: Optional[str] = None
+
+
+class CompetenciasRespostasOut(BaseModel):
+    participantes: int
+    respondidas: int
+    rows: list[CompetenciaRespostaRow] = Field(default_factory=list)
+
+
+class CompetenciasLembreteOut(BaseModel):
+    notificados: int
+    sem_login: int
+
+
 class PersonStackCreate(BaseModel):
     stack_id: uuid.UUID
-    level: StackLevel = StackLevel.PLENO
+    level: StackLevel = StackLevel.AUTONOMO
     years_experience: int = Field(0, ge=0, le=80)
     is_reference: bool = False
     notes: Optional[str] = None
@@ -580,7 +627,8 @@ class CompetencyMapEntry(BaseModel):
     stack: StackMini
     category_id: uuid.UUID
     category_name: str
-    person_count: int
+    person_count: int             # habilitadas: fazem sozinhas ou dominam (contam como backup)
+    learning_count: int = 0       # conhecem ou fazem com apoio
     has_reference: bool
     risk_level: str  # "low" | "medium" | "high"
     persons: list[CompetencyMapPerson] = []

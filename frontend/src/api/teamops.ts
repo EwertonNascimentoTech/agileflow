@@ -4,7 +4,8 @@ export type AreaType = "negocio" | "suporte" | "dados" | "produto" | "sustentaca
 export type AreaStatus = "ativa" | "inativa" | "reestruturacao"
 export type EmploymentType = "clt" | "pj" | "estagio" | "terceiro"
 export type PersonStatus = "ativo" | "afastado" | "ferias" | "desligado"
-export type StackLevel = "basico" | "junior" | "pleno" | "senior" | "especialista" | "referencia"
+/** Domínio na stack (autoavaliação): 1 conhece, 2 com apoio, 3 sozinho, 4 domina e orienta. */
+export type StackLevel = "conhece" | "com_apoio" | "autonomo" | "referencia"
 export type AbsenceStatus = "pendente" | "aprovada" | "recusada" | "cancelada"
 
 export interface PositionMini {
@@ -85,6 +86,13 @@ export interface Stack {
   created_at: string
   updated_at: string
   category: StackCategoryMini | null
+}
+
+/** Quantas pessoas (competências) e produtos ativos usam a stack. */
+export interface StackUsage {
+  stack_id: string
+  person_count: number
+  product_count: number
 }
 
 export interface AbsenceType {
@@ -294,10 +302,44 @@ export interface CompetencyMapEntry {
   stack: StackMini
   category_id: string
   category_name: string
+  /** Habilitadas: fazem sozinhas ou dominam (contam como backup). */
   person_count: number
+  /** Conhecem ou fazem com apoio. */
+  learning_count: number
   has_reference: boolean
   risk_level: "low" | "medium" | "high"
   persons: CompetencyMapPerson[]
+}
+
+// ── Formulário "Minhas competências" ──
+export interface CompetenciaItem {
+  stack_id: string
+  level: StackLevel
+}
+
+export interface Competencias {
+  person_id: string
+  full_name: string
+  respondido_em: string | null
+  outras: string | null
+  itens: CompetenciaItem[]
+}
+
+export interface CompetenciaRespostaRow {
+  person_id: string
+  full_name: string
+  position_name: string | null
+  has_login: boolean
+  respondido_em: string | null
+  total: number
+  autonomas: number
+  outras: string | null
+}
+
+export interface CompetenciasRespostas {
+  participantes: number
+  respondidas: number
+  rows: CompetenciaRespostaRow[]
 }
 
 export interface CompetencyMap {
@@ -480,7 +522,10 @@ export const teamopsApi = {
   }) => api.post<Stack>("/teamops/stacks", data).then((r) => r.data),
   updateStack: (id: string, data: Partial<Pick<Stack, "category_id" | "name" | "is_critical" | "is_active">> & { slug?: string | null }) =>
     api.patch<Stack>(`/teamops/stacks/${id}`, data).then((r) => r.data),
-  deleteStack: (id: string) => api.delete<void>(`/teamops/stacks/${id}`).then((r) => r.data),
+  getStackUsage: () => api.get<StackUsage[]>("/teamops/stacks/usage").then((r) => r.data),
+  /** Com `replaceWith`, produtos e competências passam para a outra stack; sem, a stack só sai dos cadastros. */
+  deleteStack: (id: string, replaceWith?: string) =>
+    api.delete<void>(`/teamops/stacks/${id}`, { params: replaceWith ? { replace_with: replaceWith } : undefined }).then((r) => r.data),
 
   // Absence Types
   listAbsenceTypes: (activeOnly = false) =>
@@ -539,6 +584,16 @@ export const teamopsApi = {
     api.patch<PersonStack>(`/teamops/persons/${personId}/stacks/${personStackId}`, data).then((r) => r.data),
   deletePersonStack: (personId: string, personStackId: string) =>
     api.delete<void>(`/teamops/persons/${personId}/stacks/${personStackId}`).then((r) => r.data),
+
+  // Formulário "Minhas competências" (sem personId = a própria pessoa logada)
+  getCompetencias: (personId?: string) =>
+    api.get<Competencias>(personId ? `/teamops/persons/${personId}/competencias` : "/teamops/me/competencias").then((r) => r.data),
+  saveCompetencias: (data: { itens: CompetenciaItem[]; outras: string | null }, personId?: string) =>
+    api.put<Competencias>(personId ? `/teamops/persons/${personId}/competencias` : "/teamops/me/competencias", data).then((r) => r.data),
+  getCompetenciasRespostas: () =>
+    api.get<CompetenciasRespostas>("/teamops/competencias/respostas").then((r) => r.data),
+  lembrarCompetencias: () =>
+    api.post<{ notificados: number; sem_login: number }>("/teamops/competencias/lembrete").then((r) => r.data),
 
   // Absences
   listAbsences: (params?: {
@@ -610,13 +665,29 @@ export function personPosLabel(p: Pick<Person, "pos" | "po_person"> | null | und
   return "—"
 }
 
+export const STACK_LEVEL_ORDER: StackLevel[] = ["conhece", "com_apoio", "autonomo", "referencia"]
+
 export const STACK_LEVEL_LABELS: Record<StackLevel, string> = {
-  basico: "Básico",
-  junior: "Júnior",
-  pleno: "Pleno",
-  senior: "Sênior",
-  especialista: "Especialista",
-  referencia: "Referência",
+  conhece: "Conheço / estudei",
+  com_apoio: "Faço com apoio",
+  autonomo: "Faço sozinho",
+  referencia: "Domino e oriento",
+}
+
+/** Rótulo curto (chips do mapa, botões do formulário no celular). */
+export const STACK_LEVEL_SHORT: Record<StackLevel, string> = {
+  conhece: "Conhece",
+  com_apoio: "Com apoio",
+  autonomo: "Sozinho",
+  referencia: "Domina",
+}
+
+/** O que cada nível quer dizer — mostrado no formulário para a autoavaliação ser comparável. */
+export const STACK_LEVEL_HINTS: Record<StackLevel, string> = {
+  conhece: "Estudei ou usei pouco; ainda não entrego sozinho.",
+  com_apoio: "Entrego tarefas com ajuda ou revisão de alguém.",
+  autonomo: "Entrego do início ao fim sem precisar de ajuda.",
+  referencia: "Resolvo os casos difíceis e oriento ou reviso os outros.",
 }
 
 export const AREA_TYPE_LABELS: Record<AreaType, string> = {

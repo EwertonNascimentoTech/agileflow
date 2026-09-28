@@ -4811,6 +4811,27 @@ async def _step_148_produto_sem_documentos_natos(conn: AsyncConnection, schema: 
     })
 
 
+async def _step_150_competencias_formulario(conn: AsyncConnection, schema: str) -> None:
+    """Formulário "Minhas competências": data da resposta e "outras tecnologias" na pessoa, e a
+    escala de domínio passa a 4 níveis (conhece, com_apoio, autonomo, referencia)."""
+    await _add_columns(conn, schema, "team_persons", {
+        "competencias_respondidas_em": "TIMESTAMP",
+        "competencias_outras": "TEXT",
+    })
+    if await _table_exists(conn, schema, "team_person_stacks"):
+        await conn.execute(text(f"""
+            UPDATE {schema}.team_person_stacks SET level = CASE level
+                WHEN 'basico' THEN 'conhece'
+                WHEN 'junior' THEN 'com_apoio'
+                WHEN 'pleno' THEN 'autonomo'
+                WHEN 'senior' THEN 'autonomo'
+                WHEN 'especialista' THEN 'referencia'
+                ELSE level END
+            WHERE level IN ('basico', 'junior', 'pleno', 'senior', 'especialista')
+        """))
+        await conn.execute(text(f"ALTER TABLE {schema}.team_person_stacks ALTER COLUMN level SET DEFAULT 'autonomo'"))
+
+
 async def _step_149_sustentacao_problemas(conn: AsyncConnection, schema: str) -> None:
     """Sustentação: catálogo de problemas por nível (nome, descrição, SLA em horas úteis) e as
     soluções possíveis de cada problema. Índices em `_INDEX_SPECS`."""
@@ -5095,6 +5116,7 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("147_portal_tour", _step_147_portal_tour),
     ("148_produto_sem_documentos_natos", _step_148_produto_sem_documentos_natos),
     ("149_sustentacao_problemas", _step_149_sustentacao_problemas),
+    ("150_competencias_formulario", _step_150_competencias_formulario),
     ("123_reconcile_indexes", _step_123_reconcile_indexes),
 ]
 

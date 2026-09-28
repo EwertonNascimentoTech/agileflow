@@ -7,11 +7,12 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import HTTPException
-from sqlalchemy import and_, delete as sa_delete, func, or_, select
+from sqlalchemy import and_, delete as sa_delete, func, or_, select, text, update as sa_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.notifications import notify_persons
 from app.core.security import get_password_hash, validate_password_strength
 from app.modules.super_admin.models import (
     ModulePermission,
@@ -25,6 +26,7 @@ from app.modules.super_admin.models import (
     UserRole,
 )
 
+from app.modules.produtos.models import Product
 from app.modules.teamops.person_status_sync import PersonStatusSync
 from app.modules.teamops.models import (
     Absence,
@@ -39,6 +41,7 @@ from app.modules.teamops.models import (
     Position,
     Stack,
     StackCategory,
+    STACK_LEVELS_HABILITADOS,
     StackLevel,
     WorkCalendar,
     team_person_areas,
@@ -140,6 +143,12 @@ from app.modules.teamops.schemas import (
     AreaUpdate,
     CompetencyMapEntry,
     CompetencyMapPerson,
+    CompetenciaItem,
+    CompetenciaRespostaRow,
+    CompetenciasIn,
+    CompetenciasLembreteOut,
+    CompetenciasOut,
+    CompetenciasRespostasOut,
     CompetencyMapResponse,
     DashboardKpis,
     HolidayCreate,
@@ -382,13 +391,24 @@ class StackCategoryService:
         for key, value in data.model_dump(exclude_unset=True).items():
             setattr(item, key, value)
         item.updated_at = datetime.utcnow()
-        await db.commit()
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            raise HTTPException(status_code=400, detail="Já existe uma categoria com este nome.")
         await db.refresh(item)
         return item
 
     @staticmethod
     async def delete(db: AsyncSession, category_id: uuid.UUID) -> None:
         item = await StackCategoryService.get(db, category_id)
+        # Só categoria vazia: o CASCADE do banco apagaria as stacks e as competências das pessoas.
+        n = (await db.execute(select(func.count()).select_from(Stack).where(Stack.category_id == category_id))).scalar_one()
+        if n:
+            raise HTTPException(
+                status_code=400,
+                detail=f"A categoria tem {n} stack{'s' if n > 1 else ''}. Mova para outra categoria ou exclua antes.",
+            )
         await db.delete(item)
         await db.commit()
 
@@ -447,8 +467,8 @@ class StackService:
         payload = data.model_dump(exclude_unset=True)
         if payload.get("category_id"):
             await StackCategoryService.get(db, payload["category_id"])
-        if payload.get("slug"):
-            payload["slug"] = _slugify(payload["slug"])
+        if "slug" in payload:
+            payload["slug"] = _slugify(payload["slug"] or payload.get("name") or item.name)
         for key, value in payload.items():
             setattr(item, key, value)
         item.updated_at = datetime.utcnow()
@@ -460,8 +480,62 @@ class StackService:
         return await StackService.get(db, item.id)
 
     @staticmethod
-    async def delete(db: AsyncSession, stack_id: uuid.UUID) -> None:
+    async def usage(db: AsyncSession) -> list[dict]:
+        """Quantas pessoas (competências) e produtos ativos usam cada stack — para o catálogo e a exclusão."""
+        pessoas = dict((await db.execute(
+            select(PersonStack.stack_id, func.count()).group_by(PersonStack.stack_id)
+        )).all())
+        produtos: dict[uuid.UUID, int] = {}
+        try:
+            async with db.begin_nested():  # tenant sem a tabela de produtos: só pessoas
+                listas = (await db.execute(select(Product.stacks).where(Product.is_active.is_(True)))).scalars().all()
+        except Exception:  # noqa: BLE001
+            listas = []
+        for lista in listas:
+            for raw in {str(x) for x in (lista or [])}:
+                try:
+                    sid = uuid.UUID(raw)
+                except ValueError:
+                    continue
+                produtos[sid] = produtos.get(sid, 0) + 1
+        return [
+            {"stack_id": i, "person_count": pessoas.get(i, 0), "product_count": produtos.get(i, 0)}
+            for i in set(pessoas) | set(produtos)
+        ]
+
+    @staticmethod
+    async def delete(db: AsyncSession, stack_id: uuid.UUID, replace_with: Optional[uuid.UUID] = None) -> None:
+        """Exclui a stack. Produtos (ids no JSON `products.stacks`) e competências das pessoas passam para
+        `replace_with`; sem substituta, a stack só sai desses cadastros."""
         item = await StackService.get(db, stack_id)
+        target: Optional[Stack] = None
+        if replace_with:
+            if replace_with == stack_id:
+                raise HTTPException(status_code=400, detail="A stack substituta precisa ser outra.")
+            target = await StackService.get(db, replace_with)
+        old, new = str(stack_id), str(target.id) if target else None
+        try:
+            async with db.begin_nested():
+                rows = (await db.execute(
+                    select(Product.id, Product.stacks).where(Product.stacks.contains([old]))
+                )).all()
+                for pid, atuais in rows:
+                    ids = [str(x) for x in (atuais or []) if str(x) != old]
+                    if new and new not in ids:
+                        ids.append(new)
+                    # Troca de catálogo não é edição do produto: "Última atualização" fica como estava.
+                    await db.execute(sa_update(Product).where(Product.id == pid)
+                                     .values(stacks=ids, updated_at=Product.updated_at))
+        except Exception:  # noqa: BLE001 — tenant sem a tabela de produtos
+            pass
+        if target:
+            # Quem já tinha a substituta fica com a competência que tinha; os demais passam para ela.
+            ja_tem = select(PersonStack.person_id).where(PersonStack.stack_id == target.id)
+            await db.execute(sa_delete(PersonStack).where(
+                PersonStack.stack_id == stack_id, PersonStack.person_id.in_(ja_tem),
+            ).execution_options(synchronize_session=False))
+            await db.execute(sa_update(PersonStack).where(PersonStack.stack_id == stack_id)
+                             .values(stack_id=target.id).execution_options(synchronize_session=False))
         await db.delete(item)
         await db.commit()
 
@@ -1357,6 +1431,101 @@ class PersonStackService:
         await db.commit()
 
 
+class CompetenciaFormService:
+    """Formulário "Minhas competências": a pessoa marca as stacks que conhece e o nível.
+    A resposta grava em `team_person_stacks` (a mesma base do Mapa de competências e da busca
+    de pessoas por stack na Capacidade)."""
+
+    @staticmethod
+    async def get(db: AsyncSession, person_id: uuid.UUID) -> CompetenciasOut:
+        person = await PersonService.get(db, person_id)
+        links = (await db.execute(select(PersonStack).where(PersonStack.person_id == person_id))).scalars().all()
+        return CompetenciasOut(
+            person_id=person.id, full_name=person.full_name,
+            respondido_em=person.competencias_respondidas_em, outras=person.competencias_outras,
+            itens=[CompetenciaItem(stack_id=l.stack_id, level=l.level) for l in links],
+        )
+
+    @staticmethod
+    async def save(db: AsyncSession, person_id: uuid.UUID, data: CompetenciasIn) -> CompetenciasOut:
+        person = await PersonService.get(db, person_id)
+        ativas = {sid for sid in (await db.execute(select(Stack.id).where(Stack.is_active.is_(True)))).scalars().all()}
+        marcadas: dict[uuid.UUID, StackLevel] = {}
+        for item in data.itens:
+            if item.stack_id not in ativas:
+                raise HTTPException(status_code=400, detail="Uma das stacks marcadas não está mais ativa. Recarregue a página.")
+            marcadas[item.stack_id] = item.level
+        atuais = {l.stack_id: l for l in (await db.execute(
+            select(PersonStack).where(PersonStack.person_id == person_id)
+        )).scalars().all()}
+        now = datetime.utcnow()
+        for sid, level in marcadas.items():
+            link = atuais.get(sid)
+            if link:
+                if link.level != level:
+                    link.level, link.updated_at = level, now
+            else:
+                db.add(PersonStack(person_id=person_id, stack_id=sid, level=level))
+        # Desmarcou no formulário = não conhece. Vínculo de stack inativa (fora do formulário) fica.
+        for sid, link in atuais.items():
+            if sid in ativas and sid not in marcadas:
+                await db.delete(link)
+        person.competencias_respondidas_em = now
+        person.competencias_outras = (data.outras or "").strip() or None
+        person.updated_at = now
+        await db.commit()
+        return await CompetenciaFormService.get(db, person_id)
+
+    @staticmethod
+    async def _participantes(db: AsyncSession) -> list[Person]:
+        """Pessoas ativas que enxergam o TeamOps (cargo com alguma permissão teamops.*) ou sem
+        cargo — fica de fora quem não consegue abrir o formulário (ex.: PO Externo)."""
+        roles = {r for r in (await db.execute(text(
+            "SELECT DISTINCT role_id FROM public.role_permissions WHERE permission_code LIKE 'teamops.%'"
+        ))).scalars().all()}
+        persons = (await db.execute(
+            select(Person).where(Person.status == PersonStatus.ATIVO).order_by(Person.full_name)
+        )).scalars().unique().all()
+        return [p for p in persons if p.position is None or p.position.role_id in roles]
+
+    @staticmethod
+    async def respostas(db: AsyncSession) -> CompetenciasRespostasOut:
+        persons = await CompetenciaFormService._participantes(db)
+        links = (await db.execute(select(PersonStack.person_id, PersonStack.level))).all()
+        total: dict[uuid.UUID, int] = {}
+        autonomas: dict[uuid.UUID, int] = {}
+        for pid, level in links:
+            total[pid] = total.get(pid, 0) + 1
+            if level in STACK_LEVELS_HABILITADOS:
+                autonomas[pid] = autonomas.get(pid, 0) + 1
+        rows = [
+            CompetenciaRespostaRow(
+                person_id=p.id, full_name=p.full_name, position_name=p.position.name if p.position else None,
+                has_login=p.user_id is not None, respondido_em=p.competencias_respondidas_em,
+                total=total.get(p.id, 0), autonomas=autonomas.get(p.id, 0), outras=p.competencias_outras,
+            )
+            for p in persons
+        ]
+        return CompetenciasRespostasOut(
+            participantes=len(rows), respondidas=sum(1 for r in rows if r.respondido_em), rows=rows,
+        )
+
+    @staticmethod
+    async def lembrar_pendentes(db: AsyncSession, user_id: Optional[uuid.UUID]) -> CompetenciasLembreteOut:
+        pendentes = [p for p in await CompetenciaFormService._participantes(db) if not p.competencias_respondidas_em]
+        com_login = [p for p in pendentes if p.user_id]
+        n = 0
+        for p in com_login:  # uma por pessoa: o clique abre o formulário
+            n += await notify_persons(
+                db, [p.id], "Conte para o time quais tecnologias você domina",
+                "Responda o formulário Minhas competências: marque as stacks que você conhece e o seu nível. "
+                "Leva uns 5 minutos.",
+                "competencias", p.id, exclude_user_id=user_id,
+            )
+        await db.commit()
+        return CompetenciasLembreteOut(notificados=n, sem_login=len(pendentes) - len(com_login))
+
+
 # ─────────────────────────────────────────────
 # Absence
 # ─────────────────────────────────────────────
@@ -1785,6 +1954,13 @@ class OrgService:
 # ─────────────────────────────────────────────
 
 
+_LEVEL_ORDER = {StackLevel.CONHECE: 1, StackLevel.COM_APOIO: 2, StackLevel.AUTONOMO: 3, StackLevel.REFERENCIA: 4}
+
+
+def _habilitado(link: PersonStack) -> bool:
+    return link.level in STACK_LEVELS_HABILITADOS or link.is_reference
+
+
 class CompetencyMapService:
     @staticmethod
     async def build(db: AsyncSession) -> CompetencyMapResponse:
@@ -1805,9 +1981,13 @@ class CompetencyMapService:
 
         entries: list[CompetencyMapEntry] = []
         for st in stacks:
-            persons_links = by_stack.get(st.id, [])
-            count = len(persons_links)
-            has_ref = any(l.is_reference for l in persons_links)
+            # Mais experiente primeiro; só quem faz sozinho ou domina conta como habilitado (backup).
+            persons_links = sorted(
+                by_stack.get(st.id, []),
+                key=lambda l: (-_LEVEL_ORDER.get(l.level, 0), l.person.full_name if l.person else ""),
+            )
+            count = sum(1 for l in persons_links if _habilitado(l))
+            has_ref = any(l.is_reference or l.level == StackLevel.REFERENCIA for l in persons_links)
             if st.is_critical and count <= 1:
                 risk = "high"
             elif st.is_critical and count <= 2:
@@ -1822,6 +2002,7 @@ class CompetencyMapService:
                     category_id=st.category_id,
                     category_name=st.category.name if st.category else "",
                     person_count=count,
+                    learning_count=len(persons_links) - count,
                     has_reference=has_ref,
                     risk_level=risk,
                     persons=[
@@ -1943,7 +2124,7 @@ class AlertsService:
         stack_to_persons: dict[uuid.UUID, list[uuid.UUID]] = {}
         critical_stacks: dict[uuid.UUID, Stack] = {}
         for ps in ps_list:
-            if ps.stack and ps.stack.is_critical:
+            if ps.stack and ps.stack.is_critical and _habilitado(ps):
                 stack_to_persons.setdefault(ps.stack_id, []).append(ps.person_id)
                 critical_stacks[ps.stack_id] = ps.stack
 

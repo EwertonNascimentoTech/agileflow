@@ -13,6 +13,8 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 
 ## Pessoas e acesso
 
+- Competências (TeamOps): escala de 4 níveis `conhece`, `com_apoio`, `autonomo`, `referencia` (autoavaliação do formulário "Minhas competências"). Só `autonomo`/`referencia` (ou `is_reference`) contam como habilitado/backup no mapa e nos alertas de stack crítica (`STACK_LEVELS_HABILITADOS`, `_habilitado`). O PUT do formulário é a resposta completa: stack ativa desmarcada apaga o vínculo; vínculo de stack inativa fica.
+- Stacks (TeamOps): `products.stacks` guarda ids de `team_stacks` em JSON, sem FK. Excluir stack passa por `StackService.delete` (limpa ou troca o id nos produtos e move as competências para a substituta), nunca por DELETE direto. Categoria só se exclui vazia: o FK CASCADE de `team_stacks.category_id` apagaria as stacks e as competências das pessoas.
 - `assigned_to` nas tarefas de Processos ? **Person.id** (TeamOps), n?o `users.id`.
 - PO Externo: s? projetos em que ? respons?vel; sem Pessoas, Indicadores, RTD, Capacidade, Relat?rios, Status Reports.
 - Salvar Pessoa (TeamOps), SSO e 1º acesso nunca mudam o papel de `company_admin`/`super_admin` — só a role do cargo. Criar quadro/raia (`projetos.status.manage`) e demais configurações de Projetos: admin da empresa (Ewerton) e o cargo Administrativo (Coordenação).
