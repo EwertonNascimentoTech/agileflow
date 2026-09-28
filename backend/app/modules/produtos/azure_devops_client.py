@@ -3,7 +3,8 @@ repositórios vinculados aos produtos.
 
 Credencial única da instituição no .env (AZURE_DEVOPS_PAT), autenticada por Basic com
 usuário vazio — o padrão do Azure DevOps para PAT: `Authorization: Basic base64(":" + PAT)`.
-Não usa o service principal do Azure AI Foundry: aqui é PAT, escopo Code (Read).
+Não usa o service principal do Azure AI Foundry: aqui é PAT, escopo Code (Read); criar repositório
+(cadastro do produto) exige Code (Read & write).
 
 Endpoints mapeados (api-version 7.1, verificado em ago/2026):
   GET /{org}/_apis/projects
@@ -17,6 +18,10 @@ Endpoints mapeados (api-version 7.1, verificado em ago/2026):
                                 "committer": {...}, "comment", "commentTruncated",
                                 "changeCounts": {"Add","Edit","Delete"}, "remoteUrl"}]}
 
+  POST /{org}/{project}/_apis/git/repositories   {"name", "project": {"id"}}
+      → repositório novo (vazio); 409 se o nome já existe. Exige escopo Code (Read & write).
+  GET  /{org}/_apis/permissions/{namespace Git}/256?tokens=repoV2/{projectId}
+      → [true|false]: o token pode criar repositório no projeto (consulta só leitura).
 A listagem de commits NÃO devolve `parents`, por isso merge é detectado por heurística de
 mensagem em `is_merge_comment()` — buscar commit a commit sairia caro demais.
 """
@@ -88,7 +93,8 @@ def _raise_for(resp: httpx.Response, contexto: str) -> None:
     if resp.status_code in (401, 403):
         raise AzureDevOpsError(
             f"Acesso negado pelo Azure DevOps ao {contexto}. "
-            "Verifique AZURE_DEVOPS_PAT no .env (escopo Code → Read) e se ele não expirou."
+            "Verifique AZURE_DEVOPS_PAT no .env (escopo Code → Read; para criar repositório, Read & write) "
+            "e se ele não expirou."
         )
     if resp.status_code == 404:
         raise AzureDevOpsError(f"Não encontrado no Azure DevOps: {contexto}.")
@@ -169,6 +175,70 @@ async def find_repository(project: str, repository: str) -> Optional[dict]:
         if (r["name"] or "").strip().lower() == alvo:
             return r
     return None
+
+
+# Namespace de segurança do Git no Azure DevOps e o bit "CreateRepository".
+_GIT_SECURITY_NAMESPACE = "2e9eb7ed-3c0a-47d4-87c1-0ffdd275fd87"
+_PERM_CREATE_REPOSITORY = 256
+
+
+async def _project_id(client: httpx.AsyncClient, project: str) -> str:
+    data = await _get(
+        client, f"{_base()}/_apis/projects/{quote(project)}",
+        {"api-version": settings.AZURE_DEVOPS_API_VERSION}, f"localizar o projeto {project}",
+    )
+    return data["id"]
+
+
+async def can_create_repository(project: str) -> Optional[bool]:
+    """O token da instituição pode criar repositório no projeto? None = não foi possível saber."""
+    _guard()
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            pid = await _project_id(client, project)
+            data = await _get(
+                client, f"{_base()}/_apis/permissions/{_GIT_SECURITY_NAMESPACE}/{_PERM_CREATE_REPOSITORY}",
+                {"tokens": f"repoV2/{pid}", "alwaysAllowAdministrators": "true",
+                 "api-version": settings.AZURE_DEVOPS_API_VERSION},
+                f"consultar a permissão no projeto {project}",
+            )
+    except AzureDevOpsError:
+        return None
+    valores = data.get("value") or []
+    return bool(valores[0]) if valores else None
+
+
+async def create_repository(project: str, name: str) -> dict:
+    """Cria um repositório Git vazio no projeto e devolve id/nome/projeto/web_url."""
+    _guard()
+    contexto = f"criar o repositório {name} no projeto {project}"
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        pid = await _project_id(client, project)
+        resp = await client.post(
+            f"{_base()}/{quote(project)}/_apis/git/repositories",
+            params={"api-version": settings.AZURE_DEVOPS_API_VERSION},
+            json={"name": name, "project": {"id": pid}},
+            headers={**_headers(), "Content-Type": "application/json"},
+        )
+    if resp.status_code == 409 or "TF400948" in resp.text:
+        raise AzureDevOpsError(f"Já existe um repositório '{name}' no projeto {project} do Azure DevOps.")
+    if resp.status_code == 400:
+        try:
+            motivo = resp.json().get("message") or resp.text[:200]
+        except ValueError:
+            motivo = resp.text[:200]
+        raise AzureDevOpsError(f"O Azure DevOps recusou o repositório '{name}': {motivo}")
+    _raise_for(resp, contexto)
+    try:
+        r = resp.json()
+    except ValueError:
+        raise AzureDevOpsError(f"Resposta inesperada do Azure DevOps ao {contexto}.")
+    return {
+        "id": r.get("id"),
+        "name": r.get("name") or name,
+        "project": (r.get("project") or {}).get("name") or project,
+        "web_url": r.get("webUrl") or r.get("remoteUrl"),
+    }
 
 
 def _parse_dt(value: Any) -> Optional[datetime]:

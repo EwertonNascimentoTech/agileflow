@@ -1238,6 +1238,17 @@ export interface RepoImportResult {
   ignorados: number
 }
 
+export interface AzureRepoNameCheck {
+  project: string
+  name: string
+  valido: boolean
+  disponivel: boolean
+  /** null = não deu para consultar a permissão no Azure. */
+  pode_criar: boolean | null
+  motivo: string | null
+  web_url: string | null
+}
+
 export interface AzureRepoMini {
   id: string
   name: string
@@ -1399,6 +1410,16 @@ export const reposApi = {
 
   listAzureProjects: () =>
     api.get<{ id: string; name: string }[]>("/produtos/repositorios/azure/projetos").then((r) => r.data),
+
+  /** Cadastro do produto: nome do repositório válido, livre no projeto e com permissão de criar? */
+  checkAzureRepoName: (project: string, name: string) =>
+    api.get<AzureRepoNameCheck>("/produtos/repositorios/azure/nome", { params: { project, name } }).then((r) => r.data),
+
+  /** Cria o repositório no Azure DevOps, vincula ao produto e grava o link (se o produto não tem). */
+  createAzureRepo: (productId: string, data: { project: string; name: string }) =>
+    api.post<{ repositorio: Repositorio; web_url: string | null; link_salvo_no_produto: boolean }>(
+      `/produtos/${productId}/repositorio-azure`, data, { timeout: 60_000 },
+    ).then((r) => r.data),
 
   descobrirRepos: (project: string) =>
     api

@@ -14,6 +14,13 @@ Modelo:
 
 ---
 
+## 2026-09-28 — Cadastro do produto cria o repositório no Azure DevOps
+
+- **Pedido:** no cadastro do produto, um campo com o nome do repositório gerado a partir do nome do produto; ao confirmar, criar o repositório no Azure DevOps e já salvar o link no campo de repositório do produto.
+- **Feito:** componente `produtos/components/AzureRepoField.tsx` (+ `azureRepo.ts`): "Criar repositório no Azure DevOps", projeto do Azure (lembra o último usado, localStorage) e nome em kebab-case sem acento que acompanha o nome do produto até ser editado ("Seguir o nome do produto" volta); confere no Azure ao digitar (atraso de 450 ms) se é válido, livre e se o token pode criar lá; o botão de salvar só libera com "Disponível". Usado no "Novo produto" da classificação do card (marcado por padrão em Desenvolvimento) e no formulário de produto do módulo Produtos (criar, ou editar produto sem link; o link manual fica desabilitado). Depois de salvar o produto, `POST /produtos/{id}/repositorio-azure` cria no Azure, cadastra no inventário (`CodeRepository` com `remote_repo_id`, sync de commits ligado), vincula ao produto e grava `link_repositorio` se estiver vazio; falha no Azure não desfaz o produto (aviso "Produto salvo, mas o repositório não foi criado: ..."). Checagem: `GET /produtos/repositorios/azure/nome` (existência e permissão em paralelo). Cliente Azure: `create_repository` (409 = já existe) e `can_create_repository` (API de permissões, namespace Git, bit 256, só leitura).
+- **Conferido:** o PAT tem a permissão CreateRepository (consultada sem criar nada) em SGE, AgentesAI, moskit e idigital. Checagem pela API (existente, livre, inválido); fluxo de banco com Azure simulado em transação desfeita (inventário, vínculo, link); tela nos dois lugares (nome gerado, disponível em ~2s, nome existente bloqueia, nenhuma gravação ao cancelar); 13 testes em `test_repo_azure.py`. **Criação real no Azure não foi exercitada** (cria recurso na organização) — o primeiro uso real é o teste.
+- **Arquivos:** `backend/app/modules/produtos/{azure_devops_client.py,repos_service.py,schemas.py,api/routes.py}`; `backend/app/core/config.py`; `.env.example`; `backend/tests/test_repo_azure.py`; `frontend/src/api/produtos.ts`; `frontend/src/modules/produtos/components/{AzureRepoField.tsx,azureRepo.ts}`; `frontend/src/modules/produtos/ProductFormDialog.tsx`; `frontend/src/modules/projetos/BacklogClassificationDialog.tsx`.
+
 ## 2026-09-28 — PO troca o produto vinculado ao projeto
 
 - **Pedido:** dar ao PO a possibilidade de mudar o produto vinculado ao projeto no kanban Projetos e Programas.

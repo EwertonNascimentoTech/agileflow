@@ -1416,6 +1416,32 @@ class AzureRepoMini(BaseModel):
     ja_cadastrado: bool = False
 
 
+# Nome de repositório criado pelo AgileFlow: minúsculas, números, ".", "_" e "-" (padrão do
+# time: kebab-case), começando e terminando com letra/número, até 64 caracteres.
+REPO_NAME_PATTERN = r"^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+
+
+class AzureRepoNameCheck(BaseModel):
+    project: str
+    name: str
+    valido: bool
+    disponivel: bool = False
+    pode_criar: Optional[bool] = None       # None = não deu para consultar a permissão
+    motivo: Optional[str] = None
+    web_url: Optional[str] = None           # do existente (indisponível) ou o previsto
+
+
+class AzureRepoCreate(BaseModel):
+    project: str = Field(..., min_length=1, max_length=200)
+    name: str = Field(..., min_length=1, max_length=64, pattern=REPO_NAME_PATTERN)
+
+
+class AzureRepoCreateResult(BaseModel):
+    repositorio: RepositoryResponse
+    web_url: Optional[str] = None
+    link_salvo_no_produto: bool = False
+
+
 class RepoSyncResult(BaseModel):
     repositorios: int = 0
     commits_novos: int = 0

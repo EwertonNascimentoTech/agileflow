@@ -14,6 +14,10 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { toast } from "@/lib/toast"
 import { nullableStr } from "@/lib/utils"
+import AzureRepoField from "@/modules/produtos/components/AzureRepoField"
+import {
+  azureRepoStatus, createRepoForProduct, newAzureRepoDraft, type AzureRepoDraft,
+} from "@/modules/produtos/components/azureRepo"
 import {
   CATEGORIA_LABEL, CATEGORIA_OPTS, LIFECYCLE_LABEL, LIFECYCLE_OPTS, isCategoriaExterna,
 } from "@/modules/produtos/constants"
@@ -22,7 +26,7 @@ const NONE = "__none__"
 const EMPTY_EXTRA = {
   sigla: "", link_descricao: "", publico_alvo: "", url_acesso: "", observacoes: "",
   desenvolvido_por: "", fornecedor_cnpj: "", ambiente_tecnologico: "", tecnologias: "",
-  link_repositorio: "", link_dev: "", link_hml: "", link_prd: "",
+  link_repositorio: "", link_hml: "", link_prd: "",
 }
 type ExtraKey = keyof typeof EMPTY_EXTRA
 export function ProductFormDialog({ open, onOpenChange, product, onSaved }: {
@@ -53,6 +57,10 @@ export function ProductFormDialog({ open, onOpenChange, product, onSaved }: {
   const [corporativo, setCorporativo] = useState(false)
   const [extra, setExtra] = useState({ ...EMPTY_EXTRA })
   const [saving, setSaving] = useState(false)
+  // Criar o repositório no Azure DevOps: no cadastro novo e em produto ainda sem link.
+  const [repo, setRepo] = useState<AzureRepoDraft>(() => newAzureRepoDraft(false))
+  const canCreateRepo = !editing || !(product?.link_repositorio ?? "").trim()
+  const repoStatus = azureRepoStatus(repo, name)
   const upd = (k: ExtraKey) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setExtra((s) => ({ ...s, [k]: e.target.value }))
 
   useEffect(() => {
@@ -83,9 +91,10 @@ export function ProductFormDialog({ open, onOpenChange, product, onSaved }: {
       sigla: product?.sigla ?? "", link_descricao: product?.link_descricao ?? "", publico_alvo: product?.publico_alvo ?? "",
       url_acesso: product?.url_acesso ?? "", observacoes: product?.observacoes ?? "", desenvolvido_por: product?.desenvolvido_por ?? "",
       fornecedor_cnpj: product?.fornecedor_cnpj ?? "", ambiente_tecnologico: product?.ambiente_tecnologico ?? "",
-      tecnologias: product?.tecnologias ?? "", link_repositorio: product?.link_repositorio ?? "", link_dev: product?.link_dev ?? "",
+      tecnologias: product?.tecnologias ?? "", link_repositorio: product?.link_repositorio ?? "",
       link_hml: product?.link_hml ?? "", link_prd: product?.link_prd ?? "",
     })
+    setRepo(newAzureRepoDraft(false))
   }, [open, product])
 
   async function save() {
@@ -98,7 +107,9 @@ export function ProductFormDialog({ open, onOpenChange, product, onSaved }: {
       sigla: t(extra.sigla), link_descricao: t(extra.link_descricao), publico_alvo: t(extra.publico_alvo),
       url_acesso: t(extra.url_acesso), observacoes: t(extra.observacoes), desenvolvido_por: t(extra.desenvolvido_por),
       fornecedor_cnpj: t(extra.fornecedor_cnpj), ambiente_tecnologico: t(extra.ambiente_tecnologico),
-      tecnologias: t(extra.tecnologias), link_repositorio: t(extra.link_repositorio), link_dev: t(extra.link_dev),
+      tecnologias: t(extra.tecnologias),
+      // Com "Criar repositório" marcado o link vem do Azure DevOps, não do campo manual.
+      link_repositorio: canCreateRepo && repo.enabled ? undefined : t(extra.link_repositorio),
       link_hml: t(extra.link_hml), link_prd: t(extra.link_prd),
       categoria: sel(categoria) as ProductCategoria | undefined,
       status_produto: sel(status) as ProductStatus | undefined,
@@ -119,7 +130,7 @@ export function ProductFormDialog({ open, onOpenChange, product, onSaved }: {
       ...digital,
     }
     try {
-      const p = editing
+      let p = editing
         ? await produtosApi.updateProduct(product!.id, {
             name: payload.name,
             description: nullableStr(description),
@@ -141,8 +152,7 @@ export function ProductFormDialog({ open, onOpenChange, product, onSaved }: {
             fornecedor_cnpj: nullableStr(extra.fornecedor_cnpj),
             ambiente_tecnologico: nullableStr(extra.ambiente_tecnologico),
             tecnologias: nullableStr(extra.tecnologias),
-            link_repositorio: nullableStr(extra.link_repositorio),
-            link_dev: nullableStr(extra.link_dev),
+            link_repositorio: canCreateRepo && repo.enabled ? null : nullableStr(extra.link_repositorio),
             link_hml: nullableStr(extra.link_hml),
             link_prd: nullableStr(extra.link_prd),
             categoria: selNullable(categoria) as ProductCategoria | null,
@@ -153,6 +163,10 @@ export function ProductFormDialog({ open, onOpenChange, product, onSaved }: {
           })
         : await produtosApi.createProduct(payload)
       toast.success(editing ? "Produto atualizado." : "Produto criado.")
+      // Repositório no Azure DevOps (se marcado): recarrega o produto para trazer o link salvo.
+      if (canCreateRepo && repo.enabled && await createRepoForProduct(p.id, repo, name.trim())) {
+        p = await produtosApi.getProduct(p.id)
+      }
       onSaved(p)
     } catch { toast.error("Não foi possível salvar.") } finally { setSaving(false) }
   }
@@ -300,9 +314,16 @@ export function ProductFormDialog({ open, onOpenChange, product, onSaved }: {
           {/* ── Repositório e ambientes ── */}
           <div className="border-t pt-3">
             <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Repositório e ambientes</p>
+            {canCreateRepo && (
+              <div className="mb-3"><AzureRepoField productName={name} draft={repo} setDraft={setRepo} disabled={saving} /></div>
+            )}
             <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5"><Label>Link do repositório</Label><Input value={extra.link_repositorio} onChange={upd("link_repositorio")} placeholder="https://" /></div>
-              <div className="space-y-1.5"><Label>Ambiente DEV</Label><Input value={extra.link_dev} onChange={upd("link_dev")} placeholder="https://" /></div>
+              <div className="space-y-1.5">
+                <Label>Link do repositório</Label>
+                <Input value={canCreateRepo && repo.enabled ? "" : extra.link_repositorio} onChange={upd("link_repositorio")}
+                  disabled={canCreateRepo && repo.enabled}
+                  placeholder={canCreateRepo && repo.enabled ? "preenchido ao criar o repositório" : "https://"} />
+              </div>
               <div className="space-y-1.5"><Label>Ambiente HML</Label><Input value={extra.link_hml} onChange={upd("link_hml")} placeholder="https://" /></div>
               <div className="space-y-1.5"><Label>Ambiente PRD</Label><Input value={extra.link_prd} onChange={upd("link_prd")} placeholder="https://" /></div>
             </div>
@@ -310,7 +331,7 @@ export function ProductFormDialog({ open, onOpenChange, product, onSaved }: {
         </div>
         <DialogFooter className="gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button onClick={() => void save()} disabled={saving || !name.trim()}>{saving && <Loader2 size={14} className="mr-1.5 animate-spin" />}{editing ? "Salvar" : "Criar"}</Button>
+          <Button onClick={() => void save()} disabled={saving || !name.trim() || !repoStatus.ready}>{saving && <Loader2 size={14} className="mr-1.5 animate-spin" />}{editing ? "Salvar" : "Criar"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -118,7 +118,7 @@ class Settings(BaseSettings):
     AZURE_AI_PORTAL_AGENT_ID: str = ""
 
     # ── Azure DevOps — commits dos repositórios vinculados aos produtos ──
-    # PAT único da instituição (escopo mínimo: Code → Read). Sem PAT a integração fica
+    # PAT único da instituição (escopo: Code → Read; Code → Read & write para criar repositório no cadastro do produto). Sem PAT a integração fica
     # inerte: o job vira no-op e a UI mostra "não configurada".
     AZURE_DEVOPS_ORG_URL: str = "https://dev.azure.com/processostotecnologia"
     AZURE_DEVOPS_PAT: str = ""

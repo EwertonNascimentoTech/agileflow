@@ -100,6 +100,8 @@ Minhas competências (`/app/modules/teamops/competencias`, menu para quem tem tea
 
 Portf?lio derivado de projetos, ?reas/diretorias, fornecedores, documentos, processos, indicadores do produto, reposit?rios Azure DevOps (webhook sem JWT). P?blico: `PUBLIC_PRODUTOS_PORTFOLIO_TOKEN`.
 
+Repositório no Azure DevOps a partir do cadastro do produto: `GET /produtos/repositorios/azure/nome` (válido/livre/permissão) e `POST /produtos/{id}/repositorio-azure` (cria, cadastra no inventário, vincula e grava `link_repositorio`). PAT precisa de Code (Read & write) para criar.
+
 ### Sustentação e catálogo de problemas (base do Service Desk)
 
 - Aba Sustentação da ficha: um cartão por nível (canal, responsáveis de Times/Clientes, observações) com a tabela de problemas (SLA em horas úteis, soluções possíveis) e "Adicionar problema"; diálogo com nome, descrição, SLA e editor de soluções.

@@ -355,6 +355,19 @@ async def list_azure_projetos(_ctx_=Depends(_ctx), __=Depends(_can_manage)):
         raise HTTPException(503, str(e))
 
 
+@router.get("/repositorios/azure/nome", response_model=schemas.AzureRepoNameCheck)
+async def checar_nome_repo_azure(
+    project: str = Query(..., min_length=1, max_length=200),
+    name: str = Query(..., max_length=200),
+    _ctx_=Depends(_ctx), __=Depends(_can_manage),
+):
+    """Cadastro do produto: o nome do repositório é válido, está livre e dá para criar?"""
+    try:
+        return await RepositoryService.check_azure_name(project, name)
+    except azure_devops_client.AzureDevOpsError as e:
+        raise HTTPException(503, str(e))
+
+
 @router.get("/repositorios/azure/projetos/{project}/repos", response_model=list[schemas.AzureRepoMini])
 async def descobrir_azure_repos(project: str, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
     """Repositórios de um projeto Azure — resolve os links que apontam só para o projeto."""
@@ -461,6 +474,17 @@ async def list_products(ctx: ModuleContext = Depends(_ctx), _view=Depends(_can_v
 @router.post("", response_model=schemas.ProductResponse, status_code=201)
 async def create_product(data: schemas.ProductCreate, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
     return await ProductService.create(ctx.db, data, ctx.user.id)
+
+
+@router.post("/{product_id}/repositorio-azure", response_model=schemas.AzureRepoCreateResult, status_code=201)
+async def criar_repositorio_azure(
+    product_id: uuid.UUID, data: schemas.AzureRepoCreate, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage),
+):
+    """Cria o repositório no Azure DevOps e liga ao produto (link + inventário de commits)."""
+    try:
+        return await RepositoryService.create_in_azure(ctx.db, product_id, data, ctx.user.id)
+    except azure_devops_client.AzureDevOpsError as e:
+        raise HTTPException(502, str(e))
 
 
 @router.get("/{product_id}", response_model=schemas.ProductResponse)

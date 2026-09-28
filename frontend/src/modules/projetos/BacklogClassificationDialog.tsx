@@ -16,6 +16,10 @@ import {
 } from "@/api/produtos"
 import { CATEGORIA_LABEL, CATEGORIA_OPTS } from "@/modules/produtos/constants"
 import { teamopsApi, type Person } from "@/api/teamops"
+import AzureRepoField from "@/modules/produtos/components/AzureRepoField"
+import {
+  azureRepoStatus, createRepoForProduct, newAzureRepoDraft, type AzureRepoDraft,
+} from "@/modules/produtos/components/azureRepo"
 import type { CardClassification, ProjectTask } from "@/api/projetos"
 
 type ClassificationResult = {
@@ -180,6 +184,8 @@ export function BacklogClassificationDialog({ open, task, mode = "backlog_exit",
   const [relDescricao, setRelDescricao] = useState("")
   const [saving, setSaving] = useState(false)
   const [procurementRequired, setProcurementRequired] = useState<boolean | null>(null)
+  // Repositório no Azure DevOps para o produto novo (nome acompanha o nome do produto).
+  const [repo, setRepo] = useState<AzureRepoDraft>(() => newAzureRepoDraft(false))
 
   // Pré-preenche a partir do card (reclassificação após voltar ao backlog) e carrega produtos.
   useEffect(() => {
@@ -194,6 +200,7 @@ export function BacklogClassificationDialog({ open, task, mode = "backlog_exit",
     // PO já vem preenchido pelo responsável do card (task.assigned_to = person_id).
     setNewPoPersonId(task.assigned_to ?? "")
     setNewCorporativo(false)
+    setRepo(newAzureRepoDraft(false))
     setRelVersao("")
     setRelNome("")
     setRelTipo("melhoria")
@@ -238,12 +245,12 @@ export function BacklogClassificationDialog({ open, task, mode = "backlog_exit",
     if (iaAssisted === null) return false
     if (askProcurement && procurementRequired === null) return false
     if (allowNewProduct) {
-      if (productMode === "new") return newName.trim().length >= 2
+      if (productMode === "new") return newName.trim().length >= 2 && azureRepoStatus(repo, newName).ready
       return !!selectedProductId
     }
     // melhoria: produto existente + release (existente ou nova).
     return !!selectedProductId && (reuseExistingRelease || relVersao.trim().length >= 1)
-  }, [classification, iaAssisted, moduleError, askProcurement, procurementRequired, allowNewProduct, productMode, newName, selectedProductId, relVersao, reuseExistingRelease, changingProduct, task?.linked_product_id])
+  }, [classification, iaAssisted, moduleError, askProcurement, procurementRequired, allowNewProduct, productMode, newName, selectedProductId, relVersao, reuseExistingRelease, changingProduct, task?.linked_product_id, repo])
 
   async function handleConfirm() {
     if (!task || !classification || iaAssisted === null) return
@@ -263,6 +270,8 @@ export function BacklogClassificationDialog({ open, task, mode = "backlog_exit",
           origin_task_id: task.id,
         })
         productId = created.id
+        // Repositório no Azure DevOps (se marcado): falha não impede a classificação.
+        await createRepoForProduct(created.id, repo, newName.trim())
       }
       if (!productId) {
         toast.error("Selecione ou cadastre um produto.")
@@ -379,7 +388,12 @@ export function BacklogClassificationDialog({ open, task, mode = "backlog_exit",
                 {allowNewProduct && (
                   <button
                     type="button"
-                    onClick={() => setProductMode((m) => (m === "new" ? "select" : "new"))}
+                    onClick={() => {
+                      const novo = productMode !== "new"
+                      setProductMode(novo ? "new" : "select")
+                      // Produto novo de desenvolvimento nasce com repositório (dá para desmarcar).
+                      if (novo) setRepo((d) => ({ ...d, enabled: classification === "desenvolvimento" }))
+                    }}
                     className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
                   >
                     {productMode === "new" ? (<><X size={13} /> Usar existente</>) : (<><Plus size={13} /> Novo produto</>)}
@@ -453,6 +467,7 @@ export function BacklogClassificationDialog({ open, task, mode = "backlog_exit",
                       </Select>
                     </div>
                   </div>
+                  <AzureRepoField productName={newName} draft={repo} setDraft={setRepo} disabled={saving} />
                   <p className="text-[11px] text-muted-foreground">
                     Cadastro mínimo — complete os detalhes depois no módulo Produtos.
                   </p>

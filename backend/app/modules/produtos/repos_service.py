@@ -11,10 +11,13 @@ de commits.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import re
 import uuid
 from datetime import date, datetime, timedelta
 from typing import Optional
+from urllib.parse import quote
 
 from fastapi import HTTPException
 from sqlalchemy import String, cast, delete, func, or_, select, text, update
@@ -199,6 +202,68 @@ class RepositoryService:
         repo.updated_at = datetime.utcnow()
         await db.commit()
         return await cls.get_one(db, repository_id)
+
+    # ── criar no Azure DevOps (cadastro do produto) ──
+    _NOME_REPO = re.compile(schemas.REPO_NAME_PATTERN)
+    _NOME_INVALIDO = (
+        "Use letras minúsculas, números e hífen (até 64 caracteres), começando e terminando "
+        "com letra ou número."
+    )
+
+    @classmethod
+    async def check_azure_name(cls, project: str, name: str) -> schemas.AzureRepoNameCheck:
+        """Nome válido? Livre no projeto? O token pode criar lá? (nada é criado aqui)"""
+        project, name = (project or "").strip(), (name or "").strip()
+        if not cls._NOME_REPO.match(name):
+            return schemas.AzureRepoNameCheck(project=project, name=name, valido=False, motivo=cls._NOME_INVALIDO)
+        # As duas consultas ao Azure em paralelo (a de permissão só importa se o nome estiver livre).
+        existente, pode = await asyncio.gather(
+            azure.find_repository(project, name), azure.can_create_repository(project),
+        )
+        if existente:
+            return schemas.AzureRepoNameCheck(
+                project=project, name=name, valido=True, disponivel=False,
+                motivo=f"Já existe um repositório com esse nome no projeto {project}.",
+                web_url=existente.get("web_url"),
+            )
+        return schemas.AzureRepoNameCheck(
+            project=project, name=name, valido=True, disponivel=True, pode_criar=pode,
+            motivo=("O AgileFlow não tem permissão para criar repositório neste projeto do Azure DevOps."
+                    if pode is False else None),
+            web_url=f"{azure._base()}/{quote(project)}/_git/{name}",
+        )
+
+    @classmethod
+    async def create_in_azure(
+        cls, db: AsyncSession, product_id: uuid.UUID, data: schemas.AzureRepoCreate,
+        user_id: Optional[uuid.UUID],
+    ) -> schemas.AzureRepoCreateResult:
+        """Cria o repositório no Azure DevOps, cadastra no inventário (commits sincronizados),
+        vincula ao produto e grava o link em `link_repositorio` se o produto ainda não tem."""
+        product = (await db.execute(select(Product).where(Product.id == product_id))).scalar_one_or_none()
+        if not product:
+            raise HTTPException(404, "Produto não encontrado.")
+        project, name = data.project.strip(), data.name.strip()
+        if await azure.find_repository(project, name):
+            raise HTTPException(409, f"Já existe um repositório '{name}' no projeto {project} do Azure DevOps.")
+        criado = await azure.create_repository(project, name)
+        repo, _ = await cls.get_or_create(
+            db, organization="", project=criado["project"], repository=criado["name"],
+            web_url=criado["web_url"], user_id=user_id,
+        )
+        repo.remote_repo_id = criado["id"]
+        repo.web_url = criado["web_url"] or repo.web_url
+        await cls.link(db, product.id, repo.id, user_id)
+        link_salvo = False
+        if not (product.link_repositorio or "").strip():
+            product.link_repositorio = repo.web_url
+            product.updated_by = user_id
+            product.updated_at = datetime.utcnow()
+            link_salvo = True
+        await db.commit()
+        return schemas.AzureRepoCreateResult(
+            repositorio=await cls.get_one(db, repo.id), web_url=repo.web_url, link_salvo_no_produto=link_salvo,
+        )
 
     @staticmethod
     async def delete(db: AsyncSession, repository_id: uuid.UUID, purgar: bool = False) -> None:
