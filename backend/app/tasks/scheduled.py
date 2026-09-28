@@ -51,6 +51,11 @@ celery_app.conf.beat_schedule = {
         "task": "scheduled.check_unassigned_occurrences",
         "schedule": 300.0,
     },
+    # Assistente do Portal: base de busca por significado igual ao que o Portal mostra.
+    "sync-portal-knowledge": {
+        "task": "scheduled.sync_portal_knowledge",
+        "schedule": 600.0,
+    },
 }
 
 
@@ -236,6 +241,49 @@ async def _index_embeddings(schema: str, source_type: str, source_id: str, conte
 
     async with AsyncSessionLocal() as db:
         return await EmbeddingService.index(db, schema, source_type, uuid.UUID(source_id), content)
+
+
+@celery_app.task(name="scheduled.sync_portal_knowledge")
+def sync_portal_knowledge_scheduled_task():
+    """A cada 10 min: grava na base do assistente só o que mudou (sem mudança, nada é gravado
+    e a execução não entra no log). Sem VECTOR_ENABLED, não faz nada."""
+    from app.core.embeddings import EmbeddingService
+
+    if not EmbeddingService.enabled():
+        return
+    _run(_sync_portal_knowledge_all())
+
+
+async def _sync_portal_knowledge_all() -> None:
+    from sqlalchemy import select, text
+    from app.core.database import AsyncSessionLocal
+    from app.modules.projetos.assistant_knowledge import AssistantKnowledgeService
+    from app.modules.super_admin.models import Tenant
+
+    async with AsyncSessionLocal() as db:
+        await db.execute(text("SET search_path TO public"))
+        tenants = list((await db.execute(
+            select(Tenant.schema_name).where(Tenant.is_active == True)  # noqa: E712
+        )).scalars())
+    for schema in tenants:
+        try:
+            result = await AssistantKnowledgeService.run_sync(schema, "agendado")
+            if result and result.get("changed"):
+                logger.info("[portal_knowledge] %s: %s", schema, result)
+        except Exception as e:  # noqa: BLE001
+            logger.error("[portal_knowledge] %s: %s", schema, e)
+
+
+@celery_app.task(name="embeddings.sync_portal_knowledge")
+def sync_portal_knowledge_task(schema: str, run_id: str, force: bool = False):
+    """Sincronizar agora / reindexar tudo (Config → Assistente IA). O resultado fica na execução."""
+    _run(_sync_portal_knowledge_one(schema, run_id, force))
+
+
+async def _sync_portal_knowledge_one(schema: str, run_id: str, force: bool) -> None:
+    from app.modules.projetos.assistant_knowledge import AssistantKnowledgeService
+
+    await AssistantKnowledgeService.run_sync(schema, "reindexar" if force else "manual", run_id, force)
 
 
 @celery_app.task(name="payroll.sync_user", bind=True, max_retries=6)

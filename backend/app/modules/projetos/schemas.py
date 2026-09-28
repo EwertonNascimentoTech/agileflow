@@ -2706,6 +2706,201 @@ class PortalAssistantAnswer(BaseModel):
     sources: list[PortalAssistantSource] = Field(default_factory=list)
 
 
+# ── Portal: tour guiado ────────────────────────────────────────────────────────
+
+class PortalTourState(BaseModel):
+    offer: bool
+    status: Optional[str] = None
+    version: int
+    updated_at: Optional[datetime] = None
+
+
+class PortalTourUpdate(BaseModel):
+    status: Literal["iniciado", "concluido", "interrompido", "recusado"]
+    step: Optional[int] = Field(None, ge=0, le=200)
+
+
+# ── Assistente do Portal: base de busca por significado (Config → Assistente IA) ──
+
+def _utc_iso(value: Optional[datetime]) -> Optional[str]:
+    """Horários gravados em UTC sem fuso: a tela converte para o horário local."""
+    return value.replace(tzinfo=timezone.utc).isoformat() if value else None
+
+
+class AiAssistantSettingsResponse(BaseModel):
+    model_config = {"from_attributes": True}
+
+    rag_enabled: bool = True
+    top_k: int = 8
+    min_score: float = 0.45
+    sources: Optional[list[str]] = None
+    auto_sync: bool = True
+    last_check_at: Optional[datetime] = None
+    last_check_status: Optional[str] = None
+    last_check_error: Optional[str] = None
+    updated_at: Optional[datetime] = None
+
+    @field_serializer("last_check_at", "updated_at")
+    def _ser_dt(self, v: Optional[datetime]) -> Optional[str]:
+        return _utc_iso(v)
+
+
+class AiAssistantSettingsUpdate(BaseModel):
+    rag_enabled: Optional[bool] = None
+    top_k: Optional[int] = Field(None, ge=1, le=20)
+    min_score: Optional[float] = Field(None, ge=0.0, le=0.95)
+    sources: Optional[list[str]] = None
+    auto_sync: Optional[bool] = None
+
+
+class AiSyncRunResponse(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    trigger: str
+    status: str
+    requested_by: Optional[uuid.UUID] = None
+    created_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    duration_ms: Optional[int] = None
+    docs_total: int = 0
+    docs_changed: int = 0
+    docs_removed: int = 0
+    chunks_embedded: int = 0
+    progress_done: int = 0
+    progress_total: int = 0
+    by_type: Optional[dict] = None
+    error_message: Optional[str] = None
+
+    @field_serializer("created_at", "started_at", "finished_at")
+    def _ser_dt(self, v: Optional[datetime]) -> Optional[str]:
+        return _utc_iso(v)
+
+
+class AiSyncRunPage(BaseModel):
+    items: list[AiSyncRunResponse]
+    total: int
+    limit: int
+    offset: int
+
+
+class AiKnowledgeSourceStat(BaseModel):
+    key: str
+    label: str
+    enabled: bool
+    docs: int = 0
+    chunks: int = 0
+    last_at: Optional[datetime] = None
+    pending: int = 0
+
+    @field_serializer("last_at")
+    def _ser_dt(self, v: Optional[datetime]) -> Optional[str]:
+        return _utc_iso(v)
+
+
+class AiEmbeddingsHealth(BaseModel):
+    ok: bool
+    model: Optional[str] = None
+    loaded: bool = False
+    error: Optional[str] = None
+
+
+class AiKnowledgeTotals(BaseModel):
+    docs: int = 0
+    chunks: int = 0
+    last_at: Optional[datetime] = None
+
+    @field_serializer("last_at")
+    def _ser_dt(self, v: Optional[datetime]) -> Optional[str]:
+        return _utc_iso(v)
+
+
+class AiKnowledgePending(BaseModel):
+    changed: dict[str, int] = Field(default_factory=dict)
+    removed: dict[str, int] = Field(default_factory=dict)
+    chunks: int = 0
+    docs_total: int = 0
+
+
+class AiAssistantUsage(BaseModel):
+    questions: int = 0
+    with_hits: int = 0
+    avg_top_score: Optional[float] = None
+    avg_total_ms: Optional[int] = None
+    errors: int = 0
+    search_unavailable: int = 0
+    users: int = 0
+
+
+class AiAssistantStatus(BaseModel):
+    vector_enabled: bool
+    extension_version: Optional[str] = None
+    index_ready: bool
+    service: AiEmbeddingsHealth
+    expected_model: str
+    index_models: list[str] = Field(default_factory=list)
+    assistant_ready: bool
+    settings: AiAssistantSettingsResponse
+    sources: list[AiKnowledgeSourceStat]
+    totals: AiKnowledgeTotals
+    pending: Optional[AiKnowledgePending] = None
+    pending_error: Optional[str] = None
+    last_run: Optional[AiSyncRunResponse] = None
+    current_run: Optional[AiSyncRunResponse] = None
+    usage_7d: AiAssistantUsage
+
+
+class AiSyncRequest(BaseModel):
+    # true = recalcula todos os vetores (troca de modelo, suspeita de índice ruim)
+    force: bool = False
+
+
+class AiSearchTestRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=500)
+    limit: int = Field(10, ge=1, le=30)
+
+
+class AiSearchTestHit(BaseModel):
+    source_type: str
+    source_label: str
+    source_id: uuid.UUID
+    scope_id: Optional[uuid.UUID] = None
+    scope_title: Optional[str] = None
+    chunk_index: int
+    content: str
+    score: float
+    above_min: bool
+
+
+class AiAssistantLogItem(BaseModel):
+    id: uuid.UUID
+    created_at: Optional[datetime] = None
+    user_id: Optional[uuid.UUID] = None
+    user_name: Optional[str] = None
+    viewer: str
+    status: str
+    search_mode: str
+    hits: int = 0
+    top_score: Optional[float] = None
+    hit_types: Optional[dict] = None
+    projects_in_scope: int = 0
+    context_chars: int = 0
+    search_ms: Optional[int] = None
+    total_ms: int = 0
+
+    @field_serializer("created_at")
+    def _ser_dt(self, v: Optional[datetime]) -> Optional[str]:
+        return _utc_iso(v)
+
+
+class AiAssistantLogPage(BaseModel):
+    items: list[AiAssistantLogItem]
+    total: int
+    limit: int
+    offset: int
+
+
 # ── Operação Assistida: entrada (POP.COR.GTD.003) ────────────────────────────
 
 class AssistedOpsPrereqItem(BaseModel):

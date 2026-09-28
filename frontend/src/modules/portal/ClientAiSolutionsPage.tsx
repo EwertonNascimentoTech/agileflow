@@ -102,7 +102,7 @@ export default function ClientAiSolutionsPage() {
           <ChevronRight size={14} />
           <span className="font-medium text-foreground">Soluções com IA</span>
         </nav>
-        <div className="flex flex-wrap items-start justify-between gap-4">
+        <div data-tour="ai-solutions-title" className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex min-w-0 items-start gap-4">
             <IconTile icon="Sparkles" color="#7C3AED" size={56} />
             <div className="min-w-0">
@@ -252,7 +252,7 @@ export default function ClientAiSolutionsPage() {
         )}
       </Card>
 
-      <Card>
+      <Card tour="ai-journey">
         <div className="border-b px-5 py-4">
           <h2 className="text-lg font-semibold">Como funciona</h2>
           <p className="text-sm text-muted-foreground">O caminho de um pedido até a solução em produção. Os passos em destaque dependem de você.</p>

@@ -9,6 +9,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     Enum as SAEnum,
+    Float,
     ForeignKey,
     Integer,
     Numeric,
@@ -1309,3 +1310,91 @@ class ProjectAssistedOpsDev(TenantBase):
     )
     created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+# ── Assistente do Portal: base de busca por significado (pgvector) ─────────
+
+class ProjectAiAssistantSettings(TenantBase):
+    """Ajustes da busca por significado do Assistente do Portal (linha única, Config de Projetos).
+    Os vetores ficam em `{schema}.embeddings` (fora do TenantBase — ver app/core/embeddings.py)."""
+
+    __tablename__ = "project_ai_assistant_settings"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Desligado: o assistente responde só com os dados estruturados (como antes do pgvector).
+    rag_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    top_k: Mapped[int] = mapped_column(Integer, nullable=False, default=8)
+    min_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.45)
+    # Origens indexadas (chaves de assistant_knowledge.SOURCES); nulo = todas.
+    sources: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    # Sincronização automática (Celery beat, a cada 10 min).
+    auto_sync: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Última verificação automática, com ou sem mudança (a execução só vira log se gravar algo).
+    last_check_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_check_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    last_check_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    updated_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class ProjectAiSyncRun(TenantBase):
+    """Execução da sincronização da base do assistente (log em Config → Assistente IA)."""
+
+    __tablename__ = "project_ai_sync_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    trigger: Mapped[str] = mapped_column(String(20), nullable=False)  # agendado | manual | reindexar
+    status: Mapped[str] = mapped_column(String(20), nullable=False)   # na_fila | rodando | ok | erro | ignorada
+    requested_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Pulso a cada grupo gravado: sem pulso há 15 min = execução presa (worker caiu).
+    heartbeat_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    docs_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    docs_changed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    docs_removed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    chunks_embedded: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    progress_done: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    progress_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    by_type: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class ProjectAiAssistantLog(TenantBase):
+    """Uma linha por pergunta ao Assistente do Portal. SÓ métricas: a pergunta e a resposta
+    nunca são gravadas (a conversa vive no navegador)."""
+
+    __tablename__ = "project_ai_assistant_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    viewer: Mapped[str] = mapped_column(String(10), nullable=False)       # cliente | equipe
+    status: Mapped[str] = mapped_column(String(20), nullable=False)       # ok | erro | indisponivel | limite
+    # busca | sem_trechos | desligada | indisponivel | sem_indice
+    search_mode: Mapped[str] = mapped_column(String(20), nullable=False)
+    hits: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    top_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    hit_types: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    projects_in_scope: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    context_chars: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    search_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    total_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class ProjectPortalTour(TenantBase):
+    """Tour guiado do Portal por pessoa: oferecido uma vez no 1º acesso do cliente (sem linha =
+    ainda não ofereceu). Refazer pelo botão "?" não muda nada aqui além do status."""
+
+    __tablename__ = "project_portal_tours"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, unique=True)
+    # iniciado | concluido | interrompido | recusado
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    step: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)       # onde parou
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)  # versão do roteiro
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

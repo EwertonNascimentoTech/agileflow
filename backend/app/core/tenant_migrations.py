@@ -4131,6 +4131,10 @@ _INDEX_SPECS: list[tuple[str, str, str, tuple[str, ...], str | None]] = [
     ("project_occurrences_project", "project_occurrences", "project_task_id", ("project_task_id",), None),
     ("project_occurrences_client", "project_occurrences", "opened_by_client_id", ("opened_by_client_id",), None),
     ("project_assisted_ops_devs_person", "project_assisted_ops_devs", "person_id", ("person_id",), None),
+    # ── assistente do portal: busca por significado (step 146) ──────────
+    ("embeddings_scope", "embeddings", "scope_id, source_type", ("scope_id", "source_type"), None),
+    ("project_ai_sync_runs_created", "project_ai_sync_runs", "created_at DESC", ("created_at",), None),
+    ("project_ai_assistant_logs_created", "project_ai_assistant_logs", "created_at DESC", ("created_at",), None),
     # ── notificações ────────────────────────────────────────────────────
     ("notif_user", "notifications", "user_id, is_read, created_at DESC", ("user_id", "is_read", "created_at"), None),
     # ── commits por ambiente (PROD/HML/DEV) ─────────────────────────────
@@ -4711,6 +4715,87 @@ async def _step_145_embeddings(conn: AsyncConnection, schema: str) -> None:
     ))
 
 
+async def _step_146_assistente_busca(conn: AsyncConnection, schema: str) -> None:
+    """Assistente do Portal com busca por significado: `scope_id` nos trechos (card-raiz ou
+    programa que dá acesso — a busca filtra por ele), ajustes, execuções da sincronização e log
+    de perguntas (só métricas). Índices em `_INDEX_SPECS`. A coluna só entra se a tabela
+    `embeddings` existir (step 145); sem pgvector, roda de novo no próximo startup."""
+    await _add_columns(conn, schema, "embeddings", {"scope_id": "UUID"})
+    if not await _table_exists(conn, schema, "project_ai_assistant_settings"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_ai_assistant_settings (
+                id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                rag_enabled       BOOLEAN NOT NULL DEFAULT true,
+                top_k             INTEGER NOT NULL DEFAULT 8,
+                min_score         DOUBLE PRECISION NOT NULL DEFAULT 0.45,
+                sources           JSONB,
+                auto_sync         BOOLEAN NOT NULL DEFAULT true,
+                last_check_at     TIMESTAMP,
+                last_check_status VARCHAR(20),
+                last_check_error  TEXT,
+                updated_by        UUID,
+                updated_at        TIMESTAMP
+            )
+        """))
+    if not await _table_exists(conn, schema, "project_ai_sync_runs"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_ai_sync_runs (
+                id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                trigger         VARCHAR(20) NOT NULL,
+                status          VARCHAR(20) NOT NULL,
+                requested_by    UUID,
+                created_at      TIMESTAMP DEFAULT now(),
+                started_at      TIMESTAMP,
+                finished_at     TIMESTAMP,
+                heartbeat_at    TIMESTAMP,
+                duration_ms     INTEGER,
+                docs_total      INTEGER NOT NULL DEFAULT 0,
+                docs_changed    INTEGER NOT NULL DEFAULT 0,
+                docs_removed    INTEGER NOT NULL DEFAULT 0,
+                chunks_embedded INTEGER NOT NULL DEFAULT 0,
+                progress_done   INTEGER NOT NULL DEFAULT 0,
+                progress_total  INTEGER NOT NULL DEFAULT 0,
+                by_type         JSONB,
+                error_message   TEXT
+            )
+        """))
+    await _add_columns(conn, schema, "project_ai_sync_runs", {"heartbeat_at": "TIMESTAMP"})
+    if not await _table_exists(conn, schema, "project_ai_assistant_logs"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_ai_assistant_logs (
+                id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                created_at        TIMESTAMP DEFAULT now(),
+                user_id           UUID,
+                viewer            VARCHAR(10) NOT NULL,
+                status            VARCHAR(20) NOT NULL,
+                search_mode       VARCHAR(20) NOT NULL,
+                hits              INTEGER NOT NULL DEFAULT 0,
+                top_score         DOUBLE PRECISION,
+                hit_types         JSONB,
+                projects_in_scope INTEGER NOT NULL DEFAULT 0,
+                context_chars     INTEGER NOT NULL DEFAULT 0,
+                search_ms         INTEGER,
+                total_ms          INTEGER NOT NULL DEFAULT 0
+            )
+        """))
+
+
+async def _step_147_portal_tour(conn: AsyncConnection, schema: str) -> None:
+    """Tour guiado do Portal: uma linha por pessoa (oferecido no 1º acesso do cliente)."""
+    if not await _table_exists(conn, schema, "project_portal_tours"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.project_portal_tours (
+                id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                user_id    UUID NOT NULL UNIQUE,
+                status     VARCHAR(20) NOT NULL,
+                step       INTEGER,
+                version    INTEGER NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT now(),
+                updated_at TIMESTAMP DEFAULT now()
+            )
+        """))
+
+
 async def _step_129_projetos_agent_fail_to(conn: AsyncConnection, schema: str) -> None:
     """Raia de destino quando a triagem do backlog (review_and_route) não aprova."""
     await _add_columns(conn, schema, "project_stage_agent_bindings", {
@@ -4954,6 +5039,8 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("143_ocorrencias_triagem_n1", _step_143_ocorrencias_triagem_n1),
     ("144_operacao_assistida_indicadores_encerramento", _step_144_operacao_assistida_indicadores_encerramento),
     ("145_embeddings", _step_145_embeddings),
+    ("146_assistente_busca", _step_146_assistente_busca),
+    ("147_portal_tour", _step_147_portal_tour),
     ("123_reconcile_indexes", _step_123_reconcile_indexes),
 ]
 

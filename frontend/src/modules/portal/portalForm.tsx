@@ -111,7 +111,7 @@ export type FormStep = { id: string; label: string; done: boolean; optional?: bo
 /** Progresso das etapas no topo do formulário; clicar leva à etapa. */
 export function StepProgress({ steps }: { steps: FormStep[] }) {
   return (
-    <Card className="p-4">
+    <Card className="p-4" tour="form-steps">
       <ol className={`grid grid-cols-2 gap-3 ${steps.length >= 4 ? "md:grid-cols-4" : "md:grid-cols-3"}`}>
         {steps.map((s, i) => (
           <li key={s.id}>
@@ -160,7 +160,7 @@ export function SummaryRow({ label, children }: { label: string; children: React
 /** Cartão lateral numerado ("Como funciona"). */
 export function HowItWorks({ title = "Como funciona", items }: { title?: string; items: [string, string][] }) {
   return (
-    <Card>
+    <Card tour="how-it-works">
       <div className="border-b px-5 py-4">
         <h2 className="text-lg font-semibold">{title}</h2>
       </div>

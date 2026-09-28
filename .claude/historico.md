@@ -31,6 +31,44 @@ Modelo:
 - **Não mexer:** ver invariantes "Design system do Portal".
 - **Arquivos:** `frontend/src/components/ds/` (novo: `index.ts`, `PageKit.tsx`, `table.ts`), `modules/portal/DetailShell.tsx`, `modules/produtos/` (`DashboardPage`, `ProductsPage`, `ProductDetailPage`, `InteligenciaPage`, `ProcessPortfolioPage`, `IndicadoresPage`, `FornecedoresPage`, `RepositoriosPage`, `config/ProdutosConfigPage`, `constants.ts`).
 
+## 2026-09-27 — Tour do Portal: como abrir/acompanhar ocorrências e pedir/acompanhar Soluções com IA
+
+- **Pedido:** o tour não mostrava como fazer uma solicitação de Solução com IA e acompanhar, nem como abrir uma ocorrência e acompanhar.
+- **Feito:** os dois passos únicos viraram roteiros. Ocorrências: tela + botão, formulário (4 etapas, triagem de 3 perguntas), "depois de enviar", como acompanhar (Aguardando você, Responder/Validar, sino) e o detalhe de uma ocorrência quando a pessoa tem alguma (andamento, conversa, validação, histórico). Soluções com IA: tela + botão, pedido (5 etapas), caminho de 8 etapas (3 do cliente), como acompanhar (Com você, Próximo passo). Tour de cliente com portfólio: 26 passos. Novos alvos `form-steps`/`how-it-works` (portalForm), `ai-journey`, `occ-progress`. Textos conferidos no código (aviso ao cliente a cada etapa da ocorrência; anexos na conversa).
+- **Testado:** navegador automático, convite -> 26 passos -> Concluir, balão sempre na tela; registro de teste apagado.
+- **Arquivos:** `frontend/src/modules/portal/tour/tourSteps.ts`, `tour/PortalTour.tsx`, `portalForm.tsx`, `ClientAiSolutionsPage.tsx`, `ClientOccurrenceDetailPage.tsx`; `docs/processo/07-portal-cliente-programas.md`.
+
+## 2026-09-27 — Tour guiado do Portal no primeiro acesso do cliente
+
+- **Pedido:** no primeiro acesso, perguntar ao cliente se quer um tour; se sim, balão passando pelas telas e explicando funcionalidades e gráficos.
+- **Feito:** convite "Boas-vindas ao Portal do Cliente!" (Fazer o tour / Agora não), gravado por pessoa em `project_portal_tours` (step 147, `GET/PUT /projetos/portal/tour`). Tour de 19 passos (18 no celular; menos para quem não é cliente ou não tem programa/projeto): Visão geral (título, menu, busca, filtros, Mapa Estratégico, quadrantes, tabela), Programas (cartões, indicadores, visões), Projeto (cabeçalho, indicadores, abas, Roadmap), Entregas e Marcos, Ocorrências, Soluções com IA, Assistente e botão de rever. Motor próprio (sem biblioteca nova): escurece a tela e destaca o alvo `data-tour`, balão posicionado onde cabe com ponta, navega entre as telas pela base do Portal, espera o alvo carregar, pula o que não existe; Esc/setas. Botão "?" no topo do Portal e "Tour do Portal" no Modo Cliente.
+- **Testado:** navegador automático (Playwright) no ambiente real com a conta do admin: convite -> 19 passos -> Concluir (status `concluido` gravado) em 1440x900 e 18 passos em 390x844, balão sempre dentro da tela. Achado e corrigido: convite podia abrir por cima do tour iniciado pelo botão (resposta atrasada); alvo mais alto que a tela agora rola até o topo e o destaque é cortado na tela. Registro de teste apagado (o admin verá o convite normalmente).
+- **Não mexer:** ver invariantes "Portal: tour guiado".
+- **Arquivos:** `backend/app/modules/projetos/portal_tour.py` (novo), `models.py`, `schemas.py`, `api/client_routes.py`, `core/tenant_migrations.py`; `frontend/src/modules/portal/tour/` (novo: `PortalTour.tsx`, `TourRunner.tsx`, `tourSteps.ts`), `api/portalPortfolio.ts`, `ClientPortalLayout.tsx`, `PortalModuleLayout.tsx`, `PortalAssistant.tsx`, `ClientPortfolioPage.tsx`, `ClientProgramsPage.tsx`, `ClientDeliveriesPage.tsx`, `ClientOccurrencesPage.tsx`, `ClientAiSolutionsPage.tsx`, `DetailShell.tsx`, `RoadmapGrid.tsx`, `PortalSearch.tsx`, `portfolioUi.tsx`; `docs/processo/07-portal-cliente-programas.md`.
+
+## 2026-09-27 — Balão de convite no botão do assistente do Portal
+
+- **Pedido:** balão ao lado do botão de chat convidando a perguntar sobre os projetos.
+- **Feito:** "Dúvidas sobre seus projetos? Pergunte aqui: prazos, entregas e andamento." Entra 1,2 s depois da página; clicar abre o chat; "x" dispensa. Some de vez depois de abrir o chat ou dispensar (`localStorage` `portal-assistant-hint-dismissed`, por navegador). Vale no Portal e no Modo Cliente.
+- **Arquivos:** `frontend/src/modules/portal/PortalAssistant.tsx`.
+
+## 2026-09-27 — Assistente do Portal com busca por significado (pgvector) + tela de gestão
+
+- **Pedido:** usar o pgvector no chat em que o cliente pergunta sobre os projetos que vê; tela em Configurações de Processos para gerenciar embeddings, logs e o que mais precisar.
+- **Decisões:** base só com o que o Portal já mostra (sem descrição de card nem comentário interno); log só com métricas (a conversa continua não gravada).
+- **Feito:** `assistant_knowledge.py` (origens `portal_*`, docs do `_base` + ocorrências/atas/encerramento, busca no recorte, sincronização, status, logs); `EmbeddingService.sync` (diff por hash, grupos com commit e pulso), `search(scopes=..., min_score=...)` com varredura iterativa do HNSW, `health`, `stats`; assistente com seção "TRECHOS ACHADOS PELA BUSCA" (dados atuais) e peso nos projetos achados; log por pergunta. Step 146 (`embeddings.scope_id`, `project_ai_assistant_settings`, `project_ai_sync_runs` com `heartbeat_at`, `project_ai_assistant_logs`). Celery: beat a cada 10 min + manual/reindexar. Tela Config -> Assistente IA do Portal (situação, pendências, sincronizar, reindexar, aquecer, origens, ajustes, testar busca, sincronizações, perguntas).
+- **Bug achado e corrigido:** a 1ª carga manual caiu com "relation project_ai_assistant_settings does not exist" — sessão do Celery perdia o `search_path` depois do commit; agora `tenant_session` reaplica no `after_begin`. A queda liberou a trava e a agendada rodou junto (resultado idempotente, sem dano). Validado com 5 commits seguidos.
+- **Medido:** 2.152 registros; carga inicial ~12 min em CPU; sincronização sem mudança ~3,5 s; busca ~250 ms; nota relacionada 0,47-0,62, sem relação até 0,42 (padrão 0,45). Teste ponta a ponta com o Azure simulado: 8 trechos, projeto certo no detalhe, log só com métricas.
+- **Não mexer:** ver invariantes "Assistente do Portal: busca por significado".
+- **Arquivos:** `backend/app/core/embeddings.py`, `core/tenant_migrations.py`, `modules/projetos/assistant_knowledge.py` (novo), `portal_assistant.py`, `models.py`, `schemas.py`, `api/routes.py`, `api/client_routes.py`, `tasks/scheduled.py`, `tests/test_assistant_knowledge.py` (novo); `frontend/src/api/projetos.ts`, `modules/projetos/config/ProjectAiAssistantConfigPage.tsx` (novo), `ProjectConfigHomePage.tsx`, `App.tsx`; `docs/técnico/10-pgvector-embeddings.md`, `docs/processo/07-portal-cliente-programas.md`.
+
+## 2026-09-27 — pgvector ligado em produção
+
+- **Pedido:** ativar a busca semântica e deixar rodando.
+- **Feito:** backup `backups/20260927-142908`; `.env` com `COMPOSE_PROFILES=ia` + `VECTOR_ENABLED=true`; build e subida do `saas_embeddings` (bge-m3 baixado para o volume `embeddings_models` e aquecido; ~1,7 GB de RAM do limite de 3 GB); `api`, `celery_worker` e `celery_beat` recriados (imagens já estavam no commit 1701e5c). Startup criou a extensão `vector` 0.8.0 em `public` e `tenant_ss.embeddings` com HNSW. Teste ponta a ponta pela fila do Celery (indexar, buscar com outras palavras, apagar): registro certo em 1º (score 0,75 contra 0,37), dados de teste removidos.
+- **Não mexer:** ver invariantes "pgvector / embeddings". Ainda nenhuma tela ou rota consome.
+- **Arquivos:** `.env` (fora do git), `docs/técnico/10-pgvector-embeddings.md` (estado).
+
 ## 2026-09-26 — pgvector + embeddings bge-m3 (infra da busca semântica)
 
 - **Pedido:** preparar o banco para pgvector sem quebrar nada, com embedding gratuito compatível com a IA em uso (IDCortex); modelo escolhido: BAAI/bge-m3.

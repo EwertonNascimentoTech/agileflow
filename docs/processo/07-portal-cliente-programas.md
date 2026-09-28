@@ -70,10 +70,37 @@ O botão de chat no canto inferior direito (Portal e módulo Modo Cliente) abre 
 - Usa só os dados que a pessoa já vê no Portal (mesma regra de "Quem vê o quê"). Sobre projeto fora do que ela vê, responde que não encontrou.
 - Na tela de um projeto ou programa, as perguntas valem para ele ("quando este projeto termina?").
 - Cada resposta traz links para os projetos e programas citados.
-- A conversa fica só no navegador (some ao recarregar ou em "Nova conversa") e não é gravada.
+- A conversa fica só no navegador (some ao recarregar ou em "Nova conversa") e não é gravada. O log do assistente guarda só métricas (quando, quem, se achou trechos, nota, tempo), nunca a pergunta nem a resposta.
 - Privacidade: a IA (Azure AI Foundry) recebe os dados anonimizados. Nomes de pessoas viram códigos e só voltam na resposta mostrada na tela; e-mails, telefones e termos sensíveis também são tratados.
 - Limite de 15 perguntas por minuto por pessoa. Se a IA estiver sobrecarregada, o assistente pede para tentar de novo em um minuto.
 - Configuração: `AZURE_AI_PORTAL_AGENT_ID` no `.env` para um agente próprio. Vazio = usa o agente da primeira etapa com agente ativo, com as instruções do assistente.
+
+### Busca por significado (desde 2026-09-27)
+
+Além dos dados de cada projeto, o assistente procura na base de busca (pgvector) os itens do Portal mais parecidos com a pergunta, mesmo com outras palavras ("quando o banco devolve o comprovante?" acha a história "Obter e anexar comprovante de pagamento"). Esses itens vão para a IA com a situação e as datas atuais, e os projetos deles entram no detalhe.
+
+- **O que entra na base:** só o que o Portal já mostra ao cliente — nome do projeto, produto, programa, pilar e área; títulos de Features e histórias; descrição de programas e pilares; ocorrências (campos que o cliente vê e comentários públicos); atas e encerramento da Operação Assistida. Descrição de card de Projeto, Feature ou História e comentários internos **não** entram.
+- **Quem vê o quê:** a busca só olha os projetos e programas que a pessoa vê no Portal; ocorrências, só dos projetos em que ela vê ocorrências (cliente vinculado ao projeto, N1 ou coordenação).
+- **Atualização:** automática a cada 10 minutos, gravando só o que mudou.
+- **Fora do ar:** o assistente responde como antes, só com os dados de cada projeto.
+- **Gestão:** Processos → Configurações → **Assistente IA do Portal** (quem configura os Agentes): situação do serviço e do índice, pendências, sincronizar agora, reindexar tudo, aquecer o modelo, origens ligadas, número de trechos e nota mínima, testar busca, histórico de sincronizações e métricas das perguntas. Detalhe técnico: `docs/técnico/10-pgvector-embeddings.md`.
+
+## Tour guiado (primeiro acesso)
+
+No primeiro acesso ao Portal, quem é cliente vê um convite: "Boas-vindas ao Portal do Cliente! Quer um tour rápido?". Aceitando, um balão percorre as telas explicando cada parte:
+
+1. Visão geral: página inicial, menu, busca, filtros, **Mapa Estratégico** (impacto no eixo vertical, esforço no horizontal, tamanho da bolha = horas), classificação por quadrante e tabela de projetos (status, saúde, evolução, próximo marco).
+2. Programas: os cartões, os indicadores do programa e as três visões (Pilares, Projetos, Roadmap).
+3. Projeto: cabeçalho (fase, etapa, favoritos, Mais ações), indicadores (evolução, Features/histórias, saúde, patrocinador, PO), abas e o **Roadmap** (barras de fase, marcos em losango, linha "Hoje").
+4. Entregas e Marcos.
+5. **Ocorrências (só cliente):** a tela e o botão "Nova ocorrência"; o formulário em 4 etapas (Sobre o quê? com a triagem de 3 perguntas, Descreva, Impacto, Anexos); o que acontece depois de enviar (alguém assume, conversa, validação com nota de 1 a 5 ou devolução); como acompanhar ("Aguardando você", Em aberto, Resolvidas, botões Responder/Validar, avisos do sino); e, se a pessoa já tiver uma ocorrência, o detalhe (andamento, conversa, validação, histórico).
+6. **Soluções com IA (só cliente):** a tela e o botão "Solicitar análise"; o pedido em 5 etapas (A solução, Quem usa e o que faz, Dados, Acesso ao Base44 e custos, Ciência); o caminho de 8 etapas com as 3 que dependem do cliente; como acompanhar ("Com você", Em andamento, Em produção, coluna Próximo passo).
+7. O Assistente e, por fim, o botão para rever o tour.
+
+- **Uma vez por pessoa:** a resposta ao convite (fazer, pular ou "Agora não") fica gravada no servidor, então o convite não volta nem em outro computador.
+- **Rever quando quiser:** botão **?** no topo do Portal; no Modo Cliente, botão **Tour do Portal** na faixa do topo (a equipe não recebe o convite automático, mas pode fazer o tour pelo botão).
+- **Adapta-se:** passos de programa/projeto usam um programa e um projeto que a pessoa vê (sem nenhum, esses passos saem); no celular o passo do menu lateral sai; durante o tour a página não recebe cliques (Esc sai, setas avançam/voltam).
+- **Técnico:** roteiro em `frontend/src/modules/portal/tour/tourSteps.ts` (cada passo aponta um `data-tour` nas telas); estado por pessoa em `project_portal_tours` (`GET/PUT /projetos/portal/tour`).
 
 ## Fora desta entrega
 

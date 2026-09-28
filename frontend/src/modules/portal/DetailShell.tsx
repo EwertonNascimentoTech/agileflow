@@ -102,7 +102,7 @@ export function DetailHeader({
   actions?: MenuAction[]
 }) {
   return (
-    <div className="space-y-3">
+    <div data-tour="detail-header" className="space-y-3">
       <nav className="flex flex-wrap items-center gap-1 text-sm text-muted-foreground" aria-label="Trilha">
         {crumbs.map((c, i) => (
           <span key={`${c.label}-${i}`} className="inline-flex items-center gap-1">
@@ -301,7 +301,7 @@ export function KpiMilestone({ icon: Icon, date, title }: { icon: ElementType; d
  *  Outras telas passam a própria grade em `className`. */
 export function KpiRow({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div className={`grid gap-3 ${className ?? "sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-[1.35fr_0.85fr_0.85fr_1fr_1.1fr_1.1fr_1.15fr]"}`}>
+    <div data-tour="detail-kpis" className={`grid gap-3 ${className ?? "sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-[1.35fr_0.85fr_0.85fr_1fr_1.1fr_1.1fr_1.15fr]"}`}>
       {children}
     </div>
   )
@@ -330,7 +330,7 @@ export function DetailTabs<T extends string>({
   onCollapseAll?: () => void
 }) {
   return (
-    <div className="flex flex-wrap items-end justify-between gap-3 border-b print:hidden">
+    <div data-tour="detail-tabs" className="flex flex-wrap items-end justify-between gap-3 border-b print:hidden">
       <div className="-mb-px flex overflow-x-auto" role="tablist">
         {tabs.map((t) => (
           <button

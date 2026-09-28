@@ -137,8 +137,9 @@ export function DeltaLabel({ delta, days }: { delta: number | null | undefined; 
 
 // ── Datas e textos ──────────────────────────────────────────────────────────
 
-export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <section className={`rounded-2xl border bg-card shadow-sm ${className}`}>{children}</section>
+/** `tour`: ponto do tour guiado do Portal (data-tour, ver tour/tourSteps.ts). */
+export function Card({ children, className = "", tour }: { children: ReactNode; className?: string; tour?: string }) {
+  return <section data-tour={tour} className={`rounded-2xl border bg-card shadow-sm ${className}`}>{children}</section>
 }
 
 export function Kpi({ icon: Icon, children, className = "" }: { icon?: ElementType; children: ReactNode; className?: string }) {

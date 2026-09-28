@@ -13,7 +13,19 @@ from app.core.dependencies import (
     require_permission,
 )
 from app.modules.projetos.program_portal import ProgramAdminService
+from app.core.embeddings import EmbeddingService
+from app.modules.projetos.assistant_knowledge import AssistantKnowledgeService
 from app.modules.projetos.schemas import (
+    AiAssistantLogPage,
+    AiAssistantSettingsResponse,
+    AiAssistantSettingsUpdate,
+    AiAssistantStatus,
+    AiEmbeddingsHealth,
+    AiSearchTestHit,
+    AiSearchTestRequest,
+    AiSyncRequest,
+    AiSyncRunPage,
+    AiSyncRunResponse,
     ProgramAdminDetail,
     ProgramPillarIn,
     ProgramPillarSuggestResult,
@@ -2223,6 +2235,67 @@ async def list_agent_execution_logs(
         limit=limit,
         offset=offset,
     )
+
+
+# ─────────────────────────────────────────────
+# Assistente do Portal: base de busca por significado (pgvector)
+# ─────────────────────────────────────────────
+
+@router.get("/config/ai-assistant/status", response_model=AiAssistantStatus)
+async def ai_assistant_status(ctx: ModuleContext = Depends(_ctx), _=Depends(_can_automation_manage)):
+    """Serviço de embeddings, índice por origem, pendências, última sincronização e uso (7 dias)."""
+    return await AssistantKnowledgeService.status(ctx.db, ctx.schema)
+
+
+@router.put("/config/ai-assistant/settings", response_model=AiAssistantSettingsResponse)
+async def ai_assistant_update_settings(
+    data: AiAssistantSettingsUpdate, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_automation_manage),
+):
+    return await AssistantKnowledgeService.update_settings(ctx.db, data, ctx.user.id)
+
+
+@router.post("/config/ai-assistant/sync", response_model=AiSyncRunResponse, status_code=202)
+async def ai_assistant_sync(
+    data: AiSyncRequest, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_automation_manage),
+):
+    """Sincronizar agora (só o que mudou) ou reindexar tudo (`force`). Roda no Celery."""
+    return await AssistantKnowledgeService.request_sync(ctx.db, ctx.schema, ctx.user.id, data.force)
+
+
+@router.post("/config/ai-assistant/warmup", response_model=AiEmbeddingsHealth)
+async def ai_assistant_warmup(ctx: ModuleContext = Depends(_ctx), _=Depends(_can_automation_manage)):
+    """Carrega o modelo no serviço de embeddings (1º uso depois de subir o container: ~1 min)."""
+    return await EmbeddingService.health(load=True, timeout=180.0)
+
+
+@router.post("/config/ai-assistant/search", response_model=list[AiSearchTestHit])
+async def ai_assistant_search_test(
+    data: AiSearchTestRequest, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_automation_manage),
+):
+    """Testar busca: base inteira (sem recorte), com a nota de cada trecho."""
+    return await AssistantKnowledgeService.search_test(ctx.db, ctx.schema, data.query, data.limit)
+
+
+@router.get("/config/ai-assistant/runs", response_model=AiSyncRunPage)
+async def ai_assistant_runs(
+    limit: int = Query(30, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_automation_manage),
+):
+    return await AssistantKnowledgeService.list_runs(ctx.db, limit, offset)
+
+
+@router.get("/config/ai-assistant/logs", response_model=AiAssistantLogPage)
+async def ai_assistant_logs(
+    status: Optional[str] = Query(None, pattern=r"^(ok|erro|indisponivel|limite)$"),
+    limit: int = Query(30, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_automation_manage),
+):
+    """Perguntas ao assistente — só métricas (a pergunta não é gravada)."""
+    return await AssistantKnowledgeService.list_logs(ctx.db, limit, offset, status)
 
 
 # ─────────────────────────────────────────────

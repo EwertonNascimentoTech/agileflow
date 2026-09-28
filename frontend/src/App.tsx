@@ -121,6 +121,7 @@ const GanttPage = lazy(() => import("@/modules/projetos/GanttPage"))
 const ProjectScheduleConfigPage = lazy(() => import("@/modules/projetos/config/ProjectScheduleConfigPage"))
 const ProjectAgentsConfigPage = lazy(() => import("@/modules/projetos/config/ProjectAgentsConfigPage"))
 const ProjectAgentLogsConfigPage = lazy(() => import("@/modules/projetos/config/ProjectAgentLogsConfigPage"))
+const ProjectAiAssistantConfigPage = lazy(() => import("@/modules/projetos/config/ProjectAiAssistantConfigPage"))
 const ProjectPriorityMatrixPage = lazy(() => import("@/modules/projetos/ProjectPriorityMatrixPage"))
 const PMODashboardPage = lazy(() => import("@/modules/projetos/PMODashboardPage"))
 const CapacityCockpitPage = lazy(() => import("@/modules/projetos/CapacityCockpitPage"))
@@ -352,6 +353,7 @@ export default function App() {
                       <Route path="config/cronograma" element={<ProjectScheduleConfigPage />} />
                       <Route path="config/agentes" element={<ProjectAgentsConfigPage />} />
                       <Route path="config/agentes/logs" element={<ProjectAgentLogsConfigPage />} />
+                      <Route path="config/assistente-ia" element={<ProjectAiAssistantConfigPage />} />
                       <Route path="config/priorizacao" element={<ProjectPriorityConfigPage />} />
                       <Route path="config/layout-card" element={<ProjectCardLayoutConfigPage />} />
                     </Route>

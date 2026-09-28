@@ -138,7 +138,7 @@ export function RoadmapGrid({
   const grid = { gridTemplateColumns: `${LEFT}px minmax(0,1fr)` }
 
   return (
-    <Card>
+    <Card tour="roadmap">
       <div className="flex flex-wrap items-end justify-between gap-3 border-b p-4 print:hidden">
         <div className="flex flex-wrap gap-3">
           <FilterSelect

@@ -54,7 +54,7 @@ export function PortalSearch() {
   }
 
   return (
-    <div ref={boxRef} className="relative w-full max-w-md">
+    <div ref={boxRef} data-tour="portal-search" className="relative w-full max-w-md">
       <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
       <input
         type="search"

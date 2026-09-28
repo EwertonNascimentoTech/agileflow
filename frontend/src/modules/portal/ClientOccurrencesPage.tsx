@@ -152,7 +152,7 @@ export default function ClientOccurrencesPage() {
           <ChevronRight size={14} />
           <span className="font-medium text-foreground">Ocorrências</span>
         </nav>
-        <div className="flex flex-wrap items-start justify-between gap-4">
+        <div data-tour="occurrences-title" className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Ocorrências</h1>
             <p className="mt-1 text-sm text-muted-foreground">

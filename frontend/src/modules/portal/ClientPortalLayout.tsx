@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { Link, NavLink, Outlet } from "react-router-dom"
 import {
-  Flag, FolderKanban, Layers, LayoutDashboard, LayoutGrid, LifeBuoy, LogOut, Menu, Moon, Sparkles, Sun, X,
+  CircleHelp, Flag, FolderKanban, Layers, LayoutDashboard, LayoutGrid, LifeBuoy, LogOut, Menu, Moon, Sparkles, Sun, X,
 } from "lucide-react"
 
 import { useAuth } from "@/contexts/AuthContext"
@@ -12,6 +12,8 @@ import { initials } from "@/modules/portal/occurrenceUi"
 import { PortalSearch } from "@/modules/portal/PortalSearch"
 import { ClientModeBanner } from "@/modules/portal/ClientModeBanner"
 import { PortalAssistant } from "@/modules/portal/PortalAssistant"
+import { PortalTour } from "@/modules/portal/tour/PortalTour"
+import { startPortalTour } from "@/modules/portal/tour/tourSteps"
 
 // `client`: só para quem é cliente (ocorrências e soluções são ações do cliente; a equipe em
 // "modo cliente" vê o acompanhamento dos projetos).
@@ -36,7 +38,7 @@ function SideNav({ onNavigate }: { onNavigate?: () => void }) {
           <span className="mt-0.5 block text-[11px] text-white/60">Portal do Cliente</span>
         </span>
       </Link>
-      <nav className="flex-1 space-y-1 px-3" aria-label="Navegação do portal">
+      <nav data-tour="portal-nav" className="flex-1 space-y-1 px-3" aria-label="Navegação do portal">
         {NAV.filter((n) => isClient || !n.client).map(({ to, label, icon: Icon, end }) => (
           <NavLink
             key={to}
@@ -110,6 +112,12 @@ export default function ClientPortalLayout() {
             </Button>
             <PortalSearch />
             <div className="flex-1" />
+            <Button
+              variant="ghost" size="icon" className="h-9 w-9" onClick={startPortalTour} data-tour="tour-button"
+              aria-label="Fazer o tour do Portal" title="Tour do Portal"
+            >
+              <CircleHelp size={17} />
+            </Button>
             <Button variant="ghost" size="icon" className="h-9 w-9" onClick={toggleTheme} aria-label="Alternar tema" title="Alternar tema">
               {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
             </Button>
@@ -143,6 +151,7 @@ export default function ClientPortalLayout() {
         </main>
       </div>
       <PortalAssistant />
+      <PortalTour standalone />
     </div>
   )
 }

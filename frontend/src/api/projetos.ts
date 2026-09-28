@@ -526,6 +526,128 @@ export interface ProjectAgentExecutionLogPage {
   offset: number
 }
 
+// ── Assistente do Portal: base de busca por significado (pgvector) ──────────
+export interface AiAssistantSettings {
+  rag_enabled: boolean
+  top_k: number
+  min_score: number
+  sources: string[] | null
+  auto_sync: boolean
+  last_check_at: string | null
+  last_check_status: string | null
+  last_check_error: string | null
+  updated_at: string | null
+}
+
+export type AiAssistantSettingsUpdate = Partial<Pick<AiAssistantSettings, "rag_enabled" | "top_k" | "min_score" | "auto_sync">> & {
+  sources?: string[]
+}
+
+export interface AiSyncRun {
+  id: string
+  trigger: "agendado" | "manual" | "reindexar" | string
+  status: "na_fila" | "rodando" | "ok" | "erro" | "ignorada" | string
+  requested_by: string | null
+  created_at: string | null
+  started_at: string | null
+  finished_at: string | null
+  duration_ms: number | null
+  docs_total: number
+  docs_changed: number
+  docs_removed: number
+  chunks_embedded: number
+  progress_done: number
+  progress_total: number
+  by_type: { alterados?: Record<string, number>; removidos?: Record<string, number> } | null
+  error_message: string | null
+}
+
+export interface AiSyncRunPage {
+  items: AiSyncRun[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface AiKnowledgeSource {
+  key: string
+  label: string
+  enabled: boolean
+  docs: number
+  chunks: number
+  last_at: string | null
+  pending: number
+}
+
+export interface AiEmbeddingsHealth {
+  ok: boolean
+  model: string | null
+  loaded: boolean
+  error: string | null
+}
+
+export interface AiAssistantStatus {
+  vector_enabled: boolean
+  extension_version: string | null
+  index_ready: boolean
+  service: AiEmbeddingsHealth
+  expected_model: string
+  index_models: string[]
+  assistant_ready: boolean
+  settings: AiAssistantSettings
+  sources: AiKnowledgeSource[]
+  totals: { docs: number; chunks: number; last_at: string | null }
+  pending: { changed: Record<string, number>; removed: Record<string, number>; chunks: number; docs_total: number } | null
+  pending_error: string | null
+  last_run: AiSyncRun | null
+  current_run: AiSyncRun | null
+  usage_7d: {
+    questions: number
+    with_hits: number
+    avg_top_score: number | null
+    avg_total_ms: number | null
+    errors: number
+    search_unavailable: number
+    users: number
+  }
+}
+
+export interface AiSearchTestHit {
+  source_type: string
+  source_label: string
+  source_id: string
+  scope_id: string | null
+  scope_title: string | null
+  chunk_index: number
+  content: string
+  score: number
+  above_min: boolean
+}
+
+export interface AiAssistantLogItem {
+  id: string
+  created_at: string | null
+  user_id: string | null
+  user_name: string | null
+  viewer: "cliente" | "equipe" | string
+  status: "ok" | "erro" | "indisponivel" | "limite" | string
+  search_mode: "busca" | "sem_trechos" | "desligada" | "indisponivel" | "sem_indice" | string
+  hits: number
+  top_score: number | null
+  hit_types: Record<string, number> | null
+  projects_in_scope: number
+  context_chars: number
+  search_ms: number | null
+  total_ms: number
+}
+
+export interface AiAssistantLogPage {
+  items: AiAssistantLogItem[]
+  total: number
+  limit: number
+  offset: number
+}
+
 export interface ProjectReports {
   total_active: number
   total_completed: number
@@ -2406,6 +2528,21 @@ export const projetosApi = {
       .then((r) => r.data),
   listTaskAgentExecutions: (taskId: string) =>
     api.get<ProjectAgentExecution[]>(`/projetos/tasks/${taskId}/agent-executions`).then((r) => r.data),
+  // Assistente do Portal: base de busca por significado (Config → Assistente IA)
+  getAiAssistantStatus: () =>
+    api.get<AiAssistantStatus>(`/projetos/config/ai-assistant/status`, { timeout: 60000 }).then((r) => r.data),
+  updateAiAssistantSettings: (data: AiAssistantSettingsUpdate) =>
+    api.put<AiAssistantSettings>(`/projetos/config/ai-assistant/settings`, data).then((r) => r.data),
+  syncAiAssistant: (force = false) =>
+    api.post<AiSyncRun>(`/projetos/config/ai-assistant/sync`, { force }).then((r) => r.data),
+  warmupAiAssistant: () =>
+    api.post<AiEmbeddingsHealth>(`/projetos/config/ai-assistant/warmup`, {}, { timeout: 200000 }).then((r) => r.data),
+  searchAiAssistant: (query: string, limit = 10) =>
+    api.post<AiSearchTestHit[]>(`/projetos/config/ai-assistant/search`, { query, limit }, { timeout: 60000 }).then((r) => r.data),
+  listAiSyncRuns: (params?: { limit?: number; offset?: number }) =>
+    api.get<AiSyncRunPage>(`/projetos/config/ai-assistant/runs`, { params }).then((r) => r.data),
+  listAiAssistantLogs: (params?: { status?: string; limit?: number; offset?: number }) =>
+    api.get<AiAssistantLogPage>(`/projetos/config/ai-assistant/logs`, { params }).then((r) => r.data),
   listAgentExecutionLogs: (params?: {
     status?: "pending" | "success" | "failed"
     binding_id?: string

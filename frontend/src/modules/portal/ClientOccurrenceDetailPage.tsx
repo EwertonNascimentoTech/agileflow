@@ -71,15 +71,18 @@ function Section({
   right,
   children,
   className = "",
+  tour,
 }: {
   title: string
   subtitle?: ReactNode
   right?: ReactNode
   children: ReactNode
   className?: string
+  /** Ponto do tour guiado (data-tour). */
+  tour?: string
 }) {
   return (
-    <Card className={className}>
+    <Card className={className} tour={tour}>
       <div className="flex flex-wrap items-start justify-between gap-3 border-b px-5 py-4">
         <div className="min-w-0">
           <h2 className="text-lg font-semibold">{title}</h2>
@@ -424,7 +427,7 @@ export default function ClientOccurrenceDetailPage() {
         )}
       </KpiRow>
 
-      <Section title="Andamento da ocorrência" subtitle="Em que etapa a ocorrência está e o que acontece a seguir.">
+      <Section title="Andamento da ocorrência" subtitle="Em que etapa a ocorrência está e o que acontece a seguir." tour="occ-progress">
         <div className="space-y-5">
           <div className="mx-auto max-w-3xl">
             <StageStepper stageKey={occ.stage_key} />

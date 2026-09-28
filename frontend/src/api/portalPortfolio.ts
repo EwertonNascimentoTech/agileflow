@@ -254,3 +254,19 @@ export const portalAssistantApi = {
   ask: (body: { question: string; history: PortalAssistantTurn[]; project_id?: string; program_id?: string }) =>
     api.post<PortalAssistantAnswer>("/projetos/portal/assistant", body, { timeout: 120_000 }).then((r) => r.data),
 }
+
+// ── Tour guiado do Portal (oferecido no 1º acesso do cliente) ──
+export type PortalTourStatus = "iniciado" | "concluido" | "interrompido" | "recusado"
+
+export interface PortalTourState {
+  offer: boolean
+  status: PortalTourStatus | null
+  version: number
+  updated_at: string | null
+}
+
+export const portalTourApi = {
+  get: () => api.get<PortalTourState>("/projetos/portal/tour").then((r) => r.data),
+  set: (status: PortalTourStatus, step?: number) =>
+    api.put<PortalTourState>("/projetos/portal/tour", { status, step }).then((r) => r.data),
+}

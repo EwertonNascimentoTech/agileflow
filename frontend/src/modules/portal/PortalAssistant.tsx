@@ -133,6 +133,25 @@ function SourceChips({ sources, base }: { sources: PortalAssistantSource[]; base
   )
 }
 
+// Balão de convite ao lado do botão: some de vez depois que a pessoa abre o chat ou dispensa.
+const HINT_KEY = "portal-assistant-hint-dismissed"
+
+function hintDismissed(): boolean {
+  try {
+    return localStorage.getItem(HINT_KEY) === "1"
+  } catch {
+    return false
+  }
+}
+
+function rememberHintDismissed() {
+  try {
+    localStorage.setItem(HINT_KEY, "1")
+  } catch {
+    /* navegador sem storage: o balão volta na próxima visita */
+  }
+}
+
 /** Chat do Portal: perguntas sobre programas, projetos, entregas e prazos que a pessoa vê.
  *  A conversa fica só no navegador (some ao recarregar); a IA recebe os dados anonimizados. */
 export function PortalAssistant() {
@@ -140,6 +159,7 @@ export function PortalAssistant() {
   const { pathname } = useLocation()
   const focus = pageFocus(pathname, base)
   const [open, setOpen] = useState(false)
+  const [hint, setHint] = useState<"waiting" | "shown" | "gone">(() => (hintDismissed() ? "gone" : "waiting"))
   const [messages, setMessages] = useState<Message[]>([])
   const [draft, setDraft] = useState("")
   const [busy, setBusy] = useState(false)
@@ -150,6 +170,23 @@ export function PortalAssistant() {
   useEffect(() => {
     if (open) inputRef.current?.focus()
   }, [open])
+
+  // O balão entra um pouco depois da página, para não competir com o carregamento.
+  useEffect(() => {
+    if (hint !== "waiting") return
+    const t = window.setTimeout(() => setHint("shown"), 1200)
+    return () => window.clearTimeout(t)
+  }, [hint])
+
+  function closeHint() {
+    rememberHintDismissed()
+    setHint("gone")
+  }
+
+  function toggleChat() {
+    setOpen((o) => !o)
+    if (hint !== "gone") closeHint()
+  }
 
   useEffect(() => {
     const el = scrollRef.current
@@ -341,13 +378,44 @@ export function PortalAssistant() {
         </section>
       )}
 
+      {!open && hint !== "gone" && (
+        <div
+          className={`fixed bottom-6 right-24 z-50 flex h-14 items-center transition-all duration-300 ${
+            hint === "shown" ? "translate-x-0 opacity-100" : "pointer-events-none translate-x-2 opacity-0"
+          }`}
+        >
+          <div className="relative w-max max-w-[min(16rem,calc(100vw-7.5rem))] rounded-2xl border bg-background py-2.5 pl-3.5 pr-8 shadow-lg">
+            <button type="button" onClick={toggleChat} className="block text-left">
+              <span className="block text-sm font-semibold leading-tight text-foreground">Dúvidas sobre seus projetos?</span>
+              <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">
+                Pergunte aqui: prazos, entregas e andamento.
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={closeHint}
+              aria-label="Dispensar dica do assistente"
+              className="absolute right-1.5 top-1.5 rounded-full p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            >
+              <X size={13} />
+            </button>
+            {/* ponta do balão, apontando para o botão */}
+            <span
+              aria-hidden
+              className="absolute -right-[7px] top-1/2 h-3 w-3 -translate-y-1/2 rotate-45 border-r border-t bg-background"
+            />
+          </div>
+        </div>
+      )}
+
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        data-tour="assistant-button"
+        onClick={toggleChat}
         className="fixed bottom-6 right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg ring-4 ring-primary/15 transition hover:scale-105 hover:shadow-xl"
         aria-label={open ? "Fechar assistente" : "Abrir assistente do Portal"}
         aria-expanded={open}
-        title={open ? "Fechar assistente" : "Perguntar ao assistente"}
+        title={open ? "Fechar assistente" : "Tire dúvidas sobre seus projetos"}
       >
         {open ? <X size={22} /> : <MessageCircle size={24} />}
       </button>

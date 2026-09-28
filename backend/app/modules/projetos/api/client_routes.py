@@ -19,8 +19,11 @@ from app.modules.projetos.ai_solutions import AiSolutionsService
 from app.modules.projetos.assisted_ops_closure import AssistedOpsClosureService, AssistedOpsIndicatorsService
 from app.modules.projetos.clients import ProjectClientService
 from app.modules.projetos.portal_assistant import PortalAssistantService
+from app.modules.projetos.portal_tour import PortalTourService
 from app.modules.projetos.program_portal import PortalPortfolioService, ProgramAdminService
 from app.modules.projetos.schemas import (
+    PortalTourState,
+    PortalTourUpdate,
     AssistedOpsEntrySet,
     AssistedOpsEntryState,
     AssistedOpsExtend,
@@ -314,7 +317,19 @@ async def portal_deliveries(ctx: ModuleContext = Depends(_portal_ctx)):
 @router.post("/portal/assistant", response_model=PortalAssistantAnswer)
 async def portal_assistant(data: PortalAssistantAsk, ctx: ModuleContext = Depends(_portal_ctx)):
     """Assistente do Portal: responde sobre o que a pessoa vê no Portal (dados anonimizados antes da IA)."""
-    return await PortalAssistantService.ask(ctx.db, ctx.user.id, data)
+    return await PortalAssistantService.ask(ctx.db, ctx.user.id, data, schema=ctx.schema)
+
+@router.get("/portal/tour", response_model=PortalTourState)
+async def portal_tour_state(ctx: ModuleContext = Depends(_portal_ctx)):
+    """Se o tour guiado ainda não foi oferecido a esta pessoa (1º acesso)."""
+    return await PortalTourService.get(ctx.db, ctx.user.id)
+
+
+@router.put("/portal/tour", response_model=PortalTourState)
+async def portal_tour_update(data: PortalTourUpdate, ctx: ModuleContext = Depends(_portal_ctx)):
+    """Resposta ao convite / andamento do tour (iniciado, concluido, interrompido, recusado)."""
+    return await PortalTourService.set(ctx.db, ctx.user.id, data.status, data.step)
+
 
 # ── Portal: Soluções com IA ─────────────────────────────────────────────────
 

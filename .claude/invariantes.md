@@ -189,6 +189,22 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 - Modelo BAAI/bge-m3 (1024 dimensões) roda no container `embeddings` (profile `ia`, 1 worker, sem porta publicada) — nunca carregar o modelo na API nem no Celery. Trocar de modelo com outra dimensão = coluna nova e reindexar tudo.
 - O texto não sai do servidor para gerar o vetor; o que for ao IDCortex continua passando por `anonymize.py` (ele recebe trechos em texto, nunca vetores).
 
+## Assistente do Portal: busca por significado (2026-09-27)
+
+- Base do assistente (`assistant_knowledge.py`) só com o que o Portal JÁ mostra ao cliente: projetos/Features/histórias montados de `PortalPortfolioService._base` (nomes e títulos), descrição de programa e pilar, ocorrências (campos visíveis ao cliente + comentários públicos com autor), atas e encerramento da OA (só com `assisted_op_entered_at`). Descrição de card de Projeto/Feature/História, causa raiz, classificação e comentário interno NUNCA entram (decisão do Ewerton).
+- Todo trecho tem `scope_id` (card-raiz ou programa) e a busca filtra no SQL (`scopes`) pelo recorte de `_scope`/`_visible`; ocorrências só dos projetos em que a pessoa vê ocorrências (`_portal_viewer`: cliente vinculado, N1, coordenação; PO/dev no Modo Cliente não). Origem nova = definir o `scope_id` e o recorte antes de indexar.
+- O trecho só acha o item: situação, datas e % que vão para a IA vêm dos dados atuais (`semantic_lines`), nunca do texto indexado. A seção de trechos entra no `MAX_CONTEXT_CHARS` (teto próprio `SEMANTIC_MAX_CHARS`).
+- Log do assistente (`project_ai_assistant_logs`) = só métricas; a pergunta e a resposta nunca são gravadas. Logs e execuções > 90 dias são apagados.
+- Busca desligada, sem índice ou fora do ar não derruba o assistente: responde só com os dados estruturados.
+- Sessão do Celery que faz mais de um commit em tabela de tenant usa `tenant_session` (reaplica o `search_path` no `after_begin`); sem isso o 2º commit cai no `public` ("relation ... does not exist").
+- Sincronização: uma por tenant (trava Redis renovada a cada grupo); execução sem pulso (`heartbeat_at`) há 15 min vira erro. Agendada sem mudança não vira execução no log.
+
+## Portal: tour guiado (2026-09-27)
+
+- Convite automático só para cliente (`is_client`/`has_client_portal`) e uma vez por pessoa: qualquer resposta grava `project_portal_tours` (sem linha = oferece). A equipe no Modo Cliente só faz pelo botão. Resposta atrasada do convite não abre por cima de um tour já iniciado.
+- Cada passo aponta um `data-tour` nas telas do Portal (`home-*`, `portal-nav`, `portal-search`, `programs-grid`, `detail-header/kpis/tabs`, `roadmap`, `deliveries`, `occurrences-title`, `ai-solutions-title`, `form-steps` e `how-it-works` (`portalForm`: formulários de ocorrência e de solução), `ai-journey`, `occ-progress`, `assistant-button`, `tour-button`). Renomear/remover um alvo = ajustar `tourSteps.ts`; alvo que não aparece em 8 s faz o passo ser pulado (não quebra, mas some do tour).
+- Navegação do tour sempre pela base do Portal (`usePortalBase`): vale para `/portal` e para o Modo Cliente. O motor (`TourRunner`) é lazy: a primeira tela do Portal não carrega o tour.
+
 ## Design system do Portal (2026-09-27)
 
 - Padrão visual do Portal do Cliente vale para todos os módulos ativos (Processos, Times, Produtos, Indicadores, RTD, Empresa/Configurações, Documentação): telas importam de `@/components/ds` (reexporta `modules/portal/portfolioUi`, `DetailShell`, `portalForm` + `PageHeader`, `SectionCard`, `Notice`, `Pill`, `Field`, `TABLE`). Mudar um componente do Portal muda todas as áreas: conferir Portal e módulos.

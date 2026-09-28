@@ -181,7 +181,7 @@ export default function ClientPortfolioPage() {
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+        <div data-tour="home-title">
           <p className="text-sm text-muted-foreground">Olá, {firstName}</p>
           <h1 className="mt-0.5 text-2xl font-bold tracking-tight md:text-3xl">Meu Portfólio de Transformação Digital</h1>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -222,7 +222,7 @@ export default function ClientPortfolioPage() {
         </Card>
       ) : (
         <>
-          <div className="flex flex-wrap items-end justify-between gap-3">
+          <div data-tour="home-filters" className="flex flex-wrap items-end justify-between gap-3">
             <Segmented
               value={mapMode}
               onChange={setMapMode}
@@ -250,7 +250,7 @@ export default function ClientPortfolioPage() {
           </div>
 
           <div className="grid gap-4 xl:grid-cols-[1.55fr_1fr]">
-            <Card className="p-5">
+            <Card className="p-5" tour="home-map">
               <div className="mb-3">
                 <h2 className="flex items-center gap-1.5 text-lg font-semibold">
                   Mapa Estratégico dos {mapMode === "projetos" ? "Projetos" : "Programas"}
@@ -267,7 +267,7 @@ export default function ClientPortfolioPage() {
               )}
             </Card>
 
-            <Card className="flex flex-col gap-4 p-5">
+            <Card className="flex flex-col gap-4 p-5" tour="home-quadrants">
               <h2 className="text-lg font-semibold">Resumo da Classificação Estratégica</h2>
               <div className="grid grid-cols-2 gap-3">
                 {quadrants.map((qd) => {
@@ -325,7 +325,7 @@ export default function ClientPortfolioPage() {
             </Card>
           </div>
 
-          <Card>
+          <Card tour="home-table">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b p-4 md:p-5">
               <div>
                 <h2 className="text-lg font-semibold">Projetos do Portfólio</h2>

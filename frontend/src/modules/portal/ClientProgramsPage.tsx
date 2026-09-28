@@ -44,7 +44,7 @@ export default function ClientProgramsPage() {
           <EmptyState icon={Layers} title="Nenhum programa" description={error ?? "Seus projetos ainda não fazem parte de um programa."} />
         </Card>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div data-tour="programs-grid" className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {programs.map((g) => (
             <Link key={g.id} to={`${base}/programas/${g.id}`} className="group">
               <Card className="flex h-full flex-col gap-4 p-5 transition-colors group-hover:border-primary/40">

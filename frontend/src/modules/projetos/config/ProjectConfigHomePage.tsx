@@ -1,6 +1,6 @@
 import { createElement, type ElementType } from "react"
 import { useNavigate } from "react-router-dom"
-import { ArrowRight, Bot, CalendarRange, ClipboardList, FileText, GitBranch, Grid2x2, KanbanSquare, LayoutGrid, ListChecks, ScrollText, Settings2 } from "lucide-react"
+import { ArrowRight, Bot, BrainCircuit, CalendarRange, ClipboardList, FileText, GitBranch, Grid2x2, KanbanSquare, LayoutGrid, ListChecks, ScrollText, Settings2 } from "lucide-react"
 
 import { PageHeader } from "@/components/ds"
 
@@ -61,6 +61,12 @@ const sections = [
     icon: ScrollText,
     title: "Logs de agentes",
     description: "Histórico de execuções, erros e respostas dos agentes por card e etapa.",
+  },
+  {
+    to: "/app/modules/projetos/config/assistente-ia",
+    icon: BrainCircuit,
+    title: "Assistente IA do Portal",
+    description: "Base de busca por significado (pgvector) do chat do Portal: situação, sincronização, ajustes, teste de busca e logs.",
   },
   {
     to: "/app/modules/projetos/config/priorizacao",
