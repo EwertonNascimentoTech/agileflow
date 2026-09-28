@@ -4135,6 +4135,10 @@ _INDEX_SPECS: list[tuple[str, str, str, tuple[str, ...], str | None]] = [
     ("embeddings_scope", "embeddings", "scope_id, source_type", ("scope_id", "source_type"), None),
     ("project_ai_sync_runs_created", "project_ai_sync_runs", "created_at DESC", ("created_at",), None),
     ("project_ai_assistant_logs_created", "project_ai_assistant_logs", "created_at DESC", ("created_at",), None),
+    # ── produtos: catálogo de problemas da sustentação (step 149) ──────
+    ("product_support_problems_support", "product_support_problems", "support_id", ("support_id",), None),
+    ("product_support_problems_product", "product_support_problems", "product_id", ("product_id",), None),
+    ("product_support_solutions_problem", "product_support_solutions", "problem_id", ("problem_id",), None),
     # ── notificações ────────────────────────────────────────────────────
     ("notif_user", "notifications", "user_id, is_read, created_at DESC", ("user_id", "is_read", "created_at"), None),
     # ── commits por ambiente (PROD/HML/DEV) ─────────────────────────────
@@ -4796,6 +4800,54 @@ async def _step_147_portal_tour(conn: AsyncConnection, schema: str) -> None:
         """))
 
 
+async def _step_148_produto_sem_documentos_natos(conn: AsyncConnection, schema: str) -> None:
+    """Produto: declaração de que não gera documentos natos digitais (com justificativa), que
+    tira o critério "Documentos cadastrados" do cálculo da saúde."""
+    await _add_columns(conn, schema, "products", {
+        "sem_documentos_natos": "BOOLEAN NOT NULL DEFAULT false",
+        "justificativa_sem_documentos_natos": "TEXT",
+        "sem_documentos_natos_by": "UUID",
+        "sem_documentos_natos_at": "TIMESTAMP",
+    })
+
+
+async def _step_149_sustentacao_problemas(conn: AsyncConnection, schema: str) -> None:
+    """Sustentação: catálogo de problemas por nível (nome, descrição, SLA em horas úteis) e as
+    soluções possíveis de cada problema. Índices em `_INDEX_SPECS`."""
+    if await _table_exists(conn, schema, "product_supports") and not await _table_exists(conn, schema, "product_support_problems"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.product_support_problems (
+                id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                product_id  UUID NOT NULL REFERENCES {schema}.products(id) ON DELETE CASCADE,
+                support_id  UUID NOT NULL REFERENCES {schema}.product_supports(id) ON DELETE CASCADE,
+                name        VARCHAR(200) NOT NULL,
+                description TEXT,
+                sla_horas   INTEGER NOT NULL,
+                "order"     INTEGER NOT NULL DEFAULT 0,
+                is_active   BOOLEAN NOT NULL DEFAULT true,
+                created_by  UUID,
+                created_at  TIMESTAMP DEFAULT now(),
+                updated_by  UUID,
+                updated_at  TIMESTAMP DEFAULT now()
+            )
+        """))
+    if await _table_exists(conn, schema, "product_support_problems") and not await _table_exists(conn, schema, "product_support_solutions"):
+        await conn.execute(text(f"""
+            CREATE TABLE {schema}.product_support_solutions (
+                id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                problem_id  UUID NOT NULL REFERENCES {schema}.product_support_problems(id) ON DELETE CASCADE,
+                title       VARCHAR(200) NOT NULL,
+                description TEXT,
+                origem      VARCHAR(20) NOT NULL DEFAULT 'cadastro',
+                "order"     INTEGER NOT NULL DEFAULT 0,
+                is_active   BOOLEAN NOT NULL DEFAULT true,
+                created_by  UUID,
+                created_at  TIMESTAMP DEFAULT now(),
+                updated_at  TIMESTAMP DEFAULT now()
+            )
+        """))
+
+
 async def _step_129_projetos_agent_fail_to(conn: AsyncConnection, schema: str) -> None:
     """Raia de destino quando a triagem do backlog (review_and_route) não aprova."""
     await _add_columns(conn, schema, "project_stage_agent_bindings", {
@@ -5041,6 +5093,8 @@ STEPS: list[tuple[str, Callable[[AsyncConnection, str], Awaitable[None]]]] = [
     ("145_embeddings", _step_145_embeddings),
     ("146_assistente_busca", _step_146_assistente_busca),
     ("147_portal_tour", _step_147_portal_tour),
+    ("148_produto_sem_documentos_natos", _step_148_produto_sem_documentos_natos),
+    ("149_sustentacao_problemas", _step_149_sustentacao_problemas),
     ("123_reconcile_indexes", _step_123_reconcile_indexes),
 ]
 

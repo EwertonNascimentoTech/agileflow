@@ -129,6 +129,19 @@ class ServicoSubprocessoDispensa(BaseModel):
         return self
 
 
+class ProductDocumentosDispensa(BaseModel):
+    """Declaração de que o produto não gera documentos natos digitais (tira o critério
+    "Documentos cadastrados" da saúde). `sem_documentos_natos=False` desfaz."""
+    sem_documentos_natos: bool = False
+    justificativa: Optional[str] = Field(None, max_length=2000)
+
+    @model_validator(mode="after")
+    def _justificativa_obrigatoria(self) -> "ProductDocumentosDispensa":
+        if self.sem_documentos_natos and len((self.justificativa or "").strip()) < 10:
+            raise ValueError("Explique por que o produto não gera documentos natos digitais (mínimo de 10 caracteres).")
+        return self
+
+
 class ServicoUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=160)
     description: Optional[str] = None
@@ -463,6 +476,8 @@ class HealthCheck(BaseModel):
     label: str
     status: str        # pass | fail | na
     weight: int
+    # Por que não se aplica quando é uma escolha do produto (ex.: declarado sem documentos natos).
+    note: Optional[str] = None
 
 
 class ProductHealth(BaseModel):
@@ -472,6 +487,9 @@ class ProductHealth(BaseModel):
     applicable_weight: int
     passed_weight: int
     checks: list[HealthCheck] = []
+    # Limiares do tenant (Config do Produtos): a tela explica a régua e quanto falta.
+    limiar_saudavel: int = 75
+    limiar_atencao: int = 40
 
 
 class ProductListItem(BaseModel):
@@ -678,6 +696,11 @@ class ProductResponse(BaseModel):
     link_prd: Optional[str] = None
     login_idigital: bool = False
     corporativo: bool = False
+    # Declarado sem documentos natos digitais (critério da saúde não se aplica).
+    sem_documentos_natos: bool = False
+    justificativa_sem_documentos_natos: Optional[str] = None
+    sem_documentos_natos_by_name: Optional[str] = None
+    sem_documentos_natos_at: Optional[datetime] = None
     servicos: list[ServicoResponse]
     documentos: list[DocumentoResponse]
     processos: list[ProdutoProcessoResponse]
@@ -1198,6 +1221,46 @@ class DocumentationResponse(BaseModel):
 _NIVEL_ATENDIMENTO = Literal["n1", "n2", "n3"]
 
 
+# ── Sustentação: catálogo de problemas e soluções (base do futuro Service Desk) ──
+class SupportSolutionIn(BaseModel):
+    id: Optional[uuid.UUID] = None          # com id = mantém/atualiza; sem id = nova
+    title: str = Field(..., min_length=2, max_length=200)
+    description: Optional[str] = Field(None, max_length=5000)
+
+
+class SupportSolutionResponse(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    title: str
+    description: Optional[str] = None
+    origem: str = "cadastro"               # cadastro | atendimento
+
+
+class SupportProblemCreate(BaseModel):
+    name: str = Field(..., min_length=2, max_length=200)
+    description: Optional[str] = Field(None, max_length=5000)
+    sla_horas: int = Field(..., ge=1, le=2000)   # SLA de resolução, horas úteis
+    solutions: list[SupportSolutionIn] = Field(default_factory=list, max_length=50)
+
+
+class SupportProblemUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=2, max_length=200)
+    description: Optional[str] = Field(None, max_length=5000)
+    sla_horas: Optional[int] = Field(None, ge=1, le=2000)
+    # Lista completa: as que ficarem de fora são inativadas.
+    solutions: Optional[list[SupportSolutionIn]] = Field(None, max_length=50)
+
+
+class SupportProblemResponse(BaseModel):
+    id: uuid.UUID
+    support_id: uuid.UUID
+    name: str
+    description: Optional[str] = None
+    sla_horas: int
+    solutions: list[SupportSolutionResponse] = Field(default_factory=list)
+
+
 class SupportCreate(BaseModel):
     canal_atendimento: Optional[str] = Field(None, max_length=200)
     nivel: _NIVEL_ATENDIMENTO
@@ -1235,6 +1298,8 @@ class SupportResponse(BaseModel):
     responsaveis: list[PersonMini] = Field(default_factory=list)
     clientes: list[PersonMini] = Field(default_factory=list)
     observacoes: Optional[str] = None
+    # Problemas que o nível atende (cada um com SLA e soluções possíveis).
+    problemas: list[SupportProblemResponse] = Field(default_factory=list)
 
 
 class SupportPerson(BaseModel):

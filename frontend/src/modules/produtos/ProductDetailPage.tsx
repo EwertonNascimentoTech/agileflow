@@ -1,12 +1,22 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
-import { AlertTriangle, ArrowLeft, CheckCircle2, Download, ExternalLink, FileText, GitBranch, Link2, Loader2, MinusCircle, Paperclip, Pencil, Plus, ShieldAlert, Trash2, Workflow, XCircle } from "lucide-react"
+import {
+  Activity, AlertTriangle, BookOpen, CheckCircle2, ClipboardList, Download, ExternalLink, FileSignature, FileText, GitBranch,
+  FileX, LayoutGrid, LifeBuoy, Link2, Loader2, MinusCircle, Paperclip, Pencil, Plus, Rocket, Server, ShieldAlert, Trash2,
+  Users, Workflow, Wrench, XCircle,
+} from "lucide-react"
 
 import {
-  produtosApi, reposApi, type AnexoItem, type Contrato, type ContratoCreate, type ContratoUpdate, type Documento, type Documentation,
-  type Product, type ProductHealth, type Release, type ReleaseCreate, type Repositorio, type Servico,
-  type ServicoStatus, type Support, type SupportCreate, type SupportNivel, type SupportPerson,
+  produtosApi, reposApi, type AnexoItem, type Contrato, type ContratoCreate, type ContratoUpdate,
+  type Documento, type Documentation, type Product, type ProductCriticidade, type ProductHealth,
+  type ProductStatus, type Release, type ReleaseCreate, type ReleaseStatus, type Repositorio, type SaudeClasse, type Servico,
+  type ServicoStatus, type Support, type SupportCreate, type SupportNivel, type SupportPerson, type SupportProblem,
+  type SupportProblemInput, type SupportSolution,
 } from "@/api/produtos"
+import {
+  Card, DetailHeader, DetailTabs, Field, KpiCount, KpiPerson, KpiRow, KpiText, Notice, Pill, SectionCard, TABLE,
+  type KpiTone, type MenuAction, type TabDef, type Tone,
+} from "@/components/ds"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -25,19 +35,62 @@ import { DefinirFornecedorDialog } from "@/modules/produtos/DefinirFornecedorDia
 import ServiceProcessLinksDialog from "@/modules/produtos/ServiceProcessLinksDialog"
 import MarkdownEditor, { MarkdownPreview } from "@/modules/produtos/components/MarkdownEditor"
 import {
-  CATEGORIA_LABEL, CONTRATO_STATUS_COLOR, CONTRATO_STATUS_LABEL, CONTRATO_STATUS_OPTS,
-  CONTRATO_TIPOVALOR_LABEL, CONTRATO_TIPOVALOR_OPTS, CRITICIDADE_COLOR, CRITICIDADE_LABEL, DOC_FORMATO_LABEL,
-  DOCNT_STATUS_COLOR, DOCNT_STATUS_LABEL, DOCNT_STATUS_OPTS, DOCNT_TIPO_LABEL, DOCNT_TIPO_OPTS, LIFECYCLE_LABEL,
-  NIVEL_LGPD_LABEL, NIVEL_LGPD_OPTS,
-  RELEASE_AMBIENTE_LABEL, RELEASE_AMBIENTE_OPTS, RELEASE_IMPACTO_LABEL, RELEASE_IMPACTO_OPTS,
-  RELEASE_STATUS_COLOR, RELEASE_STATUS_LABEL, RELEASE_STATUS_OPTS, RELEASE_TIPO_LABEL, RELEASE_TIPO_OPTS,
-  SERVICO_STATUS_LABEL, SERVICO_STATUS_OPTS,
-  STATUS_COLOR, STATUS_LABEL, SAUDE_COLOR, SAUDE_LABEL, TIPODEV_LABEL,
-  UNIDADE_LABEL,
+  CATEGORIA_LABEL, CONTRATO_STATUS_LABEL, CONTRATO_STATUS_OPTS, CONTRATO_TIPOVALOR_LABEL, CONTRATO_TIPOVALOR_OPTS,
+  CONTRATO_TONE, CRITICIDADE_LABEL, DOC_FORMATO_LABEL, DOC_TONE, DOCNT_STATUS_LABEL, DOCNT_STATUS_OPTS,
+  DOCNT_TIPO_LABEL, DOCNT_TIPO_OPTS, LIFECYCLE_LABEL, NIVEL_LGPD_LABEL, NIVEL_LGPD_OPTS, RELEASE_AMBIENTE_LABEL,
+  RELEASE_AMBIENTE_OPTS, RELEASE_IMPACTO_LABEL, RELEASE_IMPACTO_OPTS, RELEASE_STATUS_LABEL, RELEASE_STATUS_OPTS,
+  RELEASE_TIPO_LABEL, RELEASE_TIPO_OPTS, SAUDE_LABEL, SAUDE_TONE, SERVICO_STATUS_LABEL,
+  SERVICO_STATUS_OPTS, STATUS_LABEL, TIPODEV_LABEL, UNIDADE_LABEL,
 } from "@/modules/produtos/constants"
 
 const NONE = "__none__"
 function fmtDate(iso: string | null) { return iso ? new Date(iso).toLocaleDateString("pt-BR") : "—" }
+
+// Tons dos selos (Pill do design system do Portal) para os status do produto e dos itens;
+// saúde, contrato e documentação vêm de constants.ts (os mesmos da lista).
+const STATUS_TONE: Record<ProductStatus, Tone> = {
+  ideia: "slate", discovery: "violet", desenvolvimento: "blue", homologacao: "amber", producao: "emerald",
+  sustentacao: "teal", evolucao: "violet", suspenso: "amber", descontinuado: "red",
+}
+const CRITICIDADE_TONE: Record<ProductCriticidade, Tone> = { baixa: "emerald", media: "amber", alta: "red", critica: "red" }
+const SAUDE_KPI: Record<SaudeClasse, KpiTone> = { saudavel: "emerald", atencao: "amber", critico: "red" }
+const SAUDE_TEXT: Record<SaudeClasse, string> = {
+  saudavel: "text-emerald-600 dark:text-emerald-400",
+  atencao: "text-amber-600 dark:text-amber-400",
+  critico: "text-red-600 dark:text-red-400",
+}
+const SERVICO_TONE: Record<ServicoStatus, Tone> = { ativo: "emerald", em_implantacao: "blue", suspenso: "amber", descontinuado: "slate" }
+const RELEASE_TONE: Record<ReleaseStatus, Tone> = {
+  planejada: "slate", em_desenvolvimento: "blue", em_homologacao: "amber", publicada: "emerald", cancelada: "red", revertida: "amber",
+}
+
+type ProductTab = "geral" | "servicos" | "documentos" | "contratos" | "releases" | "documentacao" | "sustentacao"
+
+/** Link externo curto ("Abrir") das fichas; sem URL, traço. */
+function ExtLink({ url, children = "Abrir" }: { url: string | null; children?: ReactNode }) {
+  if (!url) return <>—</>
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className="inline-flex max-w-full items-center gap-1 text-primary hover:underline">
+      <span className="truncate">{children}</span> <ExternalLink size={12} className="shrink-0" />
+    </a>
+  )
+}
+
+/** Ações de linha (editar/excluir) das listas das abas. */
+function RowActions({ onEdit, onDelete, editTitle = "Editar", deleteTitle = "Inativar" }: {
+  onEdit?: () => void; onDelete: () => void; editTitle?: string; deleteTitle?: string
+}) {
+  return (
+    <div className="flex shrink-0 items-center justify-end gap-0.5">
+      {onEdit && (
+        <Button variant="ghost" size="icon" className="h-9 w-9" title={editTitle} aria-label={editTitle} onClick={onEdit}><Pencil size={14} /></Button>
+      )}
+      <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground hover:text-destructive" title={deleteTitle} aria-label={deleteTitle} onClick={onDelete}>
+        <Trash2 size={14} />
+      </Button>
+    </div>
+  )
+}
 
 export default function ProductDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -54,12 +107,32 @@ export default function ProductDetailPage() {
   const [product, setProduct] = useState<Product | null>(null)
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(false)
+  // Aba ativa: começa pela da URL (?tab=) e volta a ela quando a URL muda (antes: key={initialTab}).
+  const [tabState, setTabState] = useState<{ init: string; value: ProductTab }>({ init: initialTab, value: initialTab })
+  const tab: ProductTab = tabState.init === initialTab ? tabState.value : initialTab
+  const setTab = (value: ProductTab) => setTabState({ init: initialTab, value })
 
   async function reload() { if (id) setProduct(await produtosApi.getProduct(id).catch(() => null)) }
   useEffect(() => { if (id) produtosApi.getProduct(id).catch(() => null).then(setProduct).finally(() => setLoading(false)) }, [id])
 
-  if (loading) return <Skeleton className="h-96 w-full" />
-  if (!product) return <EmptyState icon={FileText} title="Produto não encontrado" description="Volte para a lista." />
+  if (loading) {
+    return (
+      <div className="space-y-5">
+        <Skeleton className="h-20 w-2/3 rounded-xl" />
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+          {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-[74px] rounded-xl" />)}
+        </div>
+        <Skeleton className="h-96 rounded-2xl" />
+      </div>
+    )
+  }
+  if (!product) {
+    return (
+      <Card>
+        <EmptyState icon={FileText} title="Produto não encontrado" description="Volte para a lista." />
+      </Card>
+    )
+  }
   const p = product
 
   async function remove() {
@@ -74,105 +147,220 @@ export default function ProductDetailPage() {
   if (p.criticidade === "critica") {
     if (!p.documentations.some((d) => d.status === "publicada")) criticalGaps.push("documentação publicada")
     if (!p.supports.some((s) => (s.canal_atendimento ?? "").trim())) criticalGaps.push("canal de suporte")
-    const hasSla = p.supports.some((s) => s.sla_horas != null) || p.contratos.some((c) => c.sla_contratual)
+    // SLA mora nos problemas do catálogo da Sustentação (cada um com o seu) ou no contrato.
+    const hasSla = p.supports.some((s) => s.problemas.length > 0) || p.contratos.some((c) => c.sla_contratual)
     if (!hasSla) criticalGaps.push("SLA definido")
   }
+  const semContratoAtivo = p.requires_contract && !p.has_active_contract
+
+  const actions: MenuAction[] = [
+    ...(p.url_acesso ? [{ label: "Acessar o sistema", icon: ExternalLink, onClick: () => window.open(p.url_acesso!, "_blank", "noopener") }] : []),
+    { label: "Editar produto", icon: Pencil, onClick: () => setEditing(true) },
+    { label: "Inativar produto", icon: Trash2, onClick: () => void remove() },
+  ]
+  const tabs: TabDef<ProductTab>[] = [
+    { value: "geral", label: "Geral", icon: LayoutGrid },
+    { value: "servicos", label: `Serviços (${p.servicos.length})`, icon: Wrench },
+    { value: "documentos", label: `Documentos Natos Digitais (${p.documentos.length})`, icon: FileText },
+    { value: "contratos", label: `Contratos (${p.contratos.length})`, icon: FileSignature },
+    { value: "releases", label: `Releases (${p.releases.length})`, icon: Rocket },
+    { value: "documentacao", label: `Documentação (${p.documentations.length})`, icon: BookOpen },
+    { value: "sustentacao", label: "Sustentação", icon: LifeBuoy },
+  ]
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <Button variant="ghost" size="icon" onClick={() => navigate("/app/modules/produtos/produtos")}><ArrowLeft size={16} /></Button>
-        <div className="flex-1">
-          <h2 className="text-lg font-bold">{p.simbolo ? `${p.simbolo} ` : ""}{p.name}{p.sigla && <span className="ml-1 text-sm font-normal text-muted-foreground">({p.sigla})</span>}</h2>
+    <div className="space-y-5">
+      <DetailHeader
+        crumbs={[{ label: "Produtos", to: "/app/modules/produtos/produtos" }, { label: p.name }]}
+        icon={p.categoria === "sistema_interno_ia" || p.categoria === "sistema_externo_ia" ? "Sparkles" : "Package"}
+        color="#7C3AED"
+        title={`${p.simbolo ? `${p.simbolo} ` : ""}${p.name}`}
+        badge={
           <div className="flex flex-wrap items-center gap-1.5">
-            {p.status_produto && <Badge variant="secondary" className="text-[10px]" style={{ backgroundColor: `${STATUS_COLOR[p.status_produto]}22`, color: STATUS_COLOR[p.status_produto] }}>{STATUS_LABEL[p.status_produto]}</Badge>}
-            <Badge variant="secondary" className="text-[10px]" style={{ backgroundColor: `${CRITICIDADE_COLOR[p.criticidade]}22`, color: CRITICIDADE_COLOR[p.criticidade] }}>{CRITICIDADE_LABEL[p.criticidade]}</Badge>
-            {p.categoria && <Badge variant="outline" className="text-[10px]">{CATEGORIA_LABEL[p.categoria]}</Badge>}
-            {p.tipo_desenvolvimento && <Badge variant="outline" className="text-[10px]">{TIPODEV_LABEL[p.tipo_desenvolvimento]}</Badge>}
-            {p.unidade && <Badge variant="outline" className="text-[10px]">{UNIDADE_LABEL[p.unidade]}</Badge>}
-            {trataDados && <Badge variant="secondary" className="gap-0.5 bg-amber-100 text-[10px] text-amber-800"><ShieldAlert size={10} /> {trataSensiveis ? "Dados sensíveis" : "Dados pessoais"}</Badge>}
+            {p.status_produto && <Pill tone={STATUS_TONE[p.status_produto]} dot>{STATUS_LABEL[p.status_produto]}</Pill>}
+            <Pill tone={CRITICIDADE_TONE[p.criticidade]} dot>Criticidade {CRITICIDADE_LABEL[p.criticidade].toLowerCase()}</Pill>
+            {p.categoria && <Pill>{CATEGORIA_LABEL[p.categoria]}</Pill>}
+            {p.tipo_desenvolvimento && <Pill>Desenvolvimento {TIPODEV_LABEL[p.tipo_desenvolvimento].toLowerCase()}</Pill>}
+            {p.unidade && <Pill>{UNIDADE_LABEL[p.unidade]}</Pill>}
+            {p.corporativo && <Pill tone="violet">Produto corporativo</Pill>}
+            {trataDados && (
+              <Pill tone={trataSensiveis ? "red" : "amber"}><ShieldAlert size={12} /> {trataSensiveis ? "Dados sensíveis" : "Dados pessoais"}</Pill>
+            )}
           </div>
-        </div>
-        {p.url_acesso && <Button variant="outline" size="sm" className="gap-1.5" onClick={() => window.open(p.url_acesso!, "_blank", "noopener")}><ExternalLink size={13} /> Acessar</Button>}
-        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setEditing(true)}><Pencil size={13} /> Editar</Button>
-        <Button variant="ghost" size="sm" className="gap-1.5 text-destructive" onClick={() => void remove()}><Trash2 size={13} /> Inativar</Button>
-      </div>
+        }
+        description={p.description ? <span className="line-clamp-2">{p.description}</span> : undefined}
+        meta={
+          <>
+            {p.sigla && <>Sigla: <span className="text-foreground">{p.sigla}</span> · </>}
+            Ciclo de vida: <span className="text-foreground">{LIFECYCLE_LABEL[p.lifecycle]}</span>
+            {p.fornecedor && <> · Fornecedor: <span className="text-foreground">{p.fornecedor.nome}</span></>}
+            {" "}· Cadastrado em {fmtDate(p.created_at)}
+          </>
+        }
+        updatedAt={p.updated_at ?? null}
+        actions={actions}
+      />
 
-      {p.requires_contract && !p.has_active_contract && (
-        <div className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          <AlertTriangle size={15} /> Produto de fornecedor sem contrato ativo — cadastre um contrato na aba Contratos.
-        </div>
+      <KpiRow className="sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+        {p.health ? (
+          <KpiText
+            icon={Activity}
+            tone={SAUDE_KPI[p.health.classe]}
+            label={`Saúde do produto (${p.health.passed_weight}/${p.health.applicable_weight} pts)`}
+            value={<span className={SAUDE_TEXT[p.health.classe]}>{p.health.score} · {SAUDE_LABEL[p.health.classe]}</span>}
+          />
+        ) : (
+          <KpiText icon={Activity} tone="slate" label="Saúde do produto" value="Sem cálculo" />
+        )}
+        <KpiCount icon={Wrench} value={p.servicos.length} label="Serviços digitais" onClick={() => setTab("servicos")} />
+        <KpiCount
+          icon={p.sem_documentos_natos ? FileX : FileText} value={p.documentos.length}
+          label={p.sem_documentos_natos ? "Documentos Natos Digitais · não gera (justificado)" : "Documentos Natos Digitais"}
+          tone={p.sem_documentos_natos ? "slate" : "primary"} onClick={() => setTab("documentos")}
+        />
+        <KpiCount
+          icon={FileSignature} value={p.contratos.length} label={semContratoAtivo ? "Contratos (nenhum ativo)" : "Contratos"}
+          tone={semContratoAtivo ? "amber" : "primary"} highlight={semContratoAtivo} onClick={() => setTab("contratos")}
+        />
+        <KpiCount icon={Rocket} value={p.releases.length} label="Releases" onClick={() => setTab("releases")} />
+        {p.corporativo
+          ? <KpiPerson name={p.responsavel_tecnico?.full_name} role="Responsável técnico" />
+          : <KpiPerson name={p.responsavel?.full_name} role="Responsável (PO)" />}
+      </KpiRow>
+
+      {semContratoAtivo && (
+        <Notice tone="amber" icon={AlertTriangle}>
+          <span className="flex-1">Produto de fornecedor sem contrato ativo — cadastre um contrato na aba Contratos.</span>
+          {tab !== "contratos" && (
+            <Button size="sm" variant="outline" className="h-8 bg-background" onClick={() => setTab("contratos")}>Ver contratos</Button>
+          )}
+        </Notice>
       )}
       {criticalGaps.length > 0 && (
-        <div className="flex items-center gap-2 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
-          <ShieldAlert size={15} /> Produto crítico sem: {criticalGaps.join(", ")}.
-        </div>
+        <Notice tone="red" icon={ShieldAlert}>Produto crítico sem: {criticalGaps.join(", ")}.</Notice>
       )}
 
-      <Tabs defaultValue={initialTab} key={initialTab}>
-        <TabsList className="flex-wrap">
-          <TabsTrigger value="geral">Geral</TabsTrigger>
-          <TabsTrigger value="servicos">Serviços ({p.servicos.length})</TabsTrigger>
-          <TabsTrigger value="documentos">Documentos ({p.documentos.length})</TabsTrigger>
-          <TabsTrigger value="contratos">Contratos ({p.contratos.length})</TabsTrigger>
-          <TabsTrigger value="releases">Releases ({p.releases.length})</TabsTrigger>
-          <TabsTrigger value="documentacao">Documentação ({p.documentations.length})</TabsTrigger>
-          <TabsTrigger value="sustentacao">Sustentação</TabsTrigger>
-        </TabsList>
+      <DetailTabs tabs={tabs} value={tab} onChange={setTab} />
 
-        <TabsContent value="geral"><GeralTab p={p} onChange={reload} /></TabsContent>
-        <TabsContent value="servicos"><ServicosTab p={p} onChange={reload} /></TabsContent>
-        <TabsContent value="documentos"><DocumentosTab p={p} onChange={reload} /></TabsContent>
-        <TabsContent value="contratos"><ContratosTab p={p} onChange={reload} /></TabsContent>
-        <TabsContent value="releases"><ReleasesTab p={p} onChange={reload} /></TabsContent>
-        <TabsContent value="documentacao"><DocumentacaoTab p={p} onChange={reload} /></TabsContent>
-        <TabsContent value="sustentacao"><SustentacaoTab p={p} onChange={reload} /></TabsContent>
-      </Tabs>
+      {tab === "geral" && <GeralTab p={p} onChange={reload} onEdit={() => setEditing(true)} onGoDocumentos={() => setTab("documentos")} />}
+      {tab === "servicos" && <ServicosTab p={p} onChange={reload} />}
+      {tab === "documentos" && <DocumentosTab p={p} onChange={reload} />}
+      {tab === "contratos" && <ContratosTab p={p} onChange={reload} />}
+      {tab === "releases" && <ReleasesTab p={p} onChange={reload} />}
+      {tab === "documentacao" && <DocumentacaoTab p={p} onChange={reload} />}
+      {tab === "sustentacao" && <SustentacaoTab p={p} onChange={reload} />}
 
       <ProductFormDialog open={editing} onOpenChange={setEditing} product={p} onSaved={() => { setEditing(false); void reload() }} />
     </div>
   )
 }
 
-function Field({ label, value }: { label: string; value: React.ReactNode }) {
-  return <div><p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">{label}</p><p className="text-sm">{value || "—"}</p></div>
+/** Menor pontuação (em pts) que leva a nota ao limiar, com o mesmo arredondamento do backend. */
+function ptsParaLimiar(passed: number, applicable: number, limiar: number): number {
+  if (applicable <= 0) return 0
+  for (let pts = passed; pts <= applicable; pts++) {
+    if (Math.round((pts / applicable) * 100) >= limiar) return pts - passed
+  }
+  return applicable - passed
 }
 
-function HealthChecklist({ health }: { health: ProductHealth }) {
+/** Régua da saúde: faixas Crítico / Atenção / Saudável do tenant e onde a nota está. */
+function HealthRuler({ score, atencao, saudavel }: { score: number; atencao: number; saudavel: number }) {
+  const pos = Math.max(0, Math.min(100, score))
+  return (
+    <div className="space-y-1">
+      <div className="relative">
+        <div className="flex h-2 overflow-hidden rounded-full">
+          <div className="bg-red-200 dark:bg-red-900/60" style={{ width: `${atencao}%` }} />
+          <div className="bg-amber-200 dark:bg-amber-900/60" style={{ width: `${saudavel - atencao}%` }} />
+          <div className="bg-emerald-200 dark:bg-emerald-900/60" style={{ width: `${100 - saudavel}%` }} />
+        </div>
+        <span
+          className="absolute top-1/2 h-4 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground ring-2 ring-background"
+          style={{ left: `${pos}%` }}
+          aria-hidden
+        />
+      </div>
+      <div className="flex justify-between text-[11px] text-muted-foreground">
+        <span>Crítico &lt; {atencao}</span>
+        <span>Atenção {atencao}–{saudavel - 1}</span>
+        <span>Saudável ≥ {saudavel}</span>
+      </div>
+    </div>
+  )
+}
+
+function HealthChecklist({ health, className = "", onDocumentosDispensa }: {
+  health: ProductHealth
+  className?: string
+  /** Produto sem documento: atalho para declarar que não gera documentos natos digitais. */
+  onDocumentosDispensa?: () => void
+}) {
   // Ordena: o que falta (fail) primeiro, depois o que passou, por último os não aplicáveis.
   const rank = { fail: 0, pass: 1, na: 2 } as const
   const checks = [...health.checks].sort((a, b) => (rank[a.status] - rank[b.status]) || (b.weight - a.weight))
   const fails = health.checks.filter((c) => c.status === "fail").length
-  const color = SAUDE_COLOR[health.classe]
+  const naCount = health.checks.filter((c) => c.status === "na").length
+  const saudavel = health.limiar_saudavel ?? 75
+  const atencao = health.limiar_atencao ?? 40
+  const faltaSaudavel = ptsParaLimiar(health.passed_weight, health.applicable_weight, saudavel)
+  const faltaAtencao = ptsParaLimiar(health.passed_weight, health.applicable_weight, atencao)
   return (
-    <div className="rounded-lg border p-3">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className="inline-flex min-w-[2.5rem] items-center justify-center rounded-full border px-2 py-0.5 text-sm font-bold tabular-nums"
-            style={{ backgroundColor: `${color}1a`, color, borderColor: `${color}55` }}>{health.score}</span>
-          <div>
-            <p className="text-sm font-semibold">Saúde: {SAUDE_LABEL[health.classe]}</p>
-            <p className="text-[11px] text-muted-foreground">{health.passed_weight}/{health.applicable_weight} pts dos critérios aplicáveis</p>
-          </div>
+    <SectionCard
+      className={className}
+      title="Saúde do produto"
+      icon={Activity}
+      subtitle="Critérios do índice de portfólio; o que falta aparece primeiro."
+      right={<Pill tone={SAUDE_TONE[health.classe]} dot>Saúde: {SAUDE_LABEL[health.classe]}</Pill>}
+    >
+      <div className="flex items-center gap-4">
+        <p className={`text-4xl font-bold leading-none tabular-nums ${SAUDE_TEXT[health.classe]}`}>{health.score}</p>
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <HealthRuler score={health.score} atencao={atencao} saudavel={saudavel} />
+          <p className="text-xs text-muted-foreground">
+            Nota = {health.passed_weight} de {health.applicable_weight} pts dos critérios que se aplicam a este produto.
+          </p>
         </div>
-        {fails > 0
-          ? <Badge variant="secondary" className="bg-amber-100 text-[10px] text-amber-800">{fails} critério(s) p/ chegar a 100</Badge>
-          : <Badge variant="secondary" className="bg-emerald-100 text-[10px] text-emerald-800">Nada pendente</Badge>}
       </div>
-      <ul className="space-y-1">
+      <div className="mt-3 flex flex-wrap gap-2">
+        {health.classe === "saudavel"
+          ? <Pill tone="emerald" dot>Saudável (nota ≥ {saudavel})</Pill>
+          : health.classe === "atencao"
+            ? <Pill tone="amber" dot>Faltam {faltaSaudavel} pts para ficar Saudável</Pill>
+            : <Pill tone="red" dot>Faltam {faltaAtencao} pts para Atenção e {faltaSaudavel} pts para Saudável</Pill>}
+        {fails > 0
+          ? <Pill tone="slate">{fails} critério(s) pendente(s)</Pill>
+          : <Pill tone="emerald">Nada pendente</Pill>}
+      </div>
+      {naCount > 0 && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Os {naCount} critério(s) "não se aplica" ficam fora da conta: não somam nem tiram pontos.
+        </p>
+      )}
+      <ul className="mt-3 divide-y">
         {checks.map((c) => {
           const Icon = c.status === "pass" ? CheckCircle2 : c.status === "fail" ? XCircle : MinusCircle
-          const cls = c.status === "pass" ? "text-emerald-600" : c.status === "fail" ? "text-red-600" : "text-muted-foreground/60"
+          const cls = c.status === "pass"
+            ? "text-emerald-600 dark:text-emerald-400"
+            : c.status === "fail" ? "text-red-600 dark:text-red-400" : "text-muted-foreground/60"
           return (
-            <li key={c.code} className="flex items-center gap-2 text-sm">
-              <Icon size={15} className={`shrink-0 ${cls}`} />
-              <span className={c.status === "na" ? "text-muted-foreground" : c.status === "fail" ? "font-medium" : ""}>{c.label}</span>
-              <span className="ml-auto text-[10px] text-muted-foreground">{c.status === "na" ? "não se aplica" : `${c.weight} pts`}</span>
+            <li key={c.code} className="flex items-center gap-2 py-2 text-sm">
+              <Icon size={16} className={`shrink-0 ${cls}`} />
+              <span className="min-w-0">
+                <span className={c.status === "na" ? "text-muted-foreground" : c.status === "fail" ? "font-medium" : ""}>{c.label}</span>
+                {c.note && <span className="block text-xs text-muted-foreground">{c.note}</span>}
+                {c.code === "documentos_cadastrados" && c.status === "fail" && onDocumentosDispensa && (
+                  <button type="button" onClick={onDocumentosDispensa} className="block text-xs font-medium text-primary hover:underline">
+                    Não gera documentos natos digitais? Declarar
+                  </button>
+                )}
+              </span>
+              <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">{c.status === "na" ? "não se aplica" : `${c.weight} pts`}</span>
             </li>
           )
         })}
       </ul>
-    </div>
+    </SectionCard>
   )
 }
 
@@ -190,20 +378,18 @@ function RepositoriosDoProduto({ productId }: { productId: string }) {
 
   if (!repos || repos.length === 0) return null
   return (
-    <div className="sm:col-span-2 lg:col-span-3">
-      <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
-        Repositórios sincronizados
-      </p>
-      <ul className="mt-1 space-y-1">
+    <div className="mt-5 border-t pt-4">
+      <p className="text-xs text-muted-foreground">Repositórios sincronizados</p>
+      <ul className="mt-2 space-y-2">
         {repos.map((r) => (
-          <li key={r.id} className="flex flex-wrap items-center gap-2 text-sm">
-            <GitBranch size={14} className="shrink-0 text-muted-foreground" />
+          <li key={r.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+            <GitBranch size={15} className="shrink-0 text-muted-foreground" />
             {r.web_url ? (
-              <a href={r.web_url} target="_blank" rel="noreferrer" className="text-primary underline">
+              <a href={r.web_url} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">
                 {r.project}/{r.repository}
               </a>
             ) : (
-              <span>{r.project}/{r.repository}</span>
+              <span className="font-medium">{r.project}/{r.repository}</span>
             )}
             <span className="text-xs text-muted-foreground">
               {r.commits_count > 0
@@ -211,9 +397,7 @@ function RepositoriosDoProduto({ productId }: { productId: string }) {
                 : "sem commits importados"}
             </span>
             {r.last_sync_status === "erro" || r.last_sync_status === "not_found" ? (
-              <Badge variant="outline" className="text-[10px] text-warning" title={r.last_sync_error ?? ""}>
-                falha no sync
-              </Badge>
+              <span title={r.last_sync_error ?? ""}><Pill tone="amber" dot>Falha no sync</Pill></span>
             ) : null}
           </li>
         ))}
@@ -222,35 +406,68 @@ function RepositoriosDoProduto({ productId }: { productId: string }) {
   )
 }
 
-function GeralTab({ p, onChange }: { p: Product; onChange: () => void }) {
+const DL = "grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3"
+
+function GeralTab({ p, onChange, onEdit, onGoDocumentos }: { p: Product; onChange: () => void; onEdit: () => void; onGoDocumentos?: () => void }) {
   const [fornecedorOpen, setFornecedorOpen] = useState(false)
-  const link = (url: string | null) => url ? <a href={url} target="_blank" rel="noreferrer" className="text-primary underline">abrir</a> : null
   return (
-    <div className="space-y-4 pt-3">
-      {p.health && <HealthChecklist health={p.health} />}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      <Field label="Categoria" value={p.categoria ? CATEGORIA_LABEL[p.categoria] : null} />
-      <Field label="Ciclo de vida" value={LIFECYCLE_LABEL[p.lifecycle]} />
-      <Field label="Produto corporativo" value={p.corporativo ? "Sim" : "Não"} />
-      {!p.corporativo && <Field label="Responsável (PO)" value={p.responsavel?.full_name} />}
-      <Field label="Responsável técnico" value={p.responsavel_tecnico?.full_name} />
-      <div>
-        <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Fornecedor</p>
-        <div className="mt-0.5 flex flex-wrap items-center gap-2">
-          <p className="text-sm">{p.fornecedor?.nome ?? "—"}</p>
-          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setFornecedorOpen(true)}>
-            {p.fornecedor ? "Alterar" : "Definir"}
-          </Button>
-        </div>
-      </div>
-      <Field label="Login Idigital" value={p.login_idigital ? "Sim" : "Não"} />
-      <Field label="Repositório" value={link(p.link_repositorio)} />
-      <Field label="Ambiente DEV" value={link(p.link_dev)} />
-      <Field label="Ambiente HML" value={link(p.link_hml)} />
-      <Field label="Ambiente PRD" value={link(p.link_prd)} />
-      <RepositoriosDoProduto productId={p.id} />
-      <div className="sm:col-span-2 lg:col-span-3"><Field label="Stacks" value={p.stacks.length ? p.stacks.map((s) => s.name).join(", ") : null} /></div>
-      <div className="sm:col-span-2 lg:col-span-3"><Field label="Descrição" value={p.description} /></div>
+    <div className={`grid items-start gap-4 ${p.health ? "xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]" : ""}`}>
+      {/* Saúde vem primeiro no celular; na tela larga fica na coluna da direita. */}
+      {p.health && (
+        <HealthChecklist
+          health={p.health}
+          className="xl:order-last"
+          onDocumentosDispensa={p.documentos.length === 0 && !p.sem_documentos_natos ? onGoDocumentos : undefined}
+        />
+      )}
+      <div className="min-w-0 space-y-4">
+        <SectionCard
+          title="Cadastro"
+          icon={ClipboardList}
+          right={<Button variant="outline" className="h-9 gap-1.5" onClick={onEdit}><Pencil size={14} /> Editar</Button>}
+        >
+          <dl className={DL}>
+            <Field label="Categoria">{p.categoria ? CATEGORIA_LABEL[p.categoria] : "—"}</Field>
+            <Field label="Ciclo de vida">{LIFECYCLE_LABEL[p.lifecycle]}</Field>
+            <Field label="Produto corporativo">{p.corporativo ? "Sim" : "Não"}</Field>
+            <Field label="Login Idigital">{p.login_idigital ? "Sim" : "Não"}</Field>
+            <Field label="Stacks" className="sm:col-span-2 lg:col-span-3">
+              {p.stacks.length ? (
+                <span className="flex flex-wrap gap-1.5">{p.stacks.map((s) => <Pill key={s.id}>{s.name}</Pill>)}</span>
+              ) : "—"}
+            </Field>
+            <Field label="Descrição" className="sm:col-span-2 lg:col-span-3">
+              <span className="whitespace-pre-wrap font-normal leading-relaxed">{p.description || "—"}</span>
+            </Field>
+          </dl>
+        </SectionCard>
+
+        <SectionCard
+          title="Responsáveis"
+          icon={Users}
+          subtitle={p.corporativo ? "Produto corporativo: o Responsável (PO) é definido em cada serviço." : undefined}
+          right={
+            <Button variant="outline" className="h-9 gap-1.5" onClick={() => setFornecedorOpen(true)}>
+              <Pencil size={14} /> {p.fornecedor ? "Alterar fornecedor" : "Definir fornecedor"}
+            </Button>
+          }
+        >
+          <dl className={DL}>
+            {!p.corporativo && <Field label="Responsável (PO)">{p.responsavel?.full_name || "—"}</Field>}
+            <Field label="Responsável técnico">{p.responsavel_tecnico?.full_name || "—"}</Field>
+            <Field label="Fornecedor">{p.fornecedor?.nome ?? "—"}</Field>
+          </dl>
+        </SectionCard>
+
+        <SectionCard title="Ambientes e repositório" icon={Server}>
+          <dl className={DL}>
+            <Field label="Acesso ao sistema"><ExtLink url={p.url_acesso}>Acessar</ExtLink></Field>
+            <Field label="Repositório"><ExtLink url={p.link_repositorio} /></Field>
+            <Field label="Ambiente HML"><ExtLink url={p.link_hml} /></Field>
+            <Field label="Ambiente PRD"><ExtLink url={p.link_prd} /></Field>
+          </dl>
+          <RepositoriosDoProduto productId={p.id} />
+        </SectionCard>
       </div>
       <DefinirFornecedorDialog
         open={fornecedorOpen}
@@ -308,84 +525,90 @@ function ServicosTab({ p, onChange }: { p: Product; onChange: () => void }) {
   async function del(s: Servico) { if (confirm(`Inativar o serviço "${s.name}"?`)) { await produtosApi.deleteServico(p.id, s.id); onChange() } }
   const canAdd = name.trim() && (!p.corporativo || responsavelId !== NONE)
   return (
-    <div className="space-y-3 pt-3">
-      <div className="space-y-3 rounded-md border p-3">
-        <div className="space-y-1"><Label className="text-xs">Nome do serviço</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Emissão de certidão" /></div>
-        <div className="space-y-1"><Label className="text-xs">Descrição</Label><Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} placeholder="Descreva o serviço digital" /></div>
-        <div className="flex flex-wrap items-end gap-2">
-          <div className="space-y-1"><Label className="text-xs">Data da publicação</Label><Input type="date" value={dataPublicacao} onChange={(e) => setDataPublicacao(e.target.value)} /></div>
-          <div className="space-y-1"><Label className="text-xs">Status</Label>
-            <Select value={statusSvc} onValueChange={(v) => setStatusSvc(v as ServicoStatus)}><SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
-              <SelectContent>{SERVICO_STATUS_OPTS.map((o) => <SelectItem key={o} value={o}>{SERVICO_STATUS_LABEL[o]}</SelectItem>)}</SelectContent></Select>
-          </div>
-          {p.corporativo && (
-            <div className="min-w-[200px] flex-1 space-y-1">
-              <Label className="text-xs">Responsável (PO) *</Label>
-              <Select value={responsavelId} onValueChange={setResponsavelId}>
-                <SelectTrigger className="h-9"><SelectValue placeholder="Selecione o PO" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NONE}>—</SelectItem>
-                  {pos.map((po) => <SelectItem key={po.id} value={po.id}>{po.full_name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+    <div className="space-y-4">
+      <SectionCard title="Novo serviço" icon={Plus} subtitle="Serviço digital entregue pelo produto.">
+        <div className="space-y-3">
+          <div className="space-y-1.5"><Label className="text-xs">Nome do serviço</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Emissão de certidão" /></div>
+          <div className="space-y-1.5"><Label className="text-xs">Descrição</Label><Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} placeholder="Descreva o serviço digital" /></div>
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-1.5"><Label className="text-xs">Data da publicação</Label><Input type="date" className="h-9" value={dataPublicacao} onChange={(e) => setDataPublicacao(e.target.value)} /></div>
+            <div className="space-y-1.5"><Label className="text-xs">Status</Label>
+              <Select value={statusSvc} onValueChange={(v) => setStatusSvc(v as ServicoStatus)}><SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
+                <SelectContent>{SERVICO_STATUS_OPTS.map((o) => <SelectItem key={o} value={o}>{SERVICO_STATUS_LABEL[o]}</SelectItem>)}</SelectContent></Select>
             </div>
-          )}
-          <Button className="gap-1.5" onClick={() => void add()} disabled={adding || !canAdd}><Plus size={14} /> Adicionar</Button>
+            {p.corporativo && (
+              <div className="min-w-[200px] flex-1 space-y-1.5">
+                <Label className="text-xs">Responsável (PO) *</Label>
+                <Select value={responsavelId} onValueChange={setResponsavelId}>
+                  <SelectTrigger className="h-9"><SelectValue placeholder="Selecione o PO" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NONE}>—</SelectItem>
+                    {pos.map((po) => <SelectItem key={po.id} value={po.id}>{po.full_name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <Button className="ml-auto h-9 gap-1.5" onClick={() => void add()} disabled={adding || !canAdd}><Plus size={14} /> Adicionar</Button>
+          </div>
         </div>
-      </div>
-      {p.servicos.length === 0 ? <p className="text-sm text-muted-foreground">Nenhum serviço.</p> : (
-        <div className="space-y-2">{p.servicos.map((s) => (
-          <div key={s.id} className="rounded-md border p-2.5">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <p className="text-sm font-medium">{s.name}</p>
-                {s.description && <p className="text-xs text-muted-foreground line-clamp-2">{s.description}</p>}
-                <p className="text-[11px] text-muted-foreground">
-                  Publicado em {fmtDate(s.data_publicacao ?? `${s.ano_referencia}-01-01`)}
-                  {p.corporativo && s.responsavel?.full_name && <> · PO: {s.responsavel.full_name}</>}
-                </p>
+      </SectionCard>
+
+      <SectionCard title={`Serviços (${p.servicos.length})`} icon={Wrench} subtitle="Cada serviço com os sub-processos do portfólio que ele atende." flush>
+        {p.servicos.length === 0 ? (
+          <EmptyState icon={Wrench} title="Nenhum serviço" description="Cadastre acima o primeiro serviço digital do produto." compact />
+        ) : (
+          <ul className="divide-y">{p.servicos.map((s) => (
+            <li key={s.id} className="px-5 py-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium">{s.name}</p>
+                  {s.description && <p className="mt-0.5 line-clamp-2 text-sm text-muted-foreground">{s.description}</p>}
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Publicado em {fmtDate(s.data_publicacao ?? `${s.ano_referencia}-01-01`)}
+                    {p.corporativo && s.responsavel?.full_name && <> · PO: <span className="text-foreground">{s.responsavel.full_name}</span></>}
+                  </p>
+                </div>
+                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                  {s.status_servico && <Pill tone={SERVICO_TONE[s.status_servico]} dot>{SERVICO_STATUS_LABEL[s.status_servico]}</Pill>}
+                  {s.sem_subprocesso_disponivel && (s.process_links?.length ?? 0) === 0 && (
+                    <Pill tone="amber">Sem sub-processo</Pill>
+                  )}
+                  <RowActions onEdit={() => setEditSvc(s)} editTitle="Editar serviço" onDelete={() => void del(s)} deleteTitle="Inativar serviço" />
+                </div>
               </div>
-              <div className="flex shrink-0 items-center gap-2">
-                {s.status_servico && <Badge variant="outline" className="text-[10px]">{SERVICO_STATUS_LABEL[s.status_servico]}</Badge>}
-                {s.sem_subprocesso_disponivel && (s.process_links?.length ?? 0) === 0 && (
-                  <Badge variant="secondary" className="bg-amber-100 text-[10px] text-amber-800">Sem sub-processo</Badge>
+              <div className="mt-3 rounded-xl border bg-muted/30 px-4 py-3">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-medium">
+                    Sub-processos vinculados <span className="text-muted-foreground">({s.process_links?.length ?? 0})</span>
+                  </p>
+                  <Button variant="outline" className="h-9 gap-1.5 bg-background" onClick={() => setLinkSvc(s)}>
+                    <Link2 size={14} /> Vincular
+                  </Button>
+                </div>
+                {(s.process_links?.length ?? 0) === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    {s.sem_subprocesso_disponivel
+                      ? "Sem vínculo — declarado indisponível no portfólio."
+                      : "Nenhum sub-processo vinculado."}
+                  </p>
+                ) : (
+                  <ul className="space-y-1.5">
+                    {(s.process_links ?? []).map((lk) => {
+                      const label = lk.codigo ? `${lk.codigo} · ${lk.name ?? "Sub-processo"}` : (lk.name ?? "Sub-processo")
+                      return (
+                        <li key={lk.item_lineage_id} className="flex items-start gap-2 text-sm text-foreground">
+                          <Workflow size={14} className="mt-0.5 shrink-0 text-muted-foreground" />
+                          <span className="leading-snug">{label}</span>
+                        </li>
+                      )
+                    })}
+                  </ul>
                 )}
-                <Button variant="ghost" size="icon" title="Editar serviço" onClick={() => setEditSvc(s)}><Pencil size={14} /></Button>
-                <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" onClick={() => void del(s)}><Trash2 size={14} /></Button>
               </div>
-            </div>
-            <div className="mt-2.5 border-t pt-2.5">
-              <div className="mb-1.5 flex items-center justify-between gap-2">
-                <p className="text-[11px] font-medium text-muted-foreground">
-                  Sub-processos vinculados ({s.process_links?.length ?? 0})
-                </p>
-                <Button variant="outline" size="sm" className="h-7 gap-1 text-xs" onClick={() => setLinkSvc(s)}>
-                  <Link2 size={12} /> Vincular
-                </Button>
-              </div>
-              {(s.process_links?.length ?? 0) === 0 ? (
-                <p className="text-[11px] text-muted-foreground">
-                  {s.sem_subprocesso_disponivel
-                    ? "Sem vínculo — declarado indisponível no portfólio."
-                    : "Nenhum sub-processo vinculado."}
-                </p>
-              ) : (
-                <ul className="space-y-1">
-                  {(s.process_links ?? []).map((lk) => {
-                    const label = lk.codigo ? `${lk.codigo} · ${lk.name ?? "Sub-processo"}` : (lk.name ?? "Sub-processo")
-                    return (
-                      <li key={lk.item_lineage_id} className="flex items-start gap-1.5 text-xs text-foreground">
-                        <Workflow size={12} className="mt-0.5 shrink-0 text-muted-foreground" />
-                        <span className="leading-snug">{label}</span>
-                      </li>
-                    )
-                  })}
-                </ul>
-              )}
-            </div>
-          </div>
-        ))}</div>
-      )}
+            </li>
+          ))}</ul>
+        )}
+      </SectionCard>
       {linkSvc && (
         <ServiceProcessLinksDialog
           productId={p.id}
@@ -497,10 +720,65 @@ function DocumentosTab({ p, onChange }: { p: Product; onChange: () => void }) {
   }
   async function del(d: Documento) { if (confirm(`Inativar "${d.name}"?`)) { await produtosApi.deleteDocumento(p.id, d.id); onChange() } }
   const canAdd = name.trim() && (upload || link.trim())
+
+  // Declaração "não gera documentos natos digitais": tira o critério da saúde (não se aplica).
+  const [dispensaOpen, setDispensaOpen] = useState(false)
+  const [justificativa, setJustificativa] = useState("")
+  const [savingDispensa, setSavingDispensa] = useState(false)
+  async function saveDispensa(sem: boolean) {
+    if (sem && justificativa.trim().length < 10) {
+      toast.error("Explique por que o produto não gera documentos natos digitais (mínimo de 10 caracteres).")
+      return
+    }
+    if (!sem && !confirm("Desfazer a declaração? O critério \"Documentos cadastrados\" volta a contar na saúde do produto.")) return
+    setSavingDispensa(true)
+    try {
+      await produtosApi.setDocumentosDispensa(p.id, sem ? { sem_documentos_natos: true, justificativa: justificativa.trim() } : { sem_documentos_natos: false })
+      toast.success(sem ? "Declaração registrada: o critério deixa de contar na saúde." : "Declaração desfeita.")
+      setDispensaOpen(false)
+      setJustificativa("")
+      onChange()
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: unknown } } }
+      toast.error(typeof e?.response?.data?.detail === "string" ? e.response.data.detail : "Não foi possível salvar a declaração.")
+    } finally {
+      setSavingDispensa(false)
+    }
+  }
+
   return (
-    <div className="space-y-3 pt-3">
-      <div className="rounded-lg border bg-muted/20 p-4">
-        <p className="mb-3 text-sm font-medium">Novo documento</p>
+    <div className="space-y-4">
+      {p.sem_documentos_natos && (
+        <Notice tone="slate" icon={FileX}>
+          <span className="min-w-0 flex-1">
+            <strong className="text-foreground">Este produto não gera documentos natos digitais.</strong>{" "}
+            O critério "Documentos cadastrados" não conta na saúde.
+            {p.justificativa_sem_documentos_natos && (
+              <span className="mt-1 block whitespace-pre-wrap text-foreground">Justificativa: {p.justificativa_sem_documentos_natos}</span>
+            )}
+            <span className="mt-1 block text-xs">
+              Declarado{p.sem_documentos_natos_by_name ? ` por ${p.sem_documentos_natos_by_name}` : ""}
+              {p.sem_documentos_natos_at ? ` em ${fmtDate(p.sem_documentos_natos_at)}` : ""}. Cadastrar um documento desfaz a declaração.
+            </span>
+          </span>
+          <Button type="button" variant="outline" size="sm" className="bg-background" disabled={savingDispensa} onClick={() => void saveDispensa(false)}>
+            Desfazer declaração
+          </Button>
+        </Notice>
+      )}
+      {!p.sem_documentos_natos && p.documentos.length === 0 && (
+        <Notice tone="blue" icon={FileX}>
+          <span className="min-w-0 flex-1">
+            <strong>Nenhum documento nato digital cadastrado.</strong>{" "}
+            Se o produto não gera documentos natos digitais, declare com uma justificativa: o critério
+            "Documentos cadastrados" deixa de contar na saúde.
+          </span>
+          <Button type="button" size="sm" className="gap-1.5" onClick={() => setDispensaOpen(true)}>
+            <FileX size={14} /> O produto não gera documentos natos digitais
+          </Button>
+        </Notice>
+      )}
+      <SectionCard title="Novo documento nato digital" icon={Plus} subtitle="Documento nato digital gerado pelo produto: anexe o arquivo ou informe o link.">
         <div className="space-y-3">
           <div className="grid gap-3 lg:grid-cols-2">
             <div className="space-y-1.5">
@@ -548,9 +826,9 @@ function DocumentosTab({ p, onChange }: { p: Product; onChange: () => void }) {
                 placeholder="https://…"
               />
               {formatoDetectado && (
-                <Badge variant="secondary" className="h-9 shrink-0 px-2.5 text-xs font-normal">
+                <Pill className="shrink-0">
                   {DOC_FORMATO_LABEL[formatoDetectado as keyof typeof DOC_FORMATO_LABEL] ?? formatoDetectado.toUpperCase()}
-                </Badge>
+                </Pill>
               )}
               {upload && (
                 <Button type="button" variant="ghost" size="icon" className="h-9 w-9 shrink-0 text-muted-foreground" onClick={() => { setUpload(null); setFormatoDetectado(null) }}>
@@ -561,39 +839,99 @@ function DocumentosTab({ p, onChange }: { p: Product; onChange: () => void }) {
           </div>
         </div>
 
-        <div className="mt-3 flex justify-end">
-          <Button className="gap-1.5" onClick={() => void add()} disabled={adding || !canAdd}>
+        <div className="mt-4 flex justify-end">
+          <Button className="h-9 gap-1.5" onClick={() => void add()} disabled={adding || !canAdd}>
             {adding ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
             Adicionar documento
           </Button>
         </div>
-      </div>
-      {p.documentos.length === 0 ? <p className="text-sm text-muted-foreground">Nenhum documento.</p> : (
-        <div className="space-y-2">{p.documentos.map((d) => (
-          <div key={d.id} className="flex items-center justify-between gap-2 rounded-md border p-2.5">
-            <button type="button" className="flex min-w-0 flex-col gap-0.5 text-left" onClick={() => void open(d)}>
-              <span className="flex min-w-0 items-center gap-2">
-                {d.object_name ? <FileText size={15} className="shrink-0 text-muted-foreground" /> : <Link2 size={15} className="shrink-0 text-muted-foreground" />}
-                <span className="truncate text-sm font-medium text-primary hover:underline">{d.name}</span>
-              </span>
-              {d.observacoes && (
-                <span className="truncate pl-[23px] text-[11px] text-muted-foreground">{d.observacoes}</span>
-              )}
-            </button>
-            <div className="flex flex-wrap items-center justify-end gap-1">
-              {d.formato && <Badge variant="outline" className="text-[10px]">{DOC_FORMATO_LABEL[d.formato as keyof typeof DOC_FORMATO_LABEL] ?? d.formato.toUpperCase()}</Badge>}
-              {(d.nivel_dados_pessoais !== "sem_dados_pessoais" || d.dados_pessoais || d.dados_sensiveis) && (
-                <Badge variant="secondary" className="gap-0.5 bg-amber-100 text-[10px] text-amber-800">
-                  <ShieldAlert size={10} />{docNivelLgpd(d)}
-                </Badge>
-              )}
-              <Badge variant="outline" className="text-[10px]">{fmtDate(d.data_documento ?? `${d.ano_referencia}-01-01`)}</Badge>
-              <Button variant="ghost" size="icon" onClick={() => void open(d)}><Download size={14} /></Button>
-              <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" onClick={() => void del(d)}><Trash2 size={14} /></Button>
-            </div>
+      </SectionCard>
+
+      <SectionCard title={`Documentos Natos Digitais (${p.documentos.length})`} icon={FileText} subtitle="Clique no nome para abrir o arquivo ou o link." flush>
+        {p.documentos.length === 0 ? (
+          p.sem_documentos_natos ? (
+            <EmptyState icon={FileX} title="Nenhum documento nato digital" description="Declarado que o produto não gera documentos natos digitais." compact />
+          ) : (
+            <EmptyState icon={FileText} title="Nenhum documento nato digital" description="Cadastre acima o primeiro documento nato digital do produto." compact />
+          )
+        ) : (
+          <div className={TABLE.wrap}>
+            <table className={TABLE.table}>
+              <thead className={TABLE.thead}>
+                <tr>
+                  <th className={TABLE.thFirst}>Documento</th>
+                  <th className={TABLE.th}>Formato</th>
+                  <th className={TABLE.th}>Dados pessoais (LGPD)</th>
+                  <th className={TABLE.th}>Data</th>
+                  <th className={`${TABLE.th} text-right`}><span className="sr-only">Ações</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {p.documentos.map((d) => (
+                  <tr key={d.id} className={TABLE.tr}>
+                    <td className={`${TABLE.tdFirst} min-w-[16rem]`}>
+                      <button type="button" className="flex min-w-0 max-w-full flex-col gap-0.5 text-left" onClick={() => void open(d)}>
+                        <span className="flex min-w-0 items-center gap-2">
+                          {d.object_name ? <FileText size={15} className="shrink-0 text-muted-foreground" /> : <Link2 size={15} className="shrink-0 text-muted-foreground" />}
+                          <span className="truncate font-medium text-primary hover:underline">{d.name}</span>
+                        </span>
+                        {d.observacoes && (
+                          <span className="line-clamp-2 pl-[23px] text-xs text-muted-foreground">{d.observacoes}</span>
+                        )}
+                      </button>
+                    </td>
+                    <td className={TABLE.td}>
+                      {d.formato ? <Pill>{DOC_FORMATO_LABEL[d.formato as keyof typeof DOC_FORMATO_LABEL] ?? d.formato.toUpperCase()}</Pill> : <span className="text-muted-foreground">—</span>}
+                    </td>
+                    <td className={TABLE.td}>
+                      {(d.nivel_dados_pessoais !== "sem_dados_pessoais" || d.dados_pessoais || d.dados_sensiveis) ? (
+                        <Pill tone="amber"><ShieldAlert size={12} /> {docNivelLgpd(d)}</Pill>
+                      ) : <span className="text-muted-foreground">{docNivelLgpd(d)}</span>}
+                    </td>
+                    <td className={`${TABLE.td} whitespace-nowrap tabular-nums`}>{fmtDate(d.data_documento ?? `${d.ano_referencia}-01-01`)}</td>
+                    <td className={`${TABLE.td} text-right`}>
+                      <div className="flex items-center justify-end gap-0.5">
+                        <Button variant="ghost" size="icon" className="h-9 w-9" title="Abrir / baixar" aria-label="Abrir / baixar" onClick={() => void open(d)}><Download size={14} /></Button>
+                        <RowActions onDelete={() => void del(d)} deleteTitle="Inativar documento" />
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        ))}</div>
-      )}
+        )}
+      </SectionCard>
+      <Dialog open={dispensaOpen} onOpenChange={(o) => { if (!savingDispensa) setDispensaOpen(o) }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>O produto não gera documentos natos digitais</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Com a declaração, o critério "Documentos cadastrados" deixa de contar na saúde do produto (fica como
+            "não se aplica"). Se um documento for cadastrado depois, a declaração é desfeita automaticamente.
+          </p>
+          <div className="space-y-1.5">
+            <Label htmlFor="justificativa-sem-docs">Justificativa</Label>
+            <Textarea
+              id="justificativa-sem-docs"
+              rows={4}
+              maxLength={2000}
+              value={justificativa}
+              onChange={(e) => setJustificativa(e.target.value)}
+              placeholder="Ex.: sistema só de consulta; não emite certidões, relatórios ou outros documentos."
+            />
+            <p className="text-xs text-muted-foreground">Mínimo de 10 caracteres ({justificativa.trim().length}/10).</p>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={savingDispensa} onClick={() => setDispensaOpen(false)}>Cancelar</Button>
+            <Button type="button" disabled={savingDispensa || justificativa.trim().length < 10} onClick={() => void saveDispensa(true)}>
+              {savingDispensa && <Loader2 size={14} className="mr-1.5 animate-spin" />}
+              Declarar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -607,36 +945,84 @@ function ContratosTab({ p, onChange }: { p: Product; onChange: () => void }) {
 
   async function del(c: Contrato) { if (confirm("Inativar este contrato?")) { await produtosApi.deleteContrato(p.id, c.id); onChange() } }
   return (
-    <div className="space-y-3 pt-3">
-      <div className="flex justify-end"><Button size="sm" className="gap-1.5" onClick={openNew}><Plus size={14} /> Novo contrato</Button></div>
-      {p.contratos.length === 0 ? <p className="text-sm text-muted-foreground">Nenhum contrato.</p> : (
-        <div className="space-y-2">{p.contratos.map((c) => (
-          <div key={c.id} className="rounded-md border p-3">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <p className="text-sm font-medium">{c.fornecedor_nome ?? "Fornecedor"} {c.identificador && <span className="text-muted-foreground">· {c.identificador}</span>}</p>
-                <p className="text-[11px] text-muted-foreground">Vigência {fmtDate(c.vigencia_inicio)} → {fmtDate(c.vigencia_fim)} {c.renovacao_automatica && "· renovação automática"}</p>
-              </div>
-              <div className="flex items-center gap-1">
-                {c.status_contrato && <Badge variant="secondary" className="text-[10px]" style={{ backgroundColor: `${CONTRATO_STATUS_COLOR[c.status_contrato]}22`, color: CONTRATO_STATUS_COLOR[c.status_contrato] }}>{CONTRATO_STATUS_LABEL[c.status_contrato]}</Badge>}
-                {c.dias_para_vencer != null && c.dias_para_vencer <= 90 && <Badge variant={c.dias_para_vencer <= 30 ? "destructive" : "secondary"} className="text-[10px]">vence em {c.dias_para_vencer}d</Badge>}
-                <Button variant="ghost" size="icon" title="Editar contrato" onClick={() => openEdit(c)}><Pencil size={14} /></Button>
-                <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" title="Inativar contrato" onClick={() => void del(c)}><Trash2 size={14} /></Button>
-              </div>
-            </div>
-            <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
-              {c.numero && <span>Nº {c.numero}</span>}
-              {c.valor != null && <span>· R$ {c.valor.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}{c.tipo_valor ? ` (${CONTRATO_TIPOVALOR_LABEL[c.tipo_valor]})` : ""}</span>}
-              {c.gestor_nome && <span>· gestor: {c.gestor_nome}</span>}
-              {c.object_name ? (
-                <button type="button" className="text-primary underline" onClick={async () => { const u = await produtosApi.getUploadUrl(c.object_name!); if (u) window.open(u, "_blank", "noopener") }}>· anexo{c.filename ? ` (${c.filename})` : ""}</button>
-              ) : c.external_link ? (
-                <a href={c.external_link} target="_blank" rel="noreferrer" className="text-primary underline">· anexo</a>
-              ) : null}
-            </div>
+    <div className="space-y-4">
+      <SectionCard
+        title={`Contratos (${p.contratos.length})`}
+        icon={FileSignature}
+        subtitle="Contratos com fornecedores, vigência e anexos."
+        right={<Button className="h-9 gap-1.5" onClick={openNew}><Plus size={14} /> Novo contrato</Button>}
+        flush
+      >
+        {p.contratos.length === 0 ? (
+          <EmptyState icon={FileSignature} title="Nenhum contrato" description='Clique em "Novo contrato" para cadastrar.' compact />
+        ) : (
+          <div className={TABLE.wrap}>
+            <table className={TABLE.table}>
+              <thead className={TABLE.thead}>
+                <tr>
+                  <th className={TABLE.thFirst}>Contrato</th>
+                  <th className={TABLE.th}>Vigência</th>
+                  <th className={TABLE.th}>Valor</th>
+                  <th className={TABLE.th}>Gestor</th>
+                  <th className={TABLE.th}>Situação</th>
+                  <th className={TABLE.th}>Anexo</th>
+                  <th className={`${TABLE.th} text-right`}><span className="sr-only">Ações</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {p.contratos.map((c) => (
+                  <tr key={c.id} className={TABLE.tr}>
+                    <td className={`${TABLE.tdFirst} min-w-[12rem]`}>
+                      <p className="font-medium">{c.fornecedor_nome ?? "Fornecedor"} {c.identificador && <span className="font-normal text-muted-foreground">· {c.identificador}</span>}</p>
+                      {c.numero && <p className="text-xs text-muted-foreground">Nº {c.numero}</p>}
+                    </td>
+                    <td className={`${TABLE.td} whitespace-nowrap`}>
+                      <span className="tabular-nums">{fmtDate(c.vigencia_inicio)} → {fmtDate(c.vigencia_fim)}</span>
+                      {c.renovacao_automatica && <p className="text-xs text-muted-foreground">Renovação automática</p>}
+                    </td>
+                    <td className={`${TABLE.td} whitespace-nowrap`}>
+                      {c.valor != null ? (
+                        <>
+                          <span className="tabular-nums">R$ {c.valor.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>
+                          {c.tipo_valor && <p className="text-xs text-muted-foreground">{CONTRATO_TIPOVALOR_LABEL[c.tipo_valor]}</p>}
+                        </>
+                      ) : <span className="text-muted-foreground">—</span>}
+                    </td>
+                    <td className={TABLE.td}>{c.gestor_nome ?? <span className="text-muted-foreground">—</span>}</td>
+                    <td className={TABLE.td}>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {c.status_contrato && <Pill tone={CONTRATO_TONE[c.status_contrato]} dot>{CONTRATO_STATUS_LABEL[c.status_contrato]}</Pill>}
+                        {c.dias_para_vencer != null && c.dias_para_vencer <= 90 && (
+                          <Pill tone={c.dias_para_vencer <= 30 ? "red" : "amber"}>vence em {c.dias_para_vencer}d</Pill>
+                        )}
+                        {!c.status_contrato && !(c.dias_para_vencer != null && c.dias_para_vencer <= 90) && <span className="text-muted-foreground">—</span>}
+                      </div>
+                    </td>
+                    <td className={TABLE.td}>
+                      {c.object_name ? (
+                        <button
+                          type="button"
+                          className="inline-flex max-w-[14rem] items-center gap-1.5 text-left text-primary hover:underline"
+                          onClick={async () => { const u = await produtosApi.getUploadUrl(c.object_name!); if (u) window.open(u, "_blank", "noopener") }}
+                        >
+                          <Paperclip size={14} className="shrink-0" /> <span className="truncate">{c.filename ? c.filename : "Anexo"}</span>
+                        </button>
+                      ) : c.external_link ? (
+                        <a href={c.external_link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-primary hover:underline">
+                          <Link2 size={14} className="shrink-0" /> Anexo
+                        </a>
+                      ) : <span className="text-muted-foreground">—</span>}
+                    </td>
+                    <td className={`${TABLE.td} text-right`}>
+                      <RowActions onEdit={() => openEdit(c)} editTitle="Editar contrato" onDelete={() => void del(c)} deleteTitle="Inativar contrato" />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        ))}</div>
-      )}
+        )}
+      </SectionCard>
       <ContratoDialog
         open={open}
         onOpenChange={(v) => { setOpen(v); if (!v) setEditing(null) }}
@@ -978,32 +1364,54 @@ function ReleasesTab({ p, onChange }: { p: Product; onChange: () => void }) {
   const [adding, setAdding] = useState(false)
   async function del(r: Release) { if (confirm(`Remover a release ${r.versao}?`)) { await produtosApi.deleteRelease(p.id, r.id); onChange() } }
   return (
-    <div className="space-y-3 pt-3">
-      <div className="flex justify-end"><Button size="sm" className="gap-1.5" onClick={() => setAdding(true)}><Plus size={14} /> Nova release</Button></div>
-      {p.releases.length === 0 ? <p className="text-sm text-muted-foreground">Nenhuma release registrada.</p> : (
-        <div className="space-y-2">{p.releases.map((r) => (
-          <div key={r.id} className="rounded-md border p-3">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <p className="text-sm font-medium">v{r.versao}{r.nome && <span className="text-muted-foreground"> · {r.nome}</span>}</p>
-                <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <Badge variant="secondary" className="text-[10px]" style={{ backgroundColor: `${RELEASE_STATUS_COLOR[r.status]}22`, color: RELEASE_STATUS_COLOR[r.status] }}>{RELEASE_STATUS_LABEL[r.status]}</Badge>
-                  {r.ambiente && <Badge variant="outline" className="text-[10px]">{RELEASE_AMBIENTE_LABEL[r.ambiente]}</Badge>}
-                  {r.tipo && <span>{RELEASE_TIPO_LABEL[r.tipo]}</span>}
-                  {r.data_release && <span>· {fmtDate(r.data_release)}</span>}
-                  {r.impacto && <span>· impacto {RELEASE_IMPACTO_LABEL[r.impacto]}</span>}
-                  {r.tem_rollback && <span>· rollback</span>}
-                </div>
-                {r.descricao_mudanca && <p className="mt-1 text-xs text-muted-foreground">{r.descricao_mudanca}</p>}
-              </div>
-              <div className="flex shrink-0 items-center gap-1">
-                <Button variant="ghost" size="icon" onClick={() => setEdit(r)}><Pencil size={13} /></Button>
-                <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" onClick={() => void del(r)}><Trash2 size={13} /></Button>
-              </div>
-            </div>
+    <div className="space-y-4">
+      <SectionCard
+        title={`Releases (${p.releases.length})`}
+        icon={Rocket}
+        subtitle="Versões publicadas e planejadas do produto."
+        right={<Button className="h-9 gap-1.5" onClick={() => setAdding(true)}><Plus size={14} /> Nova release</Button>}
+        flush
+      >
+        {p.releases.length === 0 ? (
+          <EmptyState icon={Rocket} title="Nenhuma release registrada" description='Clique em "Nova release" para registrar a primeira versão.' compact />
+        ) : (
+          <div className={TABLE.wrap}>
+            <table className={TABLE.table}>
+              <thead className={TABLE.thead}>
+                <tr>
+                  <th className={TABLE.thFirst}>Versão</th>
+                  <th className={TABLE.th}>Status</th>
+                  <th className={TABLE.th}>Ambiente</th>
+                  <th className={TABLE.th}>Tipo</th>
+                  <th className={TABLE.th}>Data</th>
+                  <th className={TABLE.th}>Impacto</th>
+                  <th className={TABLE.th}>Rollback</th>
+                  <th className={`${TABLE.th} text-right`}><span className="sr-only">Ações</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {p.releases.map((r) => (
+                  <tr key={r.id} className={TABLE.tr}>
+                    <td className={`${TABLE.tdFirst} min-w-[16rem]`}>
+                      <p className="font-medium">v{r.versao}{r.nome && <span className="font-normal text-muted-foreground"> · {r.nome}</span>}</p>
+                      {r.descricao_mudanca && <p className="mt-0.5 text-xs text-muted-foreground">{r.descricao_mudanca}</p>}
+                    </td>
+                    <td className={TABLE.td}><Pill tone={RELEASE_TONE[r.status]} dot>{RELEASE_STATUS_LABEL[r.status]}</Pill></td>
+                    <td className={TABLE.td}>{r.ambiente ? <Pill>{RELEASE_AMBIENTE_LABEL[r.ambiente]}</Pill> : <span className="text-muted-foreground">—</span>}</td>
+                    <td className={TABLE.td}>{r.tipo ? RELEASE_TIPO_LABEL[r.tipo] : <span className="text-muted-foreground">—</span>}</td>
+                    <td className={`${TABLE.td} whitespace-nowrap tabular-nums`}>{r.data_release ? fmtDate(r.data_release) : <span className="text-muted-foreground">—</span>}</td>
+                    <td className={TABLE.td}>{r.impacto ? RELEASE_IMPACTO_LABEL[r.impacto] : <span className="text-muted-foreground">—</span>}</td>
+                    <td className={TABLE.td}>{r.tem_rollback ? "Com plano" : <span className="text-muted-foreground">—</span>}</td>
+                    <td className={`${TABLE.td} text-right`}>
+                      <RowActions onEdit={() => setEdit(r)} editTitle="Editar release" onDelete={() => void del(r)} deleteTitle="Remover release" />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        ))}</div>
-      )}
+        )}
+      </SectionCard>
       {(adding || edit) && (
         <ReleaseDialog productId={p.id} release={edit} onClose={() => { setAdding(false); setEdit(null) }} onSaved={() => { setAdding(false); setEdit(null); onChange() }} />
       )}
@@ -1094,32 +1502,57 @@ function DocumentacaoTab({ p, onChange }: { p: Product; onChange: () => void }) 
   const [view, setView] = useState<Documentation | null>(null)
   async function del(d: Documentation) { if (confirm(`Remover a documentação "${d.titulo}"?`)) { await produtosApi.deleteDocumentation(p.id, d.id); onChange() } }
   return (
-    <div className="space-y-3 pt-3">
-      <div className="flex justify-end"><Button size="sm" className="gap-1.5" onClick={() => setAdding(true)}><Plus size={14} /> Nova documentação</Button></div>
-      {p.documentations.length === 0 ? <p className="text-sm text-muted-foreground">Nenhuma documentação.</p> : (
-        <div className="space-y-2">{p.documentations.map((d) => (
-          <div key={d.id} className="rounded-md border p-3">
-            <div className="flex items-start justify-between gap-2">
-              <button type="button" className="min-w-0 text-left" onClick={() => setView(d)}>
-                <p className="text-sm font-medium text-primary hover:underline">{d.titulo}</p>
-                <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <Badge variant="outline" className="text-[10px]">{DOCNT_TIPO_LABEL[d.tipo]}</Badge>
-                  <Badge variant="secondary" className="text-[10px]" style={{ backgroundColor: `${DOCNT_STATUS_COLOR[d.status]}22`, color: DOCNT_STATUS_COLOR[d.status] }}>{DOCNT_STATUS_LABEL[d.status]}</Badge>
-                  {d.versao_relacionada && <span>· v{d.versao_relacionada}</span>}
-                  {d.autor_nome && <span>· {d.autor_nome}</span>}
-                  {(d.anexos?.length ?? 0) > 0 && <span className="inline-flex items-center gap-0.5"><Paperclip size={10} /> {d.anexos!.length}</span>}
-                  {d.link_interno && <Link2 size={11} />}
-                  <span>· atualizado {fmtDate(d.updated_at)}</span>
-                </div>
-              </button>
-              <div className="flex shrink-0 items-center gap-1">
-                <Button variant="ghost" size="icon" onClick={() => setEdit(d)}><Pencil size={13} /></Button>
-                <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" onClick={() => void del(d)}><Trash2 size={13} /></Button>
-              </div>
-            </div>
+    <div className="space-y-4">
+      <SectionCard
+        title={`Documentação (${p.documentations.length})`}
+        icon={BookOpen}
+        subtitle="Manuais e documentos técnicos do produto. Clique no título para ler."
+        right={<Button className="h-9 gap-1.5" onClick={() => setAdding(true)}><Plus size={14} /> Nova documentação</Button>}
+        flush
+      >
+        {p.documentations.length === 0 ? (
+          <EmptyState icon={BookOpen} title="Nenhuma documentação" description='Clique em "Nova documentação" para escrever, anexar ou apontar um link.' compact />
+        ) : (
+          <div className={TABLE.wrap}>
+            <table className={TABLE.table}>
+              <thead className={TABLE.thead}>
+                <tr>
+                  <th className={TABLE.thFirst}>Título</th>
+                  <th className={TABLE.th}>Tipo</th>
+                  <th className={TABLE.th}>Status</th>
+                  <th className={TABLE.th}>Versão</th>
+                  <th className={TABLE.th}>Autor</th>
+                  <th className={TABLE.th}>Atualizado em</th>
+                  <th className={`${TABLE.th} text-right`}><span className="sr-only">Ações</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {p.documentations.map((d) => (
+                  <tr key={d.id} className={TABLE.tr}>
+                    <td className={`${TABLE.tdFirst} min-w-[14rem]`}>
+                      <button type="button" className="flex min-w-0 max-w-full items-center gap-2 text-left" onClick={() => setView(d)}>
+                        <span className="font-medium text-primary hover:underline">{d.titulo}</span>
+                        {(d.anexos?.length ?? 0) > 0 && (
+                          <span className="inline-flex shrink-0 items-center gap-0.5 text-xs text-muted-foreground" title="Anexos"><Paperclip size={12} /> {d.anexos!.length}</span>
+                        )}
+                        {d.link_interno && <Link2 size={13} className="shrink-0 text-muted-foreground" aria-label="Tem link" />}
+                      </button>
+                    </td>
+                    <td className={TABLE.td}><Pill>{DOCNT_TIPO_LABEL[d.tipo]}</Pill></td>
+                    <td className={TABLE.td}><Pill tone={DOC_TONE[d.status]} dot>{DOCNT_STATUS_LABEL[d.status]}</Pill></td>
+                    <td className={TABLE.td}>{d.versao_relacionada ? `v${d.versao_relacionada}` : <span className="text-muted-foreground">—</span>}</td>
+                    <td className={TABLE.td}>{d.autor_nome ?? <span className="text-muted-foreground">—</span>}</td>
+                    <td className={`${TABLE.td} whitespace-nowrap tabular-nums`}>{fmtDate(d.updated_at)}</td>
+                    <td className={`${TABLE.td} text-right`}>
+                      <RowActions onEdit={() => setEdit(d)} editTitle="Editar documentação" onDelete={() => void del(d)} deleteTitle="Remover documentação" />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        ))}</div>
-      )}
+        )}
+      </SectionCard>
       {(adding || edit) && <DocumentacaoDialog productId={p.id} doc={edit} onClose={() => { setAdding(false); setEdit(null) }} onSaved={() => { setAdding(false); setEdit(null); onChange() }} />}
       {view && (
         <Dialog open onOpenChange={(v) => { if (!v) setView(null) }}>
@@ -1261,7 +1694,7 @@ function DocumentacaoDialog({ productId, doc, onClose, onSaved }: { productId: s
   )
 }
 
-// ── Sustentação / SLA ─────────────────────────
+// ── Sustentação: níveis e catálogo de problemas ─────────────────────────
 const NIVEL_LABEL: Record<SupportNivel, string> = { n1: "Nível 1", n2: "Nível 2", n3: "Nível 3" }
 const NIVEL_OPTS: SupportNivel[] = ["n1", "n2", "n3"]
 
@@ -1277,36 +1710,68 @@ function supportResponsaveisLabel(s: Support): string {
 function SustentacaoTab({ p, onChange }: { p: Product; onChange: () => void | Promise<void> }) {
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<Support | null>(null)
+  // Problema em edição: nível dono + problema (null = novo).
+  const [problemCtx, setProblemCtx] = useState<{ support: Support; problem: SupportProblem | null } | null>(null)
   const usedNiveis = new Set(p.supports.map((s) => s.nivel))
   const canAdd = NIVEL_OPTS.some((n) => !usedNiveis.has(n))
 
   function openNew() { setEditing(null); setOpen(true) }
   function openEdit(s: Support) { setEditing(s); setOpen(true) }
   async function del(s: Support) {
-    if (!confirm(`Excluir sustentação ${NIVEL_LABEL[s.nivel]}?`)) return
+    const n = s.problemas.length
+    const aviso = n > 0 ? `\n\nO catálogo deste nível (${n} problema${n > 1 ? "s" : ""}) sai junto.` : ""
+    if (!confirm(`Excluir sustentação ${NIVEL_LABEL[s.nivel]}?${aviso}`)) return
     try {
       await produtosApi.deleteSupport(p.id, s.id)
       toast.success("Sustentação excluída.")
       await onChange()
     } catch (e) { toast.error(detail(e)) }
   }
+  async function delProblem(s: Support, pr: SupportProblem) {
+    if (!confirm(`Excluir o problema "${pr.name}" do ${NIVEL_LABEL[s.nivel]}?`)) return
+    try {
+      await produtosApi.deleteSupportProblem(p.id, s.id, pr.id)
+      toast.success("Problema excluído.")
+      await onChange()
+    } catch (e) { toast.error(detail(e)) }
+  }
 
   return (
-    <div className="space-y-3 pt-3">
-      <div className="flex justify-end">
-        <Button size="sm" className="gap-1.5" onClick={openNew} disabled={!canAdd}>
-          <Plus size={14} /> Nova sustentação
-        </Button>
-      </div>
-      {p.supports.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Nenhuma sustentação cadastrada. Clique em &quot;Nova sustentação&quot; para adicionar.</p>
-      ) : (
-        <div className="space-y-2">
-          {p.supports.map((s) => (
-            <SupportListItem key={s.id} support={s} productId={p.id} onEdit={() => openEdit(s)} onDelete={() => void del(s)} />
-          ))}
-        </div>
-      )}
+    <div className="space-y-4">
+      <SectionCard
+        title="Sustentação"
+        icon={LifeBuoy}
+        subtitle={canAdd
+          ? "Um cadastro por nível de atendimento, com canal, responsáveis e os problemas que o nível atende."
+          : "Os três níveis de atendimento já estão cadastrados."}
+        right={
+          <Button className="h-9 gap-1.5" onClick={openNew} disabled={!canAdd}>
+            <Plus size={14} /> Nova sustentação
+          </Button>
+        }
+      >
+        {p.supports.length === 0 ? (
+          <EmptyState icon={LifeBuoy} title="Nenhuma sustentação cadastrada" description='Clique em "Nova sustentação" para adicionar.' compact />
+        ) : (
+          <Notice tone="blue" icon={ClipboardList}>
+            <span className="min-w-0 flex-1">
+              Cada problema tem SLA próprio, em horas úteis, e as soluções possíveis. É a base do Service Desk: o cliente
+              escolhe o sistema e o problema, e o chamado cai no nível que atende aquele problema, com o SLA dele.
+            </span>
+          </Notice>
+        )}
+      </SectionCard>
+      {p.supports.map((s) => (
+        <SupportLevelCard
+          key={s.id}
+          support={s}
+          onEdit={() => openEdit(s)}
+          onDelete={() => void del(s)}
+          onAddProblem={() => setProblemCtx({ support: s, problem: null })}
+          onEditProblem={(pr) => setProblemCtx({ support: s, problem: pr })}
+          onDeleteProblem={(pr) => void delProblem(s, pr)}
+        />
+      ))}
       <SupportDialog
         open={open}
         onOpenChange={(v) => { setOpen(v); if (!v) setEditing(null) }}
@@ -1315,32 +1780,99 @@ function SustentacaoTab({ p, onChange }: { p: Product; onChange: () => void | Pr
         usedNiveis={new Set(p.supports.filter((x) => x.id !== editing?.id).map((x) => x.nivel))}
         onSaved={async () => { setOpen(false); setEditing(null); await onChange() }}
       />
+      {problemCtx && (
+        <ProblemDialog
+          productId={p.id}
+          support={problemCtx.support}
+          problem={problemCtx.problem}
+          onClose={() => setProblemCtx(null)}
+          onSaved={async () => { setProblemCtx(null); await onChange() }}
+        />
+      )}
     </div>
   )
 }
 
-function SupportListItem({ support: s, onEdit, onDelete }: { support: Support; productId: string; onEdit: () => void; onDelete: () => void }) {
-  const responsaveis = supportResponsaveisLabel(s)
-
+/** Um nível de atendimento: dados do nível e o catálogo de problemas que ele atende. */
+function SupportLevelCard({ support: s, onEdit, onDelete, onAddProblem, onEditProblem, onDeleteProblem }: {
+  support: Support
+  onEdit: () => void
+  onDelete: () => void
+  onAddProblem: () => void
+  onEditProblem: (pr: SupportProblem) => void
+  onDeleteProblem: (pr: SupportProblem) => void
+}) {
+  const n = s.problemas.length
   return (
-    <div className="rounded-md border p-3">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 space-y-1">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Badge variant="outline">{NIVEL_LABEL[s.nivel]}</Badge>
-            <Badge variant="secondary" className="text-[10px]">{s.interno ? "Interno" : "Externo"}</Badge>
-            {s.sla_horas != null && <Badge className="text-[10px]">SLA {s.sla_horas}h</Badge>}
-          </div>
-          <p className="text-sm"><span className="text-muted-foreground">Canal:</span> {s.canal_atendimento?.trim() || "—"}</p>
-          <p className="text-sm"><span className="text-muted-foreground">Responsáveis:</span> {responsaveis}</p>
-          {s.observacoes?.trim() && <p className="text-sm text-muted-foreground">{s.observacoes}</p>}
+    <SectionCard
+      title={<>{NIVEL_LABEL[s.nivel]} <Pill tone={s.interno ? "blue" : "violet"}>{s.interno ? "Interno" : "Externo"}</Pill></>}
+      icon={LifeBuoy}
+      subtitle={n > 0 ? `${n} problema${n > 1 ? "s" : ""} no catálogo` : "Nenhum problema no catálogo ainda"}
+      right={
+        <div className="flex items-center gap-1">
+          <Button variant="outline" className="h-9 gap-1.5" onClick={onAddProblem}>
+            <Plus size={14} /> Adicionar problema
+          </Button>
+          <RowActions onEdit={onEdit} editTitle="Editar nível" onDelete={onDelete} deleteTitle="Excluir nível" />
         </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <Button variant="ghost" size="icon" title="Editar" onClick={onEdit}><Pencil size={14} /></Button>
-          <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" title="Excluir" onClick={onDelete}><Trash2 size={14} /></Button>
+      }
+      flush
+    >
+      <dl className="grid gap-4 border-b px-5 py-4 sm:grid-cols-3">
+        <Field label="Canal">{s.canal_atendimento?.trim() || "—"}</Field>
+        <Field label="Responsáveis" className="sm:col-span-2">{supportResponsaveisLabel(s)}</Field>
+        {s.observacoes?.trim() && <Field label="Observações" className="sm:col-span-3">{s.observacoes}</Field>}
+      </dl>
+      {n === 0 ? (
+        <p className="px-5 py-5 text-sm text-muted-foreground">
+          Cadastre os problemas que este nível resolve, com o SLA de cada um e as soluções possíveis.
+        </p>
+      ) : (
+        <div className={TABLE.wrap}>
+          <table className={TABLE.table}>
+            <thead className={TABLE.thead}>
+              <tr>
+                <th className={TABLE.thFirst}>Problema</th>
+                <th className={TABLE.th}>SLA</th>
+                <th className={TABLE.th}>Soluções possíveis</th>
+                <th className={`${TABLE.th} text-right`}><span className="sr-only">Ações</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {s.problemas.map((pr) => (
+                <tr key={pr.id} className={`${TABLE.tr} align-top`}>
+                  <td className={`${TABLE.tdFirst} min-w-[14rem]`}>
+                    <p className="font-medium">{pr.name}</p>
+                    {pr.description && <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{pr.description}</p>}
+                  </td>
+                  <td className={`${TABLE.td} whitespace-nowrap tabular-nums`}>{pr.sla_horas}h úteis</td>
+                  <td className={`${TABLE.td} min-w-[14rem]`}>
+                    {pr.solutions.length === 0 ? (
+                      <span className="text-muted-foreground">Nenhuma ainda</span>
+                    ) : (
+                      <ul className="space-y-0.5">
+                        {pr.solutions.slice(0, 3).map((sol) => (
+                          <li key={sol.id} className="flex gap-1.5">
+                            <CheckCircle2 size={13} className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                            <span>{sol.title}</span>
+                          </li>
+                        ))}
+                        {pr.solutions.length > 3 && (
+                          <li className="pl-5 text-xs text-muted-foreground">+{pr.solutions.length - 3} outra{pr.solutions.length - 3 > 1 ? "s" : ""}</li>
+                        )}
+                      </ul>
+                    )}
+                  </td>
+                  <td className={`${TABLE.td} text-right`}>
+                    <RowActions onEdit={() => onEditProblem(pr)} editTitle="Editar problema" onDelete={() => onDeleteProblem(pr)} deleteTitle="Excluir problema" />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      </div>
-    </div>
+      )}
+    </SectionCard>
   )
 }
 
@@ -1363,7 +1895,6 @@ function SupportDialog({ open, onOpenChange, productId, support, usedNiveis, onS
   const [nomesExt, setNomesExt] = useState<string[]>([])
   const [busca, setBusca] = useState("")
   const [nomeExt, setNomeExt] = useState("")
-  const [slaHoras, setSlaHoras] = useState<string>("")
   const [obs, setObs] = useState("")
   const [saving, setSaving] = useState(false)
 
@@ -1379,7 +1910,6 @@ function SupportDialog({ open, onOpenChange, productId, support, usedNiveis, onS
       setPersonIds([...support.person_ids])
       setClientIds([...(support.client_ids ?? [])])
       setNomesExt([...support.nomes_externos])
-      setSlaHoras(support.sla_horas != null ? String(support.sla_horas) : "")
       setObs(support.observacoes ?? "")
     } else {
       setCanal("")
@@ -1388,7 +1918,6 @@ function SupportDialog({ open, onOpenChange, productId, support, usedNiveis, onS
       setPersonIds([])
       setClientIds([])
       setNomesExt([])
-      setSlaHoras("")
       setObs("")
     }
     setBusca("")
@@ -1419,7 +1948,6 @@ function SupportDialog({ open, onOpenChange, productId, support, usedNiveis, onS
 
   async function save() {
     if (!canal.trim()) { toast.error("Informe o canal de atendimento."); return }
-    if (!slaHoras || Number(slaHoras) < 1) { toast.error("Informe o SLA em horas."); return }
     const cadastrados = personIds.length + clientIds.length
     if (cadastrados === 0 && (interno || nomesExt.length === 0)) { toast.error("Adicione ao menos um responsável."); return }
     setSaving(true)
@@ -1431,7 +1959,6 @@ function SupportDialog({ open, onOpenChange, productId, support, usedNiveis, onS
         person_ids: personIds,
         client_ids: clientIds,
         nomes_externos: interno ? [] : nomesExt,
-        sla_horas: Number(slaHoras),
         observacoes: obs.trim() || null,
       }
       if (editing && support) {
@@ -1544,10 +2071,6 @@ function SupportDialog({ open, onOpenChange, productId, support, usedNiveis, onS
             </div>
           )}
           <div className="space-y-1.5">
-            <Label className="text-xs">SLA em horas</Label>
-            <Input type="number" min={1} className="max-w-[140px]" value={slaHoras} onChange={(e) => setSlaHoras(e.target.value)} placeholder="Ex.: 4" />
-          </div>
-          <div className="space-y-1.5">
             <Label className="text-xs">Observações</Label>
             <Textarea rows={2} value={obs} onChange={(e) => setObs(e.target.value)} />
           </div>
@@ -1557,6 +2080,120 @@ function SupportDialog({ open, onOpenChange, productId, support, usedNiveis, onS
           <Button onClick={() => void save()} disabled={saving}>
             {saving && <Loader2 size={14} className="mr-1.5 animate-spin" />}
             {editing ? "Salvar alterações" : "Cadastrar"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+type SolucaoDraft = { key: string; id?: string; title: string; description: string; origem?: SupportSolution["origem"] }
+
+/** Problema do catálogo de um nível: descrição, SLA (horas úteis) e soluções possíveis.
+ *  Monta só quando abre, então o estado nasce das props (sem efeito de sincronização). */
+function ProblemDialog({ productId, support, problem, onClose, onSaved }: {
+  productId: string
+  support: Support
+  problem: SupportProblem | null
+  onClose: () => void
+  onSaved: () => void | Promise<void>
+}) {
+  const [name, setName] = useState(problem?.name ?? "")
+  const [desc, setDesc] = useState(problem?.description ?? "")
+  const [sla, setSla] = useState(problem ? String(problem.sla_horas) : "")
+  const [sols, setSols] = useState<SolucaoDraft[]>(() => (problem?.solutions ?? []).map((x) => ({
+    key: x.id, id: x.id, title: x.title, description: x.description ?? "", origem: x.origem,
+  })))
+  const [saving, setSaving] = useState(false)
+  const seq = useRef(0)
+
+  function addSol() {
+    seq.current += 1
+    setSols((l) => [...l, { key: `nova-${seq.current}`, title: "", description: "" }])
+  }
+  const patchSol = (key: string, patch: Partial<SolucaoDraft>) =>
+    setSols((l) => l.map((x) => (x.key === key ? { ...x, ...patch } : x)))
+
+  async function save() {
+    if (name.trim().length < 2) { toast.error("Informe o problema."); return }
+    const horas = Number(sla)
+    if (!Number.isInteger(horas) || horas < 1 || horas > 2000) { toast.error("Informe o SLA em horas úteis (número inteiro de 1 a 2000)."); return }
+    const preenchidas = sols.filter((x) => x.title.trim() || x.description.trim())
+    if (preenchidas.some((x) => x.title.trim().length < 2)) { toast.error("Dê um título a cada solução."); return }
+    const payload: SupportProblemInput = {
+      name: name.trim(),
+      description: desc.trim(),  // vazio limpa a descrição na edição
+      sla_horas: horas,
+      solutions: preenchidas.map((x) => ({ id: x.id, title: x.title.trim(), description: x.description.trim() || null })),
+    }
+    setSaving(true)
+    try {
+      if (problem) {
+        await produtosApi.updateSupportProblem(productId, support.id, problem.id, payload)
+        toast.success("Problema atualizado.")
+      } else {
+        await produtosApi.createSupportProblem(productId, support.id, payload)
+        toast.success("Problema cadastrado.")
+      }
+      await onSaved()
+    } catch (e) { toast.error(detail(e)) } finally { setSaving(false) }
+  }
+
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onClose() }}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>
+            {problem ? "Editar problema" : "Novo problema"} · {NIVEL_LABEL[support.nivel]}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label className="text-xs">Problema</Label>
+            <Input value={name} maxLength={200} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Não consigo acessar o sistema" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Descrição</Label>
+            <Textarea rows={3} value={desc} onChange={(e) => setDesc(e.target.value)}
+              placeholder="Como o problema aparece para o cliente e o que ele deve informar ao abrir o chamado." />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">SLA de resolução (horas úteis)</Label>
+            <Input type="number" min={1} max={2000} step={1} className="max-w-[140px]" value={sla} onChange={(e) => setSla(e.target.value)} placeholder="Ex.: 8" />
+            <p className="text-[11px] text-muted-foreground">Prazo do chamado aberto com este problema, contado em horas úteis.</p>
+          </div>
+          <div className="space-y-2">
+            <Label className="text-xs">Soluções possíveis</Label>
+            {sols.length === 0 && (
+              <p className="text-xs text-muted-foreground">
+                Nenhuma solução cadastrada. Quem resolver o chamado vai escolher uma destas ou registrar a que aplicou.
+              </p>
+            )}
+            {sols.map((x, i) => (
+              <div key={x.key} className="space-y-2 rounded-xl border p-3">
+                <div className="flex items-start gap-2">
+                  <Input className="flex-1" value={x.title} maxLength={200} onChange={(e) => patchSol(x.key, { title: e.target.value })}
+                    placeholder={`Solução ${i + 1}. Ex.: Redefinir a senha pelo portal`} />
+                  <Button type="button" variant="ghost" size="icon" className="h-9 w-9 shrink-0 text-muted-foreground hover:text-destructive"
+                    title="Remover solução" aria-label="Remover solução" onClick={() => setSols((l) => l.filter((y) => y.key !== x.key))}>
+                    <Trash2 size={14} />
+                  </Button>
+                </div>
+                <Textarea rows={2} value={x.description} onChange={(e) => patchSol(x.key, { description: e.target.value })}
+                  placeholder="Passo a passo (opcional)" />
+                {x.origem === "atendimento" && <Pill tone="teal">Registrada em atendimento</Pill>}
+              </div>
+            ))}
+            <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={addSol}>
+              <Plus size={13} /> Adicionar solução
+            </Button>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancelar</Button>
+          <Button onClick={() => void save()} disabled={saving}>
+            {saving && <Loader2 size={14} className="mr-1.5 animate-spin" />}
+            {problem ? "Salvar alterações" : "Cadastrar"}
           </Button>
         </DialogFooter>
       </DialogContent>

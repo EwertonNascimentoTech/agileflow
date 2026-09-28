@@ -37,6 +37,8 @@ from app.modules.produtos.models import (
     ProductCategoria,
     ProductCriticidade,
     ProductDocumentation,
+    ProductSupportProblem,
+    ProductSupportSolution,
     ProductDocumento,
     ProductHealthConfig,
     ProductLifecycle,
@@ -159,10 +161,10 @@ _HEALTH_CHECKS = [
 ]
 _HEALTH_DEFAULT_WEIGHTS = {code: w for code, _lbl, w in _HEALTH_CHECKS}
 _HEALTH_APLICABILIDADE = {
-    "geral_completo": "Aplica a produtos em produção. Exige todos os campos da aba Geral, exceto Ambiente DEV e HML.",
+    "geral_completo": "Aplica a produtos em produção. Exige todos os campos da aba Geral, exceto Ambiente HML.",
     "servicos_cadastrados": "Aplica a produtos em produção.",
     "servicos_subprocesso": "Aplica a produtos em produção com serviços cadastrados. Cada serviço deve ter ao menos um sub-processo vinculado, ou declaração de indisponibilidade com justificativa.",
-    "documentos_cadastrados": "Aplica a produtos em produção.",
+    "documentos_cadastrados": "Aplica a produtos em produção, exceto quando o produto declara, com justificativa, que não gera documentos natos digitais.",
     "contrato_vigente": "Só aplica a Sistema externo (implantação/híbrido) em produção.",
     "documentacao": "Aplica a produtos em produção.",
     "sustentacao_sla": "Aplica a produtos em produção.",
@@ -407,10 +409,20 @@ class ProductService:
         return bool(s.sem_subprocesso_disponivel and (s.justificativa_sem_subprocesso or "").strip())
 
     @staticmethod
+    def _sem_documentos_natos_ok(p: Product, documentos_ativos: list) -> bool:
+        """Declaração válida: marcada, com justificativa e sem documento ativo (cadastrar um
+        documento desfaz a declaração; se sobrar um ativo, vale o documento)."""
+        return bool(
+            p.sem_documentos_natos
+            and (p.justificativa_sem_documentos_natos or "").strip()
+            and not documentos_ativos
+        )
+
+    @staticmethod
     def _nivel_config_ok(cfg: Optional[dict]) -> bool:
+        # Nível cadastrado = tem responsáveis. O SLA saiu do nível (2026-09-27): agora cada
+        # problema do catálogo tem o seu, e os problemas não entram na nota.
         if not cfg:
-            return False
-        if cfg.get("sla_horas") is None:
             return False
         return bool(cfg.get("person_ids") or cfg.get("client_ids") or cfg.get("nomes_externos"))
 
@@ -462,6 +474,10 @@ class ProductService:
             for s in servicos_ativos
         )
 
+        # Declarado sem documentos natos digitais (com justificativa e nenhum documento ativo):
+        # o critério deixa de se aplicar — não conta nem a favor nem contra.
+        sem_docs_declarado = cls._sem_documentos_natos_ok(p, documentos_ativos)
+
         # Repositório: vinculado E sincronizando sem erro. Enquanto não houver PAT configurado
         # nenhum repo fica "ok", então o check só entra em vigor depois da primeira coleta.
         repo = (repo_stats or {}).get(p.id)
@@ -473,7 +489,7 @@ class ProductService:
             "geral_completo": (mature, geral_ok),
             "servicos_cadastrados": (mature, len(servicos_ativos) > 0),
             "servicos_subprocesso": (mature and bool(servicos_ativos), subprocesso_ok),
-            "documentos_cadastrados": (mature, len(documentos_ativos) > 0),
+            "documentos_cadastrados": (mature and not sem_docs_declarado, len(documentos_ativos) > 0),
             "contrato_vigente": (cls._requires_contract(p) and mature, has_active_contract),
             "documentacao": (mature, len(documentacoes_ativas) > 0),
             "sustentacao_sla": (mature, cls._supports_ok(supports_ativos)),
@@ -501,13 +517,17 @@ class ProductService:
                     status = "pass"
                 else:
                     status = "fail"
-            checks.append(schemas.HealthCheck(code=code, label=label, status=status, weight=weight))
+            note = None
+            if code == "documentos_cadastrados" and mature and sem_docs_declarado:
+                note = "Declarado: o produto não gera documentos natos digitais."
+            checks.append(schemas.HealthCheck(code=code, label=label, status=status, weight=weight, note=note))
 
         score = 100 if applicable_weight == 0 else round(passed_weight / applicable_weight * 100)
         classe = "saudavel" if score >= lim_saud else ("atencao" if score >= lim_aten else "critico")
         return schemas.ProductHealth(
             score=score, classe=classe,
             applicable_weight=applicable_weight, passed_weight=passed_weight, checks=checks,
+            limiar_saudavel=lim_saud, limiar_atencao=lim_aten,
         )
 
     @staticmethod
@@ -603,6 +623,13 @@ class ProductService:
         health = cls._health(p, today=today, has_active_contract=cls._has_active_contract(p, today),
                              tech_ref_ids=tech_ref_ids, weights=hw, lim_saud=hsaud, lim_aten=haten,
                              servico_link_counts=link_counts, repo_stats=repo_stats)
+        sem_docs_by_name = None
+        if p.sem_documentos_natos and p.sem_documentos_natos_by:
+            from app.modules.super_admin.models import User
+
+            sem_docs_by_name = (await db.execute(
+                select(User.full_name).where(User.id == p.sem_documentos_natos_by)
+            )).scalar_one_or_none()
         return schemas.ProductResponse(
             id=p.id, name=p.name, simbolo=p.simbolo, description=p.description, dominio_funcional=p.dominio_funcional,
             origem=_ev(p.origem), lifecycle=_ev(p.lifecycle), criticidade=_ev(p.criticidade),
@@ -627,6 +654,10 @@ class ProductService:
             ambiente_tecnologico=p.ambiente_tecnologico, tecnologias=p.tecnologias,
             link_repositorio=p.link_repositorio, link_dev=p.link_dev, link_hml=p.link_hml, link_prd=p.link_prd,
             login_idigital=p.login_idigital, corporativo=p.corporativo,
+            sem_documentos_natos=bool(p.sem_documentos_natos),
+            justificativa_sem_documentos_natos=p.justificativa_sem_documentos_natos,
+            sem_documentos_natos_by_name=sem_docs_by_name,
+            sem_documentos_natos_at=p.sem_documentos_natos_at,
             servicos=await ProcessPortfolioService.servicos_with_links(
                 db, [s for s in p.servicos if s.is_active],
             ),
@@ -1337,7 +1368,7 @@ class ProductService:
     # ── Documentos (append-only history) ──────
     @classmethod
     async def add_documento(cls, db, product_id, data: schemas.DocumentoCreate, user_id) -> schemas.DocumentoResponse:
-        await cls._get(db, product_id)
+        product = await cls._get(db, product_id)
         if not data.object_name and not data.external_link:
             raise HTTPException(status_code=400, detail="Envie um arquivo ou informe um link externo.")
         order = (await db.execute(select(func.coalesce(func.max(ProductDocumento.order), -1)).where(ProductDocumento.product_id == product_id))).scalar_one() + 1
@@ -1361,9 +1392,52 @@ class ProductService:
             observacoes=data.observacoes,
         )
         db.add(item)
+        # Passou a ter documento: a declaração "não gera documentos natos digitais" deixa de valer.
+        if product.sem_documentos_natos:
+            cls._clear_sem_documentos_natos(product, user_id)
         await db.commit()
         await db.refresh(item)
         return schemas.DocumentoResponse.model_validate(item)
+
+    @staticmethod
+    def _clear_sem_documentos_natos(p: Product, user_id: Optional[uuid.UUID]) -> None:
+        p.sem_documentos_natos = False
+        p.justificativa_sem_documentos_natos = None
+        p.sem_documentos_natos_by = None
+        p.sem_documentos_natos_at = None
+        p.updated_by = user_id
+        p.updated_at = datetime.utcnow()
+
+    @classmethod
+    async def set_documentos_dispensa(
+        cls, db: AsyncSession, product_id: uuid.UUID, data: schemas.ProductDocumentosDispensa,
+        user_id: Optional[uuid.UUID],
+    ) -> schemas.ProductResponse:
+        """Declara (ou desfaz) que o produto não gera documentos natos digitais. Só com
+        nenhum documento ativo; a justificativa é obrigatória (validada no schema)."""
+        p = await cls._get(db, product_id)
+        if data.sem_documentos_natos:
+            ativos = (await db.execute(
+                select(func.count()).select_from(ProductDocumento).where(
+                    ProductDocumento.product_id == product_id, ProductDocumento.is_active.is_(True),
+                )
+            )).scalar_one()
+            if ativos:
+                raise HTTPException(
+                    status_code=400,
+                    detail="O produto tem documentos natos digitais cadastrados. Inative-os antes de declarar que não há.",
+                )
+            p.sem_documentos_natos = True
+            p.justificativa_sem_documentos_natos = (data.justificativa or "").strip()
+            p.sem_documentos_natos_by = user_id
+            p.sem_documentos_natos_at = datetime.utcnow()
+            p.updated_by = user_id
+            p.updated_at = datetime.utcnow()
+        else:
+            cls._clear_sem_documentos_natos(p, user_id)
+        await db.commit()
+        await db.refresh(p)
+        return await cls._to_response(db, p)
 
     @classmethod
     async def update_documento(cls, db, product_id, doc_id, data: schemas.DocumentoUpdate, user_id) -> schemas.DocumentoResponse:
@@ -2254,18 +2328,23 @@ class SupportService:
 
     @classmethod
     async def list_people(cls, db: AsyncSession) -> list[schemas.SupportPerson]:
-        """Quem pode ser responsável de um nível: Pessoas ativas de Times e Clientes ativos."""
+        """Quem pode ser responsável de um nível: Pessoas ativas de Times e Clientes ativos.
+        Colaborador que também tem cadastro de cliente aparece uma vez só, pelo cadastro de Times
+        (mesmo e-mail ou mesmo login — o vínculo cliente↔login também é pelo e-mail)."""
         from app.modules.teamops.models import PersonStatus, Position
 
+        rows = (await db.execute(
+            select(Person, Position.name)
+            .outerjoin(Position, Position.id == Person.position_id)
+            .where(Person.status == PersonStatus.ATIVO)
+            .order_by(Person.full_name.asc())
+        )).all()
         people = [
             schemas.SupportPerson(kind="person", id=p.id, full_name=p.full_name, email=p.email, detail=pos)
-            for p, pos in (await db.execute(
-                select(Person, Position.name)
-                .outerjoin(Position, Position.id == Person.position_id)
-                .where(Person.status == PersonStatus.ATIVO)
-                .order_by(Person.full_name.asc())
-            )).all()
+            for p, pos in rows
         ]
+        person_emails = {(p.email or "").strip().lower() for p, _pos in rows if (p.email or "").strip()}
+        person_users = {p.user_id for p, _pos in rows if p.user_id}
         try:
             from app.modules.projetos.models import ProjectClient
 
@@ -2274,6 +2353,8 @@ class SupportService:
                     select(ProjectClient).where(ProjectClient.is_active == True)  # noqa: E712
                     .order_by(ProjectClient.full_name.asc())
                 )).scalars().all():
+                    if (c.email or "").strip().lower() in person_emails or (c.user_id and c.user_id in person_users):
+                        continue  # já listado como Pessoa de Times
                     people.append(schemas.SupportPerson(
                         kind="client", id=c.id, full_name=c.full_name, email=c.email,
                         detail=c.department or c.organization,
@@ -2300,6 +2381,7 @@ class SupportService:
     @classmethod
     def to_response(
         cls, s: ProductSupport, persons: dict[uuid.UUID, Person], clients: Optional[dict[uuid.UUID, str]] = None,
+        problems: Optional[dict[uuid.UUID, list[schemas.SupportProblemResponse]]] = None,
     ) -> schemas.SupportResponse:
         cfg = s.niveis_atendimento or {}
         interno = bool(cfg.get("interno", True))
@@ -2322,15 +2404,132 @@ class SupportService:
             ],
             clientes=[schemas.PersonMini(id=cid, full_name=clients[cid]) for cid in cids if cid in clients],
             observacoes=s.observacoes,
+            problemas=(problems or {}).get(s.id, []),
         )
 
     @classmethod
     async def list_responses(cls, db: AsyncSession, supports: list[ProductSupport]) -> list[schemas.SupportResponse]:
         persons = await cls._persons_map(db, supports)
         clients = await cls._clients_map(db, supports)
+        problems = await cls._problems_map(db, [s.id for s in supports])
         order = {"n1": 0, "n2": 1, "n3": 2}
         sorted_rows = sorted(supports, key=lambda s: (order.get(s.nivel or "n1", 9), s.created_at))
-        return [cls.to_response(s, persons, clients) for s in sorted_rows]
+        return [cls.to_response(s, persons, clients, problems) for s in sorted_rows]
+
+    @staticmethod
+    async def _problems_map(db: AsyncSession, support_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[schemas.SupportProblemResponse]]:
+        """Problemas ativos (com as soluções ativas) por nível, numa leitura só."""
+        if not support_ids:
+            return {}
+        try:
+            async with db.begin_nested():  # tenant sem a tabela (step 149 ainda não rodou): vazio
+                probs = (await db.execute(
+                    select(ProductSupportProblem).where(
+                        ProductSupportProblem.support_id.in_(support_ids), ProductSupportProblem.is_active.is_(True),
+                    ).order_by(ProductSupportProblem.order, ProductSupportProblem.created_at)
+                )).scalars().all()
+                sols = (await db.execute(
+                    select(ProductSupportSolution).where(
+                        ProductSupportSolution.problem_id.in_([p.id for p in probs] or [uuid.uuid4()]),
+                        ProductSupportSolution.is_active.is_(True),
+                    ).order_by(ProductSupportSolution.order, ProductSupportSolution.created_at)
+                )).scalars().all()
+        except Exception:  # noqa: BLE001
+            return {}
+        by_problem: dict[uuid.UUID, list] = defaultdict(list)
+        for sol in sols:
+            by_problem[sol.problem_id].append(schemas.SupportSolutionResponse.model_validate(sol))
+        out: dict[uuid.UUID, list[schemas.SupportProblemResponse]] = defaultdict(list)
+        for pr in probs:
+            out[pr.support_id].append(schemas.SupportProblemResponse(
+                id=pr.id, support_id=pr.support_id, name=pr.name, description=pr.description,
+                sla_horas=pr.sla_horas, solutions=by_problem.get(pr.id, []),
+            ))
+        return out
+
+    # ── Catálogo de problemas do nível ──
+    @classmethod
+    async def _get_problem(cls, db, product_id, support_id, problem_id) -> ProductSupportProblem:
+        pr = (await db.execute(select(ProductSupportProblem).where(
+            ProductSupportProblem.id == problem_id, ProductSupportProblem.support_id == support_id,
+            ProductSupportProblem.product_id == product_id, ProductSupportProblem.is_active.is_(True),
+        ))).scalar_one_or_none()
+        if not pr:
+            raise HTTPException(status_code=404, detail="Problema não encontrado.")
+        return pr
+
+    @classmethod
+    async def _problem_response(cls, db, problem_id: uuid.UUID, support_id: uuid.UUID) -> schemas.SupportProblemResponse:
+        items = (await cls._problems_map(db, [support_id])).get(support_id, [])
+        return next(p for p in items if p.id == problem_id)
+
+    @staticmethod
+    async def _replace_solutions(db, problem_id: uuid.UUID, items: list[schemas.SupportSolutionIn], user_id) -> None:
+        """Deixa as soluções ativas iguais à lista: atualiza as com id, cria as novas e inativa as
+        que saíram (a solução nunca é apagada: o Service Desk futuro vai apontar para ela)."""
+        current = {
+            s.id: s for s in (await db.execute(select(ProductSupportSolution).where(
+                ProductSupportSolution.problem_id == problem_id, ProductSupportSolution.is_active.is_(True),
+            ))).scalars().all()
+        }
+        keep: set[uuid.UUID] = set()
+        for i, item in enumerate(items):
+            title = item.title.strip()
+            desc = (item.description or "").strip() or None
+            if item.id and item.id in current:
+                sol = current[item.id]
+                sol.title, sol.description, sol.order = title, desc, i
+                sol.updated_at = datetime.utcnow()
+                keep.add(sol.id)
+            else:
+                db.add(ProductSupportSolution(
+                    problem_id=problem_id, title=title, description=desc, origem="cadastro", order=i, created_by=user_id,
+                ))
+        for sid, sol in current.items():
+            if sid not in keep:
+                sol.is_active = False
+                sol.updated_at = datetime.utcnow()
+
+    @classmethod
+    async def create_problem(cls, db, product_id, support_id, data: schemas.SupportProblemCreate, user_id) -> schemas.SupportProblemResponse:
+        await cls._get_row(db, product_id, support_id)
+        order = (await db.execute(select(func.coalesce(func.max(ProductSupportProblem.order), -1)).where(
+            ProductSupportProblem.support_id == support_id,
+        ))).scalar_one() + 1
+        pr = ProductSupportProblem(
+            product_id=product_id, support_id=support_id, name=data.name.strip(),
+            description=(data.description or "").strip() or None, sla_horas=data.sla_horas, order=order,
+            created_by=user_id, updated_by=user_id,
+        )
+        db.add(pr)
+        await db.flush()
+        await cls._replace_solutions(db, pr.id, data.solutions, user_id)
+        await db.commit()
+        return await cls._problem_response(db, pr.id, support_id)
+
+    @classmethod
+    async def update_problem(cls, db, product_id, support_id, problem_id, data: schemas.SupportProblemUpdate, user_id) -> schemas.SupportProblemResponse:
+        pr = await cls._get_problem(db, product_id, support_id, problem_id)
+        if data.name is not None:
+            pr.name = data.name.strip()
+        if data.description is not None:
+            pr.description = data.description.strip() or None
+        if data.sla_horas is not None:
+            pr.sla_horas = data.sla_horas
+        if data.solutions is not None:
+            await cls._replace_solutions(db, pr.id, data.solutions, user_id)
+        pr.updated_by = user_id
+        pr.updated_at = datetime.utcnow()
+        await db.commit()
+        return await cls._problem_response(db, pr.id, support_id)
+
+    @classmethod
+    async def delete_problem(cls, db, product_id, support_id, problem_id, user_id) -> None:
+        pr = await cls._get_problem(db, product_id, support_id, problem_id)
+        pr.is_active = False
+        pr.updated_by = user_id
+        pr.updated_at = datetime.utcnow()
+        await db.commit()
 
     @classmethod
     async def list(cls, db, product_id) -> list[schemas.SupportResponse]:
@@ -2379,8 +2578,7 @@ class SupportService:
         db.add(s)
         await db.commit()
         await db.refresh(s)
-        persons = await cls._persons_map(db, [s])
-        return cls.to_response(s, persons, await cls._clients_map(db, [s]))
+        return (await cls.list_responses(db, [s]))[0]
 
     @classmethod
     async def update(cls, db, product_id, support_id, data: schemas.SupportUpdate, user_id) -> schemas.SupportResponse:
@@ -2414,8 +2612,7 @@ class SupportService:
         s.updated_at = _now()
         await db.commit()
         await db.refresh(s)
-        persons = await cls._persons_map(db, [s])
-        return cls.to_response(s, persons, await cls._clients_map(db, [s]))
+        return (await cls.list_responses(db, [s]))[0]
 
     @classmethod
     async def delete(cls, db, product_id, support_id, user_id) -> None:
@@ -2423,6 +2620,10 @@ class SupportService:
         s.is_active = False
         s.updated_by = user_id
         s.updated_at = _now()
+        # O catálogo de problemas sai junto (inativado, não apagado): nível novo começa vazio.
+        await db.execute(update(ProductSupportProblem).where(
+            ProductSupportProblem.support_id == support_id, ProductSupportProblem.is_active.is_(True),
+        ).values(is_active=False, updated_by=user_id, updated_at=datetime.utcnow()))
         await db.commit()
 
 

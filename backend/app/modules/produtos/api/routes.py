@@ -516,6 +516,18 @@ async def delete_servico(product_id: uuid.UUID, servico_id: uuid.UUID, ctx: Modu
 
 
 # ── Documentos ────────────────────────────────
+@router.put("/{product_id}/documentos-dispensa", response_model=schemas.ProductResponse)
+async def set_documentos_dispensa(
+    product_id: uuid.UUID,
+    data: schemas.ProductDocumentosDispensa,
+    ctx: ModuleContext = Depends(_ctx),
+    _=Depends(_can_manage),
+):
+    """Declara (ou desfaz) que o produto não gera documentos natos digitais, com justificativa:
+    o critério "Documentos cadastrados" da saúde deixa de se aplicar."""
+    return await ProductService.set_documentos_dispensa(ctx.db, product_id, data, ctx.user.id)
+
+
 @router.post("/{product_id}/documentos", response_model=schemas.DocumentoResponse, status_code=201)
 async def add_documento(product_id: uuid.UUID, data: schemas.DocumentoCreate, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
     return await ProductService.add_documento(ctx.db, product_id, data, ctx.user.id)
@@ -625,3 +637,28 @@ async def update_support(product_id: uuid.UUID, support_id: uuid.UUID, data: sch
 @router.delete("/{product_id}/supports/{support_id}", status_code=204)
 async def delete_support(product_id: uuid.UUID, support_id: uuid.UUID, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage)):
     await SupportService.delete(ctx.db, product_id, support_id, ctx.user.id)
+
+
+# Catálogo de problemas do nível (cada um com SLA e soluções possíveis) — base do Service Desk.
+@router.post("/{product_id}/supports/{support_id}/problemas", response_model=schemas.SupportProblemResponse, status_code=201)
+async def create_support_problem(
+    product_id: uuid.UUID, support_id: uuid.UUID, data: schemas.SupportProblemCreate,
+    ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage),
+):
+    return await SupportService.create_problem(ctx.db, product_id, support_id, data, ctx.user.id)
+
+
+@router.patch("/{product_id}/supports/{support_id}/problemas/{problem_id}", response_model=schemas.SupportProblemResponse)
+async def update_support_problem(
+    product_id: uuid.UUID, support_id: uuid.UUID, problem_id: uuid.UUID, data: schemas.SupportProblemUpdate,
+    ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage),
+):
+    return await SupportService.update_problem(ctx.db, product_id, support_id, problem_id, data, ctx.user.id)
+
+
+@router.delete("/{product_id}/supports/{support_id}/problemas/{problem_id}", status_code=204)
+async def delete_support_problem(
+    product_id: uuid.UUID, support_id: uuid.UUID, problem_id: uuid.UUID,
+    ctx: ModuleContext = Depends(_ctx), _=Depends(_can_manage),
+):
+    await SupportService.delete_problem(ctx.db, product_id, support_id, problem_id, ctx.user.id)

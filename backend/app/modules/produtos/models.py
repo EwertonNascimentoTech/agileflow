@@ -376,6 +376,12 @@ class Product(TenantBase):
     login_idigital: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # Produto corporativo: quando True, o PO (responsável) não é do produto e sim de cada serviço.
     corporativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Declaração "o produto não gera documentos natos digitais" (com justificativa): o critério
+    # "Documentos cadastrados" da saúde passa a não se aplicar. Cadastrar um documento desfaz.
+    sem_documentos_natos: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    justificativa_sem_documentos_natos: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sem_documentos_natos_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    sem_documentos_natos_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
@@ -741,6 +747,49 @@ class ProductSupport(TenantBase):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     product: Mapped["Product"] = relationship(back_populates="supports")
+
+
+class ProductSupportProblem(TenantBase):
+    """Problema que um nível de sustentação atende (catálogo do produto). Base do futuro Service
+    Desk: o cliente escolhe o sistema e o problema, e o chamado cai neste nível com o SLA dele."""
+    __tablename__ = "product_support_problems"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    product_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("products.id", ondelete="CASCADE"), nullable=False,
+    )
+    support_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("product_supports.id", ondelete="CASCADE"), nullable=False,
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # SLA de resolução do problema, em horas úteis (calendário do TeamOps).
+    sla_horas: Mapped[int] = mapped_column(Integer, nullable=False)
+    order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ProductSupportSolution(TenantBase):
+    """Solução possível de um problema. `origem`: "cadastro" (configurada no produto) ou
+    "atendimento" (acrescentada por quem resolveu um chamado — Service Desk futuro)."""
+    __tablename__ = "product_support_solutions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    problem_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("product_support_problems.id", ondelete="CASCADE"), nullable=False,
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    origem: Mapped[str] = mapped_column(String(20), nullable=False, default="cadastro")
+    order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 # ─────────────────────────────────────────────

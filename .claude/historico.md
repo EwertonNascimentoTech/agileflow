@@ -14,6 +14,56 @@ Modelo:
 
 ---
 
+## 2026-09-28 — Sustentação: SLA sai do nível; catálogo de problemas por nível (base do Service Desk)
+
+- **Pedido:** tirar o campo SLA do nível de atendimento; em cada nível cadastrar os problemas que ele atende, cada um com descrição, SLA próprio e soluções possíveis. Objetivo: dados para um futuro Service Desk (o cliente escolhe o sistema e o problema, o chamado cai no nível com o SLA do problema; quem resolve escolhe ou registra a solução). Tudo configurado no produto.
+- **Decisões do usuário:** critério de saúde "Sustentação cadastrada" = canal + responsáveis; alerta de triagem N1 = 8h úteis fixas; os SLAs já gravados (109 níveis, `niveis_atendimento.sla_horas`) ficam guardados, sem aparecer.
+- **Feito:** tabelas `product_support_problems` (nome, descrição, `sla_horas` em horas úteis, ordem, soft delete) e `product_support_solutions` (título, descrição, `origem` cadastro|atendimento, soft delete) no step 149 + 3 índices em `_INDEX_SPECS`. API `POST/PATCH/DELETE /produtos/{id}/supports/{sid}/problemas[/{pid}]` (permissão de gerenciar produto); o PATCH recebe a lista completa de soluções (com id = mantém/atualiza, sem id = nova, fora da lista = inativada). `SupportResponse.problemas`. `_nivel_config_ok` não exige SLA. Triagem N1 (`assisted_ops.py`) usa `N1_SLA_PADRAO` fixo. Excluir o nível inativa os problemas dele. Ficha do produto, aba Sustentação: um cartão por nível (canal, responsáveis, observações) com a tabela de problemas (SLA "Xh úteis", soluções) e "Adicionar problema"; diálogo com nome, descrição, SLA e editor de soluções; formulário do nível sem SLA. Alerta de produto crítico "SLA definido" passa a contar problema cadastrado ou SLA de contrato.
+- **Conferido:** 7 testes (`test_produto_saude_documentos.py`); navegador no AVA SENAI: criar (4h, 2 soluções), editar (6h; remove 1 e adiciona 1, a removida fica `is_active=false`), validação do SLA, excluir, tema escuro, sem erro de console; API: nível excluído inativa o problema; nome curto / SLA 0 = 422. Dados de teste apagados.
+- **Pendente (Service Desk):** abertura do chamado pelo cliente escolhendo sistema e problema, e o registro da solução no atendimento (`origem = "atendimento"` já existe).
+- **Arquivos:** `backend/app/modules/produtos/models.py`, `schemas.py`, `service.py`, `api/routes.py`; `backend/app/core/tenant_migrations.py`; `backend/app/modules/projetos/assisted_ops.py`; `backend/tests/test_produto_saude_documentos.py`; `frontend/src/api/produtos.ts`; `frontend/src/modules/produtos/ProductDetailPage.tsx`.
+
+## 2026-09-27 — Responsáveis pelo atendimento: uma pessoa só (prioriza Times)
+
+- **Pedido:** no seletor de responsáveis do nível de chamado apareciam dois "Ewerton" (Times e Cliente); regra: se a pessoa está em Times, vale esse cadastro e lista um só.
+- **Feito:** `SupportService.list_people` descarta o cliente cujo e-mail (sem diferenciar maiúsculas) ou login bate com uma Pessoa ativa de Times. Hoje havia 1 duplicado (Ewerton), sem uso em nenhuma sustentação salva (nada a migrar).
+- **Conferido:** `/produtos/support-people` devolve 44 pessoas + 5 clientes e um único Ewerton (Times, Coordenador).
+- **Arquivos:** `backend/app/modules/produtos/service.py`.
+
+## 2026-09-27 — Produto: campo "Ambiente DEV" retirado da tela
+
+- **Pedido:** tirar o campo Ambiente DEV (o link de ambiente de desenvolvimento não existe).
+- **Feito:** saiu do formulário de produto (criar/editar, estado e payload) e do cartão "Ambientes e repositório" da ficha. Coluna `products.link_dev` e API mantidas: 41 dos 121 produtos têm link DEV guardado, que não foi apagado (edição não envia o campo, `exclude_unset` preserva). Texto do critério "Cadastro geral completo" passou a "exceto Ambiente HML".
+- **Arquivos:** `frontend/src/modules/produtos/ProductFormDialog.tsx`, `ProductDetailPage.tsx`; `backend/app/modules/produtos/service.py`.
+
+## 2026-09-27 — Cartão de saúde do produto explica a régua e o "não se aplica"
+
+- **Pedido:** com itens "não se aplica", como saber se o produto está saudável?
+- **Feito:** `ProductHealth` devolve `limiar_saudavel`/`limiar_atencao` do tenant (hoje 75/40). Cartão "Saúde do produto": régua Crítico / Atenção / Saudável com marcador na nota; "Nota = X de Y pts dos critérios que se aplicam"; selo "Faltam N pts para ficar Saudável" (e para Atenção quando crítico), mesmo arredondamento do backend; frase "os critérios 'não se aplica' ficam fora da conta: não somam nem tiram pontos".
+- **Conferido:** TEste 0/90 -> faltam 36 (Atenção) e 68 (Saudável); AVA SENAI 75/105 = 71 -> faltam 4 pts.
+- **Arquivos:** `backend/app/modules/produtos/schemas.py`, `service.py`; `frontend/src/api/produtos.ts`, `modules/produtos/ProductDetailPage.tsx`.
+
+## 2026-09-27 — Botão "O produto não gera documentos natos digitais" visível
+
+- **Pedido:** o usuário não via o botão.
+- **Causa:** o botão ficava na lista vazia, abaixo do formulário comprido de "Novo documento" (só aparecia rolando a página).
+- **Feito:** aviso azul com o botão no topo da aba Documentos Natos Digitais (sem documento e sem declaração); atalho "Não gera documentos natos digitais? Declarar" no critério "Documentos cadastrados" do cartão de saúde (aba Geral), que leva à aba; botão repetido saiu da lista vazia. Conferido no navegador (AVA SENAI): atalho presente, botão a 482 px do topo, diálogo abre.
+- **Arquivos:** `frontend/src/modules/produtos/ProductDetailPage.tsx`.
+
+## 2026-09-27 — Produto sem documentos natos digitais: declaração com justificativa tira o critério da saúde
+
+- **Pedido:** produto pode não ter documentos natos digitais; informar que não existe e justificar, e com isso não computar para a saúde.
+- **Feito:** campos `sem_documentos_natos`, `justificativa_sem_documentos_natos`, `_by`, `_at` em `products` (step 148). `PUT /produtos/{id}/documentos-dispensa` (permissão de gerenciar produto; justificativa >= 10; 400 se houver documento ativo; `false` desfaz). `_health`: com declaração válida, "Documentos cadastrados" = não se aplica (sai do peso) com `note`. `add_documento` desfaz a declaração. Ficha: botão "O produto não gera documentos natos digitais" na lista vazia -> diálogo com justificativa; aviso com justificativa, quem e quando + "Desfazer declaração"; indicador do topo e observação no cartão de saúde.
+- **Testado:** 5 testes (`tests/test_produto_saude_documentos.py`); ponta a ponta no AVA SENAI: 71 -> 79 (saudável), peso 105 -> 95, critério "na" com nota, lista também 79; justificativa curta 422; produto com documento (Agile Flow) 400; desfeito volta a 71; data de alteração do produto restaurada.
+- **Não mexer:** ver invariantes (Produtos, critério "Documentos cadastrados").
+- **Arquivos:** `backend/app/modules/produtos/models.py`, `schemas.py`, `service.py`, `api/routes.py`, `core/tenant_migrations.py`, `tests/test_produto_saude_documentos.py` (novo); `frontend/src/api/produtos.ts`, `modules/produtos/ProductDetailPage.tsx`.
+
+## 2026-09-27 — Ficha do produto: "Documentos Natos Digitais"
+
+- **Pedido:** trocar o nome "Documentos" por "Documentos Natos Digitais".
+- **Feito:** aba, indicador do topo e título da lista da ficha do produto; cartão "Novo documento nato digital" e vazio "Nenhum documento nato digital". Conferido: as 7 abas cabem numa linha em 1440 px.
+- **Arquivos:** `frontend/src/modules/produtos/ProductDetailPage.tsx`.
+
 ## 2026-09-27 — Kanban Soluções com IA: nome do solicitante no card
 
 - **Pedido:** o card do kanban de Soluções com IA deve mostrar o nome de quem pediu.

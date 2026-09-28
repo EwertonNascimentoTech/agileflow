@@ -96,6 +96,12 @@ Telas: Dashboard, Organograma, Pessoas, Stacks, Aus?ncias, Config.
 
 Portf?lio derivado de projetos, ?reas/diretorias, fornecedores, documentos, processos, indicadores do produto, reposit?rios Azure DevOps (webhook sem JWT). P?blico: `PUBLIC_PRODUTOS_PORTFOLIO_TOKEN`.
 
+### Sustentação e catálogo de problemas (base do Service Desk)
+
+- Aba Sustentação da ficha: um cartão por nível (canal, responsáveis de Times/Clientes, observações) com a tabela de problemas (SLA em horas úteis, soluções possíveis) e "Adicionar problema"; diálogo com nome, descrição, SLA e editor de soluções.
+- API: `GET/POST/PATCH/DELETE /produtos/{id}/supports[/{sid}]` (sem SLA no nível) e `POST/PATCH/DELETE /produtos/{id}/supports/{sid}/problemas[/{pid}]`; `SupportResponse.problemas[].solutions[]`.
+- Tabelas de tenant: `product_support_problems`, `product_support_solutions` (step 149).
+
 ## Indicadores
 
 Estrat?gicos/t?ticos, metas por per?odo, dashboard. Usados na RTD.
@@ -133,5 +139,7 @@ Reuni?o de comit? (mensal/trimestral): portf?lio, POs, indicadores, planos EPA, 
 | Rotas SPA | `frontend/src/App.tsx` |
 | Menu | `frontend/src/modules/crm/moduleNavConfig.ts` |
 | Migrations tenant | `backend/app/core/tenant_migrations.py` |
+
+Produtos: declaração "não gera documentos natos digitais" em `PUT /produtos/{id}/documentos-dispensa` (campos `products.sem_documentos_natos*`, step 148; aba Documentos Natos Digitais da ficha).
 
 Design system compartilhado: `frontend/src/components/ds` (visual do Portal do Cliente; usado pelo Portal e por todos os módulos ativos desde 2026-09-27).

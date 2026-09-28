@@ -313,6 +313,8 @@ export interface HealthCheck {
   label: string
   status: "pass" | "fail" | "na"
   weight: number
+  /** Por que não se aplica quando é escolha do produto (ex.: declarado sem documentos natos). */
+  note?: string | null
 }
 
 export interface ProductHealth {
@@ -321,6 +323,9 @@ export interface ProductHealth {
   applicable_weight: number
   passed_weight: number
   checks: HealthCheck[]
+  /** Limiares do tenant (Config do Produtos). */
+  limiar_saudavel: number
+  limiar_atencao: number
 }
 
 export interface ProductListItem {
@@ -405,6 +410,11 @@ export interface Product {
   link_prd: string | null
   login_idigital: boolean
   corporativo: boolean
+  /** Declarado sem documentos natos digitais (critério da saúde não se aplica). */
+  sem_documentos_natos: boolean
+  justificativa_sem_documentos_natos: string | null
+  sem_documentos_natos_by_name: string | null
+  sem_documentos_natos_at: string | null
   servicos: Servico[]
   documentos: Documento[]
   processos: ProdutoProcessoLink[]
@@ -585,10 +595,37 @@ export interface Support {
   client_ids: string[]
   /** Só nome, sem cadastro (legado/fornecedor): não recebe ocorrência. */
   nomes_externos: string[]
-  sla_horas: number | null
   responsaveis: PersonMini[]
   clientes: PersonMini[]
   observacoes: string | null
+  /** Catálogo de problemas que o nível atende (base do futuro Service Desk). */
+  problemas: SupportProblem[]
+}
+
+/** Solução possível de um problema; "atendimento" = registrada por quem resolveu um chamado. */
+export interface SupportSolution {
+  id: string
+  title: string
+  description: string | null
+  origem: "cadastro" | "atendimento"
+}
+
+/** Problema que o nível atende, com SLA próprio (horas úteis) e soluções possíveis. */
+export interface SupportProblem {
+  id: string
+  support_id: string
+  name: string
+  description: string | null
+  sla_horas: number
+  solutions: SupportSolution[]
+}
+
+/** Soluções vão como lista completa: com id = mantém/atualiza; sem id = nova; a que sair é inativada. */
+export interface SupportProblemInput {
+  name: string
+  description?: string | null
+  sla_horas: number
+  solutions: { id?: string; title: string; description?: string | null }[]
 }
 
 /** Quem pode ser responsável de um nível: Pessoa de Times ou Cliente do Portal. */
@@ -607,7 +644,6 @@ export interface SupportCreate {
   person_ids: string[]
   client_ids: string[]
   nomes_externos: string[]
-  sla_horas?: number | null
   observacoes?: string | null
 }
 
@@ -1009,6 +1045,10 @@ export const produtosApi = {
       .patch<Servico>(`/produtos/${productId}/servicos/${servicoId}/subprocesso-dispensa`, data)
       .then((r) => r.data),
 
+  /** Declara (ou desfaz) que o produto não gera documentos natos digitais (justificativa ≥ 10). */
+  setDocumentosDispensa: (productId: string, data: { sem_documentos_natos: boolean; justificativa?: string }) =>
+    api.put<Product>(`/produtos/${productId}/documentos-dispensa`, data).then((r) => r.data),
+
   addDocumento: (productId: string, data: DocumentoCreate) =>
     api.post<Documento>(`/produtos/${productId}/documentos`, data).then((r) => r.data),
 
@@ -1067,6 +1107,12 @@ export const produtosApi = {
     api.patch<Support>(`/produtos/${productId}/supports/${supportId}`, data).then((r) => r.data),
   deleteSupport: (productId: string, supportId: string) =>
     api.delete<void>(`/produtos/${productId}/supports/${supportId}`).then((r) => r.data),
+  createSupportProblem: (productId: string, supportId: string, data: SupportProblemInput) =>
+    api.post<SupportProblem>(`/produtos/${productId}/supports/${supportId}/problemas`, data).then((r) => r.data),
+  updateSupportProblem: (productId: string, supportId: string, problemId: string, data: Partial<SupportProblemInput>) =>
+    api.patch<SupportProblem>(`/produtos/${productId}/supports/${supportId}/problemas/${problemId}`, data).then((r) => r.data),
+  deleteSupportProblem: (productId: string, supportId: string, problemId: string) =>
+    api.delete<void>(`/produtos/${productId}/supports/${supportId}/problemas/${problemId}`).then((r) => r.data),
 
   // ── Portfólio de Processos ──
   listProcessPortfolios: () =>

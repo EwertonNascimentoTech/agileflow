@@ -122,7 +122,7 @@ OA_PREREQS: list[tuple[str, str, bool]] = [
 
 # POP 8.2.1: N1 = Dono do Processo + Especialista do Processo (além dos responsáveis de N1 do Produto).
 N1_ROLES = ("dono_processo", "especialista_processo")
-# SLA da triagem quando o N1 do Produto não informa (horas úteis).
+# SLA fixo da triagem N1 (horas úteis); o SLA do Produto agora é por problema do catálogo.
 N1_SLA_PADRAO = 8.0
 
 
@@ -1590,10 +1590,9 @@ class AssistedOpsService:
             root = await db.get(ProjectTask, occ.project_task_id)
             if root is None:
                 continue
+            # Prazo fixo da triagem (decisão de 2026-09-27): o SLA saiu do nível de sustentação —
+            # agora é por problema, e na triagem o problema ainda não foi escolhido.
             sla = N1_SLA_PADRAO
-            if root.linked_product_id:
-                slas = [cfg.get("sla_horas") for _p, cfg in await AssistedOpsService._n1_supports(db, {root.linked_product_id})]
-                sla = float(next((x for x in slas if x), N1_SLA_PADRAO))
             if cal.working_hours_between(_to_local(occ.created_at, tz), _to_local(now, tz)) < sla:
                 continue
             person_ids, user_ids = await AssistedOpsService._n1_recipients(db, *await AssistedOpsService.n1_targets(db, root))

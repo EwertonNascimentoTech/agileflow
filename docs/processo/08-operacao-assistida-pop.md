@@ -71,7 +71,7 @@ Se faltar algo, o sistema abre o modal ao mover o card. Os demais usuários veem
   - **Resolver aqui:** é dúvida de uso. Ele escreve a orientação e a ocorrência é encerrada.
   - **Encaminhar à TI:** como **Correção**, com a criticidade, vai para o Backlog e avisa o PO e os desenvolvedores de atendimento; como **Melhoria**, vai para "Melhoria – Análise PO".
 - **Sem triagem:** se quem abriu já é do N1, ou se ninguém do N1 tem acesso ao sistema, a ocorrência vai direto para o Backlog.
-- **Prazo:** triagem parada além do SLA do N1 do Produto (padrão 8 horas úteis) avisa o N1 e o PO. O aviso de "sem responsável há 1h" da TI conta a partir do encaminhamento.
+- **Prazo:** triagem parada além de 8 horas úteis (prazo fixo) avisa o N1 e o PO. O nível de sustentação não tem mais SLA próprio: o SLA fica em cada problema do catálogo do nível, na aba Sustentação do Produto. O aviso de "sem responsável há 1h" da TI conta a partir do encaminhamento.
 
 ## Escalonamento (8.2.1 e 8.4.1)
 
