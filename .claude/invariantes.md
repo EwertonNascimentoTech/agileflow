@@ -38,6 +38,7 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 - Grade ancora em **hoje** (passado ? esquerda). Bot?o “Ir para hoje”.
 - Janela da aba Carga (Desempenho) come?a em hoje e projeta o futuro — n?o 90 dias atr?s.
 - Aus?ncia aprovada que `affects_capacity` zera/reduz horas do dia.
+- Quem está de férias/afastado CONTINUA na capacidade (heatmap, Por time, Pessoas livres, Gargalos): filtro é `status != desligado`, nunca `== ativo` (a ausência aprovada já zera só os dias dela). O heatmap traz `status` e `absences` por pessoa: selo "De férias até dd/mm" e dias hachurados (pendente mais claro, não desconta horas).
 - Homologa??o (PO) da **Feature pai** faz a US contar no PO do card-raiz (n?o no executor).
 - Import Excel Features/US: Configura??es ? Cronograma **e** modal do Projeto/Programa nas raias de planejamento (Requisitos, Prot?tipo, Refinamento, Validar Escopo, Pronto para Desenvolvimento). Colunas: Tipo, T?tulo, Descri??o, Respons?vel (e-mail), In?cio, Fim, Horas. Cada US ? filha da Feature da linha acima.
 

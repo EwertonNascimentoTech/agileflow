@@ -93,6 +93,7 @@ from app.modules.projetos.schemas import (
     CapacityDayDetailResponse,
     CapacityPersonMeta,
     CapacitySummary,
+    CapacityAbsenceSpan,
     CapacityHeatmapResponse,
     CapacityReserveCell,
     CapacityProjectRow,
@@ -6670,8 +6671,9 @@ class CapacityService:
         )
 
         # Fatias Operação Assistida / Chamados: quem tem essa reserva aparece mesmo sem US.
+        # Quem está de férias/afastado continua no heatmap (sinalizado): só desligado sai.
         q = select(Person).options(selectinload(Person.areas)).where(
-            Person.status == PersonStatus.ATIVO,
+            Person.status != PersonStatus.DESLIGADO,
             (Person.assisted_ops_allocation_pct > 0)
             | ((Person.project_allocation_pct + Person.assisted_ops_allocation_pct) < 100),
         )
@@ -6679,6 +6681,15 @@ class CapacityService:
             q = q.where(Person.id.in_(person_ids))
         for p in (await db.execute(q)).scalars().all():
             persons_by_id.setdefault(p.id, p)
+        # Ausências na janela (férias, afastamento...): a pessoa aparece mesmo sem US nem reserva.
+        absences = await CapacityService._absences_in_window(db, date_from, date_to, person_ids)
+        missing = [pid for pid in absences if pid not in persons_by_id]
+        if missing:
+            for p in (await db.execute(
+                select(Person).options(selectinload(Person.areas))
+                .where(Person.id.in_(missing), Person.status != PersonStatus.DESLIGADO)
+            )).scalars().all():
+                persons_by_id[p.id] = p
         reserve_ids = {
             uid for uid, p in persons_by_id.items()
             if person_allowed(uid) and (
@@ -6688,8 +6699,10 @@ class CapacityService:
             )
         }
         reserves = await CapacityService._reserve_cells(db, reserve_ids, persons_by_id, calendar, date_from, date_to)
+        absent_ids = {pid for pid in absences if pid in persons_by_id and person_allowed(pid)}
         resp = CapacityService._assemble_heatmap(
-            cells, persons_by_id, unmapped, extra_person_ids={r.user_id for r in reserves},
+            cells, persons_by_id, unmapped, extra_person_ids={r.user_id for r in reserves} | absent_ids,
+            absences_by_person=absences,
         )
         resp.reserves = reserves
         return resp
@@ -6745,12 +6758,40 @@ class CapacityService:
             ]
 
     @staticmethod
+    async def _absences_in_window(
+        db: AsyncSession, date_from: date, date_to: date, person_ids: Optional[list[uuid.UUID]] = None,
+    ) -> dict[uuid.UUID, list[CapacityAbsenceSpan]]:
+        """Ausências que afetam a capacidade (aprovadas e pendentes) e cruzam a janela, por pessoa."""
+        q = (
+            select(Absence, AbsenceType.name, AbsenceType.color)
+            .join(AbsenceType, Absence.absence_type_id == AbsenceType.id)
+            .where(
+                Absence.status.in_([AbsenceStatus.APROVADA, AbsenceStatus.PENDENTE]),
+                AbsenceType.affects_capacity.is_(True),
+                Absence.start_date <= date_to,
+                Absence.end_date >= date_from,
+            )
+            .order_by(Absence.start_date.asc())
+        )
+        if person_ids:
+            q = q.where(Absence.person_id.in_(person_ids))
+        out: dict[uuid.UUID, list[CapacityAbsenceSpan]] = {}
+        for ab, type_name, color in (await db.execute(q)).all():
+            out.setdefault(ab.person_id, []).append(CapacityAbsenceSpan(
+                type_name=type_name, color=color, start_date=ab.start_date, end_date=ab.end_date,
+                status=ab.status.value if hasattr(ab.status, "value") else str(ab.status),
+                partial_hours=float(ab.partial_hours) if ab.partial_hours is not None else None,
+            ))
+        return out
+
+    @staticmethod
     def _assemble_heatmap(
         cells: list[WorkloadCell],
         persons_by_id: dict[uuid.UUID, Person],
         unmapped: list[str],
         virtual_meta: Optional[dict[uuid.UUID, CapacityPersonMeta]] = None,
         extra_person_ids: Optional[set[uuid.UUID]] = None,
+        absences_by_person: Optional[dict[uuid.UUID, list[CapacityAbsenceSpan]]] = None,
     ) -> CapacityHeatmapResponse:
         """Monta CapacityHeatmapResponse (meta de pessoas + summary) a partir das células.
         `virtual_meta` injeta pessoas sintéticas (freelancers do simulador).
@@ -6776,6 +6817,8 @@ class CapacityService:
                 tickets_pct=max(
                     0.0, 100.0 - float(p.project_allocation_pct or 0) - float(p.assisted_ops_allocation_pct or 0)
                 ),
+                status=p.status.value if hasattr(p.status, "value") else p.status,
+                absences=(absences_by_person or {}).get(p.id, []),
             ))
         persons_meta.sort(key=lambda m: m.full_name.lower())
         summary = CapacitySummary(
@@ -7060,7 +7103,9 @@ class CapacityService:
                 selectinload(Person.areas),
                 selectinload(Person.stacks).selectinload(PersonStack.stack),
             )
-            .where(Person.status == PersonStatus.ATIVO)
+            # Férias/afastamento: a pessoa segue na conta (a ausência aprovada zera só os dias dela;
+            # "Próxima ausência" mostra o período). Só desligado sai.
+            .where(Person.status != PersonStatus.DESLIGADO)
         )).scalars().all())
 
         def matches(p: Person) -> bool:
@@ -7489,7 +7534,8 @@ class CapacityService:
         )
 
         persons = list((await db.execute(
-            select(Person).options(selectinload(Person.areas)).where(Person.status == PersonStatus.ATIVO)
+            # Quem está de férias entra: a capacidade já desconta os dias da ausência aprovada.
+            select(Person).options(selectinload(Person.areas)).where(Person.status != PersonStatus.DESLIGADO)
         )).scalars().all())
         pids = {p.id for p in persons}
         capacity_for = await CapacityService._capacity_resolver(db, pids, calendar)

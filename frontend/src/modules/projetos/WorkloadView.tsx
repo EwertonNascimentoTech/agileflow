@@ -1,10 +1,11 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { AlertTriangle, Loader2, Users } from "lucide-react"
+import { AlertTriangle, CalendarDays, Loader2, Users } from "lucide-react"
 
-import { projetosApi, type CapacityReserveCell, type WorkloadCell } from "@/api/projetos"
-import { capacityCellStyle } from "./capacityColors"
+import { projetosApi, type CapacityAbsenceSpan, type CapacityPersonMeta, type CapacityReserveCell, type WorkloadCell } from "@/api/projetos"
+import { capacityCellStyle, capacityRatioColors } from "./capacityColors"
 import type { User } from "@/types"
 import { EmptyState } from "@/components/EmptyState"
+import { Button } from "@/components/ui/button"
 
 function initials(name: string | undefined): string {
   if (!name) return "?"
@@ -42,6 +43,95 @@ function weekdayRange(fromIso: string, toIso: string): string[] {
 // de capacidade do cronograma (capacityColors.ts).
 const cellStyle = capacityCellStyle
 
+// Legenda da escala: amostras tiradas da própria paleta (capacityRatioColors), então
+// acompanha qualquer ajuste de faixa feito lá.
+const SCALE_LEGEND: { label: string; allocated: number; capacity: number }[] = [
+  { label: "até 80%", allocated: 0.5, capacity: 1 },
+  { label: "80–100%", allocated: 0.9, capacity: 1 },
+  { label: "acima de 100%", allocated: 1.5, capacity: 1 },
+  { label: "carga sem capacidade no dia", allocated: 1, capacity: 0 },
+]
+
+/** dd/mm de uma data AAAA-MM-DD. */
+function ddmm(iso: string): string {
+  return `${iso.slice(8, 10)}/${iso.slice(5, 7)}`
+}
+
+/** Ausência (aprovada primeiro) que cobre o dia, se houver. */
+function absenceOn(list: CapacityAbsenceSpan[] | undefined, day: string): CapacityAbsenceSpan | undefined {
+  if (!list?.length) return undefined
+  const hits = list.filter((a) => a.start_date <= day && day <= a.end_date)
+  return hits.find((a) => a.status === "aprovada") ?? hits[0]
+}
+
+/** Hachurado na cor do tipo de ausência (pendente = mais claro). */
+function absenceStyle(a: CapacityAbsenceSpan): React.CSSProperties {
+  const color = a.color && /^#[0-9a-f]{6}$/i.test(a.color) ? a.color : "#8B5CF6"
+  const alpha = a.status === "aprovada" ? "40" : "1f"
+  return { backgroundImage: `repeating-linear-gradient(135deg, ${color}${alpha} 0 4px, transparent 4px 8px)`, color }
+}
+
+/** Selo da pessoa: de férias/afastada agora, ou ausência marcada dentro da janela. */
+function AbsenceBadge({ person, today }: { person?: CapacityPersonMeta; today: string }) {
+  if (!person) return null
+  const list = person.absences ?? []
+  const now = absenceOn(list, today)
+  const agora = now && now.status === "aprovada" ? now : undefined
+  if (agora || person.status === "ferias" || person.status === "afastado") {
+    const label = agora ? agora.type_name : person.status === "ferias" ? "Férias" : "Afastado"
+    return (
+      <span className="mt-0.5 inline-flex max-w-full items-center rounded bg-sky-100 px-1.5 py-px text-[10px] font-medium text-sky-800 dark:bg-sky-950/60 dark:text-sky-300"
+        title={agora ? `${agora.type_name} de ${ddmm(agora.start_date)} a ${ddmm(agora.end_date)}` : undefined}>
+        <span className="truncate">De {label.toLowerCase()}{agora ? ` até ${ddmm(agora.end_date)}` : ""}</span>
+      </span>
+    )
+  }
+  const prox = list.find((a) => a.end_date >= today)
+  if (!prox) return null
+  const pend = prox.status !== "aprovada"
+  return (
+    <span className={`mt-0.5 inline-flex max-w-full items-center rounded px-1.5 py-px text-[10px] ${
+      pend ? "border border-dashed border-amber-400 text-amber-800 dark:text-amber-300" : "bg-muted text-muted-foreground"
+    }`} title={pend ? "Pedido ainda não aprovado: não desconta da capacidade" : undefined}>
+      <span className="truncate">{prox.type_name} {ddmm(prox.start_date)}–{ddmm(prox.end_date)}{pend ? " (pendente)" : ""}</span>
+    </span>
+  )
+}
+
+function ScaleLegend({ showReserves, showAbsences = false }: { showReserves: boolean; showAbsences?: boolean }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 pt-3 text-xs text-muted-foreground">
+      <span className="font-semibold text-foreground">Legenda</span>
+      {SCALE_LEGEND.map((l) => {
+        const c = capacityRatioColors(l.allocated, l.capacity)
+        return (
+          <span key={l.label} className="inline-flex items-center gap-1.5">
+            <span className="inline-block h-3 w-3 rounded-sm ring-1 ring-inset ring-black/10" style={{ background: c?.bg }} aria-hidden />
+            {l.label}
+          </span>
+        )
+      })}
+      <span className="inline-flex items-center gap-1.5">
+        <span className="inline-block h-3 w-3 rounded-sm ring-1 ring-inset ring-primary/40" aria-hidden />
+        hoje
+      </span>
+      {showAbsences && (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="inline-block h-3 w-3 rounded-sm ring-1 ring-inset ring-black/10"
+            style={absenceStyle({ type_name: "", color: "#8B5CF6", start_date: "", end_date: "", status: "aprovada", partial_hours: null })} aria-hidden />
+          férias / ausência (mais claro = pedido ainda não aprovado)
+        </span>
+      )}
+      {showReserves && (
+        <span>
+          · <span className="text-teal-700 dark:text-teal-400">Operação Assistida</span> = trabalhadas/reservadas ·{" "}
+          <span className="text-amber-700 dark:text-amber-400">Chamados</span> = reserva do dia
+        </span>
+      )}
+    </div>
+  )
+}
+
 /**
  * Heatmap carga×capacidade por pessoa×dia. Dois modos:
  *  - Não-controlado: recebe `projectId` (+ `users`) e busca o workload do projeto (usado no Gantt).
@@ -60,6 +150,7 @@ export function WorkloadView({
   dateTo,
   onCellClick,
   reserves,
+  people,
 }: {
   projectId?: string
   // Card-raiz de planejamento: sem ele a carga viria de todos os projetos do container.
@@ -74,6 +165,8 @@ export function WorkloadView({
   onCellClick?: (userId: string, date: string) => void
   /** Fatias Operação Assistida / Chamados (divisão da jornada) — viram sub-linhas da pessoa. */
   reserves?: CapacityReserveCell[]
+  /** Pessoas do heatmap (cockpit): situação e ausências — quem está de férias aparece sinalizado. */
+  people?: CapacityPersonMeta[]
 }) {
   const controlled = cellsProp !== undefined
   const [fetched, setFetched] = useState<WorkloadCell[]>([])
@@ -142,8 +235,14 @@ export function WorkloadView({
     }
     const uids = [...map.keys()]
     for (const r of reserves ?? []) if (!map.has(r.user_id) && !uids.includes(r.user_id)) uids.push(r.user_id)
+    for (const p of people ?? []) {
+      if ((p.absences?.length || p.status === "ferias" || p.status === "afastado") && !uids.includes(p.id)) uids.push(p.id)
+    }
     return { dates: ds, byUser: map, userIds: uids, overCount: over }
-  }, [cells, dateFrom, dateTo, reserves])
+  }, [cells, dateFrom, dateTo, reserves, people])
+
+  const personById = useMemo(() => new Map((people ?? []).map((p) => [p.id, p])), [people])
+  const hasAbsences = (people ?? []).some((p) => (p.absences?.length ?? 0) > 0)
 
   const reservesByUser = useMemo(() => {
     const m = new Map<string, Map<string, CapacityReserveCell>>()
@@ -230,30 +329,32 @@ export function WorkloadView({
 
   return (
     <div className="afx w-full">
-      <div className="flex flex-wrap items-center gap-2 px-1 py-2 text-sm text-muted-foreground">
-        <AlertTriangle size={14} className="text-destructive" />
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-2 pb-3 text-sm text-muted-foreground">
+        <AlertTriangle size={15} className="shrink-0 text-destructive" />
         {overCount > 0
           ? <span><strong className="text-destructive">{overCount}</strong> dia(s)/pessoa em superlotação (carga acima da capacidade da jornada).</span>
           : <span>Nenhuma superlotação — capacidade pela jornada de cada pessoa, descontando ausências e feriados.</span>}
         {onCellClick && <span className="text-xs">· clique numa célula para ver as demandas e os atrasos do dia.</span>}
         {focusDate && (
-          <button
+          <Button
             type="button"
-            className="ml-auto rounded-md border bg-background px-2 py-0.5 text-xs font-medium text-foreground hover:bg-muted"
+            variant="outline"
+            size="sm"
+            className="ml-auto h-8 gap-1.5"
             onClick={() => {
               autoScrollKeyRef.current = null
               scrollToFocusDate()
             }}
           >
-            Ir para hoje
-          </button>
+            <CalendarDays size={14} /> Ir para hoje
+          </Button>
         )}
       </div>
-      <div ref={scrollRef} className="overflow-x-auto rounded-md border bg-card">
+      <div ref={scrollRef} className="overflow-x-auto rounded-xl border bg-card">
         <table className="border-collapse text-[11px]">
           <thead>
-            <tr className="border-b bg-muted/40">
-              <th className="sticky left-0 z-10 bg-muted/40 px-3 py-2 text-left font-medium text-muted-foreground" style={{ minWidth: 180 }}>Responsável</th>
+            <tr className="border-b bg-muted">
+              <th className="sticky left-0 z-10 bg-muted px-3 py-2 text-left text-xs font-semibold text-foreground" style={{ minWidth: 180 }}>Responsável</th>
               {dates.map((d) => {
                 const dt = new Date(d + "T00:00:00")
                 const isFocus = d === focusDate
@@ -292,7 +393,10 @@ export function WorkloadView({
                       <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#6366f1] text-[9px] font-semibold text-white">
                         {initials(userName(uid))}
                       </span>
-                      <span className="truncate" style={{ maxWidth: 140 }}>{userName(uid)}</span>
+                      <div className="min-w-0 leading-tight" style={{ maxWidth: 140 }}>
+                        <span className="block truncate">{userName(uid)}</span>
+                        <AbsenceBadge person={personById.get(uid)} today={todayIso} />
+                      </div>
                     </div>
                   </td>
                   {dates.map((d) => {
@@ -301,13 +405,18 @@ export function WorkloadView({
                     const capacity = c?.capacity_hours ?? 8
                     const isToday = d === todayIso
                     const clickable = Boolean(onCellClick)
+                    const aus = absenceOn(personById.get(uid)?.absences, d)
+                    // Dia de ausência sem carga: hachurado na cor do tipo; com carga, fica o alerta de sobrecarga.
+                    const ausVisual = aus && allocated <= 0
+                    const ausTitle = aus ? `${aus.type_name}${aus.status === "aprovada" ? "" : " (pedido pendente)"}` : undefined
                     return (
                       <td
                         key={d}
                         className={`border-l px-1 py-1.5 text-center ${isToday ? "ring-1 ring-inset ring-primary/40" : ""} ${
                           clickable ? "cursor-pointer hover:outline hover:outline-1 hover:-outline-offset-1 hover:outline-primary" : ""
                         }`}
-                        style={cellStyle(allocated, capacity)}
+                        style={ausVisual ? absenceStyle(aus) : cellStyle(allocated, capacity)}
+                        title={ausVisual ? ausTitle : undefined}
                         onMouseEnter={c ? (e) => setHover({ c, name: userName(uid), date: d, x: e.clientX, y: e.clientY }) : undefined}
                         onMouseMove={c ? (e) => setHover((h) => (h ? { ...h, x: e.clientX, y: e.clientY } : h)) : undefined}
                         onMouseLeave={() => setHover(null)}
@@ -333,7 +442,9 @@ export function WorkloadView({
                         } : undefined}
                         aria-label={clickable ? `${userName(uid)} — ${d}: ver detalhamento do dia` : undefined}
                       >
-                        {allocated > 0 ? allocated.toFixed(allocated % 1 === 0 ? 0 : 1) : ""}
+                        {allocated > 0
+                          ? allocated.toFixed(allocated % 1 === 0 ? 0 : 1)
+                          : ausVisual ? <span className="text-[9px] font-semibold opacity-80">{aus.type_name.slice(0, 3)}</span> : ""}
                       </td>
                     )
                   })}
@@ -381,6 +492,7 @@ export function WorkloadView({
           </tbody>
         </table>
       </div>
+      <ScaleLegend showReserves={(reserves?.length ?? 0) > 0} showAbsences={hasAbsences} />
 
       {hover && (
         <div
@@ -397,6 +509,14 @@ export function WorkloadView({
             {hover.c.allocated_hours.toFixed(1)}h / {hover.c.capacity_hours}h
             {hover.c.overallocated ? <span className="text-destructive"> — superlotado</span> : null}
           </div>
+          {(() => {
+            const aus = absenceOn(personById.get(hover.c.user_id)?.absences, hover.date)
+            return aus ? (
+              <div className="mb-1.5 rounded bg-sky-100 px-1.5 py-0.5 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300">
+                {aus.type_name} {aus.status === "aprovada" ? `(${ddmm(aus.start_date)} a ${ddmm(aus.end_date)})` : "— pedido pendente"}
+              </div>
+            ) : null
+          })()}
           {hover.c.items && hover.c.items.length > 0 ? (
             <ul className="space-y-1 border-t pt-1.5">
               {hover.c.items.map((it, i) => (

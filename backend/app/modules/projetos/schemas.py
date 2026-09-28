@@ -668,6 +668,17 @@ class WorkloadResponse(BaseModel):
 
 
 # ── Cockpit de capacidade (cross-project) ──
+class CapacityAbsenceSpan(BaseModel):
+    """Ausência que afeta a capacidade e cai na janela (férias, afastamento, folga...).
+    Só a aprovada desconta horas; a pendente aparece como aviso."""
+    type_name: str
+    color: Optional[str] = None
+    start_date: date
+    end_date: date
+    status: str                              # aprovada | pendente
+    partial_hours: Optional[float] = None
+
+
 class CapacityPersonMeta(BaseModel):
     """Metadados da pessoa presentes no heatmap, para o front não precisar casar com listPersons."""
     id: uuid.UUID
@@ -679,6 +690,10 @@ class CapacityPersonMeta(BaseModel):
     projects_pct: Optional[float] = None
     assisted_ops_pct: Optional[float] = None
     tickets_pct: Optional[float] = None
+    # Situação no TeamOps (ativo | ferias | afastado) e ausências na janela: quem está de
+    # férias continua no heatmap, sinalizado.
+    status: Optional[str] = None
+    absences: list[CapacityAbsenceSpan] = []
 
 
 class CapacityReserveCell(BaseModel):

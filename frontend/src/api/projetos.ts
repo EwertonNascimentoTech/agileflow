@@ -1106,6 +1106,19 @@ export interface CapacityPersonMeta {
   projects_pct?: number | null
   assisted_ops_pct?: number | null
   tickets_pct?: number | null
+  /** Situação no TeamOps: ativo | ferias | afastado (quem está de férias continua no heatmap). */
+  status?: string | null
+  /** Ausências que afetam a capacidade e cruzam a janela (aprovadas descontam horas; pendentes só avisam). */
+  absences?: CapacityAbsenceSpan[]
+}
+
+export interface CapacityAbsenceSpan {
+  type_name: string
+  color: string | null
+  start_date: string
+  end_date: string
+  status: "aprovada" | "pendente" | string
+  partial_hours: number | null
 }
 
 export interface CapacitySummary {

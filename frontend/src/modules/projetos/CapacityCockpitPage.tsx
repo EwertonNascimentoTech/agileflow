@@ -9,13 +9,12 @@ import {
   type FreePeopleResponse,
 } from "@/api/projetos"
 import { teamopsApi, type Area, type Position, type Stack } from "@/api/teamops"
-import { KpiCard } from "@/components/KpiCard"
 import { EmptyState } from "@/components/EmptyState"
-import { SectionCard } from "@/components/SectionCard"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import {
+  Card, DetailTabs, FilterSelect, KpiCount, KpiRow, Notice, PageHeader, Pill, SectionCard, TABLE, type TabDef,
+} from "@/components/ds"
 import { CapacityDayDetailDialog } from "@/modules/projetos/CapacityDayDetailDialog"
 import { WorkloadView } from "@/modules/projetos/WorkloadView"
 import { CapacitySimulator } from "@/modules/projetos/CapacitySimulator"
@@ -58,9 +57,9 @@ function ProjectBar({
         <div className="absolute inset-y-0 left-0 rounded-full bg-foreground/15" style={{ width: `${capPct}%` }} />
         <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${demandPct}%`, backgroundColor: color }} />
       </div>
-      <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+      <div className="flex items-center gap-3 text-xs text-muted-foreground">
         <span>{peopleCount} pessoa(s)</span>
-        {overloadedPeople > 0 && <span className="text-amber-600">{overloadedPeople} sobrecarregada(s)</span>}
+        {overloadedPeople > 0 && <span className="text-amber-600 dark:text-amber-400">{overloadedPeople} sobrecarregada(s)</span>}
         {over && <span className="font-medium text-destructive">demanda &gt; capacidade</span>}
       </div>
     </div>
@@ -78,15 +77,28 @@ function UtilBar({ pct }: { pct: number }) {
   )
 }
 
-const LENSES: { key: Lens; label: string; icon: typeof Users }[] = [
-  { key: "person", label: "Por pessoa", icon: Users },
-  { key: "team", label: "Por time", icon: Building2 },
-  { key: "project", label: "Por projeto", icon: TrendingUp },
-  { key: "gaps", label: "Gargalos", icon: UserPlus },
-  { key: "free", label: "Pessoas livres", icon: UserSearch },
-  { key: "crossteam", label: "Cross-team", icon: ArrowLeftRight },
-  { key: "sim", label: "Simulador", icon: FlaskConical },
+/** "AAAA-MM-DD a AAAA-MM-DD (Tipo)" da API → "De férias até 01/10" (em curso) ou "Férias 02/10–16/10". */
+function ProximaAusencia({ texto, hoje }: { texto: string | null | undefined; hoje: string }) {
+  const m = /^(\d{4}-\d{2}-\d{2}) a (\d{4}-\d{2}-\d{2}) \((.+)\)$/.exec(texto ?? "")
+  if (!m) return <>{texto ?? "—"}</>
+  const [, ini, fim, tipo] = m
+  const dm = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`
+  if (ini <= hoje && hoje <= fim) return <Pill tone="blue">De {tipo.toLowerCase()} até {dm(fim)}</Pill>
+  return <>{tipo} {dm(ini)}–{dm(fim)}</>
+}
+
+const LENSES: TabDef<Lens>[] = [
+  { value: "person", label: "Por pessoa", icon: Users },
+  { value: "team", label: "Por time", icon: Building2 },
+  { value: "project", label: "Por projeto", icon: TrendingUp },
+  { value: "gaps", label: "Gargalos", icon: UserPlus },
+  { value: "free", label: "Pessoas livres", icon: UserSearch },
+  { value: "crossteam", label: "Cross-team", icon: ArrowLeftRight },
+  { value: "sim", label: "Simulador", icon: FlaskConical },
 ]
+
+/** Campo de data/número no mesmo formato do FilterSelect (rótulo em cima, altura 10). */
+const INPUT_CLS = "block h-10 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
 
 export function CapacityCockpitPage() {
   const today = useMemo(() => new Date(), [])
@@ -164,125 +176,89 @@ export function CapacityCockpitPage() {
   )
 
   const summary = heatmap?.summary
+  const overCells = summary?.overallocated_cells ?? 0
+  const unmapped = summary?.unmapped_assignees.length ?? 0
 
   return (
     <div className="space-y-5 p-1">
       {/* Cabeçalho */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="flex items-center gap-2 text-xl font-semibold">
-            <Gauge size={20} className="text-primary" /> Cockpit de Capacidade
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Cruza o cronograma estimado de todos os projetos com a capacidade real das pessoas — sobrecarga, férias e reforço.
-          </p>
-        </div>
-        {/* Toggle de lente */}
-        <div className="inline-flex flex-wrap rounded-md border bg-card p-0.5">
-          {LENSES.map((l) => {
-            const Icon = l.icon
-            return (
-              <Button
-                key={l.key}
-                variant={lens === l.key ? "default" : "ghost"}
-                size="sm"
-                className="gap-1.5"
-                onClick={() => setLens(l.key)}
-              >
-                <Icon size={15} /> {l.label}
-              </Button>
-            )
-          })}
-        </div>
-      </div>
+      <PageHeader
+        icon={Gauge}
+        color="#2563EB"
+        title="Cockpit de Capacidade"
+        description="Cruza o cronograma estimado de todos os projetos com a capacidade real das pessoas — sobrecarga, férias e reforço."
+      />
+
+      {/* Lentes */}
+      <DetailTabs tabs={LENSES} value={lens} onChange={setLens} />
 
       {/* Filtros */}
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="space-y-1 text-xs text-muted-foreground">
-          <span>De</span>
-          <input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)}
-            className="block h-9 rounded-md border bg-background px-2 text-sm" />
-        </label>
-        <label className="space-y-1 text-xs text-muted-foreground">
-          <span>Até</span>
-          <input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)}
-            className="block h-9 rounded-md border bg-background px-2 text-sm" />
-        </label>
-        <div className="flex gap-1">
-          {[4, 8, 12].map((w) => (
-            <Button key={w} variant="outline" size="sm"
-              onClick={() => { setFrom(isoDate(today)); setTo(isoDate(addDays(today, w * 7))) }}>
-              {w}sem
-            </Button>
-          ))}
+      <Card className="p-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="block space-y-1">
+            <span className="text-xs text-muted-foreground">De</span>
+            <input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} className={INPUT_CLS} />
+          </label>
+          <label className="block space-y-1">
+            <span className="text-xs text-muted-foreground">Até</span>
+            <input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className={INPUT_CLS} />
+          </label>
+          <div className="flex gap-1">
+            {[4, 8, 12].map((w) => (
+              <Button key={w} variant="outline" className="h-10"
+                onClick={() => { setFrom(isoDate(today)); setTo(isoDate(addDays(today, w * 7))) }}>
+                {w}sem
+              </Button>
+            ))}
+          </div>
+
+          {lens === "gaps" && (
+            <FilterSelect
+              label="Agrupar por"
+              value={groupBy}
+              onChange={(v) => setGroupBy(v as "position" | "area")}
+              options={[{ value: "position", label: "Cargo" }, { value: "area", label: "Área" }]}
+            />
+          )}
+
+          {(lens === "person" || lens === "project" || lens === "free") && areas.length > 0 && (
+            <FilterSelect
+              label="Área"
+              value={areaId}
+              onChange={setAreaId}
+              options={[{ value: ALL, label: "Todas as áreas" }, ...areas.map((a) => ({ value: a.id, label: a.name }))]}
+            />
+          )}
+
+          {(lens === "person" || lens === "free") && positions.length > 0 && (
+            <FilterSelect
+              label="Cargo"
+              value={positionSlug}
+              onChange={setPositionSlug}
+              options={[{ value: ALL, label: "Todos os cargos" }, ...positions.map((p) => ({ value: p.slug, label: p.name }))]}
+            />
+          )}
+
+          {lens === "free" && stacks.length > 0 && (
+            <FilterSelect
+              label="Competência"
+              value={stackId}
+              onChange={setStackId}
+              options={[{ value: ALL, label: "Qualquer skill" }, ...stacks.map((st) => ({ value: st.id, label: st.name }))]}
+            />
+          )}
+
+          {lens === "free" && (
+            <label className="block space-y-1">
+              <span className="text-xs text-muted-foreground">Folga mínima (h)</span>
+              <input type="number" min={0} value={minFree} onChange={(e) => setMinFree(e.target.value)}
+                className={`${INPUT_CLS} w-28`} />
+            </label>
+          )}
         </div>
+      </Card>
 
-        {lens === "gaps" && (
-          <label className="space-y-1 text-xs text-muted-foreground">
-            <span>Agrupar por</span>
-            <Select value={groupBy} onValueChange={(v) => setGroupBy(v as "position" | "area")}>
-              <SelectTrigger className="h-9 w-[150px]"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="position">Cargo</SelectItem>
-                <SelectItem value="area">Área</SelectItem>
-              </SelectContent>
-            </Select>
-          </label>
-        )}
-
-        {(lens === "person" || lens === "project" || lens === "free") && areas.length > 0 && (
-          <label className="space-y-1 text-xs text-muted-foreground">
-            <span>Área</span>
-            <Select value={areaId} onValueChange={setAreaId}>
-              <SelectTrigger className="h-9 w-[180px]"><SelectValue placeholder="Todas as áreas" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>Todas as áreas</SelectItem>
-                {areas.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </label>
-        )}
-
-        {(lens === "person" || lens === "free") && positions.length > 0 && (
-          <label className="space-y-1 text-xs text-muted-foreground">
-            <span>Cargo</span>
-            <Select value={positionSlug} onValueChange={setPositionSlug}>
-              <SelectTrigger className="h-9 w-[180px]"><SelectValue placeholder="Todos os cargos" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>Todos os cargos</SelectItem>
-                {positions.map((p) => <SelectItem key={p.id} value={p.slug}>{p.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </label>
-        )}
-
-        {lens === "free" && stacks.length > 0 && (
-          <label className="space-y-1 text-xs text-muted-foreground">
-            <span>Competência</span>
-            <Select value={stackId} onValueChange={setStackId}>
-              <SelectTrigger className="h-9 w-[180px]"><SelectValue placeholder="Qualquer skill" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>Qualquer skill</SelectItem>
-                {stacks.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </label>
-        )}
-
-        {lens === "free" && (
-          <label className="space-y-1 text-xs text-muted-foreground">
-            <span>Folga mínima (h)</span>
-            <input type="number" min={0} value={minFree} onChange={(e) => setMinFree(e.target.value)}
-              className="block h-9 w-28 rounded-md border bg-background px-2 text-sm" />
-          </label>
-        )}
-      </div>
-
-      {error && (
-        <div className="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-          <AlertTriangle size={15} /> {error}
-        </div>
-      )}
+      {error && <Notice tone="red" icon={AlertTriangle}>{error}</Notice>}
 
       {lens === "team" ? (
         <CapacityTeamView from={from} to={to} />
@@ -292,36 +268,39 @@ export function CapacityCockpitPage() {
         <CapacitySimulator from={from} to={to} />
       ) : loading ? (
         <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-24 w-full" />)}
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-[74px] w-full rounded-xl" />)}
           </div>
-          <Skeleton className="h-64 w-full" />
+          <Skeleton className="h-64 w-full rounded-2xl" />
         </div>
       ) : lens === "person" ? (
         <>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <KpiCard label="Dias/pessoa em sobrecarga" value={summary?.overallocated_cells ?? 0} icon={AlertTriangle}
-              deltaTone={summary && summary.overallocated_cells > 0 ? "down" : "up"} sub={`${summary?.persons_over ?? 0} pessoa(s) em risco`} />
-            <KpiCard label="Horas alocadas" value={`${Math.round(summary?.total_allocated_h ?? 0)}h`} icon={CalendarClock} />
-            <KpiCard label="Capacidade total" value={`${Math.round(summary?.total_capacity_h ?? 0)}h`} icon={Gauge} />
-            <KpiCard label="Responsáveis sem cadastro" value={summary?.unmapped_assignees.length ?? 0} icon={UserCog}
-              sub="tarefas sem Pessoa vinculada" deltaTone={summary && summary.unmapped_assignees.length > 0 ? "down" : "neutral"} />
-          </div>
-          <SectionCard title="Carga por pessoa (todos os projetos)">
-            {heatmap && heatmap.cells.length > 0 ? (
-              <div className="space-y-2">
-                <p className="text-xs text-muted-foreground">
-                  Demanda = horas das <strong>User Stories</strong> (Features ficam de fora — já carregam o rollup das US).
-                </p>
-                <WorkloadView
-                  cells={heatmap.cells}
-                  reserves={heatmap.reserves}
-                  nameForUser={nameFor}
-                  dateFrom={from}
-                  dateTo={to}
-                  onCellClick={(personId, date) => setDayDetail({ personId, date })}
-                />
-              </div>
+          <KpiRow className="sm:grid-cols-2 xl:grid-cols-4">
+            <KpiCount icon={AlertTriangle} value={overCells}
+              label={`Dias/pessoa em sobrecarga · ${summary?.persons_over ?? 0} pessoa(s) em risco`}
+              tone={overCells > 0 ? "red" : "emerald"} highlight={overCells > 0} />
+            <KpiCount icon={CalendarClock} value={`${Math.round(summary?.total_allocated_h ?? 0)}h`} label="Horas alocadas" />
+            <KpiCount icon={Gauge} value={`${Math.round(summary?.total_capacity_h ?? 0)}h`} label="Capacidade total" />
+            <KpiCount icon={UserCog} value={unmapped} label="Responsáveis sem cadastro (tarefas sem Pessoa vinculada)"
+              tone={unmapped > 0 ? "amber" : "slate"} highlight={unmapped > 0} />
+          </KpiRow>
+          <SectionCard
+            title="Carga por pessoa (todos os projetos)"
+            subtitle={heatmap && heatmap.cells.length > 0
+              ? <>Demanda = horas das <strong>User Stories</strong> (Features ficam de fora — já carregam o rollup das US).</>
+              : undefined}
+            icon={Users}
+          >
+            {heatmap && (heatmap.cells.length > 0 || heatmap.persons.length > 0) ? (
+              <WorkloadView
+                cells={heatmap.cells}
+                reserves={heatmap.reserves}
+                people={heatmap.persons}
+                nameForUser={nameFor}
+                dateFrom={from}
+                dateTo={to}
+                onCellClick={(personId, date) => setDayDetail({ personId, date })}
+              />
             ) : (
               <EmptyState icon={Users} title="Sem carga no período"
                 description="Nenhuma User Story com responsável, horas estimadas e datas no intervalo selecionado. Ajuste o período ou os filtros." />
@@ -329,13 +308,15 @@ export function CapacityCockpitPage() {
           </SectionCard>
         </>
       ) : lens === "project" ? (
-        <SectionCard title="Demanda × capacidade por projeto">
+        <SectionCard
+          title="Demanda × capacidade por projeto"
+          subtitle={byProject && byProject.rows.length > 0
+            ? "Barra colorida = demanda estimada do projeto no período. Barra cinza = capacidade total das pessoas alocadas (compartilhada entre projetos). Vermelho = a demanda deste projeto sozinha já excede a capacidade das suas pessoas."
+            : undefined}
+          icon={TrendingUp}
+        >
           {byProject && byProject.rows.length > 0 ? (
             <div className="space-y-4">
-              <p className="text-xs text-muted-foreground">
-                Barra colorida = demanda estimada do projeto no período. Barra cinza = capacidade total das pessoas alocadas
-                (compartilhada entre projetos). Vermelho = a demanda deste projeto sozinha já excede a capacidade das suas pessoas.
-              </p>
               {byProject.rows.map((r) => (
                 <ProjectBar key={r.project_id} label={r.project_name} demand={r.demand_hours} capacity={r.capacity_hours}
                   max={projMax} over={r.overallocated} overloadedPeople={r.overloaded_people} peopleCount={r.people_count} />
@@ -347,36 +328,40 @@ export function CapacityCockpitPage() {
           )}
         </SectionCard>
       ) : lens === "gaps" ? (
-        <SectionCard title={`Gargalos por ${groupBy === "position" ? "cargo" : "área"} & reforço sugerido`}>
+        <SectionCard
+          title={`Gargalos por ${groupBy === "position" ? "cargo" : "área"} & reforço sugerido`}
+          subtitle={gaps && gaps.rows.length > 0
+            ? "Déficit = soma das semanas em que a demanda do grupo excede a capacidade. O reforço sugerido cobre o pior pico semanal."
+            : undefined}
+          icon={UserPlus}
+          flush
+        >
           {gaps && gaps.rows.length > 0 ? (
-            <div className="overflow-x-auto">
-              <p className="mb-3 text-xs text-muted-foreground">
-                Déficit = soma das semanas em que a demanda do grupo excede a capacidade. O reforço sugerido cobre o pior pico semanal.
-              </p>
-              <table className="w-full text-sm">
-                <thead className="text-left text-xs text-muted-foreground">
-                  <tr className="border-b">
-                    <th className="py-2 pr-3 font-medium">{groupBy === "position" ? "Cargo" : "Área"}</th>
-                    <th className="py-2 pr-3 text-right font-medium">Pessoas</th>
-                    <th className="py-2 pr-3 text-right font-medium">Demanda / Capac.</th>
-                    <th className="py-2 pr-3 text-right font-medium">Déficit</th>
-                    <th className="py-2 pr-3 font-medium">Pior semana</th>
-                    <th className="py-2 pr-3 text-right font-medium">Reforço</th>
+            <div className={TABLE.wrap}>
+              <table className={TABLE.table}>
+                <thead className={TABLE.thead}>
+                  <tr>
+                    <th className={TABLE.thFirst}>{groupBy === "position" ? "Cargo" : "Área"}</th>
+                    <th className={`${TABLE.th} text-right`}>Pessoas</th>
+                    <th className={`${TABLE.th} text-right`}>Demanda / Capac.</th>
+                    <th className={`${TABLE.th} text-right`}>Déficit</th>
+                    <th className={TABLE.th}>Pior semana</th>
+                    <th className={`${TABLE.th} text-right`}>Reforço</th>
                   </tr>
                 </thead>
                 <tbody>
                   {gaps.rows.map((g) => (
-                    <tr key={`${g.group_type}:${g.group_key}`} className="border-b last:border-0">
-                      <td className="py-2 pr-3 font-medium">{g.group_label}</td>
-                      <td className="py-2 pr-3 text-right tabular-nums">{g.people_count}</td>
-                      <td className="py-2 pr-3 text-right tabular-nums text-muted-foreground">
+                    <tr key={`${g.group_type}:${g.group_key}`} className={TABLE.tr}>
+                      <td className={`${TABLE.tdFirst} font-medium`}>{g.group_label}</td>
+                      <td className={`${TABLE.td} text-right tabular-nums`}>{g.people_count}</td>
+                      <td className={`${TABLE.td} text-right tabular-nums text-muted-foreground`}>
                         {Math.round(g.allocated_hours)}h / {Math.round(g.capacity_hours)}h
                       </td>
-                      <td className="py-2 pr-3 text-right font-medium tabular-nums text-destructive">+{Math.round(g.deficit_hours)}h</td>
-                      <td className="py-2 pr-3 text-muted-foreground">{fmtWeek(g.peak_week)} (+{Math.round(g.peak_deficit_hours)}h)</td>
-                      <td className="py-2 pr-3 text-right">
+                      <td className={`${TABLE.td} text-right font-medium tabular-nums text-destructive`}>+{Math.round(g.deficit_hours)}h</td>
+                      <td className={`${TABLE.td} text-muted-foreground`}>{fmtWeek(g.peak_week)} (+{Math.round(g.peak_deficit_hours)}h)</td>
+                      <td className={`${TABLE.td} text-right`}>
                         {g.suggested_headcount > 0
-                          ? <Badge variant="destructive" className="gap-1"><UserPlus size={12} />+{g.suggested_headcount}</Badge>
+                          ? <Pill tone="red"><UserPlus size={12} />+{g.suggested_headcount}</Pill>
                           : <span className="text-muted-foreground">—</span>}
                       </td>
                     </tr>
@@ -390,43 +375,43 @@ export function CapacityCockpitPage() {
           )}
         </SectionCard>
       ) : (
-        <SectionCard title="Pessoas com folga (para puxar ao projeto)">
+        <SectionCard title="Pessoas com folga (para puxar ao projeto)" icon={UserSearch} flush>
           {free && free.rows.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="text-left text-xs text-muted-foreground">
-                  <tr className="border-b">
-                    <th className="py-2 pr-3 font-medium">Pessoa</th>
-                    <th className="py-2 pr-3 font-medium">Cargo</th>
-                    <th className="py-2 pr-3 font-medium">Competências</th>
-                    <th className="py-2 pr-3 text-right font-medium">Folga</th>
-                    <th className="py-2 pr-3 font-medium">Utilização</th>
-                    <th className="py-2 pr-3 font-medium">Próxima ausência</th>
+            <div className={TABLE.wrap}>
+              <table className={TABLE.table}>
+                <thead className={TABLE.thead}>
+                  <tr>
+                    <th className={TABLE.thFirst}>Pessoa</th>
+                    <th className={TABLE.th}>Cargo</th>
+                    <th className={TABLE.th}>Competências</th>
+                    <th className={`${TABLE.th} text-right`}>Folga</th>
+                    <th className={TABLE.th}>Utilização</th>
+                    <th className={TABLE.th}>Próxima ausência</th>
                   </tr>
                 </thead>
                 <tbody>
                   {free.rows.map((p) => (
-                    <tr key={p.person_id} className="border-b last:border-0">
-                      <td className="py-2 pr-3 font-medium">{p.full_name}</td>
-                      <td className="py-2 pr-3 text-muted-foreground">{p.position_label ?? "—"}</td>
-                      <td className="py-2 pr-3">
+                    <tr key={p.person_id} className={TABLE.tr}>
+                      <td className={`${TABLE.tdFirst} font-medium`}>{p.full_name}</td>
+                      <td className={`${TABLE.td} text-muted-foreground`}>{p.position_label ?? "—"}</td>
+                      <td className={TABLE.td}>
                         <div className="flex flex-wrap gap-1">
-                          {p.stacks.slice(0, 4).map((s) => <Badge key={s} variant="secondary" className="text-[10px]">{s}</Badge>)}
-                          {p.stacks.length > 4 && <span className="text-[10px] text-muted-foreground">+{p.stacks.length - 4}</span>}
+                          {p.stacks.slice(0, 4).map((st) => <Pill key={st} tone="slate">{st}</Pill>)}
+                          {p.stacks.length > 4 && <span className="text-xs text-muted-foreground">+{p.stacks.length - 4}</span>}
                           {p.stacks.length === 0 && <span className="text-muted-foreground">—</span>}
                         </div>
                       </td>
-                      <td className="py-2 pr-3 text-right">
-                        <span className="font-medium tabular-nums text-green-600">{Math.round(p.free_hours_total)}h</span>
-                        <span className="ml-1 text-[11px] text-muted-foreground">/ {p.free_days}d</span>
+                      <td className={`${TABLE.td} whitespace-nowrap text-right`}>
+                        <span className="font-medium tabular-nums text-emerald-600 dark:text-emerald-400">{Math.round(p.free_hours_total)}h</span>
+                        <span className="ml-1 text-xs text-muted-foreground">/ {p.free_days}d</span>
                       </td>
-                      <td className="py-2 pr-3">
+                      <td className={TABLE.td}>
                         <div className="flex items-center gap-2">
                           <UtilBar pct={p.utilization_pct} />
-                          <span className="text-[11px] tabular-nums text-muted-foreground">{Math.round(p.utilization_pct)}%</span>
+                          <span className="text-xs tabular-nums text-muted-foreground">{Math.round(p.utilization_pct)}%</span>
                         </div>
                       </td>
-                      <td className="py-2 pr-3 text-[11px] text-muted-foreground">{p.next_absence ?? "—"}</td>
+                      <td className={`${TABLE.td} text-xs text-muted-foreground`}><ProximaAusencia texto={p.next_absence} hoje={isoDate(today)} /></td>
                     </tr>
                   ))}
                 </tbody>

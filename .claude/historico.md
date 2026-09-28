@@ -14,6 +14,14 @@ Modelo:
 
 ---
 
+## 2026-09-28 — Capacidade: quem está de férias aparece, sinalizado
+
+- **Pedido:** usuários de férias devem aparecer na capacidade, com a informação de que estão de férias.
+- **Causa:** o heatmap só mostra quem tem US no período ou reserva de Operação Assistida/Chamados, e a reserva era buscada só para `status == ativo`; quem está de férias (status `ferias`, sem US planejada) sumia. Pessoas livres e Gargalos também filtravam `ativo` e perdiam a capacidade de depois da volta.
+- **Feito:** `compute_capacity_heatmap`, `find_available_people` e `detect_bottlenecks` passam a `status != desligado` (a ausência aprovada já zera os dias). Heatmap: pessoas com ausência (aprovada ou pendente, `affects_capacity`) na janela entram mesmo sem US/reserva; `CapacityPersonMeta.status` e `absences` (tipo, cor, período, status). `WorkloadView`: selo "De férias até dd/mm" (ou "Férias 02/10–16/10" / "(pendente)"), dias de ausência hachurados na cor do tipo com "Fér", tooltip da célula com carga avisa a ausência, legenda. Pessoas livres: "Próxima ausência" formatada ("De férias até 01/10").
+- **Conferido:** heatmap com Ícaro (até 01/10, 4 dias), Ítalo (até 05/10, 6 dias) e férias futuras (02–16/10, 11 dias); Pessoas livres com a capacidade descontando as férias (Ícaro 95,2h); Gargalos ok; claro/escuro sem erro de console. Suíte: 96 ok; falhas só de ambiente (test_auth sem banco) e `test_feature_reconcile` que já falha no último commit.
+- **Arquivos:** `backend/app/modules/projetos/service.py`, `schemas.py`; `frontend/src/api/projetos.ts`; `frontend/src/modules/projetos/WorkloadView.tsx`, `CapacityCockpitPage.tsx`, `CapacityTeamView.tsx`.
+
 ## 2026-09-28 — Tela "Meu perfil" (foto, desempenho, competências, ausências, dados)
 
 - **Pedido:** tela de perfil onde o usuário vê o próprio desempenho, põe foto, responde/atualiza o formulário de stacks, solicita ausências etc.

@@ -8,11 +8,9 @@ import {
   type CrossTeamResponse,
 } from "@/api/projetos"
 import { teamopsApi, type Area, type Person } from "@/api/teamops"
-import { KpiCard } from "@/components/KpiCard"
 import { EmptyState } from "@/components/EmptyState"
-import { SectionCard } from "@/components/SectionCard"
-import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Card, KpiCount, KpiRow, Pill, SectionCard } from "@/components/ds"
 import { CapacityDayDetailDialog } from "@/modules/projetos/CapacityDayDetailDialog"
 import { WorkloadView } from "@/modules/projetos/WorkloadView"
 
@@ -45,9 +43,9 @@ function ProjectBar({
         <div className="absolute inset-y-0 left-0 rounded-full bg-foreground/15" style={{ width: `${capPct}%` }} />
         <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${demandPct}%`, backgroundColor: color }} />
       </div>
-      <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+      <div className="flex items-center gap-3 text-xs text-muted-foreground">
         <span>{peopleCount} pessoa(s)</span>
-        {overloadedPeople > 0 && <span className="text-amber-600">{overloadedPeople} sobrecarregada(s)</span>}
+        {overloadedPeople > 0 && <span className="text-amber-600 dark:text-amber-400">{overloadedPeople} sobrecarregada(s)</span>}
         {over && <span className="font-medium text-destructive">demanda &gt; capacidade</span>}
       </div>
     </div>
@@ -125,18 +123,22 @@ export function CapacityTeamView({ from, to }: { from: string; to: string }) {
 
   const areaName = areas.find((a) => a.id === areaId)?.name
   const summary = heatmap?.summary
+  const overCells = summary?.overallocated_cells ?? 0
 
   return (
     <div className="space-y-5">
-      <label className="block space-y-1 text-xs text-muted-foreground">
-        <span>Time (área)</span>
-        <Select value={areaId} onValueChange={setAreaId}>
-          <SelectTrigger className="h-9 w-[320px]"><SelectValue placeholder="Escolha um time…" /></SelectTrigger>
-          <SelectContent>
-            {areas.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </label>
+      {/* Escolha do time: mesmo formato do FilterSelect, mas com placeholder (começa sem time). */}
+      <Card className="p-4">
+        <label className="block space-y-1">
+          <span className="text-xs text-muted-foreground">Time (área)</span>
+          <Select value={areaId} onValueChange={setAreaId}>
+            <SelectTrigger className="h-10 w-[320px] max-w-full bg-background"><SelectValue placeholder="Escolha um time…" /></SelectTrigger>
+            <SelectContent>
+              {areas.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </label>
+      </Card>
 
       {!areaId ? (
         <EmptyState icon={Users} title="Escolha um time"
@@ -148,17 +150,17 @@ export function CapacityTeamView({ from, to }: { from: string; to: string }) {
       ) : (
         <>
           {/* Elenco do time */}
-          <SectionCard title={`Elenco — ${areaName}`}>
+          <SectionCard title={`Elenco — ${areaName}`} icon={Users}>
             {team.length > 0 ? (
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {team.map((p) => (
-                  <div key={p.id} className="flex items-center justify-between gap-2 rounded-md border bg-muted/20 px-3 py-2">
+                  <div key={p.id} className="flex items-center justify-between gap-2 rounded-xl border bg-muted/30 px-3 py-2.5">
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium">{p.full_name}</p>
                       <p className="truncate text-xs text-muted-foreground">{p.position?.name ?? "—"}</p>
                     </div>
-                    {p.status === "ferias" && <Badge variant="secondary" className="shrink-0 text-[10px]">Férias</Badge>}
-                    {p.status === "afastado" && <Badge variant="secondary" className="shrink-0 text-[10px]">Afastado</Badge>}
+                    {p.status === "ferias" && <Pill tone="amber" className="shrink-0">Férias</Pill>}
+                    {p.status === "afastado" && <Pill tone="slate" className="shrink-0">Afastado</Pill>}
                   </div>
                 ))}
               </div>
@@ -168,20 +170,22 @@ export function CapacityTeamView({ from, to }: { from: string; to: string }) {
           </SectionCard>
 
           {/* KPIs do time */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <KpiCard label="Pessoas no time" value={team.length} icon={Users} />
-            <KpiCard label="Dias/pessoa em sobrecarga" value={summary?.overallocated_cells ?? 0} icon={AlertTriangle}
-              deltaTone={summary && summary.overallocated_cells > 0 ? "down" : "up"} sub={`${summary?.persons_over ?? 0} em risco`} />
-            <KpiCard label="Horas alocadas" value={`${Math.round(summary?.total_allocated_h ?? 0)}h`} icon={CalendarClock} />
-            <KpiCard label="Capacidade total" value={`${Math.round(summary?.total_capacity_h ?? 0)}h`} icon={Gauge} />
-          </div>
+          <KpiRow className="sm:grid-cols-2 xl:grid-cols-4">
+            <KpiCount icon={Users} value={team.length} label="Pessoas no time" />
+            <KpiCount icon={AlertTriangle} value={overCells}
+              label={`Dias/pessoa em sobrecarga · ${summary?.persons_over ?? 0} em risco`}
+              tone={overCells > 0 ? "red" : "emerald"} highlight={overCells > 0} />
+            <KpiCount icon={CalendarClock} value={`${Math.round(summary?.total_allocated_h ?? 0)}h`} label="Horas alocadas" />
+            <KpiCount icon={Gauge} value={`${Math.round(summary?.total_capacity_h ?? 0)}h`} label="Capacidade total" />
+          </KpiRow>
 
           {/* Capacidade do time */}
-          <SectionCard title="Capacidade do time (todos os projetos)">
-            {heatmap && heatmap.cells.length > 0 ? (
+          <SectionCard title="Capacidade do time (todos os projetos)" icon={Gauge}>
+            {heatmap && (heatmap.cells.length > 0 || heatmap.persons.length > 0) ? (
               <WorkloadView
                 cells={heatmap.cells}
                 reserves={heatmap.reserves}
+                people={heatmap.persons}
                 nameForUser={nameFor}
                 dateFrom={from}
                 dateTo={to}
@@ -194,13 +198,14 @@ export function CapacityTeamView({ from, to }: { from: string; to: string }) {
           </SectionCard>
 
           {/* Projetos do time */}
-          <SectionCard title="Projetos do time (onde as pessoas estão alocadas)">
+          <SectionCard
+            title="Projetos do time (onde as pessoas estão alocadas)"
+            subtitle={projects && projects.rows.length > 0
+              ? "Projetos em que pessoas deste time têm tarefas no período. Barra colorida = demanda das pessoas do time nesse projeto; cinza = capacidade total delas (compartilhada com outros projetos)."
+              : undefined}
+          >
             {projects && projects.rows.length > 0 ? (
               <div className="space-y-4">
-                <p className="text-xs text-muted-foreground">
-                  Projetos em que pessoas deste time têm tarefas no período. Barra colorida = demanda das pessoas do time nesse
-                  projeto; cinza = capacidade total delas (compartilhada com outros projetos).
-                </p>
                 {projects.rows.map((r) => (
                   <ProjectBar key={r.project_id} label={r.project_name} demand={r.demand_hours} capacity={r.capacity_hours}
                     max={projMax} over={r.overallocated} overloadedPeople={r.overloaded_people} peopleCount={r.people_count} />
@@ -214,25 +219,28 @@ export function CapacityTeamView({ from, to }: { from: string; to: string }) {
 
           {/* Vazamento entre times */}
           <div className="grid gap-4 lg:grid-cols-2">
-            <SectionCard title="Meu pessoal emprestado">
+            <SectionCard
+              title="Meu pessoal emprestado"
+              subtitle={lentOut.length > 0 ? "Pessoas deste time gastando horas em projetos de outros times." : undefined}
+              icon={ArrowLeftRight}
+            >
               {lentOut.length > 0 ? (
                 <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground">Pessoas deste time gastando horas em projetos de outros times.</p>
                   {lentOut.map((r) => (
-                    <div key={r.person_id} className="flex items-center justify-between gap-2 rounded-md border bg-muted/20 px-3 py-2">
+                    <div key={r.person_id} className="flex items-center justify-between gap-2 rounded-xl border bg-muted/30 px-3 py-2.5">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium">{r.full_name}</p>
-                        <div className="mt-0.5 flex flex-wrap gap-1">
+                        <div className="mt-1 flex flex-wrap gap-1">
                           {r.away_by_team.map((a) => (
-                            <Badge key={a.team_area_id ?? a.team_name} variant="secondary" className="text-[10px]">
+                            <Pill key={a.team_area_id ?? a.team_name} tone="slate">
                               {a.team_name}: {Math.round(a.hours)}h
-                            </Badge>
+                            </Pill>
                           ))}
                         </div>
                       </div>
                       <div className="shrink-0 text-right">
                         <div className="text-sm font-medium text-destructive">{Math.round(r.away_hours)}h fora</div>
-                        {r.at_risk && <Badge variant="destructive" className="mt-0.5 gap-1 text-[10px]"><ShieldAlert size={11} />Risco</Badge>}
+                        {r.at_risk && <Pill tone="red" className="mt-1"><ShieldAlert size={12} />Risco</Pill>}
                       </div>
                     </div>
                   ))}
@@ -243,19 +251,22 @@ export function CapacityTeamView({ from, to }: { from: string; to: string }) {
               )}
             </SectionCard>
 
-            <SectionCard title="Reforço de fora">
+            <SectionCard
+              title="Reforço de fora"
+              subtitle={helpIn.length > 0 ? "Pessoas de outros times trabalhando em projetos deste time." : undefined}
+              icon={UserPlus}
+            >
               {helpIn.length > 0 ? (
                 <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground">Pessoas de outros times trabalhando em projetos deste time.</p>
                   {helpIn.map(({ row, hours }) => (
-                    <div key={row.person_id} className="flex items-center justify-between gap-2 rounded-md border bg-muted/20 px-3 py-2">
+                    <div key={row.person_id} className="flex items-center justify-between gap-2 rounded-xl border bg-muted/30 px-3 py-2.5">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium">{row.full_name}</p>
-                        <p className="truncate text-[11px] text-muted-foreground">
+                        <p className="truncate text-xs text-muted-foreground">
                           {row.home_area_names.length > 0 ? row.home_area_names.join(", ") : "sem time"}
                         </p>
                       </div>
-                      <div className="shrink-0 text-sm font-medium text-green-600">{Math.round(hours)}h</div>
+                      <div className="shrink-0 text-sm font-medium text-emerald-600 dark:text-emerald-400">{Math.round(hours)}h</div>
                     </div>
                   ))}
                 </div>
