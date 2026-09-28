@@ -545,6 +545,8 @@ export const teamopsApi = {
 
   // Persons
   getMyPerson: () => api.get<Person>("/teamops/me/person").then((r) => r.data),
+  updateMyContact: (data: { phone?: string | null; whatsapp?: string | null; birth_date?: string | null }) =>
+    api.patch<Person>("/teamops/me/contato", data).then((r) => r.data),
   listPersons: (params?: {
     area_id?: string
     position_id?: string

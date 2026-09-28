@@ -30,6 +30,7 @@ from app.modules.teamops.schemas import (
     PersonCreate,
     PersonResponse,
     CompetenciasIn,
+    MeContatoUpdate,
     CompetenciasLembreteOut,
     CompetenciasOut,
     CompetenciasRespostasOut,
@@ -456,6 +457,11 @@ async def save_person_competencias(
     person_id: uuid.UUID, data: CompetenciasIn, ctx: ModuleContext = Depends(_ctx), _=Depends(_can_competencias_manage),
 ):
     return await CompetenciaFormService.save(ctx.db, person_id, data)
+
+
+@router.patch("/me/contato", response_model=PersonResponse)
+async def update_my_contact(data: MeContatoUpdate, ctx: ModuleContext = Depends(_ctx)):
+    return await PersonService.update_my_contact(ctx.db, await _my_person_or_404(ctx), data)
 
 
 @router.get("/persons", response_model=list[PersonResponse])

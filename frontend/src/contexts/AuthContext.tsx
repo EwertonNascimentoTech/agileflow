@@ -11,6 +11,8 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>
   establishSession: (data: TokenResponse) => void
   logout: () => void
+  /** Recarrega /auth/me (ex.: depois de trocar a foto do perfil). */
+  refreshUser: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -69,6 +71,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     establishSession(data)
   }, [establishSession])
 
+  const refreshUser = useCallback(async () => {
+    const u = await authApi.me()
+    localStorage.setItem("user", JSON.stringify(u))
+    setUser(u)
+  }, [])
+
   const logout = useCallback(() => {
     localStorage.removeItem("access_token")
     localStorage.removeItem("refresh_token")
@@ -81,8 +89,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Memoiza o value para não recriar o objeto a cada render do provider, o que
   // forçaria re-render de toda a árvore que consome o contexto.
   const value = useMemo<AuthContextValue>(
-    () => ({ user, isLoading, isAuthenticated: !!user, login, establishSession, logout }),
-    [user, isLoading, login, establishSession, logout],
+    () => ({ user, isLoading, isAuthenticated: !!user, login, establishSession, logout, refreshUser }),
+    [user, isLoading, login, establishSession, logout, refreshUser],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

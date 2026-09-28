@@ -219,6 +219,7 @@ def _serialize_user(u: User) -> dict:
         "last_login": u.last_login.isoformat() if u.last_login else None,
         "created_at": u.created_at.isoformat() if u.created_at else None,
         "updated_at": u.updated_at.isoformat() if u.updated_at else None,
+        "avatar_key": u.avatar_key,
     }
 
 
@@ -235,6 +236,7 @@ def _deserialize_user(d: dict) -> User:
         last_login=datetime.fromisoformat(d["last_login"]) if d["last_login"] else None,
         created_at=datetime.fromisoformat(d["created_at"]) if d["created_at"] else None,
         updated_at=datetime.fromisoformat(d["updated_at"]) if d["updated_at"] else None,
+        avatar_key=d.get("avatar_key"),  # .get: entrada de cache anterior à foto do perfil
     )
 
 

@@ -329,7 +329,7 @@ export default function AppLayout() {
             const view = /\/(lista|calendario)$/.exec(location.pathname)?.[1] ?? "board"
             navigate(`/app/modules/projetos/${kanban.projectId}/${view}?funnel=${kanban.id}`)
           }}
-          user={{ name: user?.full_name ?? "", email: user?.email ?? "", initials }}
+          user={{ name: user?.full_name ?? "", email: user?.email ?? "", initials, avatarUrl: user?.avatar_url }}
           onLogout={handleLogout}
           onNavigate={closeSidebar}
         />

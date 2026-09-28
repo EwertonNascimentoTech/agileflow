@@ -144,6 +144,7 @@ from app.modules.teamops.schemas import (
     CompetencyMapEntry,
     CompetencyMapPerson,
     CompetenciaItem,
+    MeContatoUpdate,
     CompetenciaRespostaRow,
     CompetenciasIn,
     CompetenciasLembreteOut,
@@ -845,6 +846,16 @@ class PersonService:
         await PersonService._enrich_access(db, [person])
         await PersonService._attach_payroll(db, person)
         return person
+
+    @staticmethod
+    async def update_my_contact(db: AsyncSession, person_id: uuid.UUID, data: MeContatoUpdate) -> Person:
+        """Perfil: a pessoa atualiza telefone, WhatsApp e aniversário (vazio limpa)."""
+        person = await PersonService.get(db, person_id)
+        for key, value in data.model_dump(exclude_unset=True).items():
+            setattr(person, key, (value.strip() or None) if isinstance(value, str) else value)
+        person.updated_at = datetime.utcnow()
+        await db.commit()
+        return await PersonService.get(db, person_id)
 
     @staticmethod
     async def _attach_payroll(db: AsyncSession, person: Person) -> None:

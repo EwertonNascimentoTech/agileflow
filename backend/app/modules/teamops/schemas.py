@@ -372,6 +372,19 @@ class PayrollProfileMini(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class MeContatoUpdate(BaseModel):
+    """O que a própria pessoa edita no perfil (o resto do cadastro é da coordenação)."""
+    phone: Optional[str] = Field(None, max_length=30, pattern=r"^[0-9+()\-\s]*$")
+    whatsapp: Optional[str] = Field(None, max_length=30, pattern=r"^[0-9+()\-\s]*$")
+    birth_date: Optional[date] = None
+
+    @model_validator(mode="after")
+    def _data_valida(self):
+        if self.birth_date and not (date(1900, 1, 1) <= self.birth_date <= date.today()):
+            raise ValueError("Data de nascimento inválida.")
+        return self
+
+
 class PersonResponse(BaseModel):
     id: uuid.UUID
     user_id: Optional[uuid.UUID]

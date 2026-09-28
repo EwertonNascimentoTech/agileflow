@@ -42,6 +42,20 @@ No card do projeto/programa (kanban Projetos e Programas), o bloco **Clientes do
 - **Na solicitação** (seção Identificação), quem abre a demanda escolhe os clientes no campo **Clientes** — é obrigatório ter um **Solicitante** e um **Sponsor** (pessoas diferentes). Quando a solicitação vira projeto, essas pessoas viram os clientes do projeto.
 - O cliente entra pelo **IDigital** e vê, em **Ver andamento**, a fase, o % de execução, a previsão de entrega e as entregas (Features) do projeto. Ocorrências continuam só para projetos na raia Operação Assistida.
 
+## Meu perfil
+
+Clique no seu nome no rodapé do menu lateral (ou em **Configurações > Abrir meu perfil**):
+
+- **Foto** — clique na foto ou em "Adicionar foto" (JPG, PNG ou WebP). A imagem é recortada em quadrado e
+  aparece no menu e no perfil.
+- **Desempenho** — suas User Stories entregues, % no prazo, em andamento/atrasadas, cycle e lead time e uso da
+  capacidade, com a média do time ao lado (sem nomes) e as entregas por mês. Quem é PO vê também a própria carteira.
+  São os mesmos números do painel de desempenho da gestão.
+- **Competências** — o formulário de stacks e nível de domínio (o mesmo de Gestão de Times > Minhas competências).
+- **Ausências** — pedir férias/folga, acompanhar a aprovação e cancelar pedido ainda pendente.
+- **Meus dados** — conta, dados do time (mantidos pela coordenação), dados da folha e o seu contato
+  (telefone, WhatsApp e aniversário), que você mesmo edita.
+
 ## Gestão de Times
 
 Menu típico:

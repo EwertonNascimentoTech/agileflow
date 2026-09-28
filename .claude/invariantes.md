@@ -13,6 +13,7 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 
 ## Pessoas e acesso
 
+- Meu perfil (`/app/perfil`): desempenho pessoal usa os MESMOS critérios de `TeamPerformanceService.build` (conferir os dois se mudar um); médias do time sem nomes. Foto só JPEG/PNG/WebP validados pelos bytes, até 2 MB.
 - Competências (TeamOps): escala de 4 níveis `conhece`, `com_apoio`, `autonomo`, `referencia` (autoavaliação do formulário "Minhas competências"). Só `autonomo`/`referencia` (ou `is_reference`) contam como habilitado/backup no mapa e nos alertas de stack crítica (`STACK_LEVELS_HABILITADOS`, `_habilitado`). O PUT do formulário é a resposta completa: stack ativa desmarcada apaga o vínculo; vínculo de stack inativa fica.
 - Stacks (TeamOps): `products.stacks` guarda ids de `team_stacks` em JSON, sem FK. Excluir stack passa por `StackService.delete` (limpa ou troca o id nos produtos e move as competências para a substituta), nunca por DELETE direto. Categoria só se exclui vazia: o FK CASCADE de `team_stacks.category_id` apagaria as stacks e as competências das pessoas.
 - `assigned_to` nas tarefas de Processos ? **Person.id** (TeamOps), n?o `users.id`.
@@ -54,6 +55,8 @@ Pedido novo **n?o autoriza** remover, inverter ou “simplificar” o que est? abaix
 
 ## Deploy
 
+- Coluna nova em `public.users` = migration Alembic (aplicar com a imagem nova ANTES de subir a API: `docker compose run --rm --no-deps api alembic upgrade head`) e entrar em `_serialize_user`/`_deserialize_user` (core/security.py): o usuário do `get_current_user` vem do cache Redis e perde campo não serializado; mudou o campo, `invalidate_user`.
+- nginx do frontend: `location ^~ /saas-storage/` (o `^~` é obrigatório; sem ele o regex de estáticos .png/.jpg captura as URLs assinadas do MinIO e dá 404).
 - Frontend ? **build est?tico nginx** (`saas_frontend` :18082). Mudan?a de UI exige `docker compose up -d --build frontend`.
 - API **n?o monta o c?digo-fonte**. Mudan?a Python exige `docker compose up -d --build api`.
 - P?blico: `agileflow.tdsistemafiea.com.br` ? 18082. Tenant operacional: `tenant_ss`.

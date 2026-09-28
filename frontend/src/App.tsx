@@ -139,6 +139,7 @@ const TeamopsPeoplePage = lazy(() => import("@/modules/teamops/PeoplePage"))
 const TeamopsPersonDetailPage = lazy(() => import("@/modules/teamops/PersonDetailPage"))
 const TeamopsStacksPage = lazy(() => import("@/modules/teamops/StacksPage"))
 const TeamopsMinhasCompetenciasPage = lazy(() => import("@/modules/teamops/MinhasCompetenciasPage"))
+const ProfilePage = lazy(() => import("@/modules/profile/ProfilePage"))
 const TeamopsAbsencesPage = lazy(() => import("@/modules/teamops/AbsencesPage"))
 const TeamopsConfigPage = lazy(() => import("@/modules/teamops/ConfigPage"))
 const ProdutosLayout = lazy(() => import("@/modules/produtos/ProdutosLayout"))
@@ -234,6 +235,7 @@ export default function App() {
                   <Route index element={<Navigate to="/app/dashboard" replace />} />
                   <Route path="dashboard" element={<CompanyDashboardPage />} />
                   <Route path="docs" element={<Navigate to="/app/modules/documentacao" replace />} />
+                  <Route path="perfil" element={<ProfilePage />} />
 
                   {/* Redirects: rotas antigas /app/users e /app/roles → /app/settings/* */}
                   <Route path="users" element={<Navigate to="/app/settings/users" replace />} />

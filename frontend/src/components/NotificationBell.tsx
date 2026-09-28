@@ -14,6 +14,8 @@ const ENTITY_PATHS: Record<string, (id: string) => string> = {
     window.location.pathname.startsWith("/app") ? `/app/modules/portal_cliente/ocorrencias/${id}` : `/portal/ocorrencias/${id}`,
   occurrence_project: () => `/portal`,
   // Encerramento da Operação Assistida: aba do projeto no Portal (aceite do Dono do Processo).
+  // Convite/lembrete do formulário de competências (TeamOps).
+  competencias: () => `/app/perfil?aba=competencias`,
   oa_closure: (id) =>
     window.location.pathname.startsWith("/app")
       ? `/app/modules/portal_cliente/projetos/${id}?aba=operacao`

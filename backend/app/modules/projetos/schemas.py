@@ -1596,6 +1596,91 @@ class TeamPerformanceResponse(BaseModel):
 
 
 # ─────────────────────────────────────────────
+# Meu desempenho (perfil do usuário) — mesmos critérios do painel do time, só da pessoa
+# ─────────────────────────────────────────────
+
+
+class MyPerfTask(BaseModel):
+    task_id: uuid.UUID
+    title: str
+    project_title: Optional[str] = None
+    status_name: Optional[str] = None
+    status_color: Optional[str] = None
+    due_date: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    overdue: bool = False
+    on_time: Optional[bool] = None
+    aging_days: Optional[float] = None
+
+
+class MyPerfMonth(BaseModel):
+    month: str                              # AAAA-MM
+    delivered: int = 0
+    on_time: int = 0
+
+
+class MyPerfKpis(BaseModel):
+    delivered: int = 0                      # US concluídas na janela
+    on_time: int = 0
+    on_time_pct: Optional[float] = None
+    wip: int = 0                            # US abertas (agora)
+    overdue: int = 0                        # abertas com prazo/SLA estourado (agora)
+    avg_aging_days: Optional[float] = None
+    avg_cycle_time_days: Optional[float] = None
+    avg_lead_time_days: Optional[float] = None
+    utilization_pct: Optional[float] = None
+    allocated_hours_total: Optional[float] = None
+    capacity_hours_total: Optional[float] = None
+    free_hours_total: Optional[float] = None
+    status: DevLoadStatus = "sem_dados"
+
+
+class MyPerfTeam(BaseModel):
+    """Referência do time na mesma janela — só médias, sem nomes."""
+    devs: int = 0
+    delivered_avg: Optional[float] = None
+    on_time_pct: Optional[float] = None
+    avg_cycle_time_days: Optional[float] = None
+    avg_lead_time_days: Optional[float] = None
+    utilization_avg_pct: Optional[float] = None
+
+
+class MyPerfPoProject(BaseModel):
+    task_id: str
+    title: str
+    planning_kind: Optional[str] = None
+    fase: Optional[str] = None
+    stage_name: Optional[str] = None
+    exec_pct: Optional[float] = None
+    health: Optional[str] = None
+    prazo_status: Optional[str] = None
+    due_date: Optional[str] = None
+    overdue: bool = False
+
+
+class MyPerfPo(BaseModel):
+    total: int = 0
+    avg_exec_pct: Optional[float] = None
+    em_risco: int = 0
+    atrasados: int = 0
+    projetos: list[MyPerfPoProject] = Field(default_factory=list)
+
+
+class MyPerformanceResponse(BaseModel):
+    person_id: uuid.UUID
+    full_name: str
+    position_label: Optional[str] = None
+    date_from: date
+    date_to: date
+    kpis: MyPerfKpis
+    team: MyPerfTeam
+    series: list[MyPerfMonth] = Field(default_factory=list)
+    open_tasks: list[MyPerfTask] = Field(default_factory=list)
+    delivered_tasks: list[MyPerfTask] = Field(default_factory=list)
+    po: Optional[MyPerfPo] = None            # só quem é PO de algum projeto/programa
+
+
+# ─────────────────────────────────────────────
 # Cronograma: vínculos fluxo + etapa
 # ─────────────────────────────────────────────
 

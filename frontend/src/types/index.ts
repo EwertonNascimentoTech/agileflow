@@ -53,6 +53,7 @@ export interface User {
   has_team_portal?: boolean  // pessoa ativa em Times: vê o Portal em "modo cliente" (projetos em que atua; coordenação, todos)
   team_sees_all?: boolean  // equipe com visão de tudo no Modo Cliente: lê Ocorrências e Soluções com IA
   oa_n1?: boolean  // Pessoa de Times que faz a triagem N1 de ocorrências: vê Ocorrências no Modo Cliente
+  avatar_url?: string | null  // foto do perfil (URL assinada, 24h); sem foto = iniciais
   tenant_id: string | null
   is_active: boolean
   last_login: string | null

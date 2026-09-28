@@ -7,6 +7,13 @@ export const authApi = {
 
   me: () =>
     api.get<User>("/auth/me").then((r) => r.data),
+  /** Foto do perfil: o front manda a imagem já recortada (quadrada, sem EXIF). */
+  uploadAvatar: (file: Blob) => {
+    const fd = new FormData()
+    fd.append("file", file, "avatar.jpg")
+    return api.post<{ avatar_url: string | null }>("/auth/me/avatar", fd).then((r) => r.data)
+  },
+  deleteAvatar: () => api.delete<void>("/auth/me/avatar").then((r) => r.data),
 
   forgotPassword: (email: string) =>
     api.post<{ reset_token: string; message: string }>("/auth/forgot-password", { email }).then((r) => r.data),

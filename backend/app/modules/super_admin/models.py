@@ -213,6 +213,9 @@ class User(Base):
     )
     is_active: Mapped[bool]      = mapped_column(Boolean, default=True)
     last_login: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Foto do perfil: objeto no MinIO (a URL assinada é gerada a cada /auth/me).
+    avatar_key: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    avatar_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow

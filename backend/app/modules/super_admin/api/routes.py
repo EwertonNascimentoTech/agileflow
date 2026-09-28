@@ -1,7 +1,7 @@
 import uuid
 from typing import List
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +28,7 @@ from app.core.security import (
 from pydantic import BaseModel as _BaseModel, Field as _Field, field_validator
 from fastapi import Request
 from app.core.limiter import limiter
+from app.modules.super_admin.avatar import MAX_AVATAR_BYTES, AvatarService, avatar_url
 
 router = APIRouter(prefix="/super-admin", tags=["Super Admin"])
 auth_router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -63,6 +64,8 @@ async def _attach_role_name(db: AsyncSession, user) -> None:
     user.team_sees_all = bool(user.has_team_portal) and await _team_sees_all(db, user)
     # Pessoa de Times que faz a triagem N1 de ocorrências (Produto ou Dono/Especialista do Processo).
     user.oa_n1 = bool(user.has_team_portal) and not user.team_sees_all and await _is_oa_n1(db, user)
+    # Foto do perfil (URL assinada, renovada a cada login e /auth/me).
+    user.avatar_url = avatar_url(user)
 
 
 async def _has_client_portal(db: AsyncSession, user) -> bool:
@@ -234,6 +237,24 @@ async def login(request: Request, data: LoginRequest, db: AsyncSession = Depends
 async def me(current_user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     await _attach_role_name(db, current_user)
     return current_user
+
+
+@auth_router.post("/me/avatar")
+@limiter.limit("20/hour")
+async def upload_my_avatar(
+    request: Request,
+    file: UploadFile = File(...),
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Troca a foto do perfil do usuário logado (JPG/PNG/WebP, até 2 MB)."""
+    data = await file.read(MAX_AVATAR_BYTES + 1)
+    return {"avatar_url": await AvatarService.save(db, current_user.id, data)}
+
+
+@auth_router.delete("/me/avatar", status_code=204)
+async def delete_my_avatar(current_user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    await AvatarService.remove(db, current_user.id)
 
 
 class _RefreshRequest(_BaseModel):

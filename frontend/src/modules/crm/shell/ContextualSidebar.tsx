@@ -1,7 +1,8 @@
-import { NavLink, useLocation } from "react-router-dom"
+import { Link, NavLink, useLocation } from "react-router-dom"
 import { useState, type ElementType } from "react"
 import { LogOut, PanelLeftClose, PanelLeftOpen } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { UserAvatar } from "@/components/UserAvatar"
 
 const COLLAPSE_KEY = "shell.sidebar.collapsed"
 
@@ -43,7 +44,7 @@ export function ContextualSidebar({
   kanbanItems?: SidebarKanbanItem[]
   activeKanbanId?: string
   onKanbanSelect?: (kanban: SidebarKanbanItem) => void
-  user: { name: string; email: string; initials: string }
+  user: { name: string; email: string; initials: string; avatarUrl?: string | null }
   onLogout: () => void
   onNavigate?: () => void
 }) {
@@ -174,12 +175,15 @@ export function ContextualSidebar({
       <div className={cn("border-t border-border", collapsed ? "p-2" : "p-3")}>
         {collapsed ? (
           <div className="flex flex-col items-center gap-1">
-            <span
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary"
-              title={`${user.name} · ${user.email}`}
+            <Link
+              to="/app/perfil"
+              onClick={onNavigate}
+              title={`Meu perfil · ${user.name}`}
+              aria-label="Meu perfil"
+              className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              {user.initials}
-            </span>
+              <UserAvatar name={user.name} url={user.avatarUrl} size={32} />
+            </Link>
             <button
               onClick={onLogout}
               title="Sair"
@@ -191,15 +195,18 @@ export function ContextualSidebar({
           </div>
         ) : (
           <>
-            <div className="flex items-center gap-2 rounded-lg p-1.5">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
-                {user.initials}
-              </span>
+            <Link
+              to="/app/perfil"
+              onClick={onNavigate}
+              title="Meu perfil"
+              className="flex items-center gap-2 rounded-lg p-1.5 transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <UserAvatar name={user.name} url={user.avatarUrl} size={32} />
               <div className="min-w-0 flex-1 leading-tight">
                 <p className="truncate text-sm font-medium">{user.name}</p>
-                <p className="truncate text-xs text-muted-foreground">{user.email}</p>
+                <p className="truncate text-xs text-muted-foreground">Meu perfil</p>
               </div>
-            </div>
+            </Link>
             <button
               onClick={onLogout}
               className="mt-1 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-muted-foreground transition hover:bg-muted hover:text-foreground"

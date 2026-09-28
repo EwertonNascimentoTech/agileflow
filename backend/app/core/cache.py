@@ -137,7 +137,7 @@ async def invalidate_po_external(user_id: Any) -> None:
 
 
 async def invalidate_user(user_id: Any) -> None:
-    """Chamar após mudar role, role_id, is_active ou tenant de um usuário."""
+    """Chamar após mudar role, role_id, is_active, tenant ou a foto (avatar_key) de um usuário."""
     await cache_delete(user_key(user_id))
 
 

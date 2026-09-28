@@ -78,6 +78,7 @@ from app.modules.projetos.schemas import (
     ProjectReportsResponse,
     UsDeliveryReportResponse,
     TeamPerformanceResponse,
+    MyPerformanceResponse,
     ProjectResponse,
     ProjectScheduleBindingResponse,
     ProjectScheduleBindingsUpsert,
@@ -832,6 +833,23 @@ async def delete_funnel(
     _=Depends(_can_status_manage),
 ):
     await ProjectFunnelService.delete(ctx.db, project_id, funnel_id)
+
+
+@router.get("/me/desempenho", response_model=MyPerformanceResponse)
+async def get_my_performance(
+    date_from: str = Query(..., alias="from", description="Início da janela (ISO date)."),
+    date_to: str = Query(..., alias="to", description="Fim da janela, inclusivo (ISO date)."),
+    ctx: ModuleContext = Depends(_ctx),
+):
+    """Desempenho da pessoa logada (perfil): métricas do painel do time só dela + médias do time."""
+    from datetime import date as _date
+    from app.modules.projetos.my_performance import MyPerformanceService
+
+    try:
+        df, dt = _date.fromisoformat(date_from), _date.fromisoformat(date_to)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Datas inválidas (use AAAA-MM-DD).")
+    return await MyPerformanceService.build_for_user(ctx.db, ctx.user.id, df, dt)
 
 
 @router.get("/me/requests", response_model=list[ProjectMyRequestResponse])

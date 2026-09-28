@@ -749,6 +749,73 @@ export interface UsDeliveryReport {
 // ── Painel de Desempenho do Time (Devs + POs) ───────────────────────────────
 
 export type DevLoadStatus = "livre" | "equilibrado" | "sobrecarregado" | "sem_dados"
+
+// ── Meu desempenho (perfil) — métricas do painel do time, só da pessoa logada ──
+export interface MyPerfTask {
+  task_id: string
+  title: string
+  project_title: string | null
+  status_name: string | null
+  status_color: string | null
+  due_date: string | null
+  completed_at: string | null
+  overdue: boolean
+  on_time: boolean | null
+  aging_days: number | null
+}
+
+export interface MyPerformance {
+  person_id: string
+  full_name: string
+  position_label: string | null
+  date_from: string
+  date_to: string
+  kpis: {
+    delivered: number
+    on_time: number
+    on_time_pct: number | null
+    wip: number
+    overdue: number
+    avg_aging_days: number | null
+    avg_cycle_time_days: number | null
+    avg_lead_time_days: number | null
+    utilization_pct: number | null
+    allocated_hours_total: number | null
+    capacity_hours_total: number | null
+    free_hours_total: number | null
+    status: DevLoadStatus
+  }
+  /** Médias do time na mesma janela (sem nomes). */
+  team: {
+    devs: number
+    delivered_avg: number | null
+    on_time_pct: number | null
+    avg_cycle_time_days: number | null
+    avg_lead_time_days: number | null
+    utilization_avg_pct: number | null
+  }
+  series: { month: string; delivered: number; on_time: number }[]
+  open_tasks: MyPerfTask[]
+  delivered_tasks: MyPerfTask[]
+  po: {
+    total: number
+    avg_exec_pct: number | null
+    em_risco: number
+    atrasados: number
+    projetos: {
+      task_id: string
+      title: string
+      planning_kind: string | null
+      fase: string | null
+      stage_name: string | null
+      exec_pct: number | null
+      health: string | null
+      prazo_status: string | null
+      due_date: string | null
+      overdue: boolean
+    }[]
+  } | null
+}
 export type DevAbsenceBottleneck = "none" | "provavel" | "confirmado"
 
 export interface DevAbsenceInfo {
@@ -2382,6 +2449,9 @@ export const projetosApi = {
         ...(params?.assignee ? { assignee: params.assignee } : {}),
       },
     }).then((r) => r.data),
+
+  getMyPerformance: (from: string, to: string) =>
+    api.get<MyPerformance>("/projetos/me/desempenho", { params: { from, to }, timeout: 120_000 }).then((r) => r.data),
 
   getTeamPerformance: (params: {
     from: string

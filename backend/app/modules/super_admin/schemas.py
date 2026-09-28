@@ -222,6 +222,8 @@ class UserResponse(BaseModel):
     team_sees_all: bool = False
     # Pessoa de Times que faz a triagem N1 de ocorrências: vê Ocorrências no Modo Cliente.
     oa_n1: bool = False
+    # Foto do perfil (URL assinada do MinIO, válida por 24h); None = usa as iniciais.
+    avatar_url: Optional[str] = None
     tenant_id: Optional[uuid.UUID]
     is_active: bool
     last_login: Optional[datetime]

@@ -14,6 +14,19 @@ Modelo:
 
 ---
 
+## 2026-09-28 — Tela "Meu perfil" (foto, desempenho, competências, ausências, dados)
+
+- **Pedido:** tela de perfil onde o usuário vê o próprio desempenho, põe foto, responde/atualiza o formulário de stacks, solicita ausências etc.
+- **Feito:** rota `/app/perfil` (link no nome do usuário no rodapé do menu e em Configurações; `?aba=` competencias|ausencias|dados). Cabeçalho com foto, cargo, áreas, status. Abas:
+  - **Desempenho:** `GET /projetos/me/desempenho?from&to` (`projetos/my_performance.py`), mesmos critérios de `TeamPerformanceService.build` só da pessoa (entregues, no prazo, WIP, atrasadas, aging, cycle/lead, uso da capacidade via `find_available_people`) + médias do time sem nomes (mesmo universo: quem teve US no período) + série de 6 meses + US abertas/entregues + carteira de PO (PO Sync, com cache) para quem é responsável por card-raiz.
+  - **Competências:** `CompetenciasForm` (a notificação de lembrete agora abre `/app/perfil?aba=competencias`).
+  - **Ausências:** lista própria, "Solicitar ausência" (`AbsenceFormDialog` com personId travado), cancelar pedido pendente.
+  - **Meus dados:** conta, "No time" (só leitura), folha Genus, contato editável `PATCH /teamops/me/contato` (telefone, WhatsApp, aniversário).
+- **Foto:** Alembic 009 (`users.avatar_key`, `avatar_updated_at`; aplicada antes de subir a API). `POST/DELETE /auth/me/avatar` (`super_admin/avatar.py`): só JPEG/PNG/WebP pela assinatura dos bytes, até 2 MB, 20/h; o front recorta 320 px no canvas (descarta EXIF). `avatar_url` (URL assinada 24h) no `/auth/me` e no login; `UserAvatar` no menu e no perfil; `refreshUser` no AuthContext.
+- **Bugs achados no caminho:** (1) o usuário fica em cache no Redis com campos explícitos: `avatar_key` entrou em `_serialize_user`/`_deserialize_user` e a troca de foto chama `invalidate_user`; (2) nginx: o regex de estáticos (`.png/.jpg`) ganhava do prefixo `/saas-storage/` e toda imagem do MinIO dava 404 — agora `location ^~ /saas-storage/`.
+- **Conferido:** 18 testes (novos `test_perfil.py`); números do perfil iguais ao painel do time para os 3 devs com mais entregas (0,9 s contra 2,7 s do painel); carteira de PO igual ao PO Sync; navegador: foto enviada/exibida (320x320) e removida, competências, diálogo de ausência, contato salvo, sem erro de console nem HTTP >= 400; celular sem rolagem lateral real. Estado do admin restaurado (foto, contato, updated_at); MinIO sem sobras.
+- **Arquivos:** `backend/alembic/versions/009_user_avatar.py`; `backend/app/modules/super_admin/{avatar.py,models.py,schemas.py,api/routes.py}`; `backend/app/core/{security.py,cache.py}`; `backend/app/modules/projetos/{my_performance.py,schemas.py,api/routes.py}`; `backend/app/modules/teamops/{schemas.py,service.py,api/routes.py}`; `backend/tests/test_perfil.py`; `frontend/nginx.conf`; `frontend/src/modules/profile/*`; `components/UserAvatar.tsx`; `modules/crm/shell/ContextualSidebar.tsx`, `modules/crm/AppLayout.tsx`, `modules/crm/admin/SettingsPage.tsx`; `contexts/AuthContext.tsx`; `api/{auth,projetos,teamops}.ts`; `types/index.ts`; `App.tsx`; `components/NotificationBell.tsx`; `docs/usuario/03-operacional-processos.md`.
+
 ## 2026-09-28 — Stacks: catálogo revisado com o código + formulário "Minhas competências"
 
 - **Pedido:** analisar as stacks dos produtos x catálogo (coerência e o que falta) para montar um formulário em que o time responde quais stacks domina e o nível. Aprovado: aplicar os ajustes do catálogo (com os extras IA, Produto e Gestão e ORMs), corrigir os produtos em que o código é claro e deixar os duvidosos para o PO; escala a critério (ficou a descritiva de 4 níveis).

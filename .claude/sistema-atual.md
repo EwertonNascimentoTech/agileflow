@@ -128,6 +128,10 @@ Reuni?o de comit? (mensal/trimestral): portf?lio, POs, indicadores, planos EPA, 
 - MinIO: anexos (`POST /projetos/uploads`).
 - P?blico ociosidade: `PUBLIC_OCIOSIDADE_TOKEN`.
 
+## Meu perfil
+
+`/app/perfil` (todo usuário da empresa; link no nome no rodapé do menu): foto (`POST/DELETE /auth/me/avatar`, `users.avatar_key`, `avatar_url` no `/auth/me`), Desempenho (`GET /projetos/me/desempenho`), Competências (formulário), Ausências (próprias), Meus dados (`PATCH /teamops/me/contato`).
+
 ## Onde est? o c?digo (atalhos)
 
 | Assunto | Arquivo-chave |
